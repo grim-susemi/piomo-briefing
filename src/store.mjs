@@ -5,6 +5,8 @@
 // - readText(rel): string, or null if missing. On Windows a reader can briefly get ENOENT/EPERM/EBUSY/EACCES
 //   while replace() swaps the target, so those are retried (<=~226ms) when a replace is plausibly in flight.
 //   A file that is simply absent (no target, no tmp sibling) is reported missing immediately.
+//   readText(rel, {maxBytes}) / readRecord(rel, {maxBytes}): a file over maxBytes is refused with code ETOOBIG (TOO_BIG_CODE) before
+//   any of its content is read; absent is still null, unreadable still throws, transient errors are retried the same way.
 // - allocDecisionId(record?): global monotonic id = max(decisions/*)+1, created with wx.
 // - reclaimStale(rel, staleRecord): atomic recovery of a dead-pid lock/claim via hard-link tombstone.
 // - readSnapshot(): the whole layout; broken JSON goes to readErrors, the rest is still read.
@@ -18,6 +20,10 @@ import { join, dirname, basename } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 const RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
+export const TOO_BIG_CODE = 'ETOOBIG';
+function tooBig(rel, bytes, limit) {
+  return Object.assign(new Error(`${rel}: ${bytes} bytes exceed the ${limit}-byte limit`), { code: TOO_BIG_CODE, bytes, limit });
+}
 const FIRST_DELAY_MS = 20;
 const MAX_RETRIES = 8;
 // Reader backoff (ms) while a replace() may be in flight: 2+4+8+16+32+64+100 = 226ms total, then give up.
@@ -119,11 +125,33 @@ export function openStore(root, opts = {}) {
     }
   }
 
-  function readText(rel) {
+  // A bounded read: the size comes from fstat of the opened file and a file over `maxBytes` is refused before any of its content
+  // is read. At most size+1 <= maxBytes+1 bytes are requested; the spare byte shows a file that grew since fstat (got > size): that
+  // is a torn read, reported as EBUSY so the retry loop below reads it again (and the next fstat applies the limit to the new size).
+  function readBounded(file, rel, maxBytes) {
+    const fd = fs.openSync(file, 'r');
+    try {
+      const size = fs.fstatSync(fd).size;
+      if (size > maxBytes) throw tooBig(rel, size, maxBytes);
+      const buffer = Buffer.alloc(size + 1);
+      let got = 0;
+      while (got < buffer.length) {
+        const n = fs.readSync(fd, buffer, got, buffer.length - got, got);
+        if (n === 0) break;
+        got += n;
+      }
+      if (got > size) throw Object.assign(new Error(`${rel}: changed while it was read`), { code: 'EBUSY' });
+      return buffer.toString('utf8', 0, got);
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
+  function readText(rel, { maxBytes } = {}) {
     const file = abs(rel);
     for (let attempt = 0; ; attempt++) {
       try {
-        return fs.readFileSync(file, 'utf8');
+        return maxBytes === undefined ? fs.readFileSync(file, 'utf8') : readBounded(file, rel, maxBytes);
       } catch (err) {
         const transient = RETRY_CODES.has(err.code) || (err.code === 'ENOENT' && replaceMayBeInFlight(file));
         if (transient && attempt < READ_RETRY_DELAYS_MS.length) {
@@ -136,9 +164,9 @@ export function openStore(root, opts = {}) {
     }
   }
 
-  function readRecord(rel) {
+  function readRecord(rel, limits) {
     try {
-      const text = readText(rel);
+      const text = readText(rel, limits);
       if (text === null) return null;
       const rec = JSON.parse(text);
       return rec && typeof rec === 'object' ? rec : null;

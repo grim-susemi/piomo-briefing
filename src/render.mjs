@@ -20,7 +20,7 @@ import * as nodeFs from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
-import { isPidAlive } from './store.mjs';
+import { isPidAlive, TOO_BIG_CODE } from './store.mjs';
 import { setError, hasErrors } from './errors.mjs';
 import { cardStatus, chips as truthChips, tabOf, recheckEvidence } from './truth.mjs';
 import { waitingItems } from './waiting.mjs';
@@ -274,12 +274,19 @@ function capSize(vm) {
  * {server: {url, generation} | null, error: boolean}: the live board address from STATE/server.json (no network).
  * A record whose owner pid is dead is not an address. An unreadable file is reported (error), never read as 'no server'.
  */
+// The record the board host writes is ~150 bytes. The limit is the installer's (4096 characters of up to 4 bytes): a bigger
+// server.json is refused before any of it is read.
+export const SERVER_RECORD_MAX_BYTES = 4096 * 4;
 export function serverInfoOf(store, isAlive = isPidAlive) {
   let rec;
   try {
-    rec = store.readRecord('server.json');
-  } catch {
-    return { server: null, error: true }; // the caller lists 'server.json' in vm.readErrors
+    rec = store.readRecord('server.json', { maxBytes: SERVER_RECORD_MAX_BYTES });
+  } catch (err) {
+    // the caller lists 'server.json' in vm.readErrors and may record `message` as an error of its own
+    const why = err && err.code === TOO_BIG_CODE
+      ? `너무 큼(${err.bytes}바이트 > 한도 ${err.limit}바이트) - 읽지 않음`
+      : `읽지 못함(${(err && err.code) || (err && err.message) || err})`;
+    return { server: null, error: true, message: `server.json ${why}` };
   }
   if (!isObj(rec) || !Number.isInteger(rec.port) || !isAlive(rec.pid)) return { server: null, error: false };
   return { server: { url: `http://127.0.0.1:${rec.port}/`, generation: Number.isInteger(rec.generation) ? rec.generation : null }, error: false };
@@ -726,6 +733,7 @@ function makeRenderer(store, now, opts) {
       const snap = store.readSnapshot();
       readMtime = snap.maxMtime;
       const info = serverInfoOf(store, isAlive);
+      if (typeof opts.onServerInfo === 'function') opts.onServerInfo(info); // the caller notes a failed record read after the publish
       const vm = buildViewModel(snap, now, {
         isAlive, fs, pendingDeliveries: opts.pendingDeliveries, generation, server: info.server, serverError: info.error,
       });

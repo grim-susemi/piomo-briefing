@@ -284,8 +284,12 @@ test('pause keeps memory only: no save, publish, read or error; resume publishes
   env.live.noteTaskIds(['st_b'], ['Noted']);
   await env.clock.advance(30000);
   assert.deepEqual([env.log.saves.length, env.log.publishes, env.disk.calls.length, env.log.errors.length, env.log.recovers.length], [0, 0, 0, 0, 0]);
+  assert.equal(env.clock.active(), 0, 'no timer is created or kept while paused');
   env.state.enabled = true;
-  await env.clock.advance(2100);
+  // resume is by event (the next task snapshot): a timer kept alive only to notice the resume is exactly what is forbidden
+  env.live.onRpcEvent(snapshot([task('st_a', { updated_at: iso(NOW0 + 1) })]));
+  await settle();
+  await env.clock.advance(10);
   assert.equal(env.log.publishes, 1);
   assert.deepEqual(lastSaved(env).map((w) => w.id).sort(), ['st_a', 'st_b']);
   env.live.stop();
@@ -346,5 +350,234 @@ test('a nonterminal worker silent for ten minutes is saved as stale', async () =
   assert.notEqual(row(env, 'st_a').stale, true);
   await env.clock.advance(10 * 60 * 1000);
   assert.equal(row(env, 'st_a').stale, true);
+  env.live.stop();
+});
+
+// ------------------------------------------------------------------ row 17: no timer is created or kept while paused
+
+test('a pause made elsewhere is noticed by the next timer callback, which drops the interval; later snapshots create no timer; the next snapshot after the board is on again resumes', async () => {
+  const env = setup();
+  env.live.start();
+  env.live.onRpcEvent(snapshot([task('st_a')]));
+  await env.clock.advance(10);
+  assert.equal(env.log.publishes, 1);
+  assert.ok(env.clock.active() > 0, 'a running worker is watched while the board is on');
+  env.state.enabled = false;
+  await env.clock.advance(2000); // the interval tick reads the pause state
+  assert.equal(env.clock.active(), 0, 'paused: the interval is gone');
+  assert.equal(env.disk.calls.length, 0, 'the paused tick read nothing');
+  env.live.onRpcEvent(snapshot([task('st_a', { updated_at: iso(NOW0 + 5000), live_progress: { current_tool: 'grep' } })]));
+  assert.equal(env.clock.active(), 0, 'a snapshot received while paused creates no timer, not even a short-lived one (checked before any time passes)');
+  await env.clock.advance(60000);
+  assert.equal(env.clock.active(), 0, 'a snapshot received while paused creates no timer');
+  assert.deepEqual([env.log.saves.length, env.log.publishes, env.disk.calls.length], [1, 1, 0]);
+  env.state.enabled = true;
+  env.live.onRpcEvent(snapshot([task('st_a', { updated_at: iso(NOW0 + 6000), live_progress: { current_tool: 'edit' } })]));
+  await settle();
+  assert.ok(env.clock.active() > 0, 'resume by event arms the timers again');
+  await env.clock.advance(10);
+  assert.equal(env.log.publishes, 2);
+  assert.equal(row(env, 'st_a').step, 'edit');
+  env.live.stop();
+});
+
+test('pause() drops every timer at once, events after it keep memory only, and resume() arms the pending state', async () => {
+  const env = setup();
+  env.live.start();
+  env.live.onRpcEvent(snapshot([task('st_a')]));
+  await env.clock.advance(10);
+  assert.equal(env.log.publishes, 1);
+  env.live.onRpcEvent(snapshot([task('st_a', { updated_at: iso(NOW0 + 100), live_progress: { current_tool: 'grep' } })]));
+  assert.ok(env.clock.active() >= 2, 'the interval and a pending flush');
+  env.state.enabled = false; // /brief off writes settings.json first, then pauses this conversation's live workers
+  env.live.pause();
+  assert.equal(env.clock.active(), 0, '/brief off: no timer survives');
+  env.live.onRpcEvent(snapshot([task('st_a', { updated_at: iso(NOW0 + 200), live_progress: { current_tool: 'edit' } })]));
+  assert.equal(env.clock.active(), 0, 'an event after pause() creates no timer, not even a short-lived one (checked before any time passes)');
+  await env.clock.advance(60000);
+  assert.equal(env.clock.active(), 0);
+  assert.equal(env.log.publishes, 1);
+  env.state.enabled = true; // /brief on
+  env.live.resume();
+  assert.ok(env.clock.active() > 0, '/brief on arms the timers for the pending state');
+  await env.clock.advance(10);
+  assert.equal(env.log.publishes, 2);
+  assert.equal(row(env, 'st_a').step, 'edit');
+  env.live.stop();
+});
+
+test('an unreadable pause state reads as off (never silently as on), is reported once per breakage as a process warning, and arms nothing', async (t) => {
+  const env = setup();
+  const warnings = [];
+  const onWarning = (warning) => { if (/pause state unreadable/.test(warning.message)) warnings.push(warning); };
+  process.on('warning', onWarning);
+  t.after(() => process.off('warning', onWarning));
+  let broken = true;
+  Object.defineProperty(env.state, 'enabled', {
+    configurable: true,
+    get() { if (broken) throw Object.assign(new Error('EACCES: pause state unreadable'), { code: 'EACCES' }); return true; },
+  });
+  env.live.start();
+  env.live.onRpcEvent(snapshot([task('st_a')]));
+  await env.clock.advance(30000);
+  assert.equal(warnings.length, 1, 'one warning for the whole breakage');
+  assert.match(warnings[0].message, /EACCES/);
+  assert.equal(env.clock.active(), 0, 'unreadable = off: no timer');
+  assert.deepEqual([env.log.saves.length, env.log.publishes, env.disk.calls.length, env.log.errors.length], [0, 0, 0, 0]);
+  broken = false;
+  env.live.onRpcEvent(snapshot([task('st_a', { updated_at: iso(NOW0 + 1) })]));
+  await settle();
+  await env.clock.advance(10);
+  assert.equal(env.log.publishes, 1, 'readable again: resumed by the next event');
+  env.live.stop();
+});
+
+test('a pause noticed by the flush timeout drops the interval too, and the pending change is published after resume()', async () => {
+  const env = setup();
+  env.live.start();
+  env.live.onRpcEvent(snapshot([task('st_a')]));
+  assert.ok(env.clock.active() >= 2, 'flush timeout and interval');
+  env.state.enabled = false;
+  await env.clock.advance(10); // the flush timeout is due first and reads the pause state
+  assert.equal(env.clock.active(), 0, 'paused: neither the flush timeout nor the interval is kept');
+  assert.deepEqual([env.log.saves.length, env.log.publishes], [0, 0]);
+  env.state.enabled = true;
+  env.live.resume();
+  await env.clock.advance(10);
+  assert.equal(env.log.publishes, 1, 'the pending change is published after resume');
+  env.live.stop();
+});
+
+test('a pause noticed by a deferred error report drops the interval as well and reports nothing', async () => {
+  const env = setup();
+  env.live.start();
+  env.live.onRpcEvent(snapshot([task('st_a')]));
+  await env.clock.advance(10);
+  assert.ok(env.clock.active() > 0);
+  env.live.onRpcEvent({ name: 'omo.task.updated', data: { parent_session_id: LEAD, tasks: 'bad' } }); // queues a deferred report
+  env.state.enabled = false;
+  await env.clock.advance(1); // the deferred report is due first and reads the pause state
+  assert.equal(env.clock.active(), 0, 'paused: the interval is dropped');
+  assert.deepEqual(env.log.errors, [], 'a paused board reports nothing');
+  env.live.stop();
+});
+
+test('a task noted while paused resumes the timers once the board is on again', async () => {
+  const env = setup();
+  env.state.enabled = false;
+  env.live.start();
+  env.live.noteTaskIds(['st_n1'], ['First']);
+  assert.equal(env.clock.active(), 0, 'a noted task while paused creates no timer, not even a short-lived one (checked before any time passes)');
+  await env.clock.advance(5000);
+  assert.equal(env.clock.active(), 0, 'no timer while paused');
+  assert.equal(env.log.saves.length, 0);
+  env.state.enabled = true;
+  env.live.noteTaskIds(['st_n2'], ['Second']);
+  await settle();
+  await env.clock.advance(10);
+  assert.deepEqual(lastSaved(env).map((w) => w.id).sort(), ['st_n1', 'st_n2']);
+  env.live.stop();
+});
+
+// ------------------------------------------------------------------ row 22: pause() also cancels the reports the handler queued
+
+const malformed = () => snapshot('bad'); // own-parent snapshot whose tasks is not an array: its error report is queued with a zero-delay timer
+const hostileEvent = () => Object.defineProperty({ name: 'omo.task.updated' }, 'data', { get() { throw new Error('getter'); } });
+const throwingNames = () => Object.assign(new Map(), { get() { throw new Error('names'); } });
+
+test('row 22: pause() cancels a queued snapshot-error report at once (no timer before any time passes) and nothing is reported afterwards', async () => {
+  const env = setup();
+  env.live.start();
+  env.live.onRpcEvent(malformed());
+  assert.equal(env.log.errors.length, 0, 'the report is deferred out of the bus handler');
+  assert.equal(env.clock.active(), 1, 'the queued report is the only timer');
+  env.state.enabled = false; // /brief off writes settings.json first, then pauses this conversation's live workers
+  env.live.pause();
+  assert.equal(env.clock.active(), 0, '/brief off: the queued report is cancelled too (checked before any time passes)');
+  await env.clock.advance(60000);
+  assert.equal(env.clock.active(), 0, 'no timer comes back');
+  assert.deepEqual([env.log.errors.length, env.log.recovers.length, env.log.saves.length, env.log.publishes, env.disk.calls.length], [0, 0, 0, 0, 0]);
+  env.live.stop();
+  assert.deepEqual(env.log.errors, [], 'stop() has no cancelled report left to deliver');
+});
+
+for (const [label, trigger] of [
+  ['a throwing event payload', (live) => live.onRpcEvent(hostileEvent())],
+  ['a throwing names lookup in noteTaskIds', (live) => live.noteTaskIds(['st_n1'], throwingNames())],
+]) {
+  test(`row 22: pause() cancels the report queued by ${label}`, async () => {
+    const env = setup();
+    env.live.start();
+    trigger(env.live);
+    assert.equal(env.log.errors.length, 0, 'the report is deferred out of the handler');
+    assert.equal(env.clock.active(), 1, 'the handler failure queued one report and nothing else');
+    env.state.enabled = false;
+    env.live.pause();
+    assert.equal(env.clock.active(), 0, '/brief off: the queued report is cancelled too (checked before any time passes)');
+    await env.clock.advance(60000);
+    assert.equal(env.clock.active(), 0, 'no timer comes back');
+    assert.deepEqual(env.log.errors, [], 'a paused board reports nothing');
+    env.live.stop();
+  });
+}
+
+test('row 22: pause() cancels every queued report, not only the first', async () => {
+  const env = setup();
+  env.live.start();
+  env.live.onRpcEvent(malformed());
+  env.live.onRpcEvent(hostileEvent());
+  env.live.noteTaskIds(['st_n1'], throwingNames());
+  env.live.onRpcEvent(malformed());
+  assert.equal(env.clock.active(), 4, 'one queued report per failure');
+  env.state.enabled = false;
+  env.live.pause();
+  assert.equal(env.clock.active(), 0, 'every queued report is cancelled (checked before any time passes)');
+  await env.clock.advance(60000);
+  assert.deepEqual(env.log.errors, [], 'a paused board reports nothing');
+  env.live.stop();
+  assert.deepEqual(env.log.errors, [], 'stop() has no cancelled report left to deliver');
+});
+
+for (const rearm of ['resume', 'start']) {
+  test(`row 22: after pause() cancelled a queued report, ${rearm}() revives nothing stale and the next malformed snapshot reports normally`, async () => {
+    const env = setup();
+    env.live.start();
+    env.live.onRpcEvent(malformed());
+    env.state.enabled = false;
+    env.live.pause();
+    assert.equal(env.clock.active(), 0, 'the queued report is cancelled by pause()');
+    env.state.enabled = true; // /brief on
+    env.live[rearm]();
+    assert.equal(env.clock.active(), 0, 'nothing is pending, so re-arming schedules nothing and does not revive the cancelled report');
+    await env.clock.advance(10);
+    assert.deepEqual(env.log.errors, [], 'the report queued before the pause is moot and is not delivered once the board is on again');
+    env.live.onRpcEvent(malformed());
+    assert.equal(env.clock.active(), 1, 'a new malformed snapshot queues its report again');
+    await env.clock.advance(1);
+    assert.deepEqual(env.log.errors.map((entry) => entry.key), ['workers:snapshot']);
+    assert.equal(env.clock.active(), 0);
+    env.live.stop();
+    assert.deepEqual(env.log.errors.map((entry) => entry.key), ['workers:snapshot'], 'stop() delivers no cancelled report on top of it');
+  });
+}
+
+test('row 22: pause() cancels a queued recover report; the next valid snapshot after resume() recovers normally', async () => {
+  const env = setup();
+  env.live.start();
+  env.live.onRpcEvent(malformed());
+  await env.clock.advance(1);
+  assert.deepEqual(env.log.errors.map((entry) => entry.key), ['workers:snapshot']);
+  env.live.onRpcEvent(snapshot([task('st_a')])); // valid again: queues the recover report next to the flush timeout and the interval
+  assert.equal(env.clock.active(), 3, 'recover report, flush timeout and interval');
+  env.state.enabled = false;
+  env.live.pause();
+  assert.equal(env.clock.active(), 0, 'no timer of any kind survives pause() (checked before any time passes)');
+  await env.clock.advance(60000);
+  assert.deepEqual([env.log.recovers.length, env.log.saves.length, env.log.publishes], [0, 0, 0], 'a paused board recovers and publishes nothing');
+  env.state.enabled = true;
+  env.live.resume();
+  env.live.onRpcEvent(snapshot([task('st_a', { updated_at: iso(NOW0 + 1) })]));
+  await env.clock.advance(10);
+  assert.deepEqual(env.log.recovers, ['workers:snapshot'], 'the error is still marked reported, so the next valid snapshot recovers it once');
   env.live.stop();
 });

@@ -22,7 +22,7 @@ import path from 'node:path';
 import {
   validatePlanBrief, planIdOf, rootAndSlugOf, PLAN_BRIEF_PARAMETERS, PLAN_BRIEF_DESCRIPTION,
 } from './plan-schema.mjs';
-import { computePlanStatus, findPlanForSession } from './plan-status.mjs';
+import { computePlanStatus, findPlanForSession, readWithPolicy } from './plan-status.mjs';
 
 export const PLAN_REV_SCHEMA = 'omo-plan/1';
 export const PLAN_CHIP_NO_SUMMARY = '계획 요약 없음';
@@ -36,6 +36,8 @@ const PATCH_FILE_RE = /^\*\*\* (?:Update|Add) File: (.+?)\s*$/gm;
 const PATH_FIELDS = ['path', 'file_path', 'filePath'];
 const PLAN_IDS_MAX = 50;
 const DISABLED_TEXT = '브리핑이 꺼져 있습니다(/brief on 으로 켤 수 있음). 이번 보고는 저장하지 않았습니다.';
+
+const disabledResult = () => ({ content: [{ type: 'text', text: DISABLED_TEXT }], details: { disabled: true } });
 
 const pad6 = (n) => String(n).padStart(6, '0');
 const decisionRel = (id) => `decisions/${pad6(id)}.json`;
@@ -73,8 +75,13 @@ export function createPlanTool(opts) {
   const fs = opts.fs ?? nodeFs;
   const nowMs = typeof opts.now === 'function' ? opts.now : Date.now;
   const sha256 = opts.sha256 ?? defaultSha256;
-  const readText = opts.readText ?? (async (p) => {
+  const readText = opts.readText ?? (async (p, limit) => {
     try {
+      // stat first: a file over the byte limit of plan-status' read policy is refused before any of it is read
+      if (limit && Number.isFinite(limit.maxBytes)) {
+        const { size } = await fs.promises.stat(p);
+        if (size > limit.maxBytes) throw Object.assign(new Error(`${p}: ${size} bytes exceed the ${limit.maxBytes}-byte limit`), { code: 'TOO_LARGE' });
+      }
       return await fs.promises.readFile(p, 'utf8');
     } catch (err) {
       if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return null; // absent is an answer; anything else is thrown
@@ -179,7 +186,7 @@ export function createPlanTool(opts) {
 
   // ---- plan_brief ----
   async function execute(params) {
-    if (!isEnabled()) return { content: [{ type: 'text', text: DISABLED_TEXT }], details: { disabled: true } };
+    if (!isEnabled()) return disabledResult();
     const v = validatePlanBrief(params, { fileExists, isOwnOpenDecision });
     if (!v.ok) {
       throw new Error(`plan_brief 입력 거절(저장하지 않음) - 아래를 고쳐 다시 호출:\n${v.errors.map((e) => `- ${e}`).join('\n')}`);
@@ -201,8 +208,10 @@ export function createPlanTool(opts) {
 
     const status = await computePlanStatus({
       planPath: files.plan, draftPath: files.draft, boulderPath: boulderPathFor(files.plan ?? files.draft),
-      readText, sha256, now: t,
+      readText, sha256, now: t, sleep: opts.sleep,
     });
+    // the files were read asynchronously: another conversation may have switched the board off meanwhile; nothing is persisted then
+    if (!isEnabled()) return disabledResult(); // re-checked after the status await
     if (status.errors.length > 0) problems.push(`계획 파일 읽기 문제(${[...new Set(status.errors.map((e) => e.code))].join(', ')})`);
 
     const rs = rootAndSlugOf(files.plan ?? files.draft);
@@ -345,8 +354,17 @@ export function createPlanTool(opts) {
     for (const [planId, f] of Object.entries(meta.planFiles ?? {})) {
       add(planId, { planPath: f.planPath, draftPath: f.draftPath });
     }
+    let boulderRead; // {text} | {err}: held until the pause state was checked again, so a paused board records nothing
     try {
-      const text = await readText(path.join(cwd ?? '.', '.omo', 'boulder.json'));
+      // the same retry (EPERM/EBUSY/EACCES) and size policy as the plan, ledger and boulder reads of computePlanStatus
+      boulderRead = { text: await readWithPolicy(readText, path.join(cwd ?? '.', '.omo', 'boulder.json'), 'boulder', opts.sleep) };
+    } catch (err) {
+      boulderRead = { err };
+    }
+    if (!isEnabled()) return []; // re-checked after the boulder read
+    try {
+      if (boulderRead.err) throw boulderRead.err;
+      const text = boulderRead.text;
       const boulder = typeof text === 'string' ? JSON.parse(text) : null;
       const file = boulder ? findPlanForSession(boulder, sessionId, cwd) : null;
       const rs = file ? rootAndSlugOf(file) : null;
@@ -358,14 +376,21 @@ export function createPlanTool(opts) {
 
     const results = [];
     let dirty = metaUnsaved;
+    // paused while a plan was being read: the 60s cache entry is dropped (the pass did not happen) and unsaved meta stays owed
+    const pausedMeanwhile = (planId) => {
+      lastComputed.delete(planId);
+      if (dirty) metaUnsaved = true;
+      return [];
+    };
     for (const [planId, tg] of targets) {
       if (!tg.planPath && !tg.draftPath) continue;
       if (lastComputed.has(planId) && t - lastComputed.get(planId) < STATUS_TTL_MS) continue;
       lastComputed.set(planId, t);
       const status = await computePlanStatus({
         planPath: tg.planPath, draftPath: tg.draftPath, boulderPath: boulderPathFor(tg.planPath ?? tg.draftPath),
-        readText, sha256, now: t,
+        readText, sha256, now: t, sleep: opts.sleep,
       });
+      if (!isEnabled()) return pausedMeanwhile(planId);
       const full = { ...status, planId, bySessionId: sessionId };
       const key = `plan:${planId}`;
       if (statusKey(full) !== lastStatusKey.get(planId)) {

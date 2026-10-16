@@ -13,6 +13,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { createBriefingExtension } from '../extension.mjs';
 import { planIdOf, rootAndSlugOf } from '../src/plan-schema.mjs';
+import { PLAN_CHIP_STALE, planChipMissing } from '../src/plan-tool.mjs';
 import { makeFakePi, makeCtx } from './helpers/fake-pi.mjs';
 
 const HOLDER = fileURLToPath(new URL('./helpers/lock-holder.mjs', import.meta.url));
@@ -570,4 +571,321 @@ test('B5: a task snapshot before the session exists is not cloned: irrelevant ge
     return r && r.some((w) => w.id === 'st_t0') ? r : null;
   }, 'rows from the early snapshot');
   assert.ok(rows.length >= 1);
+});
+
+// ------------------------------------------------------------------ row 17: pause state and settings reads
+
+/** fs whose reads of settings.json fail with EACCES while ctl.deny is set (every failing read is counted). */
+function settingsFaultFs(ctl) {
+  return {
+    ...nodeFs,
+    readFileSync(p, ...a) {
+      if (ctl.deny && norm(String(p)).endsWith('/settings.json')) {
+        ctl.reads++;
+        throw Object.assign(new Error('EACCES: injected settings'), { code: 'EACCES' });
+      }
+      return nodeFs.readFileSync(p, ...a);
+    },
+    // when a test sets ctl.metaWrites = [], every meta.json the store saves is recorded (its text, read just before the rename)
+    renameSync(a, b) {
+      if (ctl.metaWrites && /meta\.json$/.test(String(b))) ctl.metaWrites.push(nodeFs.readFileSync(a, 'utf8'));
+      return nodeFs.renameSync(a, b);
+    },
+  };
+}
+const ERR_CHIP = '오류 있음';
+const chipsOf = (stateDir) => readData(stateDir).sessions[0]?.chips ?? [];
+const workerSnap = (...ids) => ({
+  parent_session_id: 'senpi:sess-A',
+  tasks: ids.map((id) => ({ task_id: id, parent_session_id: 'sess-A', status: 'running', task_summary: `일 ${id}`, updated_at: new Date().toISOString() })),
+});
+const nextMacrotask = () => new Promise((resolve) => setImmediate(resolve));
+/** Stub delivery/mirror: nothing else reads the pause state in the middle of a command, so a publish is the only reader. */
+const noHooks = { createDeliverer: () => ({}), createMirror: () => ({}) };
+/** An older error of another source, on disk before the extension starts. */
+function seedErrors(dir, errors) {
+  const folder = join(dir, 'state', 'sessions', 'sess-A');
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, 'meta.json'), JSON.stringify({ errors }));
+}
+
+test('row 17: a persistent EACCES on settings.json seen by the worker timers is recorded with its code, shows as the error chip, and the first good read clears it', { timeout: 60_000 }, async (t) => {
+  const ctl = { deny: false, reads: 0 };
+  const timers = fakeTimers();
+  // workers-live rate-limits its publishes (2s) on its OWN clock; the fake timers never tick it, so it gets a clock the test moves
+  const wl = { t: Date.now() };
+  const s = make(t, { fs: settingsFaultFs(ctl), timers, extra: { workersLiveOptions: { now: () => wl.t } } });
+  await s.start();
+  await s.brief(goodBrief());
+  assert.equal(s.meta().errors.settings, undefined);
+  assert.ok(!chipsOf(s.stateDir).includes(ERR_CHIP));
+  const idle = timers.pending();
+  s.events.emit(RPC, { name: 'omo.task.updated', data: workerSnap('st_w1') });
+  await timers.runAll(4);
+  assert.ok(readData(s.stateDir).sessions[0].live.workers.some((w) => w.id === 'st_w1'), 'the worker row is published while the board is on');
+  assert.ok(timers.pending() > idle, 'the worker interval exists while the board is on');
+
+  ctl.deny = true;
+  await timers.runAll(1); // the interval tick reads the pause state
+  assert.ok(ctl.reads >= 1, 'the timer path read settings.json');
+  assert.ok(s.meta().errors.settings, 'the failed read is recorded, not swallowed');
+  assert.match(s.meta().errors.settings.message, /^settings: EACCES: injected settings/);
+  assert.ok(chipsOf(s.stateDir).includes(ERR_CHIP), 'the published page shows it');
+  assert.equal(timers.pending(), idle, 'unreadable = paused: the worker timers are gone');
+
+  ctl.deny = false;
+  wl.t += 5_000; // past the 2s publish rate limit of the live rows since the first flush
+  s.events.emit(RPC, { name: 'omo.task.updated', data: workerSnap('st_w1', 'st_w2') });
+  await nextMacrotask(); // only the resume probe has run: no timer has fired yet
+  assert.equal(s.meta().errors.settings, undefined, 'the first good read clears the settings error');
+  assert.ok(!chipsOf(s.stateDir).includes(ERR_CHIP), 'and the page');
+  await timers.runAll(4);
+  assert.ok(readData(s.stateDir).sessions[0].live.workers.some((w) => w.id === 'st_w2'), 'resumed by the event');
+  assert.ok(timers.pending() > idle);
+});
+
+test('row 17: the settings error and its recovery touch only the settings key: an older error of another source stays throughout', { timeout: 60_000 }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'omo-live-'));
+  seedErrors(dir, { decide: { at: 1, message: 'decide: older error' } });
+  const ctl = { deny: false, reads: 0 };
+  const timers = fakeTimers();
+  const s = make(t, { dir, fs: settingsFaultFs(ctl), timers });
+  // registered after make(): the session shutdown (which saves its meta) runs first, then the folder goes
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  await s.start();
+  assert.equal(s.meta().errors.decide.message, 'decide: older error');
+  s.events.emit(RPC, { name: 'omo.task.updated', data: workerSnap('st_w1') });
+  await timers.runAll(4);
+  ctl.deny = true;
+  await timers.runAll(1);
+  assert.deepEqual(Object.keys(s.meta().errors).sort(), ['decide', 'settings']);
+  assert.equal(s.meta().errors.decide.message, 'decide: older error');
+  ctl.deny = false;
+  s.events.emit(RPC, { name: 'omo.task.updated', data: workerSnap('st_w1', 'st_w2') });
+  await nextMacrotask();
+  assert.deepEqual(Object.keys(s.meta().errors), ['decide'], 'only the settings entry was cleared');
+  assert.equal(s.meta().errors.decide.message, 'decide: older error');
+});
+
+test('row 17: the board owner finds settings.json unreadable at its own check: the specific settings error is recorded (not a server:lock one), the lock is let go, and /brief on after the fix recovers', { timeout: 60_000 }, async (t) => {
+  const ctl = { deny: false, reads: 0 };
+  const timers = fakeTimers();
+  const s = make(t, { server: true, fs: settingsFaultFs(ctl), timers });
+  await s.start();
+  await s.brief(goodBrief());
+  assert.equal(existsSync(join(s.stateDir, 'server.lock')), true, 'owns the server');
+  ctl.metaWrites = [];
+  ctl.deny = true;
+  await timers.runAll(2); // the owner's periodic check
+  assert.ok(ctl.reads >= 1, 'the owner check read settings.json');
+  assert.ok(s.meta().errors.settings, 'recorded');
+  assert.match(s.meta().errors.settings.message, /EACCES/);
+  assert.equal(s.meta().errors['server:lock'], undefined, 'not misreported as a lock problem');
+  // the clean lock release after the close would clear a wrong server:lock entry again, so the end state alone cannot tell: look at every save
+  assert.ok(ctl.metaWrites.length > 0 && ctl.metaWrites.every((text) => !text.includes('server:lock')), 'a server:lock entry was never saved, not even for a moment');
+  assert.equal(existsSync(join(s.stateDir, 'server.lock')), false, 'unknown pause state = paused: the lock is let go');
+  assert.ok(chipsOf(s.stateDir).includes(ERR_CHIP));
+  ctl.deny = false;
+  await s.command('brief', 'on');
+  assert.equal(s.meta().errors.settings, undefined);
+  assert.equal(existsSync(join(s.stateDir, 'server.lock')), true, 'owns the server again');
+  assert.ok(!chipsOf(s.stateDir).includes(ERR_CHIP));
+});
+
+test('row 17: a pause check inside a publish that finds settings.json unreadable is recorded once that publish returned, and a later publish that reads it fine clears it', { timeout: 60_000 }, async (t) => {
+  const ctl = { deny: false, reads: 0 };
+  const s = make(t, { fs: settingsFaultFs(ctl), extra: noHooks });
+  await s.start();
+  await s.brief(goodBrief({ decisions: [decision()] }));
+  ctl.deny = true;
+  await s.command('decide', '1A'); // /decide publishes without reading the pause state first
+  assert.ok(ctl.reads >= 1, 'the publish read settings.json');
+  assert.ok(s.meta().errors.settings, 'recorded after the publish');
+  assert.ok(chipsOf(s.stateDir).includes(ERR_CHIP), 'and shown by the follow-up publish');
+  ctl.deny = false;
+  await s.command('decide', '1A');
+  assert.equal(s.meta().errors.settings, undefined, 'a publish that reads it fine clears the entry');
+  assert.ok(!chipsOf(s.stateDir).includes(ERR_CHIP));
+});
+
+test('row 17: a server host error that arrives while settings.json is unreadable is recorded next to the settings error, and its recovery clears both', { timeout: 60_000 }, async (t) => {
+  const ctl = { deny: false, reads: 0 };
+  const box = {};
+  const base = { ensure: async () => null, status: () => ({}), onPaused: async () => {}, release: async () => {} };
+  const fakeHost = new Proxy(base, { get: (target, key) => (key in target ? target[key] : typeof key === 'string' && key !== 'then' ? () => {} : undefined) });
+  const s = make(t, { server: true, fs: settingsFaultFs(ctl), extra: { ...noHooks, createServerHost: (o) => { box.options = o; return fakeHost; } } });
+  await s.start();
+  ctl.deny = true;
+  box.options.onError('server:lock', new Error('lock release failed'));
+  assert.ok(s.meta().errors.settings, 'the unreadable pause state is recorded');
+  assert.match(s.meta().errors['server:lock'].message, /lock release failed/, 'and the host error is not dropped');
+  box.options.onRecover('server:lock'); // still unreadable
+  assert.equal(s.meta().errors['server:lock'], undefined, 'a recovery is not dropped either');
+  assert.ok(s.meta().errors.settings, 'the settings error stays while the file is unreadable');
+  ctl.deny = false;
+  box.options.onRecover('server:lock');
+  assert.equal(s.meta().errors.settings, undefined, 'the good read cleared the settings error');
+});
+
+test('row 17: /brief off drops every worker timer at once, a snapshot received while off creates none and publishes nothing, /brief on arms them again and publishes it', { timeout: 60_000 }, async (t) => {
+  const timers = fakeTimers();
+  const wl = { t: Date.now() }; // workers-live's own clock (its 2s publish rate limit), moved by the test
+  const s = make(t, { timers, extra: { workersLiveOptions: { now: () => wl.t } } });
+  await s.start();
+  await s.brief(goodBrief());
+  const idle = timers.pending();
+  s.events.emit(RPC, { name: 'omo.task.updated', data: workerSnap('st_w1') });
+  await timers.runAll(4);
+  assert.ok(timers.pending() > idle, 'a running worker is watched while the board is on');
+  await s.command('brief', 'off');
+  assert.equal(timers.pending(), idle, '/brief off: every worker timer is gone');
+  const files = ['published.json', 'data.js', 'index.html'];
+  const bytes = () => files.map((f) => readFileSync(join(s.stateDir, f), 'utf8'));
+  const frozen = bytes();
+  s.events.emit(RPC, { name: 'omo.task.updated', data: workerSnap('st_w1', 'st_w2') });
+  await timers.runAll(4);
+  assert.equal(timers.pending(), idle, 'a snapshot received while off creates no timer');
+  assert.deepEqual(bytes(), frozen, 'and publishes nothing');
+  wl.t += 5_000; // past the 2s publish rate limit of the live rows since the first flush
+  await s.command('brief', 'on');
+  assert.ok(timers.pending() > idle, '/brief on arms the timers for what is pending');
+  await timers.runAll(4);
+  assert.ok(readData(s.stateDir).sessions[0].live.workers.some((w) => w.id === 'st_w2'), 'the snapshot received while off is published once on');
+});
+
+// ------------------------------------------------------------------ row 18: a plain /brief recomputes the plan overlay first
+
+/** fs that records the text of every data.js the store publishes (the temp file is read right before it is renamed into place). */
+function dataWrites() {
+  const versions = [];
+  const fs = { ...nodeFs, renameSync(a, b) { if (/data\.js$/.test(String(b))) versions.push(nodeFs.readFileSync(a, 'utf8')); return nodeFs.renameSync(a, b); } };
+  return { versions, fs };
+}
+const planStates = (vm) => vm.sessions[0].plan.tasks.map((x) => [x.id, x.state]);
+const demoPlanPath = (s) => norm(join(s.cwd, '.omo', 'plans', 'demo.md'));
+// the owner ticks task 1 and adds a third task that the agent's summary does not know
+const PLAN_EDITED = `${PLAN_TEXT.replace('- [ ] 1.', '- [x] 1.')}- [ ] 3. 셋째\n`;
+
+test('row 18: a plain /brief recomputes the plan status and chips before it publishes: data.js (first publication included) and the served /data.json show the plan as it is now, with no agent_settled and no plan_brief', { timeout: 60_000 }, async (t) => {
+  const clock = { t: Date.now() };
+  const { versions, fs } = dataWrites();
+  const s = make(t, { server: true, fs, extra: { now: () => clock.t } });
+  await s.start();
+  const planPath = demoPlanPath(s);
+  writeFileSync(planPath, PLAN_TEXT);
+  await s.host.tool('plan_brief').execute('c', planInput(planPath), undefined, undefined, s.ctx);
+  const planId = planIdOf(rootAndSlugOf(planPath).root, 'demo');
+  const url = serverUrl(s.stateDir);
+  const before = readData(s.stateDir);
+  assert.deepEqual(planStates(before), [['1', 'todo'], ['2', 'todo']]);
+  assert.ok(!before.sessions[0].plan.chips.includes(PLAN_CHIP_STALE));
+  assert.ok(!before.sessions[0].plan.chips.includes(planChipMissing(1)));
+
+  writeFileSync(planPath, PLAN_EDITED);
+  clock.t += 30_000; // inside the 60s cache window: a plain /brief must not recompute
+  await s.command('brief', '');
+  assert.deepEqual(planStates(readData(s.stateDir)), [['1', 'todo'], ['2', 'todo']], 'inside 60s the cached status is kept');
+
+  clock.t += 31_000; // 61s after the plan_brief call
+  const from = versions.length;
+  await s.command('brief', '');
+  assert.ok(versions.length > from, '/brief published');
+  assert.deepEqual(planStates(parseData(versions[from])), [['1', 'done'], ['2', 'todo']], 'the very first publication of /brief already carries the recomputed overlay');
+  const fileVm = readData(s.stateDir);
+  assert.deepEqual(planStates(fileVm), [['1', 'done'], ['2', 'todo']]);
+  const served = JSON.parse((await get(`${url}data.json`)).body);
+  assert.deepEqual(planStates(served), [['1', 'done'], ['2', 'todo']], 'the board server model');
+  for (const chip of [PLAN_CHIP_STALE, planChipMissing(1)]) {
+    assert.ok(fileVm.sessions[0].plan.chips.includes(chip), `data.js: ${chip}`);
+    assert.ok(served.sessions[0].plan.chips.includes(chip), `/data.json: ${chip}`);
+  }
+  assert.deepEqual(nodeFs.readdirSync(join(s.stateDir, 'plans', planId)).filter((n) => /^rev-/.test(n)), ['rev-000001.json'], 'no new plan_brief');
+  assert.equal(s.opened.at(-1), url, 'still opens the live address');
+});
+
+test('row 18 paused: a plain /brief while the board is off recomputes nothing and publishes nothing; after /brief on the next plain /brief does', { timeout: 60_000 }, async (t) => {
+  const clock = { t: Date.now() };
+  const s = make(t, { extra: { now: () => clock.t } });
+  await s.start();
+  const planPath = demoPlanPath(s);
+  writeFileSync(planPath, PLAN_TEXT);
+  await s.host.tool('plan_brief').execute('c', planInput(planPath), undefined, undefined, s.ctx);
+  const planId = planIdOf(rootAndSlugOf(planPath).root, 'demo');
+  const statusFile = join(s.stateDir, 'plans', planId, 'status.json');
+  await s.command('brief', 'off');
+  writeFileSync(planPath, PLAN_EDITED);
+  clock.t += 61_000;
+  const statusBefore = readFileSync(statusFile, 'utf8');
+  const files = ['published.json', 'data.js', 'index.html'];
+  const bytes = () => files.map((f) => readFileSync(join(s.stateDir, f), 'utf8'));
+  const frozen = bytes();
+  await s.command('brief', '');
+  assert.equal(readFileSync(statusFile, 'utf8'), statusBefore, 'no status write while paused');
+  assert.deepEqual(bytes(), frozen, 'nothing published while paused');
+  assert.deepEqual(s.meta().planChips[planId].chips, [], 'no chip change while paused');
+  await s.command('brief', 'on');
+  await s.command('brief', '');
+  const vm = readData(s.stateDir);
+  assert.deepEqual(planStates(vm), [['1', 'done'], ['2', 'todo']]);
+  assert.ok(vm.sessions[0].plan.chips.includes(PLAN_CHIP_STALE));
+});
+
+test('row 18 no plan: a plain /brief with no plan writes no plan files, records no plan error and opens the file page', { timeout: 60_000 }, async (t) => {
+  const s = make(t);
+  await s.start();
+  await s.command('brief', '');
+  assert.equal(existsSync(join(s.stateDir, 'plans')), false, 'no plan folder appeared');
+  assert.deepEqual(s.meta().errors ?? {}, {});
+  assert.equal(norm(s.opened.at(-1)), norm(join(s.stateDir, 'index.html')));
+});
+
+// ------------------------------------------------------------------ row 19: the board address file (server.json) is read within bounds
+
+const GOOD_SERVER_JSON = () => JSON.stringify({ pid: process.pid, port: 47999, generation: 4 });
+
+test('row 19: an over-limit server.json seen by the real publish is recorded as server:record with the refused size and shown; nothing is recorded while the board is off; a valid record clears it', { timeout: 60_000 }, async (t) => {
+  const s = make(t);
+  await s.start();
+  await s.brief(goodBrief());
+  const file = join(s.stateDir, 'server.json');
+  assert.equal(s.meta().errors['server:record'], undefined);
+  const big = JSON.stringify({ pid: process.pid, port: 47999, generation: 4, pad: 'x'.repeat(40_000) });
+  writeFileSync(file, big);
+  await s.command('brief', 'off');
+  await s.command('brief', ''); // paused: the publish is refused, so nothing may be recorded
+  assert.equal(s.meta().errors['server:record'], undefined, 'nothing recorded while the board is off');
+  await s.command('brief', 'on'); // publishes: the read of server.json is refused
+  const recorded = s.meta().errors['server:record'];
+  assert.ok(recorded, 'recorded');
+  assert.ok(recorded.message.includes(String(Buffer.byteLength(big))), 'with the size that was refused');
+  assert.ok(readData(s.stateDir).readErrors.includes('server.json'));
+  assert.ok(chipsOf(s.stateDir).includes(ERR_CHIP), 'shown by the follow-up publish');
+  writeFileSync(file, GOOD_SERVER_JSON());
+  await s.brief(goodBrief({ headline: '복구 뒤' }));
+  assert.equal(s.meta().errors['server:record'], undefined, 'a valid record clears it');
+  assert.ok(!readData(s.stateDir).readErrors.includes('server.json'));
+  assert.ok(!chipsOf(s.stateDir).includes(ERR_CHIP));
+});
+
+test('row 19: the board server model (/data.json) refuses a size-only over-limit server.json unread, lists it in readErrors with the chip in the same response, records it, and a valid record recovers', { timeout: 60_000 }, async (t) => {
+  const s = make(t, { server: true });
+  await s.start();
+  await s.brief(goodBrief());
+  const url = serverUrl(s.stateDir);
+  const file = join(s.stateDir, 'server.json');
+  const original = readFileSync(file, 'utf8');
+  const model = async () => JSON.parse((await get(`${url}data.json`)).body);
+  assert.ok(!(await model()).readErrors.includes('server.json'));
+  const size = 64 * 1024 * 1024;
+  writeFileSync(file, '');
+  nodeFs.truncateSync(file, size); // big in size only: reading it would cost 64 MiB
+  const bad = await model();
+  assert.ok(bad.readErrors.includes('server.json'), 'listed in readErrors');
+  assert.ok(bad.sessions[0].chips.includes(ERR_CHIP), 'the chip is in the very same response');
+  assert.ok(s.meta().errors['server:record'].message.includes(String(size)), 'recorded with the refused size');
+  writeFileSync(file, original);
+  const healed = await model();
+  assert.ok(!healed.readErrors.includes('server.json'));
+  assert.ok(!healed.sessions[0].chips.includes(ERR_CHIP));
+  assert.equal(s.meta().errors['server:record'], undefined);
 });

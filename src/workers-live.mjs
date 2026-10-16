@@ -54,8 +54,16 @@ function namesFor(ids, names) {
 // - timers = {setInterval, clearInterval, setTimeout, clearTimeout}; every
 //   handle is unref'd and stop() leaves none behind.
 // - Pause (isEnabled() false) keeps memory current but performs no fs read,
-//   saveLive, softPublish, onError or onRecover; the changes stay pending and
-//   are published once enabled again.
+//   saveLive, softPublish, onError or onRecover, and keeps no timer: the
+//   interval, the flush timeout and every report queued by later() are dropped
+//   (a queued report is moot while off; a later snapshot reports again) and
+//   none is created while paused. The changes stay pending. The bus handler does no I/O, so it only
+//   looks at the pause state last read (`armed`); the timer callbacks, start(),
+//   resume() and one microtask queued by a snapshot that arrives while paused
+//   read isEnabled() again. Resume is therefore by event: the next task
+//   snapshot, or resume() (/brief on). pause() (/brief off) drops the timers
+//   at once; a pause made by another conversation is noticed at the next
+//   timer callback.
 // - Publish rate: status/todo changes at most every 2s, step-only changes at
 //   most every 5s (one leading publish, then a trailing one).
 export function createWorkersLive({
@@ -83,13 +91,26 @@ export function createWorkersLive({
   const appliedTodo = new Map();
   const invalid = new Set();
 
-  const enabled = () => {
-    try { return Boolean(isEnabled()); } catch { return false; } // unreadable pause state means off
-  };
   const unref = (handle) => { if (typeof handle?.unref === 'function') handle.unref(); return handle; };
   const warn = (error) => process.emitWarning(error instanceof Error ? error : new Error(String(error)));
+  // The pause state last read; the bus handler looks only at this (no I/O there). false = paused or unreadable.
+  let armed = true;
+  let probing = false;
+  let enabledBroken = false;
+  const enabled = () => {
+    try {
+      const on = Boolean(isEnabled());
+      enabledBroken = false;
+      return on;
+    } catch (error) {
+      // an unreadable pause state means off; it is reported (once per breakage), never defaulted silently
+      if (!enabledBroken) { enabledBroken = true; warn(error); }
+      return false;
+    }
+  };
+  function refreshGate() { armed = enabled(); return armed; }
   function emit(kind, key, error) {
-    if (!enabled()) return;
+    if (!refreshGate()) { pauseTimers(); return; } // paused: report nothing, keep no timer
     try {
       if (kind === 'error') { reported.add(key); onError(key, error); }
       else if (reported.delete(key)) onRecover(key);
@@ -107,6 +128,28 @@ export function createWorkersLive({
   function absorb() {
     const { changed, kind } = book.changed();
     if (changed && (!pendingKind || RANK[kind] > RANK[pendingKind])) pendingKind = kind;
+  }
+  // Nothing is scheduled while paused: the interval, the flush timeout and every queued report go, the pending changes stay in memory.
+  function pauseTimers() {
+    if (interval) { timers.clearInterval(interval); interval = null; } // pause: drop the interval
+    if (flushTimer) { timers.clearTimeout(flushTimer); flushTimer = null; flushDue = Infinity; } // pause: drop the flush timeout
+    if (deferred.size) { for (const handle of deferred.keys()) timers.clearTimeout(handle); deferred.clear(); } // pause: drop queued reports (moot while off)
+  }
+  // A task snapshot (or a noted task) arrived while paused: after the current call stack unwinds, read the pause state once
+  // and, if the board is on again, arm the timers for whatever is pending. A microtask, not a timer.
+  function probeResume() {
+    if (probing || stopped) return;
+    probing = true;
+    queueMicrotask(() => {
+      probing = false;
+      if (stopped || armed) return;
+      try {
+        if (!refreshGate()) return;
+        drain();
+        schedule();
+        syncTimer();
+      } catch (error) { warn(error); }
+    });
   }
 
   function ingest(data) {
@@ -131,7 +174,7 @@ export function createWorkersLive({
     return [...rows.filter((row) => !TERMINAL.has(row.state)), ...recent];
   }
   function needsTimer() {
-    return started && !stopped && (pendingSnapshot !== null || pendingKind !== null || targets().length > 0);
+    return started && !stopped && armed && (pendingSnapshot !== null || pendingKind !== null || targets().length > 0);
   }
   function syncTimer() {
     if (needsTimer()) {
@@ -141,6 +184,7 @@ export function createWorkersLive({
 
   function schedule() {
     if (stopped || pendingKind === null) return;
+    if (!armed) { pauseTimers(); return; }
     const min = pendingKind === 'step' ? STEP_MIN_MS : STATUS_TODO_MIN_MS;
     const due = lastFlushAt === null ? 0 : lastFlushAt + min - now();
     const delay = Math.max(0, due);
@@ -151,7 +195,8 @@ export function createWorkersLive({
     flushTimer = unref(timers.setTimeout(() => { flushTimer = null; flushDue = Infinity; flush(); }, delay));
   }
   async function flush() {
-    if (stopped || flushing || pendingKind === null || !enabled()) return;
+    if (stopped || flushing || pendingKind === null) return;
+    if (!refreshGate()) { pauseTimers(); return; } // paused: the pending changes wait, no timer
     const min = pendingKind === 'step' ? STEP_MIN_MS : STATUS_TODO_MIN_MS;
     if (lastFlushAt !== null && now() - lastFlushAt < min) { schedule(); return; }
     flushing = true;
@@ -206,7 +251,8 @@ export function createWorkersLive({
     return updates;
   }
   async function tick() {
-    if (stopped || ticking || !enabled()) return;
+    if (stopped || ticking) return;
+    if (!refreshGate()) { pauseTimers(); return; } // paused: this tick and its interval end here
     ticking = true;
     try {
       drain();
@@ -238,17 +284,18 @@ export function createWorkersLive({
           pendingSnapshot = null;
           const rows = normalizeTaskSnapshot(event.data, knownId);
           if (rows.error) {
-            later(() => emit('error', 'workers:snapshot', Object.assign(new Error(rows.error.message), { code: rows.error.code })));
+            if (armed) later(() => emit('error', 'workers:snapshot', Object.assign(new Error(rows.error.message), { code: rows.error.code })));
           } else {
-            if (reported.has('workers:snapshot')) later(() => emit('recover', 'workers:snapshot'));
+            if (armed && reported.has('workers:snapshot')) later(() => emit('recover', 'workers:snapshot'));
             if (rows.length) book.apply(rows);
             absorb();
           }
         }
         schedule();
         syncTimer();
+        if (!armed) probeResume(); // a snapshot while paused: resume by this event
       } catch (error) {
-        later(() => emit('error', 'workers:snapshot', error));
+        if (armed) later(() => emit('error', 'workers:snapshot', error));
       }
     },
     noteTaskIds(ids, names) {
@@ -261,14 +308,29 @@ export function createWorkersLive({
         absorb();
         schedule();
         syncTimer();
+        if (!armed) probeResume(); // a noted task while paused: resume by this event
       } catch (error) {
-        later(() => emit('error', 'workers:notes', error));
+        if (armed) later(() => emit('error', 'workers:notes', error));
       }
     },
     setSessionId(id) { if (typeof id === 'string' && id) { knownId = id; drain(); schedule(); syncTimer(); } },
+    // /brief off in this conversation (settings.json is already written): the flag flips and the timers go at once.
+    pause() {
+      armed = false;
+      pauseTimers();
+    },
+    // /brief on in this conversation: read the pause state again and arm the timers for whatever is pending.
+    resume() {
+      if (stopped || !started) return;
+      if (!refreshGate()) return;
+      drain();
+      schedule();
+      syncTimer();
+    },
     start() {
       stopped = false;
       started = true;
+      refreshGate();
       drain();
       schedule();
       syncTimer();

@@ -29,7 +29,7 @@ const errno = (code) => Object.assign(new Error(`${code}: injected`), { code });
 const norm = (p) => p.replace(/\\/g, '/');
 
 /** A temp project + state dir, a real store (with switchable faults) and a plan tool wired like the extension would. */
-function setup(t, { sid = 'sess-A', enabled = true, readTextWrap } = {}) {
+function setup(t, { sid = 'sess-A', enabled = true, readTextWrap, toolOpts = {} } = {}) {
   const dir = realFs.mkdtempSync(join(tmpdir(), 'omo-plantool-'));
   t.after(() => realFs.rmSync(dir, { recursive: true, force: true }));
   const proj = join(dir, 'proj');
@@ -63,7 +63,12 @@ function setup(t, { sid = 'sess-A', enabled = true, readTextWrap } = {}) {
   saveMeta(meta);
   const publish = () => { env.publishCalls += 1; return renderPage(store, now(), { sessionId: sid, sleep: () => {} }); };
   // same contract as extension recordError/settle: record in meta.errors, save (a failed save stays in memory), publish once
-  const trySave = () => { try { saveMeta(meta); } catch { /* kept in memory, exactly like extension.mjs recordError/settle */ } };
+  // The save's own exception is not swallowed: it goes to saveFailures. A test that breaks the meta save on purpose claims those with
+  // takeSaveFailures() and asserts them; for every other test the teardown below fails it when a failure was left unclaimed.
+  const saveFailures = [];
+  const takeSaveFailures = () => saveFailures.splice(0);
+  t.after(() => { assert.deepEqual(saveFailures.map(String), [], 'a meta save failed that the test did not claim with takeSaveFailures()'); });
+  const trySave = () => { try { saveMeta(meta); } catch (err) { saveFailures.push(err); } };
   const onError = (key, err) => { if (setError(meta, key, `${key}: ${err.message}`, now())) { trySave(); publish(); } };
   const onRecover = (key) => { if (clearError(meta, key)) { trySave(); publish(); } };
   const reads = [];
@@ -74,6 +79,7 @@ function setup(t, { sid = 'sess-A', enabled = true, readTextWrap } = {}) {
   const tool = createPlanTool({
     store, sessionId: sid, cwd: proj, isEnabled: () => env.enabled, publish, onError, onRecover, now,
     getMeta: () => meta, saveMeta, pageUrl: 'C:/state/index.html', readText: readTextWrap ? readTextWrap(defaultRead) : defaultRead,
+    ...toolOpts,
   });
   const planId = planIdOf(rootAndSlugOf(planPath).root, 'demo');
   const mk = (over = {}) => ({
@@ -90,7 +96,7 @@ function setup(t, { sid = 'sess-A', enabled = true, readTextWrap } = {}) {
   const json = (rel) => JSON.parse(realFs.readFileSync(join(stateDir, rel), 'utf8'));
   const exists = (rel) => realFs.existsSync(join(stateDir, rel));
   const dataJs = () => store.readText('data.js') ?? '';
-  return { dir, proj, stateDir, planPath, store, tool, meta, env, faults, planId, mk, revFiles, json, exists, dataJs, reads, saveMeta };
+  return { dir, proj, stateDir, planPath, store, tool, meta, env, faults, planId, mk, revFiles, json, exists, dataJs, reads, saveMeta, takeSaveFailures };
 }
 
 const openQ = (id, over = {}) => ({
@@ -557,6 +563,8 @@ test('repeated_interruptions: meta.json that cannot be replaced is plan:writes; 
   s.env.clock += 61_000;
   await s.tool.onSettled();
   assert.ok('plan:writes' in s.meta.errors, 'not cleared while the save still fails');
+  const lost = s.takeSaveFailures(); // the fixture's own saves of those plan errors hit the same directory and failed too
+  assert.ok(lost.length > 0 && lost.every((e) => e instanceof Error && /meta\.json/.test(e.message)), `the failed saves are recorded, not swallowed: ${lost.length}`);
   realFs.rmSync(metaFile, { recursive: true });
   realFs.writeFileSync(metaFile, good);
   s.env.clock += 61_000;
@@ -577,4 +585,200 @@ test('repeated_interruptions: a plan list that cannot be read once (plan:writes)
   await s.tool.onSettled();
   assert.deepEqual(s.meta.errors, {});
   assert.equal(s.dataJs().includes('오류 있음'), false, 'the page no longer shows it');
+});
+
+test('row 23 fixture: a meta save that fails while a plan error is recorded is kept in saveFailures, not swallowed; the error stays in memory and the page is published once', async (t) => {
+  const s = setup(t);
+  const metaRel = 'sessions/sess-A/meta.json';
+  const replace = s.store.replace;
+  const boom = errno('EIO');
+  s.store.replace = (rel, data) => {
+    if (rel !== metaRel) return replace(rel, data);
+    s.store.replace = replace; // fails once
+    throw boom;
+  };
+  s.faults.writeRev = 'EPERM';
+  await assert.rejects(s.tool.execute(s.mk()), /저장하지 못했습니다\(EPERM\)/);
+  const failures = s.takeSaveFailures();
+  assert.equal(failures.length, 1, 'exactly the one injected save failure');
+  assert.equal(failures[0], boom, 'the very exception the save threw');
+  assert.deepEqual(s.takeSaveFailures(), [], 'claiming empties the record');
+  assert.ok(`plan:${s.planId}` in s.meta.errors, 'the plan error stays in memory although it could not be saved');
+  assert.deepEqual(s.json(metaRel).errors, {}, 'nothing reached the disk');
+  assert.equal(s.env.publishCalls, 1, 'published exactly once');
+});
+
+// ------------------------------------------------------------------ row 17: the pause state is checked again after every await
+
+/** readText wrapper that parks the next read of a path matching `re` until the test releases it. */
+function parkedRead() {
+  const ctl = { re: null };
+  ctl.arm = (re, failCode = null) => {
+    ctl.re = re;
+    ctl.failCode = failCode; // when set, the parked read FAILS with this errno after it is released
+    ctl.inside = new Promise((resolve) => { ctl.entered = resolve; });
+    ctl.gate = new Promise((resolve) => { ctl.release = resolve; });
+  };
+  ctl.wrap = (inner) => async (p) => {
+    if (ctl.re && ctl.re.test(norm(p))) {
+      ctl.re = null;
+      ctl.entered();
+      await ctl.gate;
+      if (ctl.failCode) throw errno(ctl.failCode);
+    }
+    return inner(p);
+  };
+  return ctl;
+}
+
+test('row 17 execute: the board is switched off by another conversation while the plan files are read: nothing is written (revision, status, decision, meta) and nothing is published', async (t) => {
+  const park = parkedRead();
+  const s = setup(t, { readTextWrap: park.wrap });
+  const before = tree(s.stateDir);
+  const metaBefore = JSON.stringify(s.meta);
+  park.arm(/\/plans\/demo\.md$/);
+  const run = s.tool.execute(s.mk({ questions: [openQ('Q1')] }));
+  await park.inside;
+  s.env.enabled = false;
+  park.release();
+  const res = await run;
+  assert.equal(res.details.disabled, true);
+  assert.deepEqual(tree(s.stateDir), before, 'no revision, status.json, decision or meta file appeared');
+  assert.equal(JSON.stringify(s.meta), metaBefore, 'the in-memory meta is untouched');
+  assert.equal(s.env.publishCalls, 0);
+  assert.deepEqual(s.revFiles(), []);
+});
+
+for (const [label, re] of [
+  ['boulder.json', /\/\.omo\/boulder\.json$/],
+  ['the plan file', /\/\.omo\/plans\/demo\.md$/],
+]) {
+  test(`row 17 onSettled: the board is switched off by another conversation while ${label} is read: no status, meta, error or publish; the interrupted pass leaves the 60s cache alone`, async (t) => {
+    const park = parkedRead();
+    const s = setup(t, { readTextWrap: park.wrap });
+    await s.tool.execute(s.mk());
+    const published = s.env.publishCalls;
+    s.env.clock += 61_000;
+    realFs.writeFileSync(s.planPath, PLAN_TEXT.replace('- [ ] 1.', '- [x] 1.'));
+    const before = tree(s.stateDir);
+    const metaBefore = JSON.stringify(s.meta);
+    park.arm(re);
+    const run = s.tool.onSettled();
+    await park.inside;
+    s.env.enabled = false;
+    park.release();
+    assert.deepEqual(await run, []);
+    assert.deepEqual(tree(s.stateDir), before, 'status.json and meta.json are as they were');
+    assert.equal(JSON.stringify(s.meta), metaBefore);
+    assert.equal(s.env.publishCalls, published);
+    assert.deepEqual(s.meta.errors, {});
+    // the interrupted pass did not use up the cache window: once the board is on again the same change is picked up at once
+    s.env.enabled = true;
+    await s.tool.onSettled();
+    assert.equal(s.json(`plans/${s.planId}/status.json`).boxes['1'], 'x');
+  });
+}
+
+test('row 17 onSettled: a boulder read that FAILS after the board was switched off is not recorded as plan:boulder: no error entry, no meta write, no publish', async (t) => {
+  const park = parkedRead();
+  const s = setup(t, { readTextWrap: park.wrap });
+  await s.tool.execute(s.mk());
+  const published = s.env.publishCalls;
+  s.env.clock += 61_000;
+  const before = tree(s.stateDir);
+  const metaBefore = JSON.stringify(s.meta);
+  park.arm(/\/\.omo\/boulder\.json$/, 'EIO');
+  const run = s.tool.onSettled();
+  await park.inside;
+  s.env.enabled = false;
+  park.release();
+  assert.deepEqual(await run, []);
+  assert.deepEqual(s.meta.errors, {}, 'no plan:boulder error while the board is off');
+  assert.equal(JSON.stringify(s.meta), metaBefore);
+  assert.deepEqual(tree(s.stateDir), before);
+  assert.equal(s.env.publishCalls, published);
+});
+
+// ------------------------------------------------------------------ row 19: boulder discovery follows the retry and size policy of the plan reads
+
+const BOULDER_OK = JSON.stringify({
+  works: { w1: { work_id: 'w1', active_plan: '.omo/plans/demo.md', session_ids: ['senpi:sess-A'], status: 'active', updated_at: '2026-01-01T00:00:00Z' } },
+});
+/** Reads of boulder.json are scripted: `script` holds errno codes (or 'big') consumed one per read, then the real file answers. */
+function boulderScript(script) {
+  const log = { attempts: 0, sleeps: [] };
+  const wrap = (inner) => async (p) => {
+    if (!String(p).endsWith('boulder.json')) return inner(p);
+    log.attempts += 1;
+    const step = script.shift();
+    if (step === 'big') return `{"works":{},"pad":"${'x'.repeat(16 * 1024 * 1024)}"}`;
+    if (step) throw errno(step);
+    return inner(p);
+  };
+  return { log, script, wrap, sleep: async (ms) => { log.sleeps.push(ms); } };
+}
+const withBoulder = (t, script) => {
+  const b = boulderScript(script);
+  const s = setup(t, { readTextWrap: b.wrap, toolOpts: { sleep: b.sleep } });
+  realFs.writeFileSync(join(s.proj, '.omo', 'boulder.json'), BOULDER_OK);
+  return { b, s };
+};
+
+test('row 19 onSettled: boulder discovery retries a first transient error (EPERM) and finds the plan; no plan:boulder error', async (t) => {
+  const { b, s } = withBoulder(t, ['EPERM']);
+  const out = await s.tool.onSettled();
+  assert.deepEqual(b.log.sleeps, [20], 'one retry after the first failure');
+  assert.deepEqual(s.meta.errors, {});
+  assert.equal(out.length, 1);
+  assert.equal(out[0].planId, s.planId);
+  assert.ok(s.exists(`plans/${s.planId}/status.json`));
+});
+
+test('row 19 onSettled: boulder discovery retries a second transient error (EBUSY) with a longer wait and still finds the plan', async (t) => {
+  const { b, s } = withBoulder(t, ['EPERM', 'EBUSY']);
+  const out = await s.tool.onSettled();
+  assert.deepEqual(b.log.sleeps, [20, 40]);
+  assert.deepEqual(s.meta.errors, {});
+  assert.equal(out[0].planId, s.planId);
+});
+
+test('row 19 onSettled: a persistent EACCES on boulder.json is retried a bounded number of times and reported as plan:boulder; a later clean read clears it', async (t) => {
+  const { b, s } = withBoulder(t, Array(50).fill('EACCES'));
+  assert.deepEqual(await s.tool.onSettled(), []);
+  assert.ok(b.log.attempts > 1 && b.log.attempts <= 5, `attempts: ${b.log.attempts}`);
+  assert.equal(b.log.sleeps.length, b.log.attempts - 1);
+  assert.match(s.meta.errors['plan:boulder'].message, /EACCES/);
+  assert.ok(s.dataJs().includes('오류 있음'), 'shown on the published page');
+  b.script.length = 0; // the file is readable again
+  const out = await s.tool.onSettled();
+  assert.equal(s.meta.errors['plan:boulder'], undefined, 'a clean read clears only this key');
+  assert.equal(out[0].planId, s.planId);
+});
+
+test('row 19 onSettled: a non-transient error on boulder.json is reported at once, without a retry', async (t) => {
+  const { b, s } = withBoulder(t, ['EIO']);
+  await s.tool.onSettled();
+  assert.equal(b.log.attempts, 1);
+  assert.deepEqual(b.log.sleeps, []);
+  assert.match(s.meta.errors['plan:boulder'].message, /EIO/);
+});
+
+test('row 19 onSettled: an over-limit boulder.json is refused by the size policy (not retried, not read as no work); a normal one clears the error', async (t) => {
+  const { b, s } = withBoulder(t, ['big']);
+  assert.deepEqual(await s.tool.onSettled(), []);
+  assert.equal(b.log.attempts, 1, 'not retried');
+  assert.ok(s.meta.errors['plan:boulder'].message.includes(String(16 * 1024 * 1024)), 'the limit is named');
+  const out = await s.tool.onSettled();
+  assert.equal(s.meta.errors['plan:boulder'], undefined);
+  assert.equal(out[0].planId, s.planId);
+});
+
+test('row 19 execute: with the default reader a size-only (truncated) over-limit plan file is refused after a stat, before any of it is read', async (t) => {
+  const reads = [];
+  const fs = { ...realFs, promises: { ...realFs.promises, readFile(p, ...a) { reads.push(norm(String(p))); return realFs.promises.readFile(p, ...a); } } };
+  const s = setup(t, { toolOpts: { readText: undefined, fs } });
+  realFs.truncateSync(s.planPath, 8 * 1024 * 1024 + 1); // 2M characters x 4 bytes is the plan limit
+  const res = await s.tool.execute(s.mk());
+  assert.ok(res.details.problems.some((p) => p.includes('TOO_LARGE')), JSON.stringify(res.details.problems));
+  assert.equal(reads.filter((p) => p.endsWith('/demo.md')).length, 0, 'the plan file was never read');
 });

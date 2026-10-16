@@ -259,13 +259,52 @@ export function createBriefingExtension(opts = {}) {
       if (ui && typeof ui.notify === 'function') ui.notify(text, level);
     };
 
-    const enabled = () => {
+    // The one place the settings file is read for a pause decision. A failed read is recorded as the 'settings' error in the same
+    // operation (never silent) and reads as {known:false, on:false}: unreadable = stay paused, never silently enable. A read that
+    // works clears that source's own entry and nothing else. `inPublish`: the caller runs inside a publish (render.lock held),
+    // which must not start another one, so the outcome is parked in `settingsNote` and finishRefresh records it after the publish.
+    let settingsNote = null; // {err} | {ok: true}
+    function settingsState(inPublish = false) {
+      let on;
       try {
-        const on = store.readSettings().enabled !== false;
-        if (meta && 'settings' in errorsOf(meta)) settle('settings'); // settings read again: this source's own success
-        return on;
-      } catch (err) { recordError('settings', err); return false; } // unreadable = stay paused, never silently enable
-    };
+        on = store.readSettings().enabled !== false;
+      } catch (err) {
+        if (inPublish) settingsNote = { err }; else recordError('settings', err);
+        return { known: false, on: false };
+      }
+      if (inPublish) settingsNote = { ok: true };
+      else if (meta && 'settings' in errorsOf(meta)) settle('settings'); // settings read again: this source's own success
+      return { known: true, on };
+    }
+    function flushSettingsNote() {
+      const note = settingsNote;
+      settingsNote = null;
+      if (!note) return;
+      if (note.err) recordError('settings', note.err);
+      else if (meta && 'settings' in errorsOf(meta)) settle('settings'); // parked success
+    }
+    const enabled = () => settingsState().on;
+
+    // server.json as the board model reads it (the render publish and the board server's own model). A read that failed (unreadable,
+    // or over the size limit) is recorded under its own key; a good read or an absent file clears only that key. Nothing is recorded
+    // while the board is off. Inside a publish (render.lock held) the outcome is parked and flushServerNote records it after the
+    // publish, like the settings one. Returns whether the error entry changed.
+    const SERVER_RECORD_KEY = 'server:record';
+    let serverNote = null; // the server info the last publish saw
+    function noteServerRecord(info) {
+      if (!active || !meta || shuttingDown) return false;
+      const had = SERVER_RECORD_KEY in errorsOf(meta);
+      if (!info.error && !had) return false;
+      if (pausedNow()) return false;
+      if (info.error) recordError(SERVER_RECORD_KEY, new Error(info.message));
+      else settle(SERVER_RECORD_KEY);
+      return had !== (SERVER_RECORD_KEY in errorsOf(meta));
+    }
+    function flushServerNote() {
+      const info = serverNote;
+      serverNote = null;
+      if (info) noteServerRecord(info);
+    }
 
     function saveMeta() {
       store.replace(`sessions/${sid}/meta.json`, meta);
@@ -287,19 +326,16 @@ export function createBriefingExtension(opts = {}) {
       refreshSoon(shuttingDown);
     }
 
-    // Pause state for the new async sources: an unreadable settings file counts as paused (as enabled() does), but the
-    // 'settings' error itself is recorded by enabled() on the normal paths, not here.
-    const quietEnabled = () => {
-      try { return store.readSettings().enabled !== false; } catch { return false; }
-    };
-    // error/recover of the server host, workers-live and the soft publish: nothing is written or published while paused
-    // the owner switched the board off (/brief off): a failed settings read is NOT a pause here, so its error chip still goes out
-    const pausedNow = () => {
-      try { return store.readSettings().enabled === false; } catch { return false; }
+    // the owner switched the board off (/brief off). An unreadable settings file is NOT a pause here (its error chip still has
+    // to go out) but settingsState records it as the 'settings' error, like everywhere else the file is read.
+    const pausedNow = (inPublish = false) => {
+      const state = settingsState(inPublish);
+      return state.known && !state.on;
     };
     const pausedResult = () => ({ ok: false, paused: true, seqs: [], error: '브리핑이 꺼져 있어 게시하지 않았습니다' });
-    const hostError = (key, err) => { if (quietEnabled()) recordError(key, err); };
-    const hostRecover = (key) => { if (quietEnabled()) settle(key); };
+    // error/recover of the server host and workers-live: nothing is written or published while the board is off
+    const hostError = (key, err) => { if (!pausedNow()) recordError(key, err); };
+    const hostRecover = (key) => { if (!pausedNow()) settle(key); };
 
     // Publishes wait for a busy render.lock with an awaited timer (never blocks the terminal); `soft` takes the lock once.
     function publish(soft) {
@@ -307,7 +343,8 @@ export function createBriefingExtension(opts = {}) {
         generation,
         ...(opts.renderOpts ?? {}),
         sessionId: sid,
-        canPublish: () => !pausedNow(),
+        canPublish: () => !pausedNow(true),
+        onServerInfo: (info) => { serverNote = info; },
         soft: soft === true || shuttingDown,
         pendingDeliveries: deliverer && typeof deliverer.pendingIds === 'function' ? deliverer.pendingIds() : [],
       });
@@ -334,6 +371,8 @@ export function createBriefingExtension(opts = {}) {
         }
         if (host) host.notifyPublished(); // the board server rebuilds its view and pushes it to open pages
       }
+      flushSettingsNote(); // a pause check inside this publish read the settings file: record/clear the 'settings' source now
+      flushServerNote(); // the publish read server.json: record a failed read / clear the 'server:record' source now
       return res;
     }
 
@@ -376,10 +415,10 @@ export function createBriefingExtension(opts = {}) {
 
     // Worker-driven publishes (rows, todos, status): take render.lock once; retry later; a `render` error only after 30s.
     async function softPublish() {
-      if (!active || !meta || shuttingDown || !quietEnabled()) return;
+      if (!active || !meta || shuttingDown || !enabled()) return;
       const res = await refresh(true);
       if (res.ok || !res.busy) { softBusySince = null; return; }
-      if (!quietEnabled()) return; // paused during the wait: no retry timer, no error entry
+      if (!enabled()) return; // paused during the wait: no retry timer, no error entry
       const t = nowFn();
       if (softBusySince === null) softBusySince = t;
       if (t - softBusySince > SOFT_FAIL_MS && setError(meta, 'render', res.error, t)) saveMeta(); // shown by the next publish that gets through
@@ -563,12 +602,14 @@ export function createBriefingExtension(opts = {}) {
       if (arg === 'off' || arg === 'on') {
         store.writeSettings({ ...store.readSettings(), enabled: arg === 'on' });
         if (arg === 'on') {
+          if (workersLive) workersLive.resume(); // settings.json says on now: the worker timers are armed again
           await refresh();
           await ensureServer();
         } else {
           // pause is global: soft-publish retries stop and the board server tells its pages, closes and lets go of its lock
           if (softTimer) { timers.clearTimeout(softTimer); softTimer = null; }
           softBusySince = null;
+          if (workersLive) workersLive.pause(); // no worker timer is kept while the board is off
           if (host) await host.onPaused();
         }
         say(cctx, arg === 'on' ? '브리핑 켜짐: 규칙 주입·자동 갱신·전달 재개' : '브리핑 꺼짐: 규칙 주입·자동 갱신·전달 중지 (/brief on 으로 켜기)');
@@ -585,6 +626,9 @@ export function createBriefingExtension(opts = {}) {
       meta.auto = collect(cctx, { readTaskRecords: true, cache: recordCache }); // the only path that reads senpi-task records
       clearError(meta, 'collect');
       saveMeta();
+      // The plan overlay (status.json + chips: 60s cache, nothing at all while paused) is recomputed BEFORE the file page and the
+      // board server's model are built, so a plain /brief shows the plan as it is now without an agent_settled or plan_brief call.
+      if (planTool) await planTool.onSettled(); // plain /brief: the plan overlay first
       const res = await refresh();
       if (!res.ok) say(cctx, `상황판 갱신 실패: ${res.error}`, 'error');
       // the live address when a healthy board server exists (this or another conversation owns it), else the file page
@@ -766,7 +810,7 @@ export function createBriefingExtension(opts = {}) {
           await within(h.release(), SHUTDOWN_STEP_MS);
         }
         // an error recorded while shutting down (lock release, server close) is shown by exactly one more publish
-        if (shutdownDirty && quietEnabled()) await within(refresh(true), SHUTDOWN_STEP_MS);
+        if (shutdownDirty && enabled()) await within(refresh(true), SHUTDOWN_STEP_MS);
         else if (inflight) await within(inflight, SHUTDOWN_STEP_MS);
         deliverer = null;
         mirror = null;
@@ -831,10 +875,12 @@ export function createBriefingExtension(opts = {}) {
           stateDir,
           sessionId: sid,
           generation,
-          isEnabled: () => store.readSettings().enabled !== false, // a read failure throws: the host reports it and treats it as paused
+          isEnabled: enabled, // never throws: an unreadable settings file is recorded as the 'settings' error and reads as paused
           buildViewModel: (snap, t) => {
             const info = serverInfoOf(store);
-            return buildViewModel(snap, t, { generation, server: info.server, serverError: info.error });
+            // a failed record read is recorded in this very operation; when that changed the errors the model is built from a fresh snapshot
+            const changed = noteServerRecord(info);
+            return buildViewModel(changed ? store.readSnapshot() : snap, t, { generation, server: info.server, serverError: info.error });
           },
           readSnapshot: () => store.readSnapshot(),
           getPage: (vm) => pageHtml(vm, generation, { mode: 'server' }),
@@ -842,7 +888,7 @@ export function createBriefingExtension(opts = {}) {
           onError: hostError,
           onRecover: hostRecover,
           // the file page shows 'open live view' only when it knows the address: publish again when it changes
-          onChange: () => { if (active && !shuttingDown && !ensuring && quietEnabled()) refreshSoon(true); },
+          onChange: () => { if (active && !shuttingDown && !ensuring && enabled()) refreshSoon(true); },
           env,
           timers,
           ...(opts.hostOptions ?? {}),
@@ -852,7 +898,7 @@ export function createBriefingExtension(opts = {}) {
       workersLive = (opts.createWorkersLive ?? createWorkersLive)({
         sessionId: () => sid,
         cwd: ctx.cwd,
-        isEnabled: quietEnabled,
+        isEnabled: enabled,
         softPublish,
         saveLive: (list) => {
           if (!meta) return;

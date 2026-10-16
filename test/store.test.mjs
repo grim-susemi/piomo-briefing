@@ -594,3 +594,103 @@ test('readPlans/readSnapshot: newest rev + status per plan; a broken newest rev 
     assert.equal(broken.plans[0].status.planId, PLAN_ID, 'the rest of the plan is still read');
   } finally { cleanup(root); }
 });
+
+// ---------------------------------------------------------------- row 19: size-bounded reads
+
+/** fs that records the bounded-read traffic: bytes requested from / returned by readSync, and whole-file reads. */
+function trafficFs(log) {
+  return {
+    ...realFs,
+    readSync(fd, buffer, offset, length, position) {
+      log.reads++;
+      log.requested += length;
+      const n = realFs.readSync(fd, buffer, offset, length, position);
+      log.returned += n;
+      return n;
+    },
+    readFileSync(...a) { log.whole++; return realFs.readFileSync(...a); },
+  };
+}
+const newLog = () => ({ reads: 0, requested: 0, returned: 0, whole: 0 });
+
+test('row 19 store: a bounded read of a normal record reads exactly its bytes in one pass (no whole-file read) and returns it intact', () => {
+  const root = tmpRoot();
+  try {
+    const log = newLog();
+    const store = openStore(root, { fs: trafficFs(log), sleep() {} });
+    store.replace('server.json', { pid: 123, port: 47999, generation: 4 });
+    const size = realFs.statSync(join(root, 'server.json')).size;
+    assert.deepEqual(store.readRecord('server.json', { maxBytes: 16384 }), { pid: 123, port: 47999, generation: 4 });
+    assert.equal(log.whole, 0, 'no whole-file read');
+    assert.equal(log.returned, size);
+    assert.ok(log.requested <= size + 2, `requested ${log.requested} for ${size} bytes`);
+  } finally { cleanup(root); }
+});
+
+test('row 19 store: an over-limit but valid JSON record is refused with ETOOBIG before any of its content is read', () => {
+  const root = tmpRoot();
+  try {
+    const log = newLog();
+    const store = openStore(root, { fs: trafficFs(log), sleep() {} });
+    realFs.writeFileSync(join(root, 'server.json'), JSON.stringify({ pid: 1, port: 2, pad: 'x'.repeat(20_000) }));
+    const size = realFs.statSync(join(root, 'server.json')).size;
+    assert.throws(() => store.readRecord('server.json', { maxBytes: 16384 }), (err) => err.code === 'ETOOBIG' && err.bytes === size && err.limit === 16384);
+    assert.throws(() => store.readText('server.json', { maxBytes: 16384 }), { code: 'ETOOBIG' });
+    assert.deepEqual([log.reads, log.requested, log.returned, log.whole], [0, 0, 0, 0], 'no content was requested or read');
+    assert.equal(store.readText('server.json').length, size, 'without a limit the same file is read as before');
+  } finally { cleanup(root); }
+});
+
+test('row 19 store: a file that is only big in size (truncateSync, sparse where the filesystem allows) is refused without reading a byte', () => {
+  const root = tmpRoot();
+  try {
+    const log = newLog();
+    const store = openStore(root, { fs: trafficFs(log), sleep() {} });
+    const file = join(root, 'server.json');
+    realFs.writeFileSync(file, '');
+    realFs.truncateSync(file, 64 * 1024 * 1024);
+    assert.throws(() => store.readRecord('server.json', { maxBytes: 16384 }), (err) => err.code === 'ETOOBIG' && err.bytes === 64 * 1024 * 1024);
+    assert.deepEqual([log.reads, log.requested, log.returned, log.whole], [0, 0, 0, 0]);
+  } finally { cleanup(root); }
+});
+
+test('row 19 store: with a limit, absent is still null, a transient open error is retried, a persistent one throws after a bounded number of attempts', () => {
+  const root = tmpRoot();
+  try {
+    const sleeps = [];
+    const fault = { count: 0, code: 'EBUSY', opens: 0 };
+    const fs = { ...realFs, openSync(...a) { fault.opens++; if (fault.count > 0) { fault.count--; throw errnoErr(fault.code); } return realFs.openSync(...a); } };
+    const store = openStore(root, { fs, sleep: (ms) => sleeps.push(ms) });
+    assert.equal(store.readRecord('server.json', { maxBytes: 16384 }), null, 'absent');
+    assert.deepEqual(sleeps, [], 'a genuinely absent file is not retried');
+    store.replace('server.json', { pid: 1, port: 2 });
+    fault.opens = 0;
+    fault.count = 2;
+    assert.deepEqual(store.readRecord('server.json', { maxBytes: 16384 }), { pid: 1, port: 2 });
+    assert.equal(fault.opens, 3, 'two transient failures, then the read');
+    fault.opens = 0;
+    fault.count = Infinity;
+    fault.code = 'EACCES';
+    assert.throws(() => store.readRecord('server.json', { maxBytes: 16384 }), { code: 'EACCES' });
+    assert.ok(fault.opens > 1 && fault.opens <= 8, `bounded attempts: ${fault.opens}`);
+  } finally { cleanup(root); }
+});
+
+test('row 19 store: a file that grew between fstat and read is a torn read: retried, then judged by its new size', () => {
+  const root = tmpRoot();
+  try {
+    const sleeps = [];
+    let lies = 0;
+    const fs = { ...realFs, fstatSync(fd) { return lies-- > 0 ? { size: 10 } : realFs.fstatSync(fd); } };
+    const store = openStore(root, { fs, sleep: (ms) => sleeps.push(ms) });
+    realFs.writeFileSync(join(root, 'grow.txt'), 'y'.repeat(15));
+    lies = 1; // the first fstat reports 10 bytes for a 15-byte file
+    assert.equal(store.readText('grow.txt', { maxBytes: 20 }), 'y'.repeat(15), 'retried, then the whole file');
+    assert.equal(sleeps.length, 1);
+    realFs.writeFileSync(join(root, 'grow.txt'), 'z'.repeat(30));
+    lies = 1;
+    sleeps.length = 0;
+    assert.throws(() => store.readText('grow.txt', { maxBytes: 20 }), (err) => err.code === 'ETOOBIG' && err.bytes === 30);
+    assert.equal(sleeps.length, 1);
+  } finally { cleanup(root); }
+});

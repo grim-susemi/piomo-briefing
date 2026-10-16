@@ -349,3 +349,94 @@ test('B2 (renderer): a publish that waited for the lock and finds itself paused 
   assert.equal(existsSync(join(store.root, 'render.lock')), false);
   assert.deepEqual(hits, [], 'after the wait the paused publish did not touch render.lock');
 });
+
+// ------------------------------------------------------------------ row 19: server.json is read within bounds
+
+/** A store whose bounded-read traffic is recorded; `ctl.code` makes every read of server.json fail with that errno. */
+function boundedStore(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'omo-render-live-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const log = { requested: 0, returned: 0, whole: 0, failed: 0 };
+  const ctl = { code: null };
+  const injected = () => Object.assign(new Error(`${ctl.code}: injected`), { code: ctl.code });
+  const fs = {
+    ...nodeFs,
+    openSync(f, ...a) {
+      if (ctl.code && String(f).endsWith('server.json')) { log.failed++; throw injected(); }
+      return nodeFs.openSync(f, ...a);
+    },
+    readFileSync(f, ...a) {
+      if (String(f).endsWith('server.json')) {
+        log.whole++;
+        if (ctl.code) { log.failed++; throw injected(); }
+      }
+      return nodeFs.readFileSync(f, ...a);
+    },
+    readSync(fd, buffer, offset, length, position) {
+      log.requested += length;
+      const n = nodeFs.readSync(fd, buffer, offset, length, position);
+      log.returned += n;
+      return n;
+    },
+  };
+  const store = openStore(join(dir, 'state'), { fs, sleep() {} });
+  return { store, log, ctl, file: join(dir, 'state', 'server.json') };
+}
+
+test('row 19 render: serverInfoOf reads a normal record in one bounded pass; an over-limit valid JSON record is a visible error that consumes no byte; a valid record recovers', (t) => {
+  const { store, log, file } = boundedStore(t);
+  const good = { pid: 123, port: 47999, generation: 4 };
+  const address = { server: { url: 'http://127.0.0.1:47999/', generation: 4 }, error: false };
+  store.replace('server.json', good);
+  const size = nodeFs.statSync(file).size;
+  assert.deepEqual(serverInfoOf(store, () => true), address);
+  assert.equal(log.whole, 0, 'no whole-file read');
+  assert.equal(log.returned, size);
+  assert.ok(log.requested <= size + 2, `requested ${log.requested} for ${size} bytes`);
+
+  const big = JSON.stringify({ ...good, pad: 'x'.repeat(20_000) }); // valid JSON, over the 16 KiB record limit
+  nodeFs.writeFileSync(file, big);
+  const [requested, returned] = [log.requested, log.returned];
+  const bad = serverInfoOf(store, () => true);
+  assert.equal(bad.server, null);
+  assert.equal(bad.error, true);
+  assert.ok(bad.message.includes('server.json') && bad.message.includes(String(Buffer.byteLength(big))), bad.message);
+  assert.deepEqual([log.requested, log.returned, log.whole], [requested, returned, 0], 'the over-limit file was not read');
+  assert.ok(buildViewModel(store.readSnapshot(), NOW, { serverError: bad.error }).readErrors.includes('server.json'));
+
+  store.replace('server.json', good);
+  assert.deepEqual(serverInfoOf(store, () => true), address, 'a valid record recovers');
+});
+
+test('row 19 render: a size-only (truncated) server.json through the real publish is refused unread; data.js lists it in readErrors, the hook sees the error, a valid record recovers', (t) => {
+  const { store, log, file } = boundedStore(t);
+  session(store, 'a');
+  nodeFs.writeFileSync(file, '');
+  nodeFs.truncateSync(file, 64 * 1024 * 1024);
+  const seen = [];
+  const opts = { isAlive: () => true, onServerInfo: (info) => seen.push(info) };
+  assert.equal(renderPage(store, NOW, opts).ok, true);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].error, true);
+  assert.deepEqual([log.requested, log.returned, log.whole], [0, 0, 0], 'not a byte of the big file was read');
+  assert.ok(dataOf(store).readErrors.includes('server.json'));
+
+  store.replace('server.json', { pid: 123, port: 47999, generation: 4 });
+  assert.equal(renderPage(store, NOW + 5, opts).ok, true);
+  assert.equal(seen.at(-1).error, false);
+  assert.ok(!dataOf(store).readErrors.includes('server.json'));
+  assert.equal(dataOf(store).server.url, 'http://127.0.0.1:47999/');
+});
+
+test('row 19 render: server.json absent is "no server" (no error); unreadable is an error with its code after a bounded number of attempts; a good read recovers', (t) => {
+  const { store, log, ctl } = boundedStore(t);
+  assert.deepEqual(serverInfoOf(store, () => true), { server: null, error: false }, 'absent');
+  store.replace('server.json', { pid: 123, port: 47999, generation: 4 });
+  ctl.code = 'EACCES';
+  const info = serverInfoOf(store, () => true);
+  assert.equal(info.error, true);
+  assert.ok(info.message.includes('EACCES'), info.message);
+  assert.ok(log.failed > 1 && log.failed <= 8, `bounded attempts: ${log.failed}`);
+  ctl.code = null;
+  assert.equal(serverInfoOf(store, () => true).error, false);
+});

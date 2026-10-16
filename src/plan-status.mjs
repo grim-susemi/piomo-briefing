@@ -210,6 +210,34 @@ function parseLedger(text, file, errors) {
   return last;
 }
 
+/**
+ * One read under this module's policy (shared with plan-tool's boulder discovery): EBUSY/EPERM/EACCES are retried (20, 40, 80,
+ * 160 ms: 5 attempts in all), a missing file is null, and anything else throws an Error carrying `.code`: the reader's own error,
+ * BAD_READ (not text) or TOO_LARGE (over the kind's character limit). `readText(file, {maxBytes})` may use maxBytes (the character
+ * limit x 4, the most that many UTF-8 characters can take) to refuse a huge file before reading it.
+ */
+export async function readWithPolicy(readText, file, kind, sleep = defaultSleep) {
+  const limit = MAX_CHARS[kind];
+  let delay = FIRST_DELAY_MS;
+  for (let attempt = 1; ; attempt++) {
+    let value;
+    try {
+      value = await readText(file, { maxBytes: limit * 4 });
+    } catch (err) {
+      if (TRANSIENT.has(codeOf(err)) && attempt < MAX_ATTEMPTS) {
+        await sleep(delay);
+        delay *= 2;
+        continue;
+      }
+      throw err;
+    }
+    if (value === null || value === undefined) return null;
+    if (typeof value !== 'string') throw Object.assign(new Error(`${file}: the read did not return text`), { code: 'BAD_READ' });
+    if (value.length > limit) throw Object.assign(new Error(`${file}: ${value.length} characters exceed the ${limit}-character limit`), { code: 'TOO_LARGE' });
+    return value;
+  }
+}
+
 async function fill(status, opts) {
   const { planPath, draftPath, boulderPath, readText, now } = opts;
   const sha256 = typeof opts.sha256 === 'function' ? opts.sha256 : defaultSha256;
@@ -223,31 +251,11 @@ async function fill(status, opts) {
 
   /** -> string, null (missing) or undefined (unreadable; already recorded in errors). */
   const read = async (file, kind) => {
-    let delay = FIRST_DELAY_MS;
-    for (let attempt = 1; ; attempt++) {
-      let value;
-      try {
-        value = await readText(file);
-      } catch (err) {
-        const code = codeOf(err);
-        if (TRANSIENT.has(code) && attempt < MAX_ATTEMPTS) {
-          await sleep(delay);
-          delay *= 2;
-          continue;
-        }
-        errors.push({ source: 'plan', path: file, code });
-        return undefined;
-      }
-      if (value === null || value === undefined) return null;
-      if (typeof value !== 'string') {
-        errors.push({ source: 'plan', path: file, code: 'BAD_READ' });
-        return undefined;
-      }
-      if (value.length > MAX_CHARS[kind]) {
-        errors.push({ source: 'plan', path: file, code: 'TOO_LARGE' });
-        return undefined;
-      }
-      return value;
+    try {
+      return await readWithPolicy(readText, file, kind, sleep);
+    } catch (err) {
+      errors.push({ source: 'plan', path: file, code: codeOf(err) });
+      return undefined;
     }
   };
   const hash = async (text, file) => {

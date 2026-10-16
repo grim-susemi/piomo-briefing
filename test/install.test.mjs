@@ -122,7 +122,7 @@ function flakyIoPreload({ failures, log }) {
     'const realStat = fs.statSync, realRead = fs.readFileSync;',
     'let used = 0;',
     "const isRecord = (p) => typeof p === 'string' && /server\\.json$/.test(p.replace(/\\\\/g, '/'));",
-    'const note = () => { try { fs.appendFileSync(LOG, "x"); } catch {} };',
+    'const note = () => { try { fs.appendFileSync(LOG, "x"); } catch (e) { fs.writeSync(2, "flaky-io: call log write failed: " + e.code + " " + e.message + "\\n"); } };',
     'const boom = () => { throw Object.assign(new Error("injected EPERM"), { code: "EPERM" }); };',
     'fs.statSync = function (p, ...rest) { if (!isRecord(p)) return realStat.call(fs, p, ...rest); note(); if (used++ < LIMIT) boom(); return realStat.call(fs, p, ...rest); };',
     'fs.readFileSync = function (p, ...rest) { if (!isRecord(p)) return realRead.call(fs, p, ...rest); note(); if (used++ < LIMIT) boom(); return realRead.call(fs, p, ...rest); };',
