@@ -1,0 +1,565 @@
+{
+  "schema": 1,
+  "seq": 7,
+  "generatedAt": 1791946800000,
+  "sessions": [
+    {
+      "id": "s-a1",
+      "project": "piomo-briefing",
+      "cwd": "C:/Users/USER/orca/projects/piomo-briefing",
+      "title": "상황판 만들기",
+      "paneId": "w3-p1",
+      "workName": "결정 기록기",
+      "status": "needs_decision",
+      "statusKey": "needs_decision",
+      "tab": "나를 기다림",
+      "chips": [
+        "작업 중"
+      ],
+      "headline": "결정 카드 저장은 끝났고, 답 전달 방식만 정하면 목표에 닿습니다",
+      "lastActivityAt": 1791946560000,
+      "lastBriefAt": 1791946560000,
+      "changesNew": true,
+      "changes": [
+        {
+          "text": "결정 번호를 전역으로 하나씩 늘리게 바꿈",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "C:/Users/USER/orca/projects/piomo-briefing/src/decide.mjs",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "두 창 동시 답 시험 추가",
+          "truth": "reported",
+          "applied": "none",
+          "evidenceState": "ok"
+        }
+      ],
+      "done": [
+        {
+          "text": "결정 파일 저장 시험 통과",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/piomo-living-briefing/task-3-decide.txt",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "잠금 회수 규칙 문서화",
+          "truth": "unverified",
+          "applied": "none",
+          "evidenceState": "ok"
+        }
+      ],
+      "next": "답 전달 방식 결정 후 전달 코드 작성",
+      "decisions": [
+        {
+          "id": 12,
+          "sessionId": "s-a1",
+          "question": "답을 다른 창에 어떻게 넘길까요?",
+          "options": {
+            "A": {
+              "text": "대화 끝날 때 넘김",
+              "consequence": "안전하지만 몇 분 늦을 수 있음"
+            },
+            "B": {
+              "text": "바로 끼어들기",
+              "consequence": "빠르지만 진행 중 작업이 흔들림"
+            },
+            "C": {
+              "text": "둘 다 지원",
+              "consequence": "코드가 두 배로 늘어남"
+            }
+          },
+          "recommend": "A",
+          "reason": "진행 중 작업을 망가뜨리지 않음",
+          "blocks": true,
+          "createdAt": 1791946440000,
+          "answered": false,
+          "closed": false
+        },
+        {
+          "id": 13,
+          "sessionId": "s-a1",
+          "question": "오래된 답 기록을 지울까요?",
+          "options": {
+            "A": {
+              "text": "영구 보관",
+              "consequence": "폴더가 조금씩 커짐"
+            },
+            "B": {
+              "text": "30일 후 삭제",
+              "consequence": "옛 영수증을 못 봄"
+            }
+          },
+          "recommend": "A",
+          "reason": "추적이 쉬움",
+          "blocks": false,
+          "createdAt": 1791946500000,
+          "answered": false,
+          "closed": false
+        },
+        {
+          "id": 14,
+          "sessionId": "s-a1",
+          "question": "결정 번호를 화면에 크게 보일까요?",
+          "options": {
+            "A": {
+              "text": "크게",
+              "consequence": "눈에 잘 띔"
+            },
+            "B": {
+              "text": "보통",
+              "consequence": "카드가 덜 커짐"
+            }
+          },
+          "recommend": "B",
+          "reason": "카드가 빽빽해야 함",
+          "blocks": false,
+          "createdAt": 1791946620000,
+          "answered": false,
+          "closed": false
+        }
+      ],
+      "flow": [
+        {
+          "label": "요구 정리",
+          "state": "done"
+        },
+        {
+          "label": "저장소",
+          "state": "done"
+        },
+        {
+          "label": "결정 카드",
+          "state": "done"
+        },
+        {
+          "label": "답 전달",
+          "state": "doing"
+        },
+        {
+          "label": "상황판",
+          "state": "todo"
+        },
+        {
+          "label": "설치",
+          "state": "todo"
+        }
+      ],
+      "auto": {
+        "stage": "실행",
+        "todoCurrent": "4. 결정 답 전달",
+        "todoNext": "5. 갱신 방식 실측",
+        "todoDone": 3,
+        "todoTotal": 9,
+        "workers": {
+          "running": 1,
+          "done": 4,
+          "error": 0
+        }
+      }
+    },
+    {
+      "id": "s-a2",
+      "project": "piomo-briefing",
+      "cwd": "C:/Users/USER/orca/projects/piomo-briefing",
+      "title": "설치 도구",
+      "paneId": "w3-p2",
+      "workName": "설치 스크립트",
+      "status": "in_progress",
+      "statusKey": "in_progress",
+      "tab": "진행 중",
+      "chips": [
+        "보고 없음"
+      ],
+      "headline": "설치·제거 스크립트가 실사용 폴더를 건드리지 않게 맞추는 중",
+      "lastActivityAt": 1791945600000,
+      "lastBriefAt": 1791944700000,
+      "changesNew": false,
+      "changes": [
+        {
+          "text": "shim 파일 하나만 만들도록 바꿈",
+          "truth": "evidence",
+          "applied": "live",
+          "evidence": "C:/Users/USER/orca/projects/piomo-briefing/scripts/install.mjs",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "--uninstall 옵션 추가",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "C:/Users/USER/orca/projects/piomo-briefing/test/install.test.mjs",
+          "evidenceState": "changed"
+        },
+        {
+          "text": "설치 전 원본 해시 기록",
+          "truth": "reported",
+          "applied": "candidate",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "README에 끄는 법 적음",
+          "truth": "reported",
+          "applied": "none",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "임시 폴더 정리 코드 추가",
+          "truth": "unverified",
+          "applied": "candidate",
+          "evidenceState": "ok"
+        }
+      ],
+      "done": [
+        {
+          "text": "설치 시험 12개 통과",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/piomo-living-briefing/task-2-install.txt",
+          "evidenceState": "ok"
+        }
+      ],
+      "next": "제거 후 원본 해시가 같은지 확인",
+      "decisions": [],
+      "flow": [
+        {
+          "label": "설치",
+          "state": "done"
+        },
+        {
+          "label": "제거",
+          "state": "doing"
+        },
+        {
+          "label": "해시 확인",
+          "state": "todo"
+        }
+      ],
+      "auto": {
+        "stage": "실행",
+        "todoCurrent": "2. 설치 스크립트",
+        "todoNext": "3. 결정 저장",
+        "todoDone": 1,
+        "todoTotal": 9,
+        "workers": {
+          "running": 0,
+          "done": 2,
+          "error": 1
+        }
+      },
+      "autoSummary": true
+    },
+    {
+      "id": "s-b1",
+      "project": "기타 작업",
+      "cwd": "C:/Users/USER/orca/projects/기타 작업",
+      "title": "하네스 점검",
+      "paneId": "w1-p1",
+      "workName": "EPERM 조사",
+      "status": "blocked",
+      "statusKey": "blocked",
+      "tab": "나를 기다림",
+      "chips": [],
+      "headline": "저장 경로가 EPERM으로 막혀 소유자 확인이 필요함",
+      "lastActivityAt": 1791943800000,
+      "lastBriefAt": 1791943800000,
+      "changesNew": true,
+      "changes": [
+        {
+          "text": "재시도 없는 저장 경로 3곳 찾음",
+          "truth": "evidence",
+          "applied": "none",
+          "evidence": "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/piomo-living-briefing/task-1-eperm.log",
+          "evidenceState": "gone"
+        }
+      ],
+      "done": [],
+      "next": "백신 예외 등록 여부 확인",
+      "decisions": [
+        {
+          "id": 15,
+          "sessionId": "s-b1",
+          "question": "백신 예외에 상태 폴더를 넣을까요?",
+          "options": {
+            "A": {
+              "text": "넣음",
+              "consequence": "EPERM이 줄어듦"
+            },
+            "B": {
+              "text": "안 넣음",
+              "consequence": "재시도로만 버팀"
+            }
+          },
+          "recommend": "A",
+          "reason": "실측된 실패 원인",
+          "blocks": true,
+          "createdAt": 1791943920000,
+          "answered": false,
+          "closed": false
+        }
+      ],
+      "flow": [
+        {
+          "label": "재현",
+          "state": "done"
+        },
+        {
+          "label": "원인",
+          "state": "blocked"
+        },
+        {
+          "label": "수정",
+          "state": "todo"
+        }
+      ],
+      "auto": {
+        "stage": "조사",
+        "todoCurrent": "1. 재현",
+        "todoNext": "2. 원인 확인",
+        "todoDone": 1,
+        "todoTotal": 4,
+        "workers": {
+          "running": 0,
+          "done": 1,
+          "error": 0
+        }
+      }
+    },
+    {
+      "id": "s-b2",
+      "project": "기타 작업",
+      "cwd": "C:/Users/USER/orca/projects/기타 작업",
+      "title": "Herdr 대시보드",
+      "paneId": "w1-p2",
+      "workName": "대시보드 정리",
+      "status": "in_progress",
+      "statusKey": "in_progress",
+      "tab": "나를 기다림",
+      "chips": [
+        "작업 중"
+      ],
+      "headline": "작업자 목록이 잘리는 문제를 고치는 중",
+      "lastActivityAt": 1791946680000,
+      "lastBriefAt": 1791946260000,
+      "changesNew": false,
+      "openQuestion": {
+        "text": "작업자 목록을 몇 줄까지 보일까요?",
+        "at": 1791946680000
+      },
+      "changes": [
+        {
+          "text": "목록 높이를 창에 맞춤",
+          "truth": "reported",
+          "applied": "candidate",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "글자 크기 한 단계 줄임",
+          "truth": "unverified",
+          "applied": "candidate",
+          "evidenceState": "ok"
+        }
+      ],
+      "done": [
+        {
+          "text": "잘림 재현 캡처",
+          "truth": "evidence",
+          "applied": "none",
+          "evidence": "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/piomo-living-briefing/task-0-herdr.png",
+          "evidenceState": "ok"
+        }
+      ],
+      "next": "질문 답 받은 뒤 줄 수 반영",
+      "decisions": [
+        {
+          "id": 11,
+          "sessionId": "s-b2",
+          "question": "색을 바꿀까요?",
+          "options": {
+            "A": {
+              "text": "바꿈",
+              "consequence": "눈에 띔"
+            },
+            "B": {
+              "text": "유지",
+              "consequence": "익숙함"
+            }
+          },
+          "recommend": "B",
+          "reason": "익숙함 우선",
+          "blocks": false,
+          "createdAt": 1791941400000,
+          "answered": true,
+          "closed": false,
+          "receipt": {
+            "kind": "steered",
+            "deliveredAt": 1791942000000
+          }
+        },
+        {
+          "id": 16,
+          "sessionId": "s-b2",
+          "question": "작업자 카드를 접어 둘까요?",
+          "options": {
+            "A": {
+              "text": "접음",
+              "consequence": "한 화면에 더 많이"
+            },
+            "B": {
+              "text": "펼침",
+              "consequence": "바로 보임"
+            }
+          },
+          "recommend": "A",
+          "reason": "공간 부족이 원래 문제",
+          "blocks": false,
+          "createdAt": 1791946680000,
+          "answered": false,
+          "closed": false
+        }
+      ],
+      "flow": [
+        {
+          "label": "재현",
+          "state": "done"
+        },
+        {
+          "label": "수정",
+          "state": "doing"
+        },
+        {
+          "label": "확인",
+          "state": "todo"
+        }
+      ],
+      "auto": {
+        "stage": "실행",
+        "todoCurrent": "2. 높이 수정",
+        "todoNext": "3. 캡처 확인",
+        "todoDone": 1,
+        "todoTotal": 3,
+        "workers": {
+          "running": 2,
+          "done": 0,
+          "error": 0
+        }
+      }
+    },
+    {
+      "id": "s-c1",
+      "project": "orca-tools",
+      "cwd": "C:/Users/USER/orca/projects/orca-tools",
+      "title": "로그 정리",
+      "paneId": "w2-p1",
+      "workName": "로그 회전",
+      "status": "in_progress",
+      "statusKey": "in_progress",
+      "tab": "진행 중",
+      "chips": [
+        "오래됨"
+      ],
+      "headline": "오래된 로그를 묶어 줄이는 스크립트 작성 중",
+      "lastActivityAt": 1791918000000,
+      "lastBriefAt": 1791918000000,
+      "changesNew": false,
+      "changes": [
+        {
+          "text": "7일 지난 로그 압축",
+          "truth": "reported",
+          "applied": "candidate",
+          "evidenceState": "ok"
+        }
+      ],
+      "done": [],
+      "next": "압축 후 원본 삭제 시험",
+      "decisions": [],
+      "flow": [
+        {
+          "label": "압축",
+          "state": "doing"
+        },
+        {
+          "label": "삭제",
+          "state": "todo"
+        }
+      ],
+      "auto": {
+        "stage": "실행",
+        "todoCurrent": "1. 압축",
+        "todoNext": "2. 삭제",
+        "todoDone": 0,
+        "todoTotal": 2,
+        "workers": {
+          "running": 0,
+          "done": 0,
+          "error": 0
+        }
+      }
+    },
+    {
+      "id": "s-c2",
+      "project": "orca-tools",
+      "cwd": "C:/Users/USER/orca/projects/orca-tools",
+      "title": "문서 번역",
+      "paneId": "w2-p2",
+      "workName": "설명서 번역",
+      "status": "done",
+      "statusKey": "done",
+      "tab": "끝남",
+      "chips": [],
+      "headline": "설명서 한국어판을 다 옮겼고 링크 확인까지 끝남",
+      "lastActivityAt": 1791939600000,
+      "lastBriefAt": 1791939600000,
+      "changesNew": false,
+      "answerTrimmed": true,
+      "changes": [
+        {
+          "text": "설명서 12쪽 번역",
+          "truth": "evidence",
+          "applied": "none",
+          "evidence": "C:/Users/USER/orca/projects/orca-tools/docs/ko/guide.md",
+          "evidenceState": "ok"
+        }
+      ],
+      "done": [
+        {
+          "text": "설명서 12쪽 번역",
+          "truth": "evidence",
+          "applied": "none",
+          "evidence": "C:/Users/USER/orca/projects/orca-tools/docs/ko/guide.md",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "용어표 정리",
+          "truth": "reported",
+          "applied": "none",
+          "evidenceState": "ok"
+        }
+      ],
+      "next": "",
+      "decisions": [],
+      "flow": [
+        {
+          "label": "번역",
+          "state": "done"
+        },
+        {
+          "label": "검토",
+          "state": "done"
+        }
+      ],
+      "auto": {
+        "stage": "끝",
+        "todoCurrent": "",
+        "todoNext": "",
+        "todoDone": 2,
+        "todoTotal": 2,
+        "workers": {
+          "running": 0,
+          "done": 3,
+          "error": 0
+        }
+      }
+    }
+  ]
+}

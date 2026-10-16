@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>refresh spike (script re-injection)</title>
+<style>
+body{margin:0;font:16px sans-serif}
+#bar{position:fixed;top:0;left:0;right:0;background:#e6f4f1;padding:8px;border-bottom:1px solid #0a8}
+#tall{height:4000px;padding-top:60px}
+</style></head>
+<body>
+<div id="bar">seq: <b id="seq">0</b> | polls: <b id="polls">0</b>
+ <button id="copy">copy</button> <span id="copyres">-</span></div>
+<div id="tall"><p>scroll area</p></div>
+<script>
+// Global marker fixed at load time: if it changes, the page was reloaded.
+window.__loadMarker = Math.random().toString(36).slice(2) + '-' + Date.now();
+window.__briefPolls = 0;      // number of script re-injection attempts
+window.__briefErrors = 0;     // data.js load failures (e.g. file deleted)
+window.__briefSeq = 0;        // last seq the page saw
+window.__briefLast = null;    // last data, kept when data.js disappears
+window.__clipboardResult = 'none';
+window.__briefData = function (d) {
+  window.__briefLast = d;
+  window.__briefSeq = d.seq;
+  document.getElementById('seq').textContent = String(d.seq);
+};
+var n = 0, current = null;
+function poll() {
+  n += 1;
+  window.__briefPolls = n;
+  document.getElementById('polls').textContent = String(n);
+  var s = document.createElement('script');
+  s.src = 'data.js?v=' + n;
+  s.onerror = function () {
+    window.__briefErrors += 1;   // counter only: a missing data.js must not change the visible page
+  };
+  var old = current;
+  current = s;
+  document.head.appendChild(s);
+  if (old && old.parentNode) old.parentNode.removeChild(old);
+}
+setInterval(poll, 1000);
+poll();
+
+// Clipboard: API first, execCommand fallback.
+document.getElementById('copy').addEventListener('click', function () {
+  var text = 'C:/abs/path/example';
+  function legacy() {
+    var ok = false;
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch (e) { ok = false; }
+    set(ok ? 'execCommand' : 'none');
+  }
+  function set(v) { window.__clipboardResult = v; document.getElementById('copyres').textContent = v; }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(function () { set('api'); }, legacy);
+  } else { legacy(); }
+});
+</script>
+</body></html>

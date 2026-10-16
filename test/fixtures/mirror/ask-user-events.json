@@ -1,0 +1,32 @@
+{
+  "_source": "Shapes copied from SENPI/extensions/builtin/ask-user: tool.js startQuestion emits pi.events.emit('ask-user:asked', { ctx, request, variant }); notify.js emitAskUserClosed emits { requestId, status, resolvedBy? }; types.d.ts QuestionRequest / QuestionResponse.status. `ctx` is added by the tests.",
+  "asked": {
+    "request": {
+      "requestId": "toolu_ask_001",
+      "questions": [
+        {
+          "id": "q1",
+          "header": "방향",
+          "question": "어느 방향으로 진행할까요?",
+          "options": [
+            { "label": "빠르게 (Recommended)", "description": "하루 안에 끝내지만 테스트가 적습니다" },
+            { "label": "안전하게", "description": "이틀이 걸리지만 테스트를 모두 씁니다" },
+            { "label": "보류" }
+          ],
+          "multiSelect": false
+        }
+      ],
+      "waitForAnswer": false,
+      "timeoutMs": 1800000
+    },
+    "variant": "claude"
+  },
+  "closed": {
+    "answered": { "requestId": "toolu_ask_001", "status": "answered", "resolvedBy": "local_ui" },
+    "commentSubmitted": { "requestId": "toolu_ask_001", "status": "comment-submitted", "resolvedBy": "rpc_connection" },
+    "timedOut": { "requestId": "toolu_ask_001", "status": "timed_out" },
+    "cancelled": { "requestId": "toolu_ask_001", "status": "cancelled" },
+    "orphaned": { "requestId": "toolu_ask_001", "status": "orphaned-after-restart" },
+    "unavailable": { "requestId": "toolu_ask_001", "status": "unavailable" }
+  }
+}

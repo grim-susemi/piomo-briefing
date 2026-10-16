@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>refresh spike (iframe + postMessage)</title>
+<style>
+body{margin:0;font:16px sans-serif}
+#bar{position:fixed;top:0;left:0;right:0;background:#fdf3d8;padding:8px;border-bottom:1px solid #a80}
+#tall{height:4000px;padding-top:60px}
+iframe{display:none}
+</style></head>
+<body>
+<div id="bar">seq: <b id="seq">0</b> | polls: <b id="polls">0</b> | messages: <b id="msgs">0</b></div>
+<div id="tall"><p>scroll area</p></div>
+<iframe id="feed" title="feed" aria-hidden="true"></iframe>
+<script>
+window.__loadMarker = Math.random().toString(36).slice(2) + '-' + Date.now();
+window.__briefPolls = 0;
+window.__briefMessages = 0;
+window.__briefSeq = 0;
+window.__briefLast = null;
+var iframe = document.getElementById('feed');
+window.addEventListener('message', function (event) {
+  if (!(event.source === iframe.contentWindow)) return;
+  window.__briefMessages += 1;
+  window.__briefLast = event.data;
+  window.__briefSeq = event.data.seq;
+  document.getElementById('seq').textContent = String(event.data.seq);
+  document.getElementById('msgs').textContent = String(window.__briefMessages);
+});
+var n = 0;
+function poll() {
+  n += 1;
+  window.__briefPolls = n;
+  document.getElementById('polls').textContent = String(n);
+  iframe.src = 'data.html?v=' + n;
+}
+setInterval(poll, 1000);
+poll();
+</script>
+</body></html>
