@@ -240,6 +240,8 @@ export function createBriefingExtension(opts = {}) {
     const recordCache = {}; // /brief task-record reads: one cache for the lifetime of this extension instance (60s TTL in collectAuto)
     const notified = new Set();
     let host = null; // board server host (src/server-host.mjs), lead sessions only
+    // the address handed to the owner: the live board url when a server is up (owned or another conversation's), else the file page
+    const boardLink = () => (host && host.status().url) || pagePath;
     let workersLive = null; // live worker rows from the task bus (src/workers-live.mjs)
     let planTool = null; // plan_brief (src/plan-tool.mjs), rebuilt per session id
     let rpcOff = null; // unsubscribe of the one task-bus subscription
@@ -590,7 +592,7 @@ export function createBriefingExtension(opts = {}) {
       const newText = created.length ? ` (새 결정 ${created.map((d) => `#${d.id}`).join(', ')})` : '';
       // Success wording only when the page really was published.
       const lines = [res.ok
-        ? `상황판 갱신됨: ${pagePath}${newText}`
+        ? `상황판 갱신됨: ${boardLink()}${newText}`
         : `보고는 저장됐지만 상황판은 갱신되지 못함${newText}: ${res.error}`];
       for (const w of v.warnings) lines.push(`경고: ${w}`);
       return { content: [{ type: 'text', text: lines.join('\n') }], details: { seq, newDecisionIds: created.map((d) => d.id), pagePath } };
@@ -721,8 +723,8 @@ export function createBriefingExtension(opts = {}) {
         if (m.role === 'assistant') {
           const text = assistantText(m);
           if (text) run.lastAssistantText = text;
-          if (run.toolUsed && !hasToolCall(m) && replyOverBudget(text, pagePath)) {
-            const fitted = fitReply(text, pagePath);
+          if (run.toolUsed && !hasToolCall(m) && replyOverBudget(text, [boardLink(), pagePath])) {
+            const fitted = fitReply(text, boardLink());
             let placed = false;
             const content = [];
             for (const b of Array.isArray(m.content) ? m.content : []) {
@@ -752,7 +754,7 @@ export function createBriefingExtension(opts = {}) {
         const messages = (event.context && event.context.contextMessages) || [];
         const last = [...messages].reverse().find((m) => m && m.role === 'assistant');
         const text = last ? assistantText(last) : '';
-        if (!replyOverBudget(text, pagePath)) return undefined;
+        if (!replyOverBudget(text, [boardLink(), pagePath])) return undefined;
         const entries = Array.isArray(event.entries) ? event.entries : [];
         // The final answer is normally trimmed in place at message_end (which sets run.appended).
         // This is only a fallback for an over-budget final reply that never reached message_end as a
@@ -761,7 +763,7 @@ export function createBriefingExtension(opts = {}) {
         meta.replyTrimmed = true;
         saveMeta();
         return {
-          entries: [...entries, { type: 'custom_message', customType: 'omo-briefing-reply', content: fitReply(text, pagePath), display: true }],
+          entries: [...entries, { type: 'custom_message', customType: 'omo-briefing-reply', content: fitReply(text, boardLink()), display: true }],
         };
       }));
 
@@ -862,7 +864,7 @@ export function createBriefingExtension(opts = {}) {
         onRecover: settle,
         getMeta: () => meta,
         saveMeta: () => saveMeta(),
-        pageUrl: () => (host && host.status().url) || pagePath,
+        pageUrl: boardLink,
         now: nowFn,
       });
       if (serverOn && (!host || hostSid !== sid)) {

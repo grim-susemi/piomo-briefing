@@ -18,9 +18,17 @@ function assertFits(out, page = PAGE) {
 
 test('rule text carries the marker and the owner-decision caveat', () => {
   assert.ok(RULE_TEXT.startsWith(RULE_MARKER));
-  assert.equal(RULE_MARKER, '<!-- omo-briefing-rule v4 -->');
+  assert.equal(RULE_MARKER, '<!-- omo-briefing-rule v5 -->');
   assert.ok(RULE_TEXT.includes('[결정 전달] #N -> X'));
   assert.ok(RULE_TEXT.includes('10줄·700자'));
+});
+
+test('replyOverBudget accepts the live url or the file path when given both', () => {
+  const URL = 'http://127.0.0.1:47317/';
+  assert.equal(replyOverBudget(`끝\n상황판: ${URL}`, [URL, PAGE]), false);
+  assert.equal(replyOverBudget(`끝\n상황판: ${PAGE}`, [URL, PAGE]), false);
+  assert.equal(replyOverBudget('끝', [URL, PAGE]), true);
+  assert.equal(replyOverBudget(`끝\n상황판: ${URL}`, [null, PAGE]), true, 'no server: only the file path counts');
 });
 
 test('injectRule appends once and never twice', () => {

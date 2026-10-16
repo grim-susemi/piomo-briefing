@@ -889,3 +889,21 @@ test('row 19: the board server model (/data.json) refuses a size-only over-limit
   assert.ok(!healed.sessions[0].chips.includes(ERR_CHIP));
   assert.equal(s.meta().errors['server:record'], undefined);
 });
+
+test('board link: with a live board server the owner is handed the live board url (brief result and the trimmed final reply), not the file path', { timeout: 60_000 }, async (t) => {
+  const URL = 'http://127.0.0.1:47999/';
+  const base = { ensure: async () => ({ url: URL }), status: () => ({ role: 'client', url: URL }), onPaused: async () => {}, release: async () => {} };
+  const fakeHost = new Proxy(base, { get: (target, key) => (key in target ? target[key] : typeof key === 'string' && key !== 'then' ? () => {} : undefined) });
+  const s = make(t, { server: true, extra: { ...noHooks, createServerHost: () => fakeHost } });
+  await s.start();
+  const r = await s.brief(goodBrief());
+  assert.match(text(r), new RegExp(`^상황판 갱신됨: ${URL.replace(/[.]/g, '\\.')}`));
+  await s.host.emit('agent_start', {}, s.ctx);
+  await s.host.emit('tool_result', { toolName: 'bash', content: [], isError: false }, s.ctx);
+  const ok = await s.host.emit('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: `끝\n상황판: ${URL}` }] } }, s.ctx);
+  assert.ok(ok.every((x) => x === undefined), 'a reply that ends with the live url is left alone');
+  const long = Array.from({ length: 15 }, (_, i) => `줄 ${i + 1}`).join('\n');
+  const out = (await s.host.emit('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: long }] } }, s.ctx)).filter(Boolean);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].message.content[0].text.split('\n').at(-1), `상황판: ${URL}`);
+});

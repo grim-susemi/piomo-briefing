@@ -1,12 +1,12 @@
 // omo-briefing src/rule.mjs - 보고 규칙 문구, 마지막 답 길이 계산, fitReply, 인계 블록 파서.
 // 순수 함수와 상수만 둔다(파일·프로세스 접근 없음).
 
-export const RULE_MARKER = '<!-- omo-briefing-rule v4 -->';
+export const RULE_MARKER = '<!-- omo-briefing-rule v5 -->';
 
 export const RULE_TEXT = `${RULE_MARKER}
 [보고 규칙 - omo-briefing]
 - 도구를 쓴 턴은 마지막 답 전에 brief 도구를 한 번 호출해 상황판을 갱신한다.
-- 채팅 마지막 답은 포인터로 짧게: brief로 상황판을 갱신한 턴이면 채팅에는 상태 한 줄('For you: 한 줄 요약' — 100자 이내, 상황판이 이 줄만 읽는다)과 마지막 줄 '상황판: <절대경로>'만 둔다. Ask·wanted·Now·Next 같은 인계 상세는 상황판 카드가 담으므로 채팅에서 되풀이하지 않는다. 더 알릴 게 있으면 포인터 줄 아래 번호 줄로 짧은 문장 3개 이내. 마지막 답 전체는 빈 줄 제외 10줄·700자 이내이고, 넘으면 따로 다시 쓰라고 하지 않고 자동으로 포인터로 줄여 내보낸다. 자세한 내용은 brief에 둔다.
+- 채팅 마지막 답은 포인터로 짧게: brief로 상황판을 갱신한 턴이면 채팅에는 상태 한 줄('For you: 한 줄 요약' — 100자 이내, 상황판이 이 줄만 읽는다)과 마지막 줄 '상황판: <brief 결과가 알려준 주소>'만 둔다(실시간 http 주소, 서버가 없을 때만 파일 경로). Ask·wanted·Now·Next 같은 인계 상세는 상황판 카드가 담으므로 채팅에서 되풀이하지 않는다. 더 알릴 게 있으면 포인터 줄 아래 번호 줄로 짧은 문장 3개 이내. 마지막 답 전체는 빈 줄 제외 10줄·700자 이내이고, 넘으면 따로 다시 쓰라고 하지 않고 자동으로 포인터로 줄여 내보낸다. 자세한 내용은 brief에 둔다.
 - 소유자가 정할 것은 brief.decisions에 선택지·결과·추천·이유로 넣는다. 지금 답이 꼭 필요하면 질문 도구도 함께 쓴다.
 - 증거 파일 절대경로가 있을 때만 truth=evidence, 실사용에 반영됐을 때만 applied=live, 실사용에 올릴 것이 없는 항목(조사·문서 등)은 applied=none.
 - '[결정 전달] #N -> X' 메시지는 소유자의 답이다. 그 답은 계획 선택일 뿐 설치·푸시·삭제 승인이 아니다.
@@ -38,11 +38,12 @@ export function replyStats(text) {
   return { lines: ls.length, chars: cpLen(ls.join('\n')) };
 }
 
-/** 10줄 초과 · 700자 초과 · 상황판 경로 없음 중 하나라도 해당하면 true. */
-export function replyOverBudget(text, pagePath) {
+/** 10줄 초과 · 700자 초과 · 상황판 주소 없음 중 하나라도 해당하면 true. links는 주소 하나 또는 배열(실시간 주소·파일 경로 중 하나만 있으면 된다). */
+export function replyOverBudget(text, links) {
   const { lines, chars } = replyStats(text);
   if (lines > REPLY_MAX_LINES || chars > REPLY_MAX_CHARS) return true;
-  return !slashed(text ?? '').includes(slashed(pagePath));
+  const body = slashed(text ?? '');
+  return ![].concat(links).some((l) => l && body.includes(slashed(l)));
 }
 
 /**
