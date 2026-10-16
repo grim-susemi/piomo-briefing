@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createBriefingExtension, isChildSessionFile, defaultStateDir } from '../extension.mjs';
-import { RULE_MARKER, REWRITE_PROMPT, replyOverBudget } from '../src/rule.mjs';
+import { RULE_MARKER, replyOverBudget } from '../src/rule.mjs';
 import { makeFakePi, makeCtx, assistant, toolCall, lines } from './helpers/fake-pi.mjs';
 
 const CHILD = fileURLToPath(new URL('./helpers/ext-child.mjs', import.meta.url));
@@ -688,18 +688,9 @@ async function toolRun(s) {
   await s.host.emit('tool_result', { toolName: 'bash', content: [], isError: false }, s.ctx);
 }
 
-test('IS-4: 15-line answer -> one rewrite request; rewritten 15 lines -> message_end trims it; no second request', async (t) => {
+test('IS-4: an over-budget final answer is trimmed in place at message_end — no rewrite, no continuation', async (t) => {
   const s = lead(t);
   await toolRun(s);
-  // settle() mirrors the real runner: a requested continuation emits a NEW agent_start (agent-loop.js:71), not agent_settled.
-  const first = await s.host.settle({ outcome: 'completed' }, s.ctx, [assistant(lines(15))]);
-  assert.equal(first.continue, true);
-  assert.equal(first.next, 'agent_start');
-  assert.equal(first.entries.length, 1);
-  assert.equal(first.entries[0].type, 'custom_message');
-  assert.equal(first.entries[0].content, REWRITE_PROMPT);
-  assert.equal(first.entries[0].display, false);
-
   const original = assistant(lines(15), [{ type: 'thinking', thinking: '생각' }]);
   const out = await s.host.emit('message_end', { message: original }, s.ctx);
   assert.equal(out.length, 1);
@@ -712,27 +703,24 @@ test('IS-4: 15-line answer -> one rewrite request; rewritten 15 lines -> message
   assert.equal(textBlocks[0].text.split('\n').at(-1), `상황판: ${s.pagePath}`);
   assert.equal(s.meta().replyTrimmed, true);
 
-  const second = await s.host.settle({ outcome: 'completed' }, s.ctx, [replaced]);
-  assert.deepEqual(second, { entries: [], continue: false, next: 'agent_settled' });
+  const settled = await s.host.settle({ outcome: 'completed' }, s.ctx, [replaced]);
+  assert.deepEqual(settled, { entries: [], continue: false, next: 'agent_settled' });
   const m = s.meta();
-  assert.equal(m.noReport, true, 'tool activity without a brief keeps its noReport mark across the continuation');
+  assert.equal(m.noReport, true);
   assert.equal(typeof m.autoSummary, 'string');
   assert.equal(m.running, false);
 });
 
-test('IS-4: rewritten answer still has a tool call and the last answer is still too long -> one custom_message appended, no continue', async (t) => {
+test('IS-4: a message that still carries a tool call is not trimmed; before_settle appends one fitted reply', async (t) => {
   const s = lead(t);
   await toolRun(s);
-  const first = await s.host.settle({ outcome: 'completed' }, s.ctx, [assistant(lines(15))]);
-  assert.equal(first.next, 'agent_start');
-  await s.host.emit('tool_result', { toolName: 'read', content: [], isError: false }, s.ctx); // the rewrite itself used a tool
   const kept = await s.host.emit('message_end', { message: assistant(lines(15), [toolCall]) }, s.ctx);
   assert.deepEqual(kept, [], 'a message with a tool call is not replaced');
-  const second = await s.host.settle({ outcome: 'completed' }, s.ctx, [assistant(lines(15))]);
-  assert.equal(second.continue, false);
-  assert.equal(second.next, 'agent_settled');
-  assert.equal(second.entries.length, 1);
-  const e = second.entries[0];
+  const settled = await s.host.settle({ outcome: 'completed' }, s.ctx, [assistant(lines(15))]);
+  assert.equal(settled.continue, false);
+  assert.equal(settled.next, 'agent_settled');
+  assert.equal(settled.entries.length, 1);
+  const e = settled.entries[0];
   assert.equal(e.type, 'custom_message');
   assert.equal(e.customType, 'omo-briefing-reply');
   assert.equal(e.display, true);
@@ -740,28 +728,6 @@ test('IS-4: rewritten answer still has a tool call and the last answer is still 
   assert.equal(e.content.split('\n').at(-1), `상황판: ${s.pagePath}`);
   assert.equal(s.meta().replyTrimmed, true);
   assert.equal(s.meta().noReport, true);
-  const third = await s.host.boundary('agent_before_settle', { outcome: 'completed' }, s.ctx, [assistant(lines(15))]);
-  assert.deepEqual(third, { entries: [], continue: false });
-});
-
-test('IS-4: state survives the continuation agent_start but a genuinely new activity starts clean', async (t) => {
-  const s = lead(t);
-  await toolRun(s);
-  const first = await s.host.settle({ outcome: 'completed' }, s.ctx, [assistant(lines(15))]);
-  assert.equal(first.next, 'agent_start');
-  assert.equal(s.meta().running, true, 'still the same running activity');
-  const out = await s.host.emit('message_end', { message: assistant(lines(15)) }, s.ctx);
-  assert.equal(out.length, 1, 'rewrite is still pending after the continuation start');
-  assert.equal((await s.host.settle({ outcome: 'completed' }, s.ctx, [out[0].message])).next, 'agent_settled');
-
-  // next owner prompt: fresh activity -> flags reset, a new rewrite may be requested again
-  await s.host.emit('agent_start', {}, s.ctx);
-  assert.equal(s.meta().replyTrimmed, false);
-  assert.deepEqual(await s.host.emit('message_end', { message: assistant(lines(15)) }, s.ctx), [], 'no rewrite pending in the new activity');
-  await s.host.emit('tool_result', { toolName: 'bash', content: [], isError: false }, s.ctx);
-  const again = await s.host.settle({ outcome: 'completed' }, s.ctx, [assistant(lines(15))]);
-  assert.equal(again.continue, true);
-  assert.equal(again.entries[0].customType, 'omo-briefing-rewrite');
 });
 
 test('IS-4: entries proposed by earlier handlers are kept (chained boundary)', async (t) => {
@@ -772,9 +738,10 @@ test('IS-4: entries proposed by earlier handlers are kept (chained boundary)', a
   const r = await handler({ type: 'agent_before_settle', outcome: 'completed', entries: [prior], continue: false, context: { contextMessages: [assistant(lines(15))] } }, s.ctx);
   assert.equal(r.entries[0], prior);
   assert.equal(r.entries.length, 2);
+  assert.equal(r.entries[1].customType, 'omo-briefing-reply');
 });
 
-test('IS-4: no tool use -> 0 requests; within budget -> 0; 8 lines with path -> 0; 8 lines without path -> 1', async (t) => {
+test('IS-4: no tool use -> nothing; within budget -> nothing; 8 lines with path -> nothing; 8 lines without path -> appended', async (t) => {
   const none = lead(t);
   await none.start();
   await none.host.emit('agent_start', {}, none.ctx);
@@ -786,23 +753,29 @@ test('IS-4: no tool use -> 0 requests; within budget -> 0; 8 lines with path -> 
   assert.deepEqual(await ok.host.boundary('agent_before_settle', { outcome: 'completed' }, ok.ctx, [assistant(withPath(3))]), { entries: [], continue: false });
   assert.deepEqual(await ok.host.boundary('agent_before_settle', { outcome: 'completed' }, ok.ctx, [assistant(withPath(8))]), { entries: [], continue: false });
   const noPath = await ok.host.boundary('agent_before_settle', { outcome: 'completed' }, ok.ctx, [assistant(lines(8))]);
-  assert.equal(noPath.continue, true);
+  assert.equal(noPath.entries.length, 1);
+  assert.equal(noPath.entries[0].customType, 'omo-briefing-reply');
 });
 
-test('IS-4: aborted runs are left alone; message_end never changes a message while no rewrite is pending', async (t) => {
+test('IS-4: aborted before_settle is left alone; message_end leaves user and within-budget messages unchanged', async (t) => {
   const s = lead(t);
   await toolRun(s);
   assert.deepEqual(await s.host.boundary('agent_before_settle', { outcome: 'aborted' }, s.ctx, [assistant(lines(15))]), { entries: [], continue: false });
-  assert.deepEqual(await s.host.emit('message_end', { message: assistant(lines(15)) }, s.ctx), []);
   assert.deepEqual(await s.host.emit('message_end', { message: { role: 'user', content: lines(15) } }, s.ctx), []);
+  assert.deepEqual(await s.host.emit('message_end', { message: assistant(`끝\n상황판: ${s.pagePath}`) }, s.ctx), []);
 });
 
-test('IS-4: rewritePending is cleared at agent_settled', async (t) => {
+test('IS-4: a fresh activity resets the trim flag and only trims once tools are used', async (t) => {
   const s = lead(t);
   await toolRun(s);
-  await s.host.boundary('agent_before_settle', { outcome: 'completed' }, s.ctx, [assistant(lines(15))]);
+  const out1 = await s.host.emit('message_end', { message: assistant(lines(15)) }, s.ctx);
+  assert.equal(out1.length, 1, 'first final answer trimmed in place');
+  assert.equal(s.meta().replyTrimmed, true);
   await s.host.emit('agent_settled', {}, s.ctx);
-  assert.deepEqual(await s.host.emit('message_end', { message: assistant(lines(15)) }, s.ctx), []);
+
+  await s.host.emit('agent_start', {}, s.ctx);
+  assert.equal(s.meta().replyTrimmed, false, 'new activity resets the flag');
+  assert.deepEqual(await s.host.emit('message_end', { message: assistant(lines(15)) }, s.ctx), [], 'no tool use yet -> left alone');
 });
 
 // ---------------------------------------------------------------- concurrency

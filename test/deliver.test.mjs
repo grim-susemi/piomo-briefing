@@ -632,7 +632,7 @@ test('same-process /decide delivers through the decide wake', async (t) => {
   await s.host.emit('session_shutdown', {}, s.ctx);
 });
 
-test('busy owner through the real extension: the rewrite continuation (a new agent_start) delivers nothing; the final agent_settled does (after-turn)', async (t) => {
+test('busy owner through the real extension: an over-budget final reply settles directly (no rewrite continuation); agent_settled delivers (after-turn)', async (t) => {
   const s = twoProcessRig(t);
   await s.host.emit('session_start', { reason: 'startup' }, s.ctx);
   await s.host.tool('brief').execute('c', briefWithDecision, undefined, undefined, s.ctx);
@@ -642,11 +642,8 @@ test('busy owner through the real extension: the rewrite continuation (a new age
   const res = applyDecide(openStore(s.stateDir), '1A', 'sess-B', Date.now());
   assert.equal(res.applied.length, 1);
   const longReply = [assistant(lines(20))];
-  const first = await s.host.settle({}, s.ctx, longReply); // too long -> rewrite continuation
-  assert.equal(first.next, 'agent_start', 'the host launched the continuation, not agent_settled');
-  assert.equal(s.session.calls.length, 0, 'no admit while the run (and its continuation) is working');
-  const second = await s.host.settle({}, s.ctx, longReply); // second boundary: appended reply, real settlement
-  assert.equal(second.next, 'agent_settled');
+  const settled = await s.host.settle({}, s.ctx, longReply); // too long -> fitted reply appended, settles directly (no continuation)
+  assert.equal(settled.next, 'agent_settled', 'no rewrite continuation; the run settles directly');
   assert.equal(s.session.calls.length, 1, 'exactly one admit, in agent_settled');
   assert.equal(s.session.calls[0].delivery_id, 'd1');
   assert.deepEqual(readReceiptsFrom(s.stateDir), []);

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  RULE_MARKER, RULE_TEXT, REWRITE_PROMPT, REPLY_MAX_LINES, REPLY_MAX_CHARS,
+  RULE_MARKER, RULE_TEXT, REPLY_MAX_LINES, REPLY_MAX_CHARS,
   injectRule, replyStats, replyOverBudget, fitReply, assistantText, hasToolCall, parseHandoff,
 } from '../src/rule.mjs';
 
@@ -18,7 +18,7 @@ function assertFits(out, page = PAGE) {
 
 test('rule text carries the marker and the owner-decision caveat', () => {
   assert.ok(RULE_TEXT.startsWith(RULE_MARKER));
-  assert.equal(RULE_MARKER, '<!-- omo-briefing-rule v3 -->');
+  assert.equal(RULE_MARKER, '<!-- omo-briefing-rule v4 -->');
   assert.ok(RULE_TEXT.includes('[결정 전달] #N -> X'));
   assert.ok(RULE_TEXT.includes('10줄·700자'));
 });
@@ -28,10 +28,6 @@ test('injectRule appends once and never twice', () => {
   assert.ok(once.startsWith('base prompt'));
   assert.equal(once.split(RULE_MARKER).length - 1, 1);
   assert.equal(injectRule(once), once);
-});
-
-test('REWRITE_PROMPT is the exact plan sentence', () => {
-  assert.equal(REWRITE_PROMPT, "[보고 길이] 직전 답이 길거나 상황판 경로가 없어. '상황판: <절대경로>'를 포함해 3문장 이내로 마지막 답만 다시 써. 도구는 쓰지 마.");
 });
 
 test('replyStats ignores blank lines and counts code points', () => {

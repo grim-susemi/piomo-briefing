@@ -41,7 +41,7 @@ import { createWorkersLive } from './src/workers-live.mjs';
 import { createPlanTool } from './src/plan-tool.mjs';
 import { setError, clearError, errorsOf, normalizeErrors } from './src/errors.mjs';
 import {
-  REWRITE_PROMPT, injectRule, replyOverBudget, fitReply, assistantText, hasToolCall, parseHandoff,
+  injectRule, replyOverBudget, fitReply, assistantText, hasToolCall, parseHandoff,
 } from './src/rule.mjs';
 import { openPage } from './src/open-page.mjs';
 import * as deliverMod from './src/deliver.mjs';
@@ -193,7 +193,7 @@ function normalizeStatus(word) {
 }
 
 function freshRun() {
-  return { started: false, toolUsed: false, rewriteRequested: false, rewritePending: false, appended: false, lastAssistantText: '' };
+  return { started: false, toolUsed: false, appended: false, lastAssistantText: '' };
 }
 
 /**
@@ -721,7 +721,7 @@ export function createBriefingExtension(opts = {}) {
         if (m.role === 'assistant') {
           const text = assistantText(m);
           if (text) run.lastAssistantText = text;
-          if (run.rewritePending && !hasToolCall(m) && replyOverBudget(text, pagePath)) {
+          if (run.toolUsed && !hasToolCall(m) && replyOverBudget(text, pagePath)) {
             const fitted = fitReply(text, pagePath);
             let placed = false;
             const content = [];
@@ -734,6 +734,7 @@ export function createBriefingExtension(opts = {}) {
             }
             if (!placed) content.push({ type: 'text', text: fitted });
             run.lastAssistantText = fitted;
+            run.appended = true;
             meta.replyTrimmed = true;
             saveMeta();
             return { message: { ...m, content } };
@@ -753,14 +754,9 @@ export function createBriefingExtension(opts = {}) {
         const text = last ? assistantText(last) : '';
         if (!replyOverBudget(text, pagePath)) return undefined;
         const entries = Array.isArray(event.entries) ? event.entries : [];
-        if (!run.rewriteRequested) {
-          run.rewriteRequested = true;
-          run.rewritePending = true;
-          return {
-            entries: [...entries, { type: 'custom_message', customType: 'omo-briefing-rewrite', content: REWRITE_PROMPT, display: false }],
-            continue: true,
-          };
-        }
+        // The final answer is normally trimmed in place at message_end (which sets run.appended).
+        // This is only a fallback for an over-budget final reply that never reached message_end as a
+        // trimmable text message: append one fitted pointer reply. No rewrite round-trip, no continuation.
         run.appended = true;
         meta.replyTrimmed = true;
         saveMeta();
