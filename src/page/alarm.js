@@ -255,6 +255,9 @@
         key: w.key,
         sessionId: str(w.sessionId),
         title: flat(w.title) || str(w.sessionId) || '(대화 모름)',
+        tabLabel: flat(w.tabLabel),
+        tabNumber: typeof w.tabNumber === 'number' && Math.floor(w.tabNumber) === w.tabNumber && isFinite(w.tabNumber) ? w.tabNumber : null,
+        paneId: flat(w.paneId),
         text: flat(w.text),
         blocks: w.blocks === true,
         at: typeof w.at === 'number' && isFinite(w.at) ? w.at : null
@@ -272,12 +275,20 @@
     return blocked && soundOn() ? '<button type="button" class="alarm-unlock" data-alarm-unlock>' + BLOCKED_TEXT + '</button>' : '';
   }
 
+  // who: herdr tab label and number when known, else the pane, else the title alone (plain text; escaped by the caller)
+  function whoOf(it) {
+    if (it.tabLabel) return '🗂 ' + it.tabLabel + (it.tabNumber === null ? '' : ' #' + it.tabNumber) + ' · ' + it.title;
+    if (it.paneId) return '창 ' + it.paneId + ' · ' + it.title;
+    return it.title;
+  }
+
   function bandHtml(items, t) {
     var shown = items.slice(0, MAX_ROWS);
     var html = shown.map(function (it) {
       var text = clip(it.text, TEXT_MAX);
+      var who = whoOf(it);
       return '<p class="alarm-row' + (flashUntil[it.key] > t ? ' is-new' : '') + '" data-alarm-key="' + esc(it.key) + '">' +
-        '<span class="alarm-text" title="' + esc('답 기다림: ' + it.title + ' · ' + it.text) + '">답 기다림: <b class="alarm-who">' + esc(it.title) +
+        '<span class="alarm-text" title="' + esc('답 기다림: ' + who + ' · ' + it.text) + '">답 기다림: <b class="alarm-who">' + esc(who) +
         '</b> · <span class="alarm-what">' + esc(text) + '</span></span>' +
         '<span class="alarm-act">' + (it.blocks ? '<span class="alarm-tag">막는 결정</span>' : '') +
         '<button type="button" class="alarm-go" data-alarm-goto="' + esc(it.sessionId) + '">보기</button></span></p>';

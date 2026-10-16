@@ -1,7 +1,7 @@
 // omo-briefing src/server-host.mjs - which lead conversation runs the board server, and hand-over between them.
 //
 // createServerHost({stateDir, sessionId, generation, isEnabled, buildViewModel, readSnapshot, getPage, reclaimStale,
-//                   onError, onRecover, env, now, timers, onChange?, fs?, isAlive?, probeHealth?, createBoardServer?})
+//                   onError, onRecover, env, now, timers, onChange?, answer?, focus?, fs?, isAlive?, probeHealth?, createBoardServer?})
 //   -> {ensure(): Promise<{url}|null>, status(), onPaused(): Promise<void>, release(): Promise<void>, notifyPublished()}
 //
 // Single owner per STATE across all pi processes (the argument, not just the mechanism):
@@ -24,6 +24,10 @@
 // - Change detection only while a browser is connected: published.json is stat'ed every 500ms; a change, or this
 //   process's notifyPublished(), rebuilds the view model with readSnapshot + buildViewModel (this generation's code) and
 //   broadcasts it. A data.js written by any generation is never forwarded.
+// - Board writes: every time this process starts serving it makes a new random write token (memory only: not in the lock,
+//   server.json, a log or a model) and hands it to the board server and, as getPage(vm, token), to the served page.
+//   answer(body) / focus(body) -> Promise|{status, json} are the extension's hooks for POST /answer and /focus; while the
+//   board is paused the host answers 503 PAUSED itself and calls neither.
 // - File I/O here is async; every timer and socket is unref'd; nothing here throws into the caller's session.
 //
 // Error keys: 'server:listen' (bind, NO_PORT), 'server:lock' (lock, server.json, owner health), 'server:sse' (view model,
@@ -49,6 +53,8 @@ const RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
 const RETRY_DELAYS_MS = [20, 40, 80]; // awaited (never blocking); keeps a release well inside the 2s shutdown budget
 const MAX_RECORD_CHARS = 4096;
 const LOST = Symbol('lost the wx race');
+const PAUSED_REPLY = { status: 503, json: { ok: false, code: 'PAUSED' } };
+const NOT_SUPPORTED_REPLY = { status: 501, json: { ok: false, code: 'NOT_SUPPORTED' } };
 
 export const urlOf = (port) => `http://127.0.0.1:${port}/`;
 
@@ -145,6 +151,8 @@ export function createServerHost(options) {
     buildViewModel,
     readSnapshot,
     getPage,
+    answer,
+    focus,
     reclaimStale,
     onError = () => {},
     onRecover = () => {},
@@ -291,11 +299,14 @@ export function createServerHost(options) {
     now: () => now(),
     readSnapshot: () => readSnapshot(),
     buildViewModel: (snap, t) => buildViewModel(snap, t),
-    getPage: (vm) => getPage(vm),
+    getPage: (vm, token) => getPage(vm, token),
     report,
     recover,
     isEnabled: enabledNow,
     markPaused,
+    // board write hooks (POST /answer, POST /focus): paused = 503 and the hook is never called
+    answer: typeof answer === 'function' ? (body) => (enabledNow() ? answer(body) : PAUSED_REPLY) : undefined,
+    focus: typeof focus === 'function' ? (body) => (enabledNow() ? focus(body) : PAUSED_REPLY) : undefined,
   };
 
   // ---- the server this process owns ----
@@ -492,6 +503,12 @@ export function createServerHost(options) {
     }
   }
 
+  // The newest host of this process drives the one server; a host that has no such hook (an older generation) answers 501.
+  function writeVia(e, name, body) {
+    const hook = e.driver[name];
+    return typeof hook === 'function' ? hook(body) : NOT_SUPPORTED_REPLY;
+  }
+
   // Runs inside serial(key). Returns {url}, null (could not serve) or LOST (another process created the lock first).
   async function becomeOwner(preferPort) {
     const e = {
@@ -511,10 +528,16 @@ export function createServerHost(options) {
       dirty: false,
       jsonPending: false,
       listenReported: false,
+      // the write token of THIS serving start: it lives in memory only (never in the lock, server.json, a log or a model)
+      // and is handed to the page through getPage; a hand-over to another process starts a new one
+      token: randomBytes(32).toString('base64url'),
     };
     const board = createBoardServer({
-      getPage: async () => e.driver.getPage(await buildVm(e)),
+      getPage: async () => e.driver.getPage(await buildVm(e), e.token),
       getViewModel: () => buildVm(e),
+      token: e.token,
+      onAnswer: (body) => writeVia(e, 'answer', body),
+      onFocus: (body) => writeVia(e, 'focus', body),
       generation,
       portBase,
       portCount: PORT_COUNT,

@@ -9,6 +9,10 @@
 //   Windows에서 방금 지운 선점에 wx를 하면 EEXIST 대신 EPERM/EBUSY/EACCES가 날 수 있다:
 //   '아직 못 얻음'으로 보고 다시 읽고 한도 안에서 재시도한 뒤, 끝내 못 얻으면 깔끔하게 진다.
 //   (3) 전부 선점한 뒤에만 answers/<id>.json을 wx로 씀.
+// - commitAnswers(store, items, fromSessionId, now, opts): 선점·전부 아니면 전무·write-once 답 기록의 공용 몸통(동기).
+//   applyDecide(/decide)와 applyBoardAnswer(상황판)가 이것 하나만 써서 같은 선점·같은 answers/<id>.json 규칙을 지킨다.
+// - applyBoardAnswer(store, {id, sessionId, option|text}, now?, opts?): 상황판 답 한 건. 검증 뒤 commitAnswers.
+//   던지지 않고 { ok:true, id } 또는 { ok:false, code }를 돌려준다. 기록은 { id, option|text, at, fromSessionId:'board' }.
 // - formatDecideResult(result): 한 줄 결과 문구.
 
 import * as nodeFs from 'node:fs';
@@ -67,13 +71,6 @@ export function formatDecideResult(result) {
  * @param {{fs?, pid?, nonce?, hooks?, sleep?}} [opts] 테스트용 주입
  */
 export function applyDecide(store, text, fromSessionId, now = Date.now(), opts = {}) {
-  const fs = opts.fs ?? nodeFs;
-  const pid = opts.pid ?? process.pid;
-  const makeNonce = opts.nonce ?? (() => randomUUID());
-  const hooks = opts.hooks ?? {};
-  const sleep = opts.sleep ?? sleepSync;
-  const at = now;
-
   const { items, invalid } = parseDecide(text);
   const errors = invalid.map((e) => ({ token: e.token, reason: e.reason }));
   const alreadyAnswered = [];
@@ -153,9 +150,32 @@ export function applyDecide(store, text, fromSessionId, now = Date.now(), opts =
       : { applied: [], errors, alreadyAnswered };
   }
 
+  // 선점·기록은 상황판 답과 같은 commitAnswers 하나를 씀(검증을 통과한 번호만 여기까지 옴).
+  return commitAnswers(
+    store,
+    items.map((it) => ({ id: it.id, fields: { option: it.option ?? decisions.get(it.id).recommend } })),
+    fromSessionId,
+    now,
+    opts,
+  );
+}
+
+/**
+ * 공용 몸통: 선점(claims/<id>.json, wx) → 전부 얻은 뒤 재확인 → answers/<id>.json(wx) 기록. 전부 아니면 전무.
+ * 검증(결정 존재·마감·이미 답함·선택지)은 호출측 몫. 같은 번호가 두 번 들어오면 안 된다.
+ * @param {{id:number, fields:{option:string}|{text:string}}[]} items 기록할 답. 파일은 { id, ...fields, at, fromSessionId }
+ * @returns {{applied:object[], errors:object[], alreadyAnswered:number[], permissionError?:number[]}} applyDecide 결과와 같은 모양
+ */
+function commitAnswers(store, items, fromSessionId, now, opts = {}) {
+  const fs = opts.fs ?? nodeFs;
+  const pid = opts.pid ?? process.pid;
+  const makeNonce = opts.nonce ?? (() => randomUUID());
+  const hooks = opts.hooks ?? {};
+  const sleep = opts.sleep ?? sleepSync;
+  const at = now;
+
   // 선점 단계: 번호 오름차순
   const ordered = [...items].sort((a, b) => a.id - b.id);
-  for (const it of ordered) it.resolved = it.option ?? decisions.get(it.id).recommend;
   const mine = [];
   const rollback = () => {
     for (const id of mine) {
@@ -236,11 +256,11 @@ export function applyDecide(store, text, fromSessionId, now = Date.now(), opts =
     }
     if (outcome === 'busy') {
       rollback();
-      return { applied: [], errors, alreadyAnswered: [], permissionError: [it.id] };
+      return { applied: [], errors: [], alreadyAnswered: [], permissionError: [it.id] };
     }
     if (outcome !== 'won') {
       rollback();
-      return { applied: [], errors, alreadyAnswered: [it.id] };
+      return { applied: [], errors: [], alreadyAnswered: [it.id] };
     }
     mine.push(it.id);
   }
@@ -249,21 +269,82 @@ export function applyDecide(store, text, fromSessionId, now = Date.now(), opts =
   const answeredNow = ordered.map((it) => it.id).filter((id) => answerExists(id));
   if (answeredNow.length > 0) {
     rollback();
-    return { applied: [], errors, alreadyAnswered: answeredNow };
+    return { applied: [], errors: [], alreadyAnswered: answeredNow };
   }
 
   // 답 단계: 위 재확인 뒤에는 선점한 프로세스만 쓰므로 EEXIST는 생기지 않음
   const applied = [];
   try {
     for (const it of ordered) {
-      store.writeNew(answerRel(it.id), { id: it.id, option: it.resolved, at, fromSessionId });
-      applied.push({ id: it.id, option: it.resolved });
+      store.writeNew(answerRel(it.id), { id: it.id, ...it.fields, at, fromSessionId });
+      applied.push({ id: it.id, ...it.fields });
     }
   } catch (err) {
     // 이미 쓴 답은 지우지 않음(이미 전달됐을 수 있음)
-    return { applied, errors: [{ token: '', reason: String(err?.message ?? err) }], alreadyAnswered };
+    return { applied, errors: [{ token: '', reason: String(err?.message ?? err) }], alreadyAnswered: [] };
   }
   return { applied, errors: [], alreadyAnswered: [] };
+}
+
+const BOARD_SENDER = 'board';
+const BOARD_TEXT_MAX = 500; // 코드포인트
+const boardFail = (code, detail) => (detail === undefined ? { ok: false, code } : { ok: false, code, detail });
+
+/**
+ * 상황판 답 한 건(옵션 하나 또는 글 하나). 던지지 않는다.
+ * 코드: BAD_REQUEST(번호·세션·option/text 모양) BAD_TEXT BAD_OPTION NOT_FOUND SESSION_MISMATCH CLOSED ANSWERED
+ *       IO_ERROR(읽기·선점·쓰기 장애: 아무것도 쓰지 않았거나 못 씀. detail은 로그용이며 화면에 내보내지 않는다)
+ * 읽기 검사는 쓰기 전에 모두 끝나고, 못 읽으면 닫힌/이미 답한 결정일 수 있으므로 fail-closed(IO_ERROR).
+ * @param {object} store openStore() 결과
+ * @param {{id:number, sessionId:string, option?:string, text?:string}} request
+ * @param {number} [now]
+ * @param {{fs?, pid?, nonce?, hooks?, sleep?}} [opts] 테스트용 주입(commitAnswers에 그대로 전달)
+ */
+export function applyBoardAnswer(store, request, now = Date.now(), opts = {}) {
+  const { id, sessionId, option, text } = request !== null && typeof request === 'object' ? request : {};
+  const hasOption = option !== undefined;
+  const hasText = text !== undefined;
+  if (!Number.isSafeInteger(id) || id <= 0 || typeof sessionId !== 'string' || sessionId === '' || hasOption === hasText) {
+    return boardFail('BAD_REQUEST');
+  }
+  let fields = null;
+  if (hasText) {
+    const clean = typeof text === 'string' ? text.trim() : '';
+    // 코드포인트 500개 = UTF-16 단위로 최대 1000: 그보다 길면 펼쳐 세기 전에 거절
+    if (clean === '' || clean.length > BOARD_TEXT_MAX * 2 || [...clean].length > BOARD_TEXT_MAX) return boardFail('BAD_TEXT');
+    fields = { text: clean };
+  }
+
+  let rec;
+  try {
+    rec = store.readRecord(decisionRel(id));
+    if (!rec) return boardFail('NOT_FOUND');
+    if (rec.sessionId !== sessionId) return boardFail('SESSION_MISMATCH');
+    if (store.readRecord(closureRel(id))) return boardFail('CLOSED');
+    if (store.readRecord(answerRel(id))) return boardFail('ANSWERED');
+  } catch (err) {
+    return boardFail('IO_ERROR', String(err?.message ?? err));
+  }
+  if (hasOption) {
+    const choices = rec.options;
+    const known = typeof option === 'string' && ['A', 'B', 'C'].includes(option)
+      && choices !== null && typeof choices === 'object' && choices[option] !== undefined;
+    if (!known) return boardFail('BAD_OPTION');
+    fields = { option };
+  }
+
+  let result;
+  try {
+    result = commitAnswers(store, [{ id, fields }], BOARD_SENDER, now, opts);
+  } catch (err) {
+    return boardFail('IO_ERROR', String(err?.message ?? err));
+  }
+  if (result.applied.length > 0) return { ok: true, id };
+  if (result.permissionError?.length > 0) return boardFail('IO_ERROR', '파일 권한 오류');
+  if (result.alreadyAnswered.length > 0) return boardFail('ANSWERED');
+  // 기록 단계에서 쓰기가 실패함: 그 사이 답이 생겼으면 ANSWERED, 아니면 장애
+  if ((opts.fs ?? nodeFs).existsSync(join(store.root, ...answerRel(id).split('/')))) return boardFail('ANSWERED');
+  return boardFail('IO_ERROR', result.errors[0]?.reason);
 }
 
 export { isPidAlive };

@@ -4,7 +4,7 @@ import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import { fork, spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -696,6 +696,117 @@ test('real processes: two processes ensure at the same moment -> exactly one own
       if (y) await stopChild(y);
       removeState(dir);
     }
+  }
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// board write token and hooks (POST /answer, POST /focus)
+
+function postJson(port, path, body, token) {
+  const text = JSON.stringify(body);
+  return new Promise((resolve, reject) => {
+    const headers = {
+      Connection: 'close',
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(text),
+      'Sec-Fetch-Site': 'same-origin',
+      Origin: `http://127.0.0.1:${port}`,
+      'X-Board-Token': token,
+    };
+    const req = http.request({ host: '127.0.0.1', port, path, method: 'POST', agent: false, headers }, (res) => {
+      let out = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { out += c; });
+      res.on('end', () => resolve({ status: res.statusCode, json: JSON.parse(out) }));
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.end(text);
+  });
+}
+
+const tokenOfPage = (html) => /<meta name="omo-board-token" content="([^"]+)">/.exec(html)?.[1];
+const allFiles = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? allFiles(join(dir, d.name)) : [join(dir, d.name)]));
+const withToken = (seen) => (vm, token) => {
+  seen.push(token);
+  return `${pageOf(vm)}<meta name="omo-board-token" content="${token}">`;
+};
+
+test('board write token: new for every serving start, handed only to the served page; a stale token writes nothing', async () => {
+  const dir = tempState();
+  try {
+    seed(dir);
+    const handed = [];
+    const calls = [];
+    const t = makeHost(dir, {
+      opts: {
+        getPage: withToken(handed),
+        answer: async (b) => { calls.push(['answer', b]); return { status: 200, json: { ok: true } }; },
+        focus: async (b) => { calls.push(['focus', b]); return { status: 200, json: { ok: true } }; },
+      },
+    });
+    const first = portOf((await t.host.ensure()).url);
+    const a = tokenOfPage((await get(first, '/')).body);
+    assert.match(a, /^[A-Za-z0-9_-]{43}$/, '32 random bytes as base64url');
+    assert.equal(a, handed[0]);
+    assert.deepEqual(await postJson(first, '/answer', { id: 1, sessionId: 's1', option: 'A' }, a), { status: 200, json: { ok: true } });
+    assert.deepEqual(await postJson(first, '/focus', { sessionId: 's1' }, a), { status: 200, json: { ok: true } });
+    assert.deepEqual(calls, [['answer', { id: 1, sessionId: 's1', option: 'A' }], ['focus', { sessionId: 's1' }]]);
+
+    // the token is in the page and nowhere else: not in any file of STATE, /health, /data.json or the SSE feed
+    const feed = await sse(first);
+    await feed.waitFor((x) => x.text.includes('event: data'), 3000, 'first SSE frame');
+    const seen = [(await get(first, '/health')).body, (await get(first, '/data.json')).body, feed.text, ...allFiles(dir).map((f) => readFileSync(f, 'utf8'))];
+    feed.close();
+    assert.ok(existsSync(lockPath(dir)) && existsSync(jsonPath(dir)), 'lock and server.json were among the files');
+    assert.ok(seen.every((text) => !text.includes(a)), 'no copy of the token outside the served page');
+
+    await t.host.release();
+    const second = portOf((await t.host.ensure()).url);
+    const b = tokenOfPage((await get(second, '/')).body);
+    assert.notEqual(b, a, 'a new serving start has a new token');
+    assert.deepEqual(await postJson(second, '/answer', { id: 1, sessionId: 's1', option: 'A' }, a), { status: 403, json: { ok: false, code: 'FORBIDDEN_TOKEN' } });
+    assert.equal(calls.length, 2, 'the old token reached no hook');
+    assert.equal((await postJson(second, '/answer', { id: 1, sessionId: 's1', option: 'A' }, b)).status, 200);
+    assert.ok(allFiles(dir).every((f) => !readFileSync(f, 'utf8').includes(b)), 'the second token is not on disk either');
+    await t.host.release();
+  } finally {
+    removeState(dir);
+  }
+});
+
+test('board write hooks: a paused board answers 503 PAUSED and calls neither hook; a host without hooks answers 501', async () => {
+  const dir = tempState();
+  try {
+    seed(dir);
+    const calls = [];
+    const t = makeHost(dir, {
+      opts: {
+        getPage: withToken([]),
+        answer: async (b) => { calls.push(['answer', b]); return { status: 200, json: { ok: true } }; },
+        focus: async (b) => { calls.push(['focus', b]); return { status: 200, json: { ok: true } }; },
+      },
+    });
+    const port = portOf((await t.host.ensure()).url);
+    const token = tokenOfPage((await get(port, '/')).body);
+    t.store.writeSettings({ enabled: false }); // /brief off, noticed by the write path itself (the owner's 5s check has not run)
+    const paused = { status: 503, json: { ok: false, code: 'PAUSED' } };
+    assert.deepEqual(await postJson(port, '/answer', { id: 1, sessionId: 's1', option: 'A' }, token), paused);
+    assert.deepEqual(await postJson(port, '/focus', { sessionId: 's1' }, token), paused);
+    assert.deepEqual(calls, [], 'nothing was written or focused while paused');
+    t.store.writeSettings({ enabled: true });
+    assert.equal((await postJson(port, '/answer', { id: 1, sessionId: 's1', option: 'A' }, token)).status, 200);
+    await t.host.release();
+
+    const bare = makeHost(dir, { opts: { getPage: withToken([]) } });
+    const barePort = portOf((await bare.host.ensure()).url);
+    const bareToken = tokenOfPage((await get(barePort, '/')).body);
+    const none = { status: 501, json: { ok: false, code: 'NOT_SUPPORTED' } };
+    assert.deepEqual(await postJson(barePort, '/answer', { id: 1, sessionId: 's1', option: 'A' }, bareToken), none);
+    assert.deepEqual(await postJson(barePort, '/focus', { sessionId: 's1' }, bareToken), none);
+    await bare.host.release();
+  } finally {
+    removeState(dir);
   }
 });
 

@@ -7,11 +7,12 @@ import { fork } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import { openStore } from '../src/store.mjs';
-import { parseDecide, applyDecide, formatDecideResult } from '../src/decide.mjs';
+import { parseDecide, applyDecide, applyBoardAnswer, formatDecideResult } from '../src/decide.mjs';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const CHILD = join(HERE, 'helpers', 'decide-child.mjs');
 const PAUSED_B = join(HERE, 'helpers', 'decide-paused-b.mjs');
+const BOARD_CHILD = join(HERE, 'helpers', 'board-answer-child.mjs');
 const DEAD_PID = 2147480000;
 
 const tmpRoot = () => fs.mkdtempSync(join(tmpdir(), 'omo-decide-test-'));
@@ -142,8 +143,11 @@ test('formatDecideResult failure line', () => {
 
 // ---- concurrency helpers (IPC start signal + bounded timeout, no sleeps) ----
 function runPair(root, textA, textB, { timeoutMs = 30000 } = {}) {
+  return runKids([fork(CHILD, [root, textA, 'sA']), fork(CHILD, [root, textB, 'sB'])], timeoutMs);
+}
+
+function runKids(kids, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const kids = [fork(CHILD, [root, textA, 'sA']), fork(CHILD, [root, textB, 'sB'])];
     const results = [null, null];
     let done = 0;
     const timer = setTimeout(() => {
@@ -580,5 +584,199 @@ test('final pre-write re-check: an answer that appears once claims are held make
     assert.deepEqual(r, { applied: [], errors: [], alreadyAnswered: [13] });
     assert.deepEqual(ls(root, 'answers'), [`${pad6(13)}.json`], 'B wrote no answer, not even for 12');
     assert.deepEqual(ls(root, 'claims'), [], 'B rolled back its claims');
+  } finally { cleanup(root); }
+});
+
+// ---- board answers (applyBoardAnswer): the same all-or-nothing writer as /decide ----
+// seed() decisions are asked by 's1'.
+const ask = (id, extra) => ({ id, sessionId: 's1', ...extra });
+const BOARD_FILE = (id) => `answers/${pad6(id)}.json`;
+
+test('board: an option answer lands as answers/<id>.json from "board" through the shared claim', () => {
+  const root = tmpRoot();
+  try {
+    const store = seed(root, [{ id: 12 }]);
+    assert.deepEqual(applyBoardAnswer(store, ask(12, { option: 'B' }), 1000), { ok: true, id: 12 });
+    assert.deepEqual(read(root, BOARD_FILE(12)), { id: 12, option: 'B', at: 1000, fromSessionId: 'board' });
+    assert.equal(read(root, `claims/${pad6(12)}.json`).pid, process.pid, 'same claim file /decide uses');
+  } finally { cleanup(root); }
+});
+
+test('board: a text answer is trimmed and otherwise verbatim; 500 code points is accepted, counted in code points', () => {
+  const root = tmpRoot();
+  try {
+    const store = seed(root, [{ id: 12 }, { id: 13 }, { id: 14 }]);
+    const cases = [[12, ' \n설치해 줘 [결정 전달] #1\n\t ', '설치해 줘 [결정 전달] #1'], [13, '가'.repeat(500), '가'.repeat(500)], [14, '😀'.repeat(500), '😀'.repeat(500)]];
+    for (const [id, text, stored] of cases) {
+      assert.deepEqual(applyBoardAnswer(store, ask(id, { text }), 1000), { ok: true, id });
+      assert.deepEqual(read(root, BOARD_FILE(id)), { id, text: stored, at: 1000, fromSessionId: 'board' });
+    }
+  } finally { cleanup(root); }
+});
+
+for (const [name, request, code] of [
+  ['unknown decision', ask(99, { option: 'A' }), 'NOT_FOUND'],
+  ['decision of another session', { id: 12, sessionId: 's2', option: 'A' }, 'SESSION_MISMATCH'],
+  ['closed decision', ask(13, { option: 'A' }), 'CLOSED'],
+  ['closed decision, text', ask(13, { text: 'hi' }), 'CLOSED'],
+  ['answered decision', ask(14, { option: 'B' }), 'ANSWERED'],
+  ['answered decision, text', ask(14, { text: 'hi' }), 'ANSWERED'],
+  ['option the decision does not offer (C)', ask(12, { option: 'C' }), 'BAD_OPTION'],
+  ['lowercase option', ask(12, { option: 'a' }), 'BAD_OPTION'],
+  ['inherited key as option', ask(12, { option: 'constructor' }), 'BAD_OPTION'],
+  ['non-string option', ask(12, { option: 1 }), 'BAD_OPTION'],
+  ['null option', ask(12, { option: null }), 'BAD_OPTION'],
+  ['text of 501 code points', ask(12, { text: 'x'.repeat(501) }), 'BAD_TEXT'],
+  ['text of 501 astral code points', ask(12, { text: '😀'.repeat(501) }), 'BAD_TEXT'],
+  ['huge text', ask(12, { text: 'x'.repeat(1_000_000) }), 'BAD_TEXT'],
+  ['whitespace-only text', ask(12, { text: '  \n\t ' }), 'BAD_TEXT'],
+  ['empty text', ask(12, { text: '' }), 'BAD_TEXT'],
+  ['non-string text', ask(12, { text: 12 }), 'BAD_TEXT'],
+  ['null text', ask(12, { text: null }), 'BAD_TEXT'],
+  ['both option and text', ask(12, { option: 'A', text: 'hi' }), 'BAD_REQUEST'],
+  ['neither option nor text', ask(12, {}), 'BAD_REQUEST'],
+  ['id as a string', { id: '12', sessionId: 's1', option: 'A' }, 'BAD_REQUEST'],
+  ['id zero', ask(0, { option: 'A' }), 'BAD_REQUEST'],
+  ['negative id', ask(-12, { option: 'A' }), 'BAD_REQUEST'],
+  ['fractional id', ask(12.5, { option: 'A' }), 'BAD_REQUEST'],
+  ['missing sessionId', { id: 12, option: 'A' }, 'BAD_REQUEST'],
+  ['empty sessionId', { id: 12, sessionId: '', option: 'A' }, 'BAD_REQUEST'],
+  ['request is null', null, 'BAD_REQUEST'],
+  ['request is a string', '12A', 'BAD_REQUEST'],
+]) {
+  test(`board refuses: ${name} -> ${code}, nothing is written`, () => {
+    const root = tmpRoot();
+    try {
+      const store = seed(root, [{ id: 12 }, { id: 13, closed: true }, { id: 14, answered: 'A' }]);
+      const before = fs.readFileSync(join(root, BOARD_FILE(14)), 'utf8');
+      assert.deepEqual(applyBoardAnswer(store, request, 1000), { ok: false, code });
+      assert.deepEqual(ls(root, 'answers'), [`${pad6(14)}.json`], 'only the seeded answer exists');
+      assert.equal(fs.readFileSync(join(root, BOARD_FILE(14)), 'utf8'), before, 'an existing answer is never changed');
+      assert.deepEqual(ls(root, 'claims'), []);
+    } finally { cleanup(root); }
+  });
+}
+
+test('board and /decide exclude each other in both orders; the first answer stays', () => {
+  const root = tmpRoot();
+  try {
+    const store = seed(root, [{ id: 12 }, { id: 13 }]);
+    assert.deepEqual(applyBoardAnswer(store, ask(12, { option: 'B' }), 1000), { ok: true, id: 12 });
+    assert.deepEqual(applyDecide(store, '12A', 'sx', 2000), { applied: [], errors: [], alreadyAnswered: [12] });
+    assert.deepEqual(read(root, BOARD_FILE(12)), { id: 12, option: 'B', at: 1000, fromSessionId: 'board' });
+    assert.deepEqual(applyDecide(store, '13A', 'sx', 3000).applied, [{ id: 13, option: 'A' }]);
+    assert.deepEqual(applyBoardAnswer(store, ask(13, { option: 'B' }), 4000), { ok: false, code: 'ANSWERED' });
+    assert.deepEqual(read(root, BOARD_FILE(13)), { id: 13, option: 'A', at: 3000, fromSessionId: 'sx' });
+  } finally { cleanup(root); }
+});
+
+test('concurrency: /decide 12A vs a board answer for #12 x20 - exactly one answers/000012.json, the loser is refused', async () => {
+  for (let rep = 0; rep < 20; rep++) {
+    const root = tmpRoot();
+    try {
+      seed(root, [{ id: 12 }]);
+      const [d, b] = await runKids([
+        fork(CHILD, [root, '12A', 'sD'], { execArgv: [] }),
+        fork(BOARD_CHILD, [root, '12', 's1', 'option', 'B'], { execArgv: [] }),
+      ], 30000);
+      assert.equal(d.type, 'result', JSON.stringify(d));
+      assert.equal(b.type, 'result', JSON.stringify(b));
+      const decideWon = d.result.applied.length === 1;
+      assert.notEqual(decideWon, b.result.ok === true, `rep ${rep}: exactly one writer wins: ${JSON.stringify([d.result, b.result])}`);
+      if (decideWon) {
+        assert.deepEqual(b.result, { ok: false, code: 'ANSWERED' });
+        assert.deepEqual(read(root, BOARD_FILE(12)), { id: 12, option: 'A', at: read(root, BOARD_FILE(12)).at, fromSessionId: 'sD' });
+      } else {
+        assert.deepEqual(d.result, { applied: [], errors: [], alreadyAnswered: [12] });
+        assert.deepEqual(read(root, BOARD_FILE(12)), { id: 12, option: 'B', at: read(root, BOARD_FILE(12)).at, fromSessionId: 'board' });
+      }
+      assert.deepEqual(ls(root, 'answers'), [`${pad6(12)}.json`]);
+      assert.deepEqual(ls(root, 'claims'), [`${pad6(12)}.json`], 'the winner\'s claim only: no loser claim, no tombstone');
+    } finally { cleanup(root); }
+  }
+});
+
+test('deterministic interleave: the board answer pauses before reclaim, /decide wins, the board answer is ANSWERED', () => {
+  const root = tmpRoot();
+  try {
+    const storeD = seed(root, [{ id: 12 }]);
+    storeD.writeNew(`claims/${pad6(12)}.json`, { id: 12, pid: DEAD_PID, at: 1, nonce: 'n-x' });
+    let hookCalled = false;
+    const hooks = { beforeReclaim: () => {
+      hookCalled = true;
+      assert.deepEqual(applyDecide(storeD, '12A', 'sD', 1000).applied, [{ id: 12, option: 'A' }]);
+    } };
+    assert.deepEqual(applyBoardAnswer(openStore(root), ask(12, { option: 'B' }), 2000, { hooks }), { ok: false, code: 'ANSWERED' });
+    assert.equal(hookCalled, true);
+    assert.deepEqual(read(root, BOARD_FILE(12)), { id: 12, option: 'A', at: 1000, fromSessionId: 'sD' });
+  } finally { cleanup(root); }
+});
+
+test('deterministic interleave: /decide pauses before reclaim, the board answer wins, /decide gets alreadyAnswered', () => {
+  const root = tmpRoot();
+  try {
+    const storeB = seed(root, [{ id: 12 }]);
+    storeB.writeNew(`claims/${pad6(12)}.json`, { id: 12, pid: DEAD_PID, at: 1, nonce: 'n-y' });
+    let hookCalled = false;
+    const hooks = { beforeReclaim: () => {
+      hookCalled = true;
+      assert.deepEqual(applyBoardAnswer(storeB, ask(12, { text: '진행해' }), 1000), { ok: true, id: 12 });
+    } };
+    const rd = applyDecide(openStore(root), '12B', 'sD', 2000, { hooks });
+    assert.equal(hookCalled, true);
+    assert.deepEqual(rd, { applied: [], errors: [], alreadyAnswered: [12] });
+    assert.deepEqual(read(root, BOARD_FILE(12)), { id: 12, text: '진행해', at: 1000, fromSessionId: 'board' });
+  } finally { cleanup(root); }
+});
+
+test('board: a closure or answer that cannot be read (EACCES) is IO_ERROR, not "open"; nothing is written', () => {
+  const root = tmpRoot();
+  try {
+    seed(root, [{ id: 12, closed: true }, { id: 13, answered: 'B' }]);
+    for (const [id, suffix] of [[12, `decision-closures/${pad6(12)}.json`], [13, BOARD_FILE(13)]]) {
+      const store = openStore(root, { fs: denyReads(suffix), sleep: () => {} });
+      assert.deepEqual(applyBoardAnswer(store, ask(id, { option: 'A' }), 1000), { ok: false, code: 'IO_ERROR', detail: 'EACCES: injected' });
+    }
+    assert.deepEqual(ls(root, 'answers'), [`${pad6(13)}.json`]);
+    assert.deepEqual(ls(root, 'claims'), []);
+  } finally { cleanup(root); }
+});
+
+test('board: a persistent EBUSY on the claim with no competitor is IO_ERROR (not ANSWERED), bounded retries, no files', () => {
+  const root = tmpRoot();
+  try {
+    seed(root, [{ id: 12 }]);
+    let attempts = 0;
+    const flaky = { ...fs, writeFileSync: (file, data, o) => {
+      if (norm(file).endsWith(`claims/${pad6(12)}.json`)) { attempts++; throw injectErr('EBUSY'); }
+      return fs.writeFileSync(file, data, o);
+    } };
+    const sleeps = [];
+    const r = applyBoardAnswer(openStore(root, { fs: flaky }), ask(12, { option: 'A' }), 1000, { sleep: (ms) => sleeps.push(ms) });
+    assert.deepEqual(r, { ok: false, code: 'IO_ERROR', detail: '파일 권한 오류' });
+    assert.equal(attempts, 9);
+    assert.equal(sleeps.length, 8);
+    assert.deepEqual(ls(root, 'answers'), []);
+    assert.deepEqual(ls(root, 'claims'), []);
+  } finally { cleanup(root); }
+});
+
+test('board: a failed answer write after the claim is IO_ERROR with the cause; a stale-claim manual-check failure is IO_ERROR too', () => {
+  const root = tmpRoot();
+  try {
+    const seeded = seed(root, [{ id: 12 }, { id: 13 }]);
+    const failing = { ...fs, writeFileSync: (file, data, o) => {
+      if (norm(file).endsWith(BOARD_FILE(12))) throw injectErr('ENOSPC');
+      return fs.writeFileSync(file, data, o);
+    } };
+    const r = applyBoardAnswer(openStore(root, { fs: failing }), ask(12, { option: 'A' }), 1000);
+    assert.deepEqual(r, { ok: false, code: 'IO_ERROR', detail: 'ENOSPC: injected' });
+    assert.deepEqual(ls(root, 'answers'), []);
+    seeded.writeNew(`claims/${pad6(13)}.json`, { id: 13, pid: DEAD_PID, at: 1, nonce: 'n-stale' });
+    const noLink = { ...fs, linkSync: () => { throw injectErr('EPERM'); } };
+    const r2 = applyBoardAnswer(openStore(root, { fs: noLink }), ask(13, { option: 'A' }), 1000, { sleep: () => {} });
+    assert.equal(r2.code, 'IO_ERROR');
+    assert.match(r2.detail, /수동 확인 필요/);
+    assert.deepEqual(ls(root, 'answers'), []);
   } finally { cleanup(root); }
 });

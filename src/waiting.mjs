@@ -1,6 +1,8 @@
 // omo-briefing src/waiting.mjs - store snapshot -> what is waiting for the owner's answer, with a stable identity.
 //
-// waitingItems(snapshot) -> [{key, sessionId, title, text, blocks, at}]   pure: no I/O, no clock, the input is not touched.
+// waitingItems(snapshot) -> [{key, sessionId, title, tabLabel, tabNumber, paneId, text, blocks, at}]
+//   pure: no I/O, no clock, the input is not touched. tabLabel/tabNumber/paneId name the herdr tab the session runs in, from
+//   its meta ('' / null / '' when meta lacks them).
 //   snapshot = store.readSnapshot(). The key is the alarm identity (plan Scope '알람'); the page remembers the keys it has
 //   seen, so one thing never rings twice:
 //   - open decision                         d<id>
@@ -31,6 +33,15 @@ function titleOf(entry) {
   return str(brief.title) || str(meta.title) || entry.sid;
 }
 
+function whereOf(entry) {
+  const meta = isObj(entry.meta) ? entry.meta : {};
+  return {
+    tabLabel: str(meta.tabLabel),
+    tabNumber: Number.isInteger(meta.tabNumber) ? meta.tabNumber : null,
+    paneId: str(meta.paneId),
+  };
+}
+
 function idSet(list) {
   const ids = new Set();
   for (const r of arr(list)) if (isObj(r) && Number.isInteger(r.id)) ids.add(r.id);
@@ -55,15 +66,19 @@ function decisionKey(d) {
 export function waitingItems(snapshot) {
   const snap = isObj(snapshot) ? snapshot : {};
   const titles = new Map();
+  const wheres = new Map();
   for (const entry of arr(snap.sessions)) {
-    if (isObj(entry) && typeof entry.sid === 'string' && entry.sid !== '') titles.set(entry.sid, titleOf(entry));
+    if (isObj(entry) && typeof entry.sid === 'string' && entry.sid !== '') {
+      titles.set(entry.sid, titleOf(entry));
+      wheres.set(entry.sid, whereOf(entry));
+    }
   }
   const byKey = new Map();
   const add = (key, sessionId, text, blocks, at) => {
     if (!titles.has(sessionId)) return;
     const cur = byKey.get(key);
     if (!cur) {
-      byKey.set(key, { key, sessionId, title: titles.get(sessionId), text, blocks, at });
+      byKey.set(key, { key, sessionId, title: titles.get(sessionId), ...wheres.get(sessionId), text, blocks, at });
       return;
     }
     cur.blocks = cur.blocks || blocks;

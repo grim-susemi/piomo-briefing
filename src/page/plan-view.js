@@ -3,6 +3,8 @@
  * tasks[].state = done|doing|todo|stopped|blocked. No file or DOM access.
  * Expansion keys: plan:<planId>, plan-tasks:<planId>, plan-out:<planId>.
  * Link view models also provide target (owner card DOM id) and tab.
+ * ui.answerBox(decisionId) (optional; view.js passes it on the server page) returns the answer controls of an open
+ * question's decision, '' when that decision cannot be answered from this page.
  */
 (function (g) {
   'use strict';
@@ -143,7 +145,10 @@
       questions.forEach(function (q) {
         var isOpen = q.state === 'open';
         var command = '/decide ' + str(q.decisionId) + str(q.recommend);
-        var answer = isOpen ? '답 기다림 · <code>' + e(command) + '</code> ' + copyBtn(command, e) : e(q.answer);
+        var box = isOpen && typeof ui.answerBox === 'function' ? ui.answerBox(q.decisionId) : '';
+        var answer = !isOpen ? e(q.answer)
+          : box ? box + '<span class="plan-answer-copy">답: <code>' + e(command) + '</code> ' + copyBtn(command, e) + ' <span class="ans-hint">· 아무 대화창에 붙여넣어도 됩니다</span></span>'
+          : '답 기다림 · <code>' + e(command) + '</code> ' + copyBtn(command, e);
         var status = isOpen ? (q.blocks ? '<span class="chip x-block">막는 결정</span>' : '답 기다림') : q.state === 'default' ? '<span class="chip x-info plan-default">기본값</span>' : e((q.by === 'owner' ? '소유자 ' : '에이전트 ') + str(q.option || q.answer));
         html += '<tr class="plan-question is-' + e(q.state) + '"' + anchor('q', q.id) + (isOpen ? ' data-decision="' + e(q.decisionId) + '"' : '') + '><td class="plan-question-id">' + e(q.id) + '</td>' +
           '<td class="plan-question-text"' + anchor('q', q.id, 'text') + '>' + e(q.text) + '</td><td class="plan-question-answer"' + anchor('q', q.id, 'answer') + '>' + answer + '</td><td class="plan-question-state">' + status + '</td></tr>';

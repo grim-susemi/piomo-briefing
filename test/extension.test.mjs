@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createBriefingExtension, isChildSessionFile, defaultStateDir } from '../extension.mjs';
-import { RULE_MARKER, replyOverBudget } from '../src/rule.mjs';
+import { RULE_MARKER, RULE_TEXT, replyOverBudget } from '../src/rule.mjs';
 import { makeFakePi, makeCtx, assistant, toolCall, lines } from './helpers/fake-pi.mjs';
 
 const CHILD = fileURLToPath(new URL('./helpers/ext-child.mjs', import.meta.url));
@@ -342,6 +342,36 @@ test('before_agent_start injects the rule once; enabled=false injects nothing; b
   assert.equal((await s.host.emit('before_agent_start', { systemPrompt: 'base', prompt: 'x', trigger: 'prompt' }, s.ctx)).length, 1);
 });
 
+test('before_agent_start swaps an older rule block in the system prompt for the current one', async (t) => {
+  const s = lead(t);
+  await s.start();
+  const oldMarker = ['<!-- omo-briefing-rule v', '5 -->'].join('');
+  const stale = RULE_TEXT.replace(RULE_MARKER, oldMarker);
+  const emitted = await s.host.emit('before_agent_start', { systemPrompt: `base\n\n${stale}\n\ntail`, prompt: 'x', trigger: 'prompt' }, s.ctx);
+  assert.equal(emitted.length, 1);
+  const next = emitted[0].systemPrompt;
+  assert.equal(next.includes(oldMarker), false, 'no stale rule block');
+  assert.equal((next.match(/<!-- omo-briefing-rule v\d+ -->/g) ?? []).length, 1, 'exactly one rule block');
+  assert.equal(next.split(RULE_MARKER).length - 1, 1, 'the one block is the current rule');
+  assert.ok(next.includes('tail'), 'unrelated prompt text stays');
+  assert.deepEqual(await s.host.emit('before_agent_start', { systemPrompt: next, prompt: 'x', trigger: 'prompt' }, s.ctx), []);
+});
+
+test('before_agent_start collapses a prompt holding both a stale and the current rule block', async (t) => {
+  const s = lead(t);
+  await s.start();
+  const oldMarker = ['<!-- omo-briefing-rule v', '5 -->'].join('');
+  const stale = RULE_TEXT.replace(RULE_MARKER, oldMarker);
+  const input = `HEAD\n\n${stale}\n\n${RULE_TEXT}\n\nTAIL`;
+  const emitted = await s.host.emit('before_agent_start', { systemPrompt: input, prompt: 'x', trigger: 'prompt' }, s.ctx);
+  assert.equal(emitted.length, 1);
+  const next = emitted[0].systemPrompt;
+  assert.equal(next.includes(oldMarker), false, 'no stale rule block');
+  assert.equal((next.match(/<!-- omo-briefing-rule v\d+ -->/g) ?? []).length, 1, 'exactly one rule block');
+  assert.ok(next.startsWith('HEAD') && next.endsWith('TAIL'), 'unrelated prompt text stays');
+  assert.deepEqual(await s.host.emit('before_agent_start', { systemPrompt: next, prompt: 'x', trigger: 'prompt' }, s.ctx), []);
+});
+
 test('disabled: events record nothing and the reply budget is not enforced', async (t) => {
   const s = lead(t);
   await s.start();
@@ -539,25 +569,69 @@ test('prompt injection in brief text: escaped page, not echoed, no extra script 
   assert.deepEqual(existsSync(answersDir) ? readdirSync(answersDir) : [], [], 'brief text must never answer a decision');
 });
 
-test('notification: blocks=true decision uses herdr CLI args that cannot be read as options; once per number', async (t) => {
+const drainHerdr = () => new Promise((r) => setImmediate(r)); // every queued herdr microtask has run
+
+test('notification: blocks=true decision uses async herdr CLI args that cannot be read as options; once per number', async (t) => {
   const execs = [];
   const syncs = [];
   const s = lead(t, {
     env: { HERDR_BIN_PATH: 'C:/herdr/herdr.exe' },
     exists: (p) => p === 'C:/herdr/herdr.exe' || existsSync(p),
     execFileSync: (bin, args) => { syncs.push([bin, args]); },
-    execFile: (bin, args, cb) => { execs.push([bin, args]); cb(null); },
+    execFile: (bin, args, options, cb) => { execs.push([bin, args, options]); cb(null); },
   });
   await s.start();
   await s.brief(goodBrief({ decisions: [decision({ question: '--sound none 해도 될까?', blocks: true })] }));
-  assert.deepEqual(syncs, [['C:/herdr/herdr.exe', ['notification', '--help']]]);
-  assert.equal(execs.length, 1);
-  const args = execs[0][1];
+  await drainHerdr();
+  assert.deepEqual(syncs, [], 'herdr is never called synchronously');
+  assert.equal(execs.length, 2, 'probe + show');
+  for (const [bin, argv, options] of execs) {
+    assert.equal(bin, 'C:/herdr/herdr.exe');
+    assert.ok(Array.isArray(argv));
+    assert.equal(options.timeout, 3000);
+  }
+  assert.deepEqual(execs[0][1], ['notification', '--help']);
+  const args = execs[1][1];
   assert.deepEqual(args.slice(0, 2), ['notification', 'show']);
   assert.ok(args[2].startsWith('결정 #1 필요: '));
   assert.deepEqual(args.slice(-4), ['--body', args[4], '--sound', 'request']);
+  assert.equal(s.notes.length, 0, 'a herdr notification is not also said in the conversation');
   await s.brief(goodBrief({ decisions: [{ ...decision({ blocks: true }), id: 1 }] }));
-  assert.equal(execs.length, 1);
+  await drainHerdr();
+  assert.equal(execs.length, 2);
+});
+
+test('notification: an old CLI, a spawn error or a 3000 ms timeout falls back to ctx.ui.notify once, without throwing', async (t) => {
+  const timedOut = () => Object.assign(new Error('timed out'), { killed: true, signal: 'SIGTERM', code: null });
+  const cases = [
+    ['probe exits non-zero (herdr without `notification`)', [{ err: Object.assign(new Error('unknown command'), { code: 1 }) }], 1],
+    ['probe spawn throws', [{ throws: new Error('spawn herdr.exe EPERM') }], 1],
+    ['probe is killed at 3000 ms', [{ err: timedOut() }], 1],
+    ['show is killed at 3000 ms', [{ err: null }, { err: timedOut() }], 2],
+    ['show exits non-zero', [{ err: null }, { err: Object.assign(new Error('boom'), { code: 3 }) }], 2],
+  ];
+  for (const [label, replies, expectedCalls] of cases) {
+    const calls = [];
+    const s = lead(t, {
+      env: { HERDR_BIN_PATH: 'C:/herdr/herdr.exe' },
+      exists: (p) => p === 'C:/herdr/herdr.exe' || existsSync(p),
+      execFileSync: () => { throw new Error('no sync herdr call expected'); },
+      execFile: (bin, args, options, cb) => {
+        calls.push([bin, args, options]);
+        const r = replies.shift() ?? {};
+        if (r.throws) throw r.throws;
+        cb(r.err ?? null);
+      },
+    });
+    await s.start();
+    const res = await s.brief(goodBrief({ decisions: [decision({ blocks: true })] }));
+    await drainHerdr();
+    assert.equal(res.details.newDecisionIds.length, 1, `${label}: the brief itself succeeded`);
+    assert.equal(calls.length, expectedCalls, label);
+    for (const [, argv, options] of calls) assert.equal(options.timeout, 3000, label);
+    assert.equal(s.notes.length, 1, label);
+    assert.ok(s.notes[0].text.includes('결정 #1 필요'), label);
+  }
 });
 
 test('notification: no usable herdr -> ctx.ui.notify; blocks=false -> none', async (t) => {

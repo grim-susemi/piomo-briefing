@@ -44,6 +44,9 @@
 .plan-mobile-arrow { display: none; }
 .plan-other-tasks[hidden], .plan-out-list[hidden] { display: none; }
 .plan-question-answer code { white-space: nowrap; }
+.plan-question-answer .ans-box { margin-top: 0; }
+.plan-answer-copy { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+.plan-answer-copy code { font-size: 11px; }
 .plan-question.is-open .plan-question-text { font-weight: 600; }
 .plan-ideal, .plan-out-list { margin: 3px 0; padding-left: 20px; overflow-wrap: anywhere; }
 .plan-ideal b { font-size: 11px; color: var(--muted); }

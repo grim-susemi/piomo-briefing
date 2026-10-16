@@ -110,10 +110,48 @@ test('decision card has 8 logical lines and a /decide copy value', () => {
   assert.ok(card.includes('#12 '));
   assert.ok(card.includes('[결정 기록기]'));
   assert.ok(card.includes('추천: A - '));
-  assert.ok(card.includes('만든 대화: '));
+  assert.ok(card.includes('class="dline from">대화: '));
   assert.ok(card.includes('⏱'));
   assert.ok(card.includes('data-copy="/decide 12A"'));
   assert.ok(card.includes('답: /decide 12A'));
+});
+
+test('herdr tab label names the conversation in the card header, decision line and TOC; no label falls back to the pane', () => {
+  const view = loadView();
+  const model = clone(FIXTURE);
+  const s = model.sessions.find((x) => x.decisions.some((d) => !d.answered && !d.closed));
+  const title = (html, id) => /<span class="title">([^<]*)<\/span>/.exec(cards(html)[id])[1];
+  const from = (html, id) => /class="dline from">([^<]*)<\/div>/.exec(cards(html)[id])[1];
+  const toc = (html) => [...html.matchAll(/class="toclink"[^>]*>(?:<span class="tag">[^<]*<\/span> )?([^<]*)<\/a>/g)].map((m) => m[1]);
+
+  Object.assign(s, { title: '작업', tabLabel: '수리', tabNumber: 181, paneId: 'w1:pR2' });
+  let html = view.renderApp(model, { tab: 'wait' });
+  assert.equal(title(html, s.id), '🗂 수리 #181 · 작업');
+  assert.equal(from(html, s.id), '대화: 🗂 수리 #181 · 작업');
+  assert.ok(toc(html).includes('🗂 수리 #181 · 작업'));
+
+  Object.assign(s, { tabLabel: '', tabNumber: null });
+  html = view.renderApp(model, { tab: 'wait' });
+  assert.equal(title(html, s.id), '창 w1:pR2 · 작업');
+  assert.equal(from(html, s.id), '대화: 창 w1:pR2 · 작업');
+  assert.ok(toc(html).includes('창 w1:pR2 · 작업'));
+
+  delete s.paneId;
+  assert.equal(title(view.renderApp(model, { tab: 'wait' }), s.id), '창 모름 · 작업');
+});
+
+test('tab label and title markup are escaped in the header, decision line and TOC', () => {
+  const view = loadView();
+  const model = clone(FIXTURE);
+  const s = model.sessions.find((x) => x.decisions.some((d) => !d.answered && !d.closed));
+  Object.assign(s, { title: '<b>제목</b>', tabLabel: '<i>수리</i>', tabNumber: 181 });
+  const html = view.renderApp(model, { tab: 'wait' });
+  assert.ok(!html.includes('<b>제목</b>') && !html.includes('<i>수리</i>'));
+  const want = '🗂 &lt;i&gt;수리&lt;/i&gt; #181 · &lt;b&gt;제목&lt;/b&gt;';
+  const c = cards(html)[s.id];
+  assert.ok(c.includes('<span class="title">' + want + '</span>'), 'header');
+  assert.ok(c.includes('class="dline from">대화: ' + want + '</div>'), 'decision line');
+  assert.ok(html.split('class="toclink"').some((p) => p.includes(want + '</a>')), 'TOC');
 });
 
 test('every change and done row carries one truth chip and one applied chip', () => {
@@ -340,6 +378,57 @@ test('tab switch shows only that tab cards', () => {
   assert.deepEqual(Object.keys(done).sort(), want);
 });
 
+test('open question with a herdr tab names the tab; focus button only in live mode with a tabId; file mode shows the read-only notice', () => {
+  const view = loadView();
+  const model = clone(FIXTURE);
+  const s = model.sessions.find((x) => x.openQuestion);
+  Object.assign(s, { tabLabel: '수리', tabNumber: 181, tabId: 'w1:t5N' });
+  const oqOf = (ui) => {
+    const html = cards(view.renderApp(model, { tab: 'wait', ...ui }))[s.id];
+    const i = html.indexOf('class="oq"');
+    return { html, oq: html.slice(i, html.indexOf('</p>', i)) };
+  };
+  let r = oqOf({ live: true });
+  assert.ok(r.oq.includes('답할 창: <code>🗂 수리 #181</code>'));
+  assert.ok(r.oq.includes('data-act="focus" data-session="' + s.id + '"'));
+  assert.equal(count(r.html, /data-act="focus"/g), 2, 'card header and question line');
+  // the tab label is untrusted text on the line this helper feeds: it stays escaped
+  const label = s.tabLabel;
+  s.tabLabel = '<b>x</b> & "y"';
+  s.tabNumber = 7;
+  const hostile = oqOf({ live: true });
+  assert.ok(hostile.oq.includes('답할 창: <code>🗂 &lt;b&gt;x&lt;/b&gt; &amp; &quot;y&quot; #7</code>'), 'escaped tab label on the open-question line');
+  assert.ok(!hostile.html.includes('<b>x</b>'), 'no raw markup from the label');
+  s.tabLabel = label;
+  s.tabNumber = 181;
+  r = oqOf({ live: true, focus: { [s.id]: { ok: false } } });
+  assert.ok(r.oq.includes('이동 실패 - herdr에서 직접 열어 주세요'));
+  r = oqOf({ live: true, focus: { [s.id]: { ok: true } } });
+  assert.ok(r.oq.includes('이동했어요'));
+  r = oqOf({});
+  assert.ok(!r.html.includes('data-act="focus"'), 'file mode: no button');
+  s.tabId = '';
+  assert.ok(!oqOf({ live: true }).html.includes('data-act="focus"'), 'no tabId: no button');
+  assert.ok(view.renderApp(model, { tab: 'wait' }).includes('보기 전용입니다'));
+  assert.ok(!view.renderApp(model, { tab: 'wait', live: true }).includes('보기 전용입니다'));
+});
+
+test('page.css dresses the [그 창으로 이동] button like the answer buttons and colors its result text from the page tokens', () => {
+  const css = fs.readFileSync(path.join(ROOT, 'src/page/page.css'), 'utf8');
+  const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({ sel: m[1].replace(/\s+/g, ' ').trim(), body: m[2] }));
+  const focus = rules.filter((r) => /(^|, )\.focusbtn(:[a-z-]+)?($|, )/.test(r.sel));
+  const base = focus.find((r) => /(^|, )\.focusbtn($|, )/.test(r.sel));
+  assert.ok(base, 'the focus button has a base rule of its own, not the browser default');
+  assert.match(base.body, /padding:/, 'it is padded like the other controls');
+  assert.match(base.body, /border: 1px solid var\(--line\)/, 'the same border as the answer buttons');
+  assert.match(base.body, /background: var\(--panel\)/, 'the same surface as the answer buttons');
+  assert.ok(focus.some((r) => /:hover/.test(r.sel)), 'hover looks like the other buttons');
+  assert.ok(focus.some((r) => /:focus-visible/.test(r.sel)), 'keyboard focus is visible');
+  assert.doesNotMatch(focus.map((r) => r.body).join('\n'), /#[0-9a-f]{3,8}\b|rgba?\(/i, 'colors come from the page tokens');
+  assert.match(css, /\.focus-res\.ok \{[^}]*var\(--teal\)/, 'a successful jump is green-teal');
+  assert.match(css, /\.focus-res\.err \{[^}]*var\(--red\)/, 'a failed jump is red');
+});
+
 test('open question alert names the pane to answer in and stays read-only; old records fall back to the session pane', () => {
   const view = loadView();
   const model = clone(FIXTURE);
@@ -362,4 +451,126 @@ test('open question alert names the pane to answer in and stays read-only; old r
   html = cards(view.renderApp(model, { tab: 'wait' }))[s.id];
   oq = html.slice(html.indexOf('class="oq"'), html.indexOf('</p>', html.indexOf('class="oq"')));
   assert.ok(oq.includes('질문이 뜬 창에서 답하기') && !/undefined|null/.test(oq));
+});
+
+// ---- answering from the board (server page: ui.live; page state ui.answers[id]) ----
+const dcardOf = (html, id) => {
+  const start = html.indexOf('data-decision="' + id + '"');
+  return start < 0 ? '' : html.slice(start, html.indexOf('</div><!--dcard-->', start));
+};
+const liveCard = (view, model, id, answers = {}) => dcardOf(view.renderApp(model, { tab: 'wait', live: true, answers }), id);
+
+test('server page: an open decision gets one button per option (the recommended one primary) and a reply button only when its conversation takes text', () => {
+  const view = loadView();
+  const c12 = liveCard(view, FIXTURE, 12); // s-a1: answerKinds option+text, A/B/C, recommend A
+  assert.deepEqual([...c12.matchAll(/data-act="ans-pick" data-opt="([ABC])" data-id="12"/g)].map((m) => m[1]), ['A', 'B', 'C']);
+  assert.equal(count(c12, /class="ans-opt is-rec"/g), 1);
+  assert.match(c12, /class="ans-opt is-rec" data-act="ans-pick" data-opt="A"/);
+  assert.equal(count(c12, /data-act="ans-reply" data-id="12"/g), 1);
+  assert.ok(c12.includes('data-copy="/decide 12A"'), 'the /decide copy line stays under the buttons');
+  const c15 = liveCard(view, FIXTURE, 15); // s-b1: answerKinds [] (an older generation)
+  assert.equal(count(c15, /data-act="ans-pick"/g), 2);
+  assert.equal(count(c15, /data-act="ans-reply"/g), 0, 'no reply box for a conversation that cannot take text');
+  const m = clone(FIXTURE);
+  delete m.sessions.find((s) => s.id === 's-a1').answerKinds; // a model from before answerKinds existed
+  assert.equal(count(liveCard(view, m, 12), /data-act="ans-reply"/g), 0);
+  assert.equal(count(liveCard(view, m, 12), /data-act="ans-pick"/g), 3);
+});
+
+test('file page (no ui.live): no answer controls and no sent lines anywhere, whatever answer state lies around', () => {
+  const view = loadView();
+  const html = renderAllTabs(view, FIXTURE, { expanded: expandAll(FIXTURE), answers: { 12: { confirm: { option: 'B' }, open: true, draft: 'x' }, 11: { phase: 'sent' } } });
+  assert.ok(!/data-act="ans-|class="ans-box"|class="dsent"|ans-confirm|<textarea/.test(html));
+  assert.equal(count(dcardOf(view.renderApp(FIXTURE, { tab: 'wait' }), 12), /class="dline/g), 8, 'the file card is unchanged');
+});
+
+test('the pending confirm names the receiving conversation and the choice; a reply confirm shows its first 40 characters', () => {
+  const view = loadView();
+  let c = liveCard(view, FIXTURE, 12, { 12: { confirm: { option: 'B' } } });
+  const confirm = /<div class="ans-confirm"[\s\S]*?<\/div>/.exec(c)[0];
+  assert.ok(confirm.includes('🗂 수리 #181 '), 'herdr tab label and number');
+  assert.ok(confirm.includes('<b>B</b>'));
+  assert.ok(confirm.includes('data-act="ans-send" data-id="12"') && confirm.includes('data-act="ans-cancel" data-id="12"'));
+  assert.deepEqual([...c.matchAll(/data-opt="([ABC])"[^>]*aria-pressed="true"/g)].map((x) => x[1]), ['B']);
+  c = liveCard(view, FIXTURE, 12, { 12: { confirm: { text: '<b>' + '가'.repeat(60) } } });
+  assert.equal(/<q class="ans-quote">([^<]*)<\/q>/.exec(c)[1], '&lt;b&gt;' + '가'.repeat(37) + '…');
+  assert.ok(!c.includes('<textarea'), 'the reply box gives way to its confirm');
+  // no herdr tab: the pane names the conversation
+  assert.ok(liveCard(view, FIXTURE, 15, { 15: { confirm: { option: 'A' } } }).includes('창 w1-p1 '));
+});
+
+test('sending / sent / closed replace the buttons; a retryable error keeps them and the confirm', () => {
+  const view = loadView();
+  const at = (a) => liveCard(view, FIXTURE, 12, { 12: a });
+  for (const phase of ['sending', 'sent']) {
+    const c = at({ phase, confirm: { option: 'B' } });
+    assert.equal(count(c, /data-act="ans-/g), 0, phase + ': nothing to click twice');
+    assert.equal(count(c, /class="ans-state"/g), 1, phase);
+    assert.ok(!c.includes('s-done'), phase + ': never a delivered chip from page state');
+  }
+  const closed = at({ phase: 'closed', error: '<i>x</i>' });
+  assert.equal(count(closed, /data-act="ans-/g), 0);
+  assert.ok(closed.includes('<p class="ans-err" role="alert">&lt;i&gt;x&lt;/i&gt;</p>'));
+  const retry = at({ error: 'e1', confirm: { option: 'A' } });
+  assert.equal(count(retry, /data-act="ans-pick"/g), 3);
+  assert.ok(retry.includes('class="ans-confirm"') && retry.includes('<p class="ans-err" role="alert">e1</p>'));
+});
+
+test('the reply box carries the escaped draft, the 500 limit and its counter', () => {
+  const view = loadView();
+  const c = liveCard(view, FIXTURE, 12, { 12: { open: true, draft: '</textarea><b>x' } });
+  assert.ok(c.includes('maxlength="500"'));
+  assert.ok(c.includes('>&lt;/textarea&gt;&lt;b&gt;x</textarea>'));
+  assert.ok(c.includes('<span class="ans-count">15/500</span>'));
+  assert.ok(c.includes('data-act="ans-text" data-id="12"'));
+  assert.match(c, /data-act="ans-reply"[^>]*aria-expanded="true"/);
+  assert.match(c, /<textarea class="ans-text" data-draft="12" data-where="dc"/);
+});
+
+test('server page: an answer still on its way shows its delivery text on the card; a delivered one stays only when this page sent it', () => {
+  const view = loadView();
+  const m = clone(FIXTURE);
+  const d11 = m.sessions.find((s) => s.id === 's-b2').decisions.find((d) => d.id === 11); // answered, with a receipt
+  const lines = (answers) => cards(view.renderApp(m, { tab: 'wait', live: true, answers }))['s-b2'].match(/<p class="dsent">[\s\S]*?<\/p>/g) || [];
+  assert.deepEqual(lines({}), [], 'delivered and not sent from this page: only under 자세히, as before');
+  const mine = lines({ 11: { phase: 'sent' } });
+  assert.equal(mine.length, 1);
+  assert.ok(mine[0].includes('chip s-done'), 'delivered: the done chip, from the receipt');
+  Object.assign(d11, { receipt: null, delivery: '대기: 작업이 끝나면 전달', answer: { option: 'B', text: '', at: 1 } });
+  const waiting = lines({});
+  assert.equal(waiting.length, 1);
+  assert.ok(waiting[0].includes('#11 답 B · 유지') && waiting[0].includes('chip x-busy">대기: 작업이 끝나면 전달<'));
+  Object.assign(d11, { answer: { option: '', text: '<b>설치해 줘</b>', at: 1 } });
+  assert.ok(lines({})[0].includes('답글 <q class="ans-quote">&lt;b&gt;설치해 줘&lt;/b&gt;</q>'));
+  assert.ok(!view.renderApp(m, { tab: 'wait' }).includes('class="dsent"'), 'never on the file page');
+});
+
+test('answer controls escape model text in buttons and attributes', () => {
+  const view = loadView();
+  const m = clone(FIXTURE);
+  const s = m.sessions.find((x) => x.id === 's-a1');
+  s.decisions[0].options.B.text = '"><img src=x onerror=alert(1)>';
+  s.tabLabel = '<script>x</script>';
+  const c = liveCard(view, m, 12, { 12: { confirm: { option: 'B' } } });
+  assert.ok(!c.includes('<img') && !c.includes('<script>'));
+  assert.ok(c.includes('&quot;&gt;&lt;img src=x onerror=alert(1)&gt;'));
+  assert.ok(c.includes('🗂 &lt;script&gt;x&lt;/script&gt; #181 '));
+});
+
+test('server page: malformed decisions and answer state render without throwing; only positive integer ids get controls', () => {
+  const view = loadView();
+  const a = { text: 'a', consequence: 'c' };
+  const m = { generatedAt: 0, sessions: [{ id: 's', title: 't', answerKinds: 'text', status: 'needs_decision', decisions: [
+    { id: 0, options: { A: a } }, { id: -3, options: { A: a } }, { id: 1.5, options: { A: a } }, { id: '7', options: { A: a } },
+    { id: 8, options: null }, { id: 9, options: { A: null, B: 'x', C: { text: { no: 1 } } } }, { id: 10, options: { A: a, constructor: a } },
+    { id: 11, answered: true, answer: 'garbage', receipt: 5 }, null, 5,
+  ] }] };
+  const answers = { 9: null, 10: { phase: { x: 1 }, confirm: 'B', error: 42, draft: { a: 1 }, open: 'yes' }, constructor: { phase: 'sending' } };
+  let html;
+  assert.doesNotThrow(() => { html = view.renderApp(m, { live: true, answers, tab: 'wait', expanded: { 'more-dc:s': true } }); });
+  const ids = [...html.matchAll(/data-act="ans-pick"[^>]*data-id="([^"]*)"/g)].map((x) => x[1]);
+  assert.deepEqual(ids.sort(), ['10', '9'], 'only object options become buttons, only under positive integer ids');
+  for (const bad of ['0', '-3', '1.5', '7']) assert.ok(!html.includes('data-ans="' + bad + '"'), 'no controls for id ' + bad);
+  assert.equal(count(html, /data-act="ans-reply"/g), 0, 'answerKinds that is not a list offers no reply box');
+  for (const bad of [null, 'x', 5, []]) assert.equal(typeof view.renderApp(m, { live: true, answers: bad, tab: 'wait' }), 'string');
 });

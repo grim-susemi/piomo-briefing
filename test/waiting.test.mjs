@@ -44,6 +44,7 @@ const snap = (over = {}) => ({
   plans: [], published: null, readErrors: [], maxMtime: 0, ...over,
 });
 const keys = (items) => items.map((i) => i.key);
+const NO_TAB = { tabLabel: '', tabNumber: null, paneId: '' }; // meta without herdr tab fields
 
 test('open decision, plan question and mirror question get the d / p / q keys with session, title, text, blocks and at', () => {
   const planId = 'p0123456789ab';
@@ -56,9 +57,9 @@ test('open decision, plan question and mirror question get the d / p / q keys wi
     mirror: [mirrorOf('S3', { question: '미러 질문?', requests: [req('toolu_x', ['미러 질문?'], { required: true })] })],
   }));
   assert.deepEqual(items, [
-    { key: 'd1', sessionId: 'S1', title: '첫 대화', text: '결정 1?', blocks: true, at: T0 + 1 },
-    { key: `p${planId}:Q3`, sessionId: 'S2', title: '메타 제목', text: '계획 질문?', blocks: false, at: T0 + 2 },
-    { key: 'qS3:toolu_x', sessionId: 'S3', title: 'S3', text: '미러 질문?', blocks: true, at: T0 + 50 },
+    { key: 'd1', sessionId: 'S1', title: '첫 대화', ...NO_TAB, text: '결정 1?', blocks: true, at: T0 + 1 },
+    { key: `p${planId}:Q3`, sessionId: 'S2', title: '메타 제목', ...NO_TAB, text: '계획 질문?', blocks: false, at: T0 + 2 },
+    { key: 'qS3:toolu_x', sessionId: 'S3', title: 'S3', ...NO_TAB, text: '미러 질문?', blocks: true, at: T0 + 50 },
   ]);
 });
 
@@ -84,7 +85,7 @@ test('a question that timed out into decision cards keeps its mirror key: one it
     dec(8, 'S1', { source: 'question-timeout', requestId: 'toolu_r', questionIndex: 1, question: '둘째 질문?', blocks: true }),
   ];
   const converted = waitingItems(snap({ ...base, decisions: cards }));
-  assert.deepEqual(converted, [{ key: 'qS1:toolu_r', sessionId: 'S1', title: '대화', text: '첫 질문?', blocks: true, at: T0 + 7 }]);
+  assert.deepEqual(converted, [{ key: 'qS1:toolu_r', sessionId: 'S1', title: '대화', ...NO_TAB, text: '첫 질문?', blocks: true, at: T0 + 7 }]);
 
   // one card answered, the other still open: still waiting; both answered: gone
   assert.deepEqual(keys(waitingItems(snap({ ...base, decisions: cards, answers: [{ id: 7, option: 'A', at: T0 }] }))), ['qS1:toolu_r']);
@@ -120,7 +121,25 @@ test('older mirror records without requests[] still give one item keyed by their
     sessions: [sess('S1')],
     mirror: [{ sid: 'S1', data: { open: true, text: '옛 모양 질문?', at: T0 + 5 } }, { sid: 'S2', data: { open: true, question: '세션 없음' } }],
   }));
-  assert.deepEqual(items, [{ key: `qS1:${T0 + 5}`, sessionId: 'S1', title: 'S1', text: '옛 모양 질문?', blocks: false, at: T0 + 5 }]);
+  assert.deepEqual(items, [{ key: `qS1:${T0 + 5}`, sessionId: 'S1', title: 'S1', ...NO_TAB, text: '옛 모양 질문?', blocks: false, at: T0 + 5 }]);
+});
+
+test('every item carries the herdr tab label, number and pane from its session meta; bad types fall back', () => {
+  const s1 = sess('S1', { title: '작업' });
+  s1.meta = { ...s1.meta, tabId: 'w1:t5N', tabLabel: '수리', tabNumber: 181, paneId: 'w1:pR2' };
+  const s2 = sess('S2');
+  s2.meta = { ...s2.meta, tabLabel: 7, tabNumber: '181', paneId: null };
+  const items = waitingItems(snap({
+    sessions: [s1, s2],
+    decisions: [dec(1, 'S1'), dec(2, 'S2')],
+    mirror: [mirrorOf('S1', { requests: [req('toolu_t', ['미러?'])] })],
+  }));
+  const where = (i) => [i.key, i.tabLabel, i.tabNumber, i.paneId];
+  assert.deepEqual(items.map(where), [
+    ['d1', '수리', 181, 'w1:pR2'],
+    ['d2', '', null, ''],
+    ['qS1:toolu_t', '수리', 181, 'w1:pR2'],
+  ]);
 });
 
 test('only sessions present in the snapshot; malformed input is skipped and never throws; nothing is mutated', () => {

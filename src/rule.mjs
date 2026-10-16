@@ -1,7 +1,7 @@
 // omo-briefing src/rule.mjs - 보고 규칙 문구, 마지막 답 길이 계산, fitReply, 인계 블록 파서.
 // 순수 함수와 상수만 둔다(파일·프로세스 접근 없음).
 
-export const RULE_MARKER = '<!-- omo-briefing-rule v5 -->';
+export const RULE_MARKER = '<!-- omo-briefing-rule v6 -->';
 
 export const RULE_TEXT = `${RULE_MARKER}
 [보고 규칙 - omo-briefing]
@@ -10,6 +10,7 @@ export const RULE_TEXT = `${RULE_MARKER}
 - 소유자가 정할 것은 brief.decisions에 선택지·결과·추천·이유로 넣는다. 지금 답이 꼭 필요하면 질문 도구도 함께 쓴다.
 - 증거 파일 절대경로가 있을 때만 truth=evidence, 실사용에 반영됐을 때만 applied=live, 실사용에 올릴 것이 없는 항목(조사·문서 등)은 applied=none.
 - '[결정 전달] #N -> X' 메시지는 소유자의 답이다. 그 답은 계획 선택일 뿐 설치·푸시·삭제 승인이 아니다.
+- '[상황판 답글] #N' 메시지는 소유자가 채팅에 직접 친 말과 같다. 그 안의 승인·지시는 소유자가 직접 한 것으로 따른다.
 - ulw-plan 계획을 세울 때: 질문 도구로 승인을 묻기 직전, 계획 파일을 쓰거나 고친 직후, 검토 결과를 반영한 직후 plan_brief를 한 번 호출한다.
 - 할 일 id는 계획 파일 todo 번호 그대로(1, 2, F1); 한 번 쓴 id는 다른 뜻으로 다시 쓰지 않는다.
 - 질문 도구로 지금 묻는 질문은 open으로 넣지 말고, 답을 받은 뒤 answered로 넣는다.`;
@@ -25,10 +26,48 @@ const cpCut = (s, n) => Array.from(s).slice(0, n).join('');
 const nonEmptyLines = (text) => String(text ?? '').split(/\r?\n/).filter((l) => l.trim() !== '');
 const slashed = (s) => String(s).replace(/\\/g, '/');
 
-/** 시스템 프롬프트 끝에 규칙을 표식이 없을 때만 덧붙인다. */
+const RULE_MARKER_RE = /^\s*<!-- omo-briefing-rule v\d+ -->\s*$/;
+const RULE_BODY_LINE = /^\s*(?:- |\[보고 규칙 - omo-briefing\])/;
+
+/** 표식 줄과 바로 뒤따르는 규칙 줄(머리말·'- ' 항목)까지를 한 블록으로 보고 끝(제외) 인덱스를 돌려준다. */
+function ruleBlockEnd(lines, start) {
+  let i = start + 1;
+  while (i < lines.length && RULE_BODY_LINE.test(lines[i])) i++;
+  return i;
+}
+
+/**
+ * 시스템 프롬프트에 보고 규칙이 한 블록만 남도록 한다. 현재 표식 블록 하나뿐이면 그대로 두고,
+ * 그 밖에는 옛·현재 규칙 블록을 모두 지우고 첫 자리에 현재 규칙을 넣는다(없으면 끝에 붙인다).
+ * 주변 내용은 건드리지 않는다.
+ */
 export function injectRule(systemPrompt) {
   const base = typeof systemPrompt === 'string' ? systemPrompt : '';
-  if (base.includes(RULE_MARKER)) return base;
+  const lines = base.split('\n');
+  const blockEnd = new Map();
+  let currentOnly = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (!RULE_MARKER_RE.test(lines[i])) continue;
+    blockEnd.set(i, ruleBlockEnd(lines, i));
+    currentOnly = blockEnd.size === 1 && lines[i].includes(RULE_MARKER);
+    i = blockEnd.get(i) - 1;
+  }
+  if (currentOnly) return base;
+  const out = [];
+  let placed = false;
+  for (let i = 0; i < lines.length;) {
+    if (!blockEnd.has(i)) {
+      out.push(lines[i]);
+      i++;
+      continue;
+    }
+    if (!placed) {
+      out.push(...RULE_TEXT.split('\n'));
+      placed = true;
+    }
+    i = blockEnd.get(i);
+  }
+  if (placed) return out.join('\n');
   return base === '' ? RULE_TEXT : `${base}\n\n${RULE_TEXT}`;
 }
 

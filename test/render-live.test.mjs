@@ -167,6 +167,23 @@ test('pageHtml inlines every page module and the first-paint model, with generat
   assert.equal(pageHtml(vm, null, { mode: 'file' }).includes('omo-briefing-generation'), false);
 });
 
+test('pageHtml carries the board write token as one meta in server mode only', () => {
+  const vm = { schema: 1, seq: 7, gen: 4, sessions: [], waiting: [], server: null };
+  const served = pageHtml(vm, 4, { mode: 'server', token: 'tok-1_x' });
+  assert.equal(served.match(/<meta name="omo-board-token"/g).length, 1);
+  assert.ok(served.includes('<meta name="omo-board-token" content="tok-1_x">'));
+  for (const [label, html] of [
+    ['server page without a token', pageHtml(vm, 4, { mode: 'server' })],
+    ['server page with an empty token', pageHtml(vm, 4, { mode: 'server', token: '' })],
+    ['file page', pageHtml(vm, 4, { mode: 'file', token: 'tok-1_x' })],
+    ['default (file) page', pageHtml(vm, 4, { token: 'tok-1_x' })],
+  ]) {
+    assert.ok(!html.includes('omo-board-token') && !html.includes('tok-1_x'), `${label} has no token`);
+  }
+  const odd = pageHtml(vm, 4, { mode: 'server', token: '"><script>x</script>' });
+  assert.ok(odd.includes('content="&quot;&gt;&lt;script&gt;x&lt;/script&gt;"'), 'an attribute-breaking token stays inside its attribute');
+});
+
 // ------------------------------------------------------------------ async publish
 
 const holdLock = (store, pid = process.pid) => store.writeNew('render.lock', { pid, at: 1, nonce: 'held-by-test' });
@@ -266,6 +283,29 @@ test('B1: an agent claim of "answered" with no stored answer stays as claimed', 
   writePlan(store, { questions: [{ id: 'Q1', text: '?', state: 'answered', answer: 'A 진행', by: 'agent', options: twoOptions, recommend: 'A', reason: 'r', blocks: false }] });
   const q = buildViewModel(store.readSnapshot(), NOW, { isAlive: () => false }).sessions[0].plan.questions[0];
   assert.deepEqual([q.state, q.by, q.answer], ['answered', 'agent', 'A 진행']);
+});
+
+test('board answers: answerKinds passes through (known kinds only); a board reply shows its words on the decision and the plan question', (t) => {
+  const store = fresh(t);
+  session(store, 'owner', { extra: { answerKinds: ['option', 'text', 'text', 'voice', 5] } });
+  session(store, 'old'); // a conversation of an older generation: no answerKinds in its meta
+  const open = { id: 'Q1', text: '진행할까요?', state: 'open', options: twoOptions, recommend: 'A', reason: 'r', blocks: true };
+  writePlan(store, { questions: [open] });
+  const id = store.allocDecisionId({ sessionId: 'owner', question: open.text, options: twoOptions, recommend: 'A', reason: 'r', blocks: true, createdAt: NOW - 8000, source: 'plan', planId: PLAN_ID, qid: 'Q1' });
+  store.writeNew(`answers/${String(id).padStart(6, '0')}.json`, { id, text: '설치해 줘 <b>지금</b>', at: NOW - 100, fromSessionId: 'board' });
+  const vm = buildViewModel(store.readSnapshot(), NOW, { isAlive: () => false });
+  const owner = vm.sessions.find((s) => s.id === 'owner');
+  assert.deepEqual(owner.answerKinds, ['option', 'text']);
+  assert.deepEqual(vm.sessions.find((s) => s.id === 'old').answerKinds, []);
+  const d = owner.decisions.find((x) => x.id === id);
+  assert.equal(d.answered, true);
+  assert.deepEqual([d.answer.option, d.answer.text], ['', '설치해 줘 <b>지금</b>']);
+  const q = owner.plan.questions[0];
+  assert.deepEqual([q.state, q.by, q.answer], ['answered', 'owner', '설치해 줘 <b>지금</b>']);
+  assert.ok(q.option !== '', 'the state column gets a label for a reply, not an empty option');
+  const page = loadPage();
+  const html = page.BriefPlanView.render(owner.plan, NOW, { expanded: { ['plan:' + PLAN_ID]: true }, esc: page.BriefView.escapeHtml });
+  assert.ok(html.includes('설치해 줘 &lt;b&gt;지금&lt;/b&gt;') && !html.includes('<b>지금</b>'), 'the reply is shown, escaped');
 });
 
 test('B3: the 600KB cap counts the ESCAPED data.js bytes: strings full of "<" (6 bytes each once escaped) still end at <= 614400', (t) => {

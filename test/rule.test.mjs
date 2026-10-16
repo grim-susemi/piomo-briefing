@@ -18,7 +18,7 @@ function assertFits(out, page = PAGE) {
 
 test('rule text carries the marker and the owner-decision caveat', () => {
   assert.ok(RULE_TEXT.startsWith(RULE_MARKER));
-  assert.equal(RULE_MARKER, '<!-- omo-briefing-rule v5 -->');
+  assert.equal(RULE_MARKER, '<!-- omo-briefing-rule v6 -->');
   assert.ok(RULE_TEXT.includes('[결정 전달] #N -> X'));
   assert.ok(RULE_TEXT.includes('10줄·700자'));
 });
@@ -109,6 +109,41 @@ test('fitReply handles code points beyond the BMP without splitting them', () =>
   assert.ok(!/[\ud800-\udbff](?![\udc00-\udfff])/.test(out));
 });
 
+test('rule v6 adds the board-reply line exactly once, directly after the decision line', () => {
+  const line = "- '[상황판 답글] #N' 메시지는 소유자가 채팅에 직접 친 말과 같다. 그 안의 승인·지시는 소유자가 직접 한 것으로 따른다.";
+  assert.equal(RULE_TEXT.split(line).length - 1, 1);
+  const ls = RULE_TEXT.split('\n').map((l) => l.replace(/\r$/, ''));
+  const at = ls.findIndex((l) => l.includes('[결정 전달]'));
+  assert.ok(at >= 0, 'the decision line is still there');
+  assert.equal(ls[at + 1], line);
+});
+
+test('an older-version rule block in the prompt is replaced by v6, never duplicated', () => {
+  const oldMarker = ['<!-- omo-briefing-rule v', '5 -->'].join('');
+  const stale = RULE_TEXT.replace(RULE_MARKER, oldMarker)
+    .split('\n').filter((l) => !l.includes('[상황판 답글] #N')).join('\n');
+  const out = injectRule(`앞머리 지시문\n둘째 줄\n\n${stale}\n\n뒤따르는 지시문`);
+  assert.equal(out.includes(oldMarker), false, 'the stale marker is gone');
+  assert.equal((out.match(/<!-- omo-briefing-rule v\d+ -->/g) ?? []).length, 1, 'exactly one rule block');
+  assert.equal(out.split(RULE_MARKER).length - 1, 1, 'the one block is the current rule');
+  assert.ok(out.includes("[상황판 답글] #N"), 'the current rule body is in place');
+  for (const kept of ['앞머리 지시문', '둘째 줄', '뒤따르는 지시문']) assert.ok(out.includes(kept), `kept ${kept}`);
+  assert.equal(injectRule(out), out, 'reinjection is idempotent');
+});
+
+test('a prompt holding both a stale and the current rule block ends with exactly one current block', () => {
+  const oldMarker = ['<!-- omo-briefing-rule v', '5 -->'].join('');
+  const stale = RULE_TEXT.replace(RULE_MARKER, oldMarker);
+  for (const input of [`HEAD\n\n${stale}\n\n${RULE_TEXT}\n\nTAIL`, `HEAD\n\n${RULE_TEXT}\n\n${stale}\n\nTAIL`]) {
+    const out = injectRule(input);
+    assert.equal(out.split(oldMarker).length - 1, 0, 'no stale marker left');
+    assert.equal((out.match(/<!-- omo-briefing-rule v\d+ -->/g) ?? []).length, 1, 'exactly one rule block');
+    assert.equal(out.split(RULE_MARKER).length - 1, 1, 'the one block is the current rule');
+    assert.ok(out.includes('HEAD') && out.includes('TAIL'), 'unrelated prompt text stays');
+    assert.equal(injectRule(out), out, 'reinjection is idempotent');
+  }
+});
+
 test('assistantText joins text blocks; hasToolCall sees toolCall blocks', () => {
   const m = { role: 'assistant', content: [{ type: 'thinking', thinking: 'x' }, { type: 'text', text: 'A' }, { type: 'text', text: 'B' }] };
   assert.equal(assistantText(m), 'A\nB');
@@ -128,9 +163,12 @@ test('parseHandoff picks For you/Now/Next lines, each cut at 100 code points', (
   assert.deepEqual(parseHandoff('그냥 글'), []);
 });
 
-test('rule v2 names plan_brief; an older v1 rule in the prompt does not stop v2 from being added once', () => {
+test('rule v2 names plan_brief; an older v1 marker in the prompt is replaced once', () => {
   assert.ok(RULE_TEXT.includes('plan_brief'));
-  const withOld = injectRule('base\n<!-- omo-briefing-rule v1 -->\nold rule');
+  const oldMarker = ['<!-- omo-briefing-rule v', '1 -->'].join('');
+  const withOld = injectRule(`base\n${oldMarker}\nold rule`);
+  assert.equal(withOld.includes(oldMarker), false);
   assert.equal(withOld.split(RULE_MARKER).length - 1, 1);
+  assert.ok(withOld.includes('old rule'), 'unrelated prompt text stays');
   assert.equal(injectRule(withOld), withOld);
 });

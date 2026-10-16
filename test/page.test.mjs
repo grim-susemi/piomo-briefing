@@ -10,7 +10,7 @@ const PAGE_SRC = fs.readFileSync(path.join(ROOT, 'src/page/page.js'), 'utf8');
 const VIEW_SRC = fs.readFileSync(path.join(ROOT, 'src/page/view.js'), 'utf8');
 
 // Small fake browser. Time and timers are fully manual: nothing here waits on the wall clock.
-function makeEnv({ protocol = 'file:', throwingView = false, realView = false } = {}) {
+function makeEnv({ protocol = 'file:', throwingView = false, realView = false, token = '', fetchImpl = null } = {}) {
   const byId = {};
   const docListeners = {};
   const winListeners = {};
@@ -76,6 +76,7 @@ function makeEnv({ protocol = 'file:', throwingView = false, realView = false } 
     readyState: 'complete', visibilityState: 'visible', body, head, documentElement: { scrollHeight: 0 },
     activeElement: null,
     getElementById: (id) => byId[id] || null, createElement: el,
+    querySelector: (sel) => (token && sel === 'meta[name="omo-board-token"]' ? { getAttribute: () => token } : null),
     addEventListener(t, f) { (docListeners[t] ||= []).push(f); },
   };
   let selection = { isCollapsed: true, toString: () => '' };
@@ -104,7 +105,10 @@ function makeEnv({ protocol = 'file:', throwingView = false, realView = false } 
     location: { protocol },
   };
   if (protocol.startsWith('http')) {
-    ctx.fetch = (url, opts) => { fetches.push({ url, opts }); return new Promise(() => {}); };
+    ctx.fetch = (url, opts) => {
+      fetches.push({ url, opts });
+      return fetchImpl && url !== '/data.json' ? fetchImpl(url, opts) : new Promise(() => {});
+    };
     ctx.EventSource = FakeEventSource;
   }
   if (realView) vm.runInNewContext(VIEW_SRC, ctx, { filename: 'view.js' });
@@ -140,6 +144,25 @@ test('http origin: one /data.json fetch + EventSource, no polling interval', () 
   assert.equal(e.sources.length, 1);
   assert.equal(e.sources[0].url, '/events');
   assert.equal(e.intervals.length, 0, 'no http-side polling');
+});
+
+test('focus click POSTs exactly {sessionId} with the page token; result is kept in ui.focus; no meta means no live mode', async () => {
+  for (const status of [200, 502]) {
+    const e = makeEnv({ protocol: 'http:', token: 'tok', fetchImpl: async () => ({ ok: status === 200, status }) });
+    assert.equal(e.page.state.ui.live, true);
+    const btn = { getAttribute: (k) => (k === 'data-act' ? 'focus' : k === 'data-session' ? 's1' : null), hasAttribute: () => false };
+    e.byId.app.listeners.click({ target: { closest: () => btn } });
+    assert.equal(e.fetches.length, 2);
+    const call = e.fetches[1];
+    assert.equal(call.url, '/focus');
+    assert.equal(call.opts.method, 'POST');
+    assert.deepEqual({ ...call.opts.headers }, { 'Content-Type': 'application/json', 'X-Board-Token': 'tok' });
+    assert.equal(call.opts.body, JSON.stringify({ sessionId: 's1' }));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual({ ...e.page.state.ui.focus.s1 }, { ok: status === 200 });
+  }
+  assert.equal(makeEnv({ protocol: 'http:' }).page.state.ui.live, false);
+  assert.equal(makeEnv({ token: 'tok' }).page.state.ui.live, false, 'file mode never live');
 });
 
 test('file origin: no fetch, no EventSource; data.js injected every 2 s', () => {

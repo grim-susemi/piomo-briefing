@@ -8,6 +8,10 @@
 //
 // Rules (plan todo 11 / Scope '결정 전달'):
 //  - Only answers to decisions THIS session made are delivered, and only once: answers/<id>.json with no receipt.
+//  - An answer is either an option (A/B/C, text = deliveryText) or the owner's own words typed on the board
+//    ({ text } and no option, text = replyText). Anything else is malformed: recorded under errors['deliver:invalid:<id>'].
+//    A file that does not parse yet may be a write in progress: it is re-read by the bounded timer retries (8, doubling from
+//    20 ms) and only a file still unparsable after the last one counts as a finished malformed answer.
 //  - Delivery = pi.session.admitExternalMessage({delivery_id:'d<id>', sender:{kind:'command_line'}, text, deliverAs:'followUp'})
 //    (SENPI core/extensions/session-control-types.d.ts; external-admission.js turns it into a role:'custom',
 //    customType:'session_control_delivery' message with details.delivery_id). Called only while the host is idle:
@@ -55,6 +59,11 @@ export function deliveryText({ id, option, optionText, title, at }) {
   return `[결정 전달] #${id} -> ${option}: ${cleanInline(optionText, 80)} (보낸 대화: ${cleanInline(title, 40)}, ${hhmm(at)}). 이 결정대로 진행해.`;
 }
 
+/** A free-text board reply: the owner's own words (the agent rule treats it like a chat message), one line, no brackets. */
+export function replyText({ id, text, at }) {
+  return `[상황판 답글] #${id} (소유자가 상황판에서 직접 씁, ${hhmm(at)}): ${cleanInline(text, 500)}`;
+}
+
 export function createDeliverer(deps) {
   const { pi, store, getSessionId, getMeta, saveMeta, refresh, enabled } = deps;
   const now = deps.now ?? Date.now;
@@ -65,6 +74,7 @@ export function createDeliverer(deps) {
   const foreign = new Set(); // ids whose decision belongs to another conversation
   const invalid = new Set(); // ids whose answer/decision is malformed (files are immutable)
   const busySeen = new Set(); // ids first noticed while the conversation was working
+  const waited = new Map(); // id -> timer retries an unparsable answer file has survived
   let lastCtx = null;
   let watcher = null;
   let watchOff = false;
@@ -149,14 +159,32 @@ export function createDeliverer(deps) {
   }
 
   // ---- candidates ----
-  function listCandidates(sid) {
+  // store.readRecord answers null for a missing file, for text that does not parse (a write in progress or a finished
+  // non-JSON file) AND for a parsed scalar or null (a finished malformed record); a real read failure (EIO, EPERM on a
+  // deleted volume...) throws instead, so it is told apart here and never silently dropped. 'scalar' is final at once (a
+  // prefix of an answer object never parses to a scalar), 'unparsed' is final once the bounded retries are spent, and
+  // everything else (missing, complete since readRecord looked) keeps waiting. A file that cannot be READ keeps waiting too,
+  // but its failure is reported through this source's error slot (deliver/lastError) instead of vanishing.
+  function unreadableKind(rel) {
+    let text;
+    try { text = store.readText(rel); } catch (err) { return { kind: 'io', err }; }
+    if (text === null) return { kind: 'unreadable' }; // vanished between the folder listing and this read
+    try {
+      const value = JSON.parse(text);
+      return { kind: value === null || typeof value !== 'object' ? 'scalar' : 'unreadable' };
+    } catch { return { kind: 'unparsed' }; }
+  }
+
+  function listCandidates(sid, retrying) {
     const dir = join(store.root, 'answers');
     let names;
     try { names = fsImpl.readdirSync(dir); } catch (err) {
-      if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return { out: [], unreadable: false };
+      if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) return { out: [], unreadable: false, bad: [], ioErrors: [] };
       throw err;
     }
     const out = [];
+    const bad = []; // ids found malformed in this scan (each reported once per process)
+    const ioErrors = []; // messages for answer files that could not be READ this scan (reported by the caller)
     let unreadable = false;
     const ids = [];
     for (const name of names) {
@@ -174,17 +202,45 @@ export function createDeliverer(deps) {
       if (!decision) continue; // missing or unreadable decision: nothing to deliver
       if (decision.sessionId !== sid) { foreign.add(n); continue; }
       if (fsImpl.existsSync(join(store.root, 'decision-closures', `${pad6(n)}.json`))) continue;
-      const ans = safeRead(`answers/${pad6(n)}.json`);
-      if (!ans || typeof ans !== 'object') { unreadable = true; continue; } // maybe still being written
+      let ans = null;
+      let answerReadError = null;
+      try { ans = store.readRecord(`answers/${pad6(n)}.json`); } catch (err) { answerReadError = err; }
+      if (answerReadError || !ans || typeof ans !== 'object') {
+        const info = answerReadError ? { kind: 'io', err: answerReadError } : unreadableKind(`answers/${pad6(n)}.json`);
+        if (info.kind === 'io') {
+          // An unreadable answer file is not an incomplete write: say so through the delivery error channel (it is cleared
+          // by the next scan that reads the file) and keep the id a candidate for the next wake.
+          ioErrors.push(`#${n} 답 파일 읽기 실패: ${messageOf(info.err)}`);
+          unreadable = true;
+          continue;
+        }
+        const { kind } = info;
+        if (kind === 'scalar') { invalid.add(n); bad.push(n); continue; }
+        if (kind === 'unparsed') {
+          if (!waited.has(n)) { retryCount = 0; retryDelay = RETRY_FIRST_MS; } // a newly seen unparsable file gets its own full round
+          const age = (waited.get(n) ?? 0) + (retrying ? 1 : 0); // only timer retries age it: a flurry of wakes must not spend the budget
+          if (age >= RETRY_MAX) { waited.delete(n); invalid.add(n); bad.push(n); continue; } // retries spent and still not JSON: finished
+          waited.set(n, age);
+        }
+        unreadable = true; // maybe still being written
+        continue;
+      }
+      if (ans.text !== undefined && ans.option === undefined) {
+        // the owner's own words: a non-empty string once control characters are gone
+        if (ans.id !== n || typeof ans.text !== 'string' || cleanInline(ans.text, 500) === '') { invalid.add(n); bad.push(n); continue; }
+        out.push({ id: n, kind: 'text', text: ans.text, ans });
+        continue;
+      }
       const option = typeof ans.option === 'string' ? ans.option : '';
       const opt = decision.options && typeof decision.options === 'object' ? decision.options[option] : undefined;
-      if (ans.id !== n || !OPTION_KEYS.has(option) || !opt || typeof opt.text !== 'string') { invalid.add(n); continue; }
-      out.push({ id: n, option, optionText: opt.text, ans });
+      if (ans.id !== n || ans.text !== undefined || !OPTION_KEYS.has(option) || !opt || typeof opt.text !== 'string') { invalid.add(n); bad.push(n); continue; }
+      out.push({ id: n, kind: 'option', option, optionText: opt.text, ans });
     }
-    return { out, unreadable };
+    return { out, unreadable, bad, ioErrors };
   }
 
   function senderTitle(from) {
+    if (from === 'board') return '상황판'; // never looked up: a sessions/board record must not rename it
     if (typeof from !== 'string' || !SAFE_ID.test(from)) return '알 수 없음';
     const rec = safeRead(`sessions/${from}/meta.json`);
     if (rec && typeof rec.title === 'string' && rec.title.trim()) return rec.title;
@@ -203,7 +259,8 @@ export function createDeliverer(deps) {
 
     changed = checkProofs(ctx, sid, errors) || changed;
 
-    const { out: candidates, unreadable } = listCandidates(sid);
+    const { out: candidates, unreadable, bad, ioErrors } = listCandidates(sid, reason === 'retry');
+    errors.push(...ioErrors);
     const idleNow = reason === 'agent_settled' || safeIdle(ctx);
     const session = pi && pi.session && typeof pi.session.admitExternalMessage === 'function' ? pi.session : null;
     let view = null;
@@ -218,7 +275,9 @@ export function createDeliverer(deps) {
       }
       if (!idleNow) { busySeen.add(c.id); holds.set(c.id, 'busy'); continue; }
       const mode = reason === 'session_start' ? 'on-resume' : busySeen.has(c.id) ? 'after-turn' : 'immediate';
-      const text = deliveryText({ id: c.id, option: c.option, optionText: c.optionText, title: senderTitle(c.ans.fromSessionId), at: c.ans.at });
+      const text = c.kind === 'text'
+        ? replyText({ id: c.id, text: c.text, at: c.ans.at })
+        : deliveryText({ id: c.id, option: c.option, optionText: c.optionText, title: senderTitle(c.ans.fromSessionId), at: c.ans.at });
       if (session) {
         let res;
         try {
@@ -271,9 +330,13 @@ export function createDeliverer(deps) {
 
     // This source's own entry only: errors set -> recorded, a clean scan -> cleared. Nothing else touches it, and it is
     // saved BEFORE the one publish below so the published page matches meta.
-    const errorChanged = errors.length
+    let errorChanged = errors.length
       ? setError(meta, 'deliver', `deliver: ${errors.join('; ')}`, now())
       : clearError(meta, 'deliver');
+    // A malformed answer file is immutable, so it gets its own per-id entry (never cleared by a clean scan).
+    for (const n of bad) {
+      if (setError(meta, `deliver:invalid:${n}`, `deliver: #${n} 답 형식 오류(선택지 A/B/C 또는 내용이 있는 답글이 필요)`, now())) errorChanged = true;
+    }
     if (metaDirty || errorChanged) saveMeta();
     if (changed || metaDirty || errorChanged) refresh();
   }
@@ -295,7 +358,7 @@ export function createDeliverer(deps) {
       retryTimer = null;
       retryCount++;
       retryDelay *= 2;
-      safeRun(lastCtx, 'answers');
+      safeRun(lastCtx, 'retry');
     }, retryDelay);
     if (typeof retryTimer.unref === 'function') retryTimer.unref();
   }

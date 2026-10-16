@@ -187,6 +187,7 @@ describe('buildViewModel', () => {
 describe('view-model contract (test/fixtures/view-model.json + src/page/view.js)', () => {
   const CONTRACT = JSON.parse(fs.readFileSync(join(HERE, 'fixtures', 'view-model.json'), 'utf8'));
   const OPTIONAL = new Set(['auto', 'autoSummary', 'openQuestion', 'answerTrimmed']);
+  const NULLABLE = new Set(['tabNumber']); // null when the session's herdr tab is unknown
   const kind = (v) => (Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v);
 
   test('every contract session key is present with the same JSON type; only contract keys are emitted', (t) => {
@@ -198,7 +199,7 @@ describe('view-model contract (test/fixtures/view-model.json + src/page/view.js)
       for (const k of contractKeys) {
         if (OPTIONAL.has(k) && !(k in s)) continue;
         assert.ok(k in s, `${s.id} lacks ${k}`);
-        if (sample[k] !== 'null') assert.equal(kind(s[k]), sample[k], `${s.id}.${k} type`);
+        if (sample[k] !== 'null' && !(NULLABLE.has(k) && s[k] === null)) assert.equal(kind(s[k]), sample[k], `${s.id}.${k} type`);
       }
       for (const k of Object.keys(s)) {
         assert.ok(contractKeys.has(k), `${s.id} emits non-contract key ${k}`);

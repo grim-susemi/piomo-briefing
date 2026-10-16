@@ -89,16 +89,46 @@
     return 'run';
   }
 
-  function normSessions(vm) {
+  // Server page: the conversation of a decision this page is sending or has sent stays in the tab whose screen showed its
+  // card at 보내기 (page.js keeps that tab in ui.answers[id].tab and clears it when the owner changes tabs). Answering its last
+  // open decision files it under another tab in the next model; its 보내는 중 -> 전달 대기/전달 중 -> 전달됨 line must stay
+  // in front of the owner.
+  function heldTab(s, ui) {
+    if (ui.live !== true) return '';
+    var ds = arr(s.decisions);
+    for (var i = 0; i < ds.length; i++) {
+      var a = obj(ds[i]) ? obj(own(obj(ui.answers), str(ds[i].id))) : null;
+      if (a && (a.phase === 'sending' || a.phase === 'sent') && (a.tab === 'wait' || a.tab === 'run' || a.tab === 'done')) return a.tab;
+    }
+    return '';
+  }
+
+  function normSessions(vm, ui) {
     var list = arr(vm && vm.sessions);
     var out = [];
     for (var i = 0; i < list.length; i++) {
       var s = obj(list[i]);
       if (!s) continue;
       var id = str(s.id) || 'session-' + i;
-      out.push({ raw: s, id: id, dom: 'c-' + safeId(id) + '-' + i, tab: tabOf(s), project: str(s.project) || '(폴더 모름)' });
+      out.push({ raw: s, id: id, dom: 'c-' + safeId(id) + '-' + i, tab: heldTab(s, ui) || tabOf(s), project: str(s.project) || '(폴더 모름)' });
     }
     return out;
+  }
+
+  // Which conversation: herdr tab label and number when known, else the pane. Plain text; callers escape it.
+  function whereLabel(s) {
+    var title = str(s.title) || '(제목 없음)';
+    var label = str(s.tabLabel);
+    if (label) return '🗂 ' + label + (num(s.tabNumber) == null ? '' : ' #' + s.tabNumber) + ' · ' + title;
+    return '창 ' + (str(s.paneId) || '모름') + ' · ' + title;
+  }
+
+  // [그 창으로 이동]: only in server mode (ui.live) and only when the session has a herdr tab. Result text lives in ui.focus.
+  function focusBtn(view, ui) {
+    if (!ui.live || !str(view.tabId) || !str(view.sessionId)) return '';
+    var res = obj(ui.focus) ? own(ui.focus, view.sessionId) : null;
+    return '<button type="button" class="focusbtn" data-act="focus" data-session="' + esc(view.sessionId) + '">그 창으로 이동</button>' +
+      (res ? ' <span class="focus-res ' + (res.ok ? 'ok' : 'err') + '">' + esc(res.ok ? '이동했어요' : '이동 실패 - herdr에서 직접 열어 주세요') + '</span>' : '');
   }
 
   function copyBtn(value) {
@@ -134,12 +164,123 @@
       (expanded ? '▴ 접기' : '▾ 외 ' + hidden + '개') + '</button>';
   }
 
-  function decisionCard(d, s) {
+  // recommended option: the decision's recommend when that option exists, else A when it exists
+  function recOf(d) {
+    var opts = obj(d.options) || {};
+    return own({ A: 1, B: 1, C: 1 }, d.recommend) && obj(own(opts, d.recommend)) ? d.recommend : (obj(own(opts, 'A')) ? 'A' : '');
+  }
+
+  // ---- answer controls: server page only (ui.live, set by page.js when the served page carries its write token) ----
+  // Per-decision page state is ui.answers[id] = {open, draft, confirm: {option}|{text}|null, phase: ''|'sending'|'sent'|'closed',
+  // error, tab} (page.js), so a full re-render keeps a pending confirm, the reply draft and the in-flight state. Buttons carry
+  // data-act="ans-*" + data-id (decision id) + data-where (dc = decision card, plan = plan Q&A row) for page.js.
+  var REPLY_MAX = 500; // page.js uses the same limit; <= 500 UTF-16 units is always within the server's 500 code points
+  var ANY_CHAT = '아무 대화창에 붙여넣어도 됩니다';
+
+  // Which conversation an answer goes to, and which window answers an open question: herdr tab label and number when
+  // known, else the pane, else the title. One helper for the confirm row and the open-question line. Plain text;
+  // callers escape it.
+  function whereOf(s) {
+    var label = str(s.tabLabel);
+    if (label) return '🗂 ' + label + (num(s.tabNumber) == null ? '' : ' #' + s.tabNumber);
+    return str(s.paneId) ? '창 ' + str(s.paneId) : (str(s.title) || '(제목 없음)');
+  }
+  function cut(v, n) {
+    var cps = Array.from(str(v));
+    return cps.length > n ? cps.slice(0, n).join('') + '…' : cps.join('');
+  }
+  function posId(v) { return typeof v === 'number' && isFinite(v) && v >= 1 && Math.floor(v) === v ? v : null; }
+
+  // A/B/C buttons (the recommended one primary), the reply box when the conversation takes free text (answerKinds), the
+  // confirm row naming the receiving tab, and the send state / error. '' outside the server page.
+  function answerBox(d, s, ui, where) {
+    var id = posId(d.id);
+    if (!ui || ui.live !== true || id === null || !obj(s)) return '';
+    var key = String(id);
+    var a = obj(own(ui.answers, key)) || {};
+    var phase = str(a.phase);
+    var html = '<div class="ans-box" data-ans="' + key + '">';
+    if (phase === 'sending' || phase === 'sent') {
+      return html + '<p class="ans-state" role="status">' + (phase === 'sending' ? '보내는 중…' : '보냄 · 전달 상태 기다리는 중…') + '</p></div>';
+    }
+    if (phase === 'closed') return html + '<p class="ans-err" role="alert">' + esc(a.error) + '</p></div>';
+    var opts = obj(d.options) || {};
+    var rec = recOf(d);
+    var conf = obj(a.confirm);
+    var canReply = arr(s.answerKinds).indexOf('text') >= 0;
+    var at = ' data-id="' + key + '" data-where="' + esc(where) + '"';
+    html += '<div class="ans-opts" role="group" aria-label="#' + key + ' 답 고르기">';
+    ['A', 'B', 'C'].forEach(function (k) {
+      var o = obj(own(opts, k));
+      if (!o) return;
+      html += '<button type="button" class="ans-opt' + (k === rec ? ' is-rec' : '') + '" data-act="ans-pick" data-opt="' + k + '"' + at +
+        ' aria-pressed="' + (conf && conf.option === k ? 'true' : 'false') + '"><b>' + k + '</b> · ' + esc(o.text) +
+        (k === rec ? ' <span class="ans-rec">추천</span>' : '') + '</button>';
+    });
+    if (canReply) html += '<button type="button" class="ans-write" data-act="ans-reply"' + at + ' aria-expanded="' + (a.open && !conf ? 'true' : 'false') + '">✍ 답글</button>';
+    html += '</div>';
+    if (conf) {
+      var reply = typeof conf.text === 'string';
+      html += '<div class="ans-confirm" role="group" aria-label="보내기 확인"><span class="ans-q">' + esc(whereOf(s)) + ' 대화에 ' +
+        (reply ? '답글을 보낼까요? <q class="ans-quote">' + esc(cut(conf.text, 40)) + '</q>' : '<b>' + esc(conf.option) + '</b>를 보낼까요?') + '</span>' +
+        '<span class="ans-acts"><button type="button" class="ans-go" data-act="ans-send"' + at + '>보내기</button>' +
+        '<button type="button" class="ans-cancel" data-act="ans-cancel"' + at + '>취소</button></span></div>';
+    } else if (canReply && a.open) {
+      var draft = str(a.draft);
+      html += '<div class="ans-reply"><textarea class="ans-text" data-draft="' + key + '" data-where="' + esc(where) + '" maxlength="' + REPLY_MAX +
+        '" rows="3" aria-label="#' + key + ' 답글">' + esc(draft) + '</textarea><div class="ans-foot">' +
+        '<span class="ans-hint">채팅에 직접 친 말과 같아요 (승인 포함)</span><span class="ans-count">' + draft.length + '/' + REPLY_MAX + '</span>' +
+        '<button type="button" class="ans-go" data-act="ans-text"' + at + '>보내기</button></div></div>';
+    }
+    if (str(a.error)) html += '<p class="ans-err" role="alert">' + esc(a.error) + '</p>';
+    return html + '</div>';
+  }
+
+  // Answered decisions the server page keeps on the card: every answer without a delivery proof yet, plus the ones this page
+  // is sending or has sent itself, 전달됨 included, so a board answer is followed from 보내는 중 to the delivery text of
+  // render.mjs on the card (which heldTab keeps on the owner's screen meanwhile).
+  function sentDecisions(s, ui) {
+    return arr(s.decisions).filter(function (d) {
+      if (!obj(d) || !d.answered) return false;
+      var a = obj(own(ui.answers, str(d.id)));
+      return !obj(d.receipt) || (!!a && (a.phase === 'sending' || a.phase === 'sent'));
+    }).sort(function (a, b) { return (num(a.id) || 0) - (num(b.id) || 0); });
+  }
+  function sentLine(d) {
+    var a = obj(d.answer) || {};
+    var opt = str(a.option), reply = str(a.text);
+    var o = opt ? obj(own(obj(d.options) || {}, opt)) : null;
+    var what = opt ? '답 ' + esc(opt) + (o && str(o.text) ? ' · ' + esc(o.text) : '')
+      : reply ? '답글 <q class="ans-quote">' + esc(cut(reply, 40)) + '</q>' : '답 받음';
+    return '<p class="dsent"><span class="sym">✅</span><span>#' + esc(d.id) + ' ' + what + '</span>' +
+      chip(obj(d.receipt) ? 's-done' : 'x-busy', str(d.delivery) || '전달 기다림') + '</p>';
+  }
+
+  // plan Q&A rows (plan-view.js) draw the same controls for their open decision, wherever that decision's conversation is
+  function planAnswerBox(ui) {
+    if (ui.live !== true) return null;
+    return function (decisionId) {
+      var hit = own(ui.decs, str(decisionId));
+      return hit && !hit.d.answered && !hit.d.closed ? answerBox(hit.d, hit.s, ui, 'plan') : '';
+    };
+  }
+  function decisionIndex(sessions) {
+    var out = Object.create(null);
+    sessions.forEach(function (n) {
+      arr(n.raw.decisions).forEach(function (d) {
+        if (obj(d) && posId(d.id) !== null) out[String(d.id)] = { d: d, s: n.raw };
+      });
+    });
+    return out;
+  }
+
+  function decisionCard(d, s, ui, owner) {
     var id = str(d.id) || '?';
     var opts = obj(d.options) || {};
-    var rec = own({ A: 1, B: 1, C: 1 }, d.recommend) && obj(own(opts, d.recommend)) ? d.recommend : (obj(own(opts, 'A')) ? 'A' : '');
+    var rec = recOf(d);
     var answer = '/decide ' + id + rec;
-    var html = '<div class="dcard' + (d.blocks ? ' blocks' : '') + '" data-decision="' + esc(id) + '">' +
+    var box = answerBox(d, owner, ui, 'dc');
+    var html = '<div class="dcard' + (d.blocks ? ' blocks' : '') + (box ? ' can-answer' : '') + '" data-decision="' + esc(id) + '">' +
       '<div class="dline dq">#' + esc(id) + ' <span class="tag">[' + esc(s.workName || s.title) + ']</span> <b>' + esc(d.question) + '</b>' +
       (d.blocks ? ' <span class="chip x-block">막는 결정</span>' : '') + '</div>';
     ['A', 'B', 'C'].forEach(function (k) {
@@ -148,9 +289,10 @@
       html += '<div class="dline opt' + (k === rec ? ' rec-opt' : '') + '"><b>' + k + ':</b> ' + esc(o.text) + ' <span class="arrow">=&gt;</span> ' + esc(o.consequence) + '</div>';
     });
     html += '<div class="dline rec">추천: ' + esc(rec || '-') + ' - ' + esc(d.reason) + '</div>' +
-      '<div class="dline from">만든 대화: ' + esc(s.title) + ' (' + esc(s.paneId || '창 모름') + ')</div>' +
-      '<div class="dline when">⏱ ' + esc(when(d.createdAt, s.__now)) + '</div>' +
-      '<div class="dline ans">답: ' + esc(answer) + ' ' + copyBtn(answer) + '</div>' +
+      '<div class="dline from">대화: ' + esc(whereLabel(s)) + '</div>' +
+      '<div class="dline when">⏱ ' + esc(when(d.createdAt, s.__now)) + '</div>' + box +
+      (box ? '<div class="dline ans">답: <code>' + esc(answer) + '</code> ' + copyBtn(answer) + ' <span class="ans-hint">· ' + ANY_CHAT + '</span></div>'
+        : '<div class="dline ans">답: ' + esc(answer) + ' ' + copyBtn(answer) + '</div>') +
       '</div><!--dcard-->';
     return html;
   }
@@ -225,7 +367,7 @@
     }
     if (pv) {
       var plan = obj(s.plan), link = obj(s.planLink);
-      if (plan) html += '<div class="plan-slot">' + pv.render(plan, now, { esc: esc, expanded: ui.expanded }) + '</div>';
+      if (plan) html += '<div class="plan-slot">' + pv.render(plan, now, { esc: esc, expanded: ui.expanded, answerBox: planAnswerBox(ui) }) + '</div>';
       else if (link) {
         var owner = ui.byId ? own(ui.byId, str(link.ownerId)) : null;
         var target = owner ? { target: owner.dom, tab: owner.tab } : {};
@@ -236,6 +378,7 @@
   }
 
   function card(n, ui, now) {
+    var live = !!ui.live, focus = ui.focus;
     var s = n.raw;
     var expanded = ui.expanded;
     var key = str(s.statusKey) || (s.status === 'blocked' ? 'blocked' : s.status === 'done' ? 'done' : 'in_progress');
@@ -243,13 +386,14 @@
     var extra = arr(s.chips).filter(function (c) { return typeof c === 'string'; });
     if (s.autoSummary) extra.push('자동 요약');
     if (s.answerTrimmed) extra.push('답 자동 줄임');
-    var view = { title: str(s.title) || '(제목 없음)', workName: str(s.workName), paneId: str(s.paneId), __now: now };
+    var view = { title: str(s.title) || '(제목 없음)', workName: str(s.workName), paneId: str(s.paneId), tabLabel: str(s.tabLabel), tabNumber: num(s.tabNumber), tabId: str(s.tabId), sessionId: str(s.id), __now: now };
+    var fview = view;
 
     var html = '<article class="card st-' + key + '" id="' + n.dom + '" data-card="' + esc(n.id) + '">' +
       '<div class="ch">' + chip('s-' + key, STATUS_LABEL[key]) +
       extra.map(function (c) { return chip(own(EXTRA_CHIP, c) || 'x-info', c); }).join('') +
       (view.workName ? '<span class="tag">[' + esc(view.workName) + ']</span>' : '') +
-      '<span class="title">' + esc(view.title) + '</span>' +
+      '<span class="title">' + esc(whereLabel(view)) + '</span>' + focusBtn(fview, { live: live, focus: focus }) +
       '<span class="time">⏱ ' + esc(when(s.lastActivityAt != null ? s.lastActivityAt : s.lastBriefAt, now)) + '</span></div>' +
       '<p class="hl"><span class="sym">▸</span>' + esc(s.headline || '아직 보고 없음') + '</p>';
     html += liveBlocks(s, n, ui, now);
@@ -258,9 +402,10 @@
     if (q) {
       // Read-only alert: say where the question lives. Pane = the mirror's own paneId, else (older records) the session's pane.
       var qPane = str(q.paneId) || str(s.paneId);
+      var tabbed = !!str(view.tabLabel);
       html += '<p class="oq"><span class="sym">❓</span>질문 알림 열림 - ' +
-        (qPane ? '<code>' + esc(qPane) + '</code>에서 답하기' : '질문이 뜬 창에서 답하기') + ' (읽기 전용): ' + esc(q.text) +
-        ' <span class="time">⏱ ' + esc(when(q.at, now)) + '</span></p>';
+        (tabbed ? '답할 창: <code>' + esc(whereOf(view)) + '</code>' : qPane ? '<code>' + esc(qPane) + '</code>에서 답하기' : '질문이 뜬 창에서 답하기') + ' (읽기 전용): ' + esc(q.text) +
+        ' <span class="time">⏱ ' + esc(when(q.at, now)) + '</span> ' + focusBtn(fview, { live: live, focus: focus }) + '</p>';
     }
 
     var changes = arr(s.changes);
@@ -271,9 +416,11 @@
         moreBtn(kc, Math.max(0, changes.length - 3), oc) + '</div>';
     }
     var decs = openDecisions(s);
-    if (decs.length) {
+    var sent = ui.live === true ? sentDecisions(s, ui) : [];
+    if (decs.length || sent.length) {
       var kd = 'more-dc:' + n.id, od = !!own(expanded, kd);
-      html += '<div class="decs">' + decs.slice(0, od ? decs.length : 2).map(function (d) { return decisionCard(d, view); }).join('') +
+      html += '<div class="decs">' + sent.map(sentLine).join('') +
+        decs.slice(0, od ? decs.length : 2).map(function (d) { return decisionCard(d, view, ui, s); }).join('') +
         moreBtn(kd, Math.max(0, decs.length - 2), od) + '</div>';
     }
     var kx = 'detail:' + n.id, ox = !!own(expanded, kx);
@@ -311,13 +458,13 @@
     var ui = obj(uiState) || {};
     var expanded = obj(ui.expanded) || {};
     var now = toMs(vm.generatedAt);
-    var sessions = normSessions(vm);
+    var sessions = normSessions(vm, ui);
     var byTab = { wait: [], run: [], done: [] };
     sessions.forEach(function (n) { byTab[n.tab].push(n); });
     var tab = own(byTab, ui.tab) ? ui.tab : (byTab.wait.length ? 'wait' : byTab.run.length ? 'run' : sessions.length ? 'done' : 'wait');
     var byId = Object.create(null);
     sessions.forEach(function (n) { byId[n.id] = n; });
-    var uiN = { expanded: expanded, byId: byId, wallNow: num(ui.wallNow) };
+    var uiN = { expanded: expanded, byId: byId, wallNow: num(ui.wallNow), live: !!ui.live, focus: obj(ui.focus) };
 
     var openCount = 0, blocked = 0, stale = 0;
     sessions.forEach(function (n) {
@@ -325,6 +472,10 @@
       if (n.raw.statusKey === 'blocked' || n.raw.status === 'blocked') blocked++;
       if (arr(n.raw.chips).indexOf('오래됨') >= 0) stale++;
     });
+    // answer controls (server page): page state per decision (page.js) and decision id -> {d, s} for the plan Q&A rows
+    uiN.live = ui.live === true;
+    uiN.answers = obj(ui.answers) || {};
+    uiN.decs = decisionIndex(sessions);
 
     // left sidebar: 3 tabs, each with project -> conversation links
     var nav = '<nav class="toc' + (ui.tocOpen ? ' open' : '') + '" aria-label="목차">' +
@@ -343,7 +494,7 @@
           nav += '<li class="proj">📁 ' + esc(grp.project) + '</li>';
           grp.items.forEach(function (n) {
             nav += '<li><a class="toclink" href="#' + n.dom + '" data-goto="' + n.dom + '" data-tab="' + t.key + '">' +
-              (str(n.raw.workName) ? '<span class="tag">[' + esc(n.raw.workName) + ']</span> ' : '') + esc(str(n.raw.title) || '(제목 없음)') + '</a></li>';
+              (str(n.raw.workName) ? '<span class="tag">[' + esc(n.raw.workName) + ']</span> ' : '') + esc(whereLabel(n.raw)) + '</a></li>';
           });
         });
         nav += '</ul>';
@@ -364,6 +515,7 @@
     } else if (!byTab[tab].length) {
       main += '<p class="empty muted">• 이 탭에 해당하는 대화가 없습니다</p>';
     } else {
+      if (!ui.live && openCount) main += '<p class="note ro">이 페이지는 보기 전용입니다 - 답은 아무 대화창에 /decide 로, 또는 실시간 상황판에서</p>';
       groupByProject(byTab[tab]).forEach(function (grp) {
         main += '<h3 class="projh">📁 ' + esc(grp.project) + '</h3>';
         grp.items.forEach(function (n) { main += card(n, uiN, now); });

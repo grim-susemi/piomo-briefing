@@ -599,6 +599,8 @@ function extHost(t, extra = {}) {
   return { bus, host, ctx, notes };
 }
 
+const drainHerdr = () => new Promise((r) => setImmediate(r)); // every queued herdr microtask has run
+
 test('mirror-created blocking card notifies through herdr when usable (once), not ctx.ui.notify', async (t) => {
   const execs = [];
   const syncs = [];
@@ -606,16 +608,23 @@ test('mirror-created blocking card notifies through herdr when usable (once), no
     env: { PATH: process.env.PATH, HERDR_BIN_PATH: 'C:/herdr/herdr.exe' },
     exists: (p) => p === 'C:/herdr/herdr.exe' || existsSync(p),
     execFileSync: (bin, args) => { syncs.push([bin, args]); },
-    execFile: (bin, args, cb) => { execs.push([bin, args]); cb(null); },
+    execFile: (bin, args, options, cb) => { execs.push([bin, args, options]); cb(null); },
   });
   await h.host.emit('session_start', { reason: 'startup' }, h.ctx);
   h.bus.emit(ASKED, askedPayload(h.ctx, { request: request({ required: true }) }));
   h.bus.emit(CLOSED, clone(FIX.closed.timedOut));
   h.bus.emit(CLOSED, clone(FIX.closed.timedOut));
-  assert.deepEqual(syncs, [['C:/herdr/herdr.exe', ['notification', '--help']]]);
-  assert.equal(execs.length, 1);
-  assert.deepEqual(execs[0][1].slice(0, 2), ['notification', 'show']);
-  assert.ok(execs[0][1][2].startsWith('결정 #1 필요: '));
+  await drainHerdr();
+  assert.deepEqual(syncs, [], 'herdr is never called synchronously');
+  assert.equal(execs.length, 2, 'probe + show');
+  for (const [bin, argv, options] of execs) {
+    assert.equal(bin, 'C:/herdr/herdr.exe');
+    assert.ok(Array.isArray(argv));
+    assert.equal(options.timeout, 3000);
+  }
+  assert.deepEqual(execs[0][1], ['notification', '--help']);
+  assert.deepEqual(execs[1][1].slice(0, 2), ['notification', 'show']);
+  assert.ok(execs[1][1][2].startsWith('결정 #1 필요: '));
   assert.equal(h.notes.length, 0);
 });
 

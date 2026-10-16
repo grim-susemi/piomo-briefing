@@ -559,12 +559,13 @@ async function phaseReal() {
 }
 
 try {
-  if (args.scenario === 'plan-view') {
-    const { runPlanView } = await import('./plan-view-scenario.mjs');
-    await runPlanView({
+  if (args.scenario === 'plan-view' || args.scenario === 'board-answer') {
+    const scenarioCtx = {
       Host, waitUntil, isoEnv, readyHost, readJson, listDir, walk, sessionEntries, textOf, notifies, isSettled, isStart,
       args, OUT, WORK, AGENT, STATE, HERE, REPO, SCRIPT_LOG, PIDS, EVENTS, slash, pad6,
-    });
+    };
+    if (args.scenario === 'plan-view') await (await import('./plan-view-scenario.mjs')).runPlanView(scenarioCtx);
+    else await (await import('./answer-scenario.mjs')).runBoardAnswer(scenarioCtx);
   } else if (args.phase === 'probe') await phaseProbe();
   else if (args.phase === 'scripted') await phaseScripted();
   else if (args.phase === 'real') await phaseReal();
@@ -575,5 +576,5 @@ try {
   mergeSummary({ [`${args.phase}Error`]: String(err.message || err) });
   process.exitCode = 1;
 } finally {
-  if (!args.keep && (args.phase === 'cleanup' || args.scenario === 'plan-view')) fs.rmSync(WORK, { recursive: true, force: true });
+  if (!args.keep && (args.phase === 'cleanup' || args.scenario === 'plan-view' || args.scenario === 'board-answer')) fs.rmSync(WORK, { recursive: true, force: true });
 }

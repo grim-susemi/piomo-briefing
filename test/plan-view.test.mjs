@@ -237,3 +237,32 @@ test('rendering is deterministic and does not mutate the input or expansion stat
   assert.equal(render(plan, state), render(plan, state));
   assert.equal(JSON.stringify({ plan, state }), before);
 });
+
+test('server page: the open Q&A row asks ui.answerBox for its decision and keeps the /decide copy line; a blank box leaves the row as it was', () => {
+  const { view, esc } = load();
+  const seen = [];
+  const html = view.render(FIXTURE, NOW, { expanded: expanded(FIXTURE), esc, answerBox: (id) => { seen.push(id); return '<i data-box="' + id + '"></i>'; } });
+  assert.deepEqual(seen, [15], 'only the open question asks, with its decision id');
+  const rows = html.split('<tr class="plan-question ').slice(1);
+  assert.ok(rows[0].includes('<i data-box="15"></i>'));
+  assert.ok(rows[0].includes('data-copy="/decide 15A"'));
+  assert.ok(rows.slice(1).every((row) => !row.includes('data-box')));
+  assert.equal(view.render(FIXTURE, NOW, { expanded: expanded(FIXTURE), esc, answerBox: () => '' }), render(), 'not answerable here: unchanged row');
+});
+
+test('server page: view.js gives the plan row the same controls as the decision card; none once answered or on the file page', () => {
+  const context = {};
+  vm.runInNewContext(VIEW_SOURCE, context, { filename: 'view.js' });
+  vm.runInNewContext(SOURCE, context, { filename: 'plan-view.js' });
+  const open = FIXTURE.questions.find((q) => q.state === 'open');
+  const model = { generatedAt: NOW, sessions: [{ id: 's1', title: '계획', tabLabel: '수리', tabNumber: 181, answerKinds: ['option', 'text'], status: 'needs_decision', plan: clone(FIXTURE),
+    decisions: [{ id: 15, sessionId: 's1', question: open.text, options: open.options, recommend: 'A', reason: 'r', blocks: true, answered: false, closed: false }] }] };
+  const row = (ui) => context.BriefView.renderApp(model, { expanded: { ['plan:' + FIXTURE.planId]: true }, ...ui }).split('<tr class="plan-question is-open"')[1].split('</tr>')[0];
+  const live = row({ live: true });
+  assert.equal(count(live, /data-act="ans-pick" data-opt="[AB]" data-id="15" data-where="plan"/g), 2);
+  assert.equal(count(live, /data-act="ans-reply" data-id="15" data-where="plan"/g), 1);
+  assert.ok(row({ live: true, answers: { 15: { confirm: { option: 'B' } } } }).includes('class="ans-confirm"'), 'shares the per-decision state');
+  assert.equal(count(row({}), /data-act="ans-/g), 0, 'file page');
+  model.sessions[0].decisions[0].answered = true;
+  assert.equal(count(row({ live: true }), /data-act="ans-/g), 0, 'answered decision');
+});

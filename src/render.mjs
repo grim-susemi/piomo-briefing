@@ -185,11 +185,12 @@ function planModel(p, ownerMeta, decisionsOf, answers, closures) {
       const ans = answers.get(live.id);
       if (ans) {
         const opt = str(ans.option);
+        const reply = opt ? '' : str(ans.text); // a board reply: the owner's own words instead of an option
         const text = isObj(live.options) && isObj(live.options[opt]) ? str(live.options[opt].text) : '';
         out.state = 'answered';
         out.by = 'owner';
-        out.option = opt;
-        out.answer = clipCp(text ? `${opt} ${text}` : opt, 60);
+        out.option = reply ? '답글' : opt;
+        out.answer = clipCp(reply || (text ? `${opt} ${text}` : opt), 60);
       } else if (q.state === 'open') {
         out.decisionId = live.id;
       }
@@ -397,7 +398,7 @@ export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
         source: str(d.source) || 'brief',
         answered: Boolean(ans),
         closed: closures.has(d.id),
-        answer: ans ? { option: str(ans.option), at: isNum(ans.at) ? ans.at : null } : null,
+        answer: ans ? { option: str(ans.option), text: str(ans.text), at: isNum(ans.at) ? ans.at : null } : null, // text = a board reply
         receipt: rc && rc.proven !== false ? { kind: str(rc.kind), mode: str(rc.mode), deliveredAt: isNum(rc.deliveredAt) ? rc.deliveredAt : null, proven: true } : null, // unproven (admitted, not yet confirmed) is not shown as a delivery proof
       };
       if (ans) {
@@ -459,6 +460,11 @@ export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
       cwd: str(meta.cwd),
       title: str(brief.title) || str(meta.title) || sid,
       paneId: str(meta.paneId),
+      tabId: str(meta.tabId),
+      tabLabel: str(meta.tabLabel),
+      tabNumber: Number.isInteger(meta.tabNumber) ? meta.tabNumber : null,
+      // what this conversation's deliverer takes: the board offers the reply box only when 'text' is here
+      answerKinds: [...new Set(arr(meta.answerKinds).filter((k) => k === 'option' || k === 'text'))],
       workName: str(isObj(meta.auto) && isObj(meta.auto.work) ? meta.auto.work.name : '') || str(meta.workName),
       status,
       statusKey: cardStatus(truthView, now),
@@ -578,6 +584,8 @@ function dataJsText(vm) {
   return `/* seq:${vm.seq} */\nwindow.__briefData && window.__briefData(${scriptJson(vm)});\n`;
 }
 
+const attrEscape = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 const PAGE_CSS = ['page.css', 'plan-view.css', 'workers-view.css', 'alarm.css'];
 // view.js first, then the block renderers it calls into, then alarm.js, then page.js which wires them together.
 const PAGE_JS = ['view.js', 'plan-view.js', 'workers-view.js', 'alarm.js', 'page.js'];
@@ -585,8 +593,10 @@ const PAGE_JS = ['view.js', 'plan-view.js', 'workers-view.js', 'alarm.js', 'page
 /**
  * The whole board page (all scripts and styles inline, first paint from `vm`). mode 'file' = STATE/index.html,
  * 'server' = GET / of the board server; both are built from the same template of this generation.
+ * `token` (the board server's per-process write token) is emitted as <meta name="omo-board-token"> in server mode ONLY:
+ * the file page, data.js, /data.json and the SSE model never carry it.
  */
-export function pageHtml(vm, generation, { mode = 'file', fs = nodeFs } = {}) {
+export function pageHtml(vm, generation, { mode = 'file', token, fs = nodeFs } = {}) {
   const read = (name) => fs.readFileSync(join(PAGE_DIR, name), 'utf8');
   const css = PAGE_CSS.map((n) => read(n).replace(/<\/style/gi, '<\\/style')).join('\n');
   return '<!doctype html>\n<html lang="ko"><head><meta charset="utf-8">' +
@@ -594,6 +604,7 @@ export function pageHtml(vm, generation, { mode = 'file', fs = nodeFs } = {}) {
     '<link rel="icon" href="data:,">' + // inline icon: the board server has no /favicon.ico and its 404 would be a console error on every load
     (Number.isInteger(generation) ? `<meta name="omo-briefing-generation" content="${generation}">` : '') +
     `<meta name="omo-briefing-mode" content="${mode === 'server' ? 'server' : 'file'}">` +
+    (mode === 'server' && typeof token === 'string' && token !== '' ? `<meta name="omo-board-token" content="${attrEscape(token)}">` : '') +
     '<title>OMO 상황판</title>\n<style>\n' + css + '\n</style></head>\n<body>\n<div id="app"></div>\n' +
     PAGE_JS.map((n) => '<script>\n' + inlineJs(read(n)) + '\n</script>\n').join('') +
     // Runs after page.js's own DOMContentLoaded start(): first paint uses the inline data,

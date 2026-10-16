@@ -1,16 +1,31 @@
-// Loopback-only board server: GET / (page), /data.json (view model), /events (SSE), /health.
-// `node:http` only. No write routes, no CORS, never serves data.js (a cross-site <script> could read it).
+// Loopback-only board server: GET / (page), /data.json (view model), /events (SSE), /health, and exactly two
+// guarded write routes, POST /answer and POST /focus. `node:http` only. No CORS (no Access-Control-* header,
+// OPTIONS stays 405), never serves data.js (a cross-site <script> could read it). Every other method/path is 405/404.
+//
+// A write route runs only when ALL of these hold, checked in this order; the first failure is answered and
+// no callback runs (Host is checked first, for every route):
+//   Sec-Fetch-Site === 'same-origin' (403) -> Origin === http://<Host> (403, 'null' included)
+//   -> Content-Type application/json (415) -> X-Board-Token === token via timingSafeEqual (403)
+//   -> at most one write in flight server-wide (429) -> body <= 4096 bytes read within bodyTimeoutMs (413/408)
+//   -> a JSON object with exactly the allowed keys (400) -> onAnswer(body) / onFocus(body) -> {status, json}.
+// The write slot stays taken until the callback itself settles: writeTimeoutMs only decides when the 504 is sent,
+// it never cancels the callback or frees the slot, so at most one callback runs at any time (others get 429).
+// /answer body: {id: positive integer, sessionId: string} + exactly one of option ('A'|'B'|'C') / text (string).
+// /focus body: {sessionId: string}. Responses are JSON {ok, code?} with the SECURE headers. Without a non-empty
+// `token` and the matching callback a write route does not exist (405 like any other non-GET).
 //
 // createBoardServer({getPage, getViewModel, generation, portBase, portCount=10, preferPort?,
-//                    onError, onRecover, pingMs?, onClientCount?, createServer?})
+//                    onError, onRecover, pingMs?, onClientCount?, createServer?,
+//                    token?, onAnswer?, onFocus?, bodyTimeoutMs=2000, writeTimeoutMs=10000})
 //   -> {start(): Promise<{port}>, broadcast(vm), sendPaused(), close(): Promise<void>, clientCount(), address()}
 //
 // Error keys reported through onError(key, err) / cleared through onRecover(key):
 //   'server:listen' - listen/server-level failures and NO_PORT; cleared by a successful listen
-//   'server:sse'    - HTTP parser/request/response/socket failures and getPage/getViewModel throwing;
-//                     cleared by the next successful request or broadcast after such an error
+//   'server:sse'    - HTTP parser/request/response/socket failures and getPage/getViewModel/onAnswer/onFocus
+//                     throwing or returning garbage; cleared by the next successful request, write or broadcast
 // The only intentionally ignored errors are EADDRINUSE/EACCES while scanning ports.
 import http from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 
 const HOST = '127.0.0.1';
 const MAX_CLIENTS = 16;
@@ -20,6 +35,13 @@ const CLOSE_BOUND_MS = 500;
 const MAX_CLIENT_BACKLOG = 2 * 1024 * 1024; // a stalled SSE reader is dropped instead of buffering forever
 const GATED_PATHS = new Set(['/data.json', '/events', '/health']);
 const SITE_OK = new Set(['same-origin', 'none']);
+const MAX_BODY_BYTES = 4096;
+const BODY_TIMEOUT_MS = 2000;
+const WRITE_TIMEOUT_MS = 10000; // after this a still-running write callback is answered 504; it keeps the write slot until it settles
+const ANSWER_KEYS = new Set(['id', 'sessionId', 'option', 'text']);
+const ANSWER_OPTIONS = new Set(['A', 'B', 'C']);
+const WRITE_TIMED_OUT = Symbol('write timed out');
+const UTF8 = new TextDecoder('utf-8', { fatal: true });
 const SECURE = {
   'Cache-Control': 'no-store',
   'X-Frame-Options': 'DENY',
@@ -39,6 +61,11 @@ export function createBoardServer(options) {
     onError = () => {},
     onRecover = () => {},
     onClientCount = () => {},
+    token,
+    onAnswer,
+    onFocus,
+    bodyTimeoutMs = BODY_TIMEOUT_MS,
+    writeTimeoutMs = WRITE_TIMEOUT_MS,
     pingMs = PING_MS,
     createServer = (handler) => http.createServer(handler),
   } = options;
@@ -54,6 +81,11 @@ export function createBoardServer(options) {
   let pending = 0;
   const clients = new Set();
   const outstandingSse = { value: false };
+  const tokenBytes = typeof token === 'string' && token !== '' ? Buffer.from(token) : null;
+  const writeHandlers = new Map();
+  if (tokenBytes && typeof onAnswer === 'function') writeHandlers.set('/answer', onAnswer);
+  if (tokenBytes && typeof onFocus === 'function') writeHandlers.set('/focus', onFocus);
+  let writeInFlight = false;
 
   // A host callback that throws must never take the lead conversation down.
   function safe(fn, ...args) {
@@ -86,6 +118,10 @@ export function createBoardServer(options) {
     res.end(body);
   }
   const plain = (res, status, text, extra) => send(res, status, 'text/plain; charset=utf-8', text, extra);
+  function json(res, status, body, extra) {
+    if (res.destroyed || res.writableEnded) return; // the client left while a write was in progress
+    send(res, status, 'application/json; charset=utf-8', JSON.stringify(body), extra);
+  }
 
   function hostAllowed(host) {
     if (typeof host !== 'string') return false;
@@ -146,17 +182,169 @@ export function createBoardServer(options) {
     recoverSse();
   }
 
+  function tokenMatches(given) {
+    if (typeof given !== 'string') return false;
+    const bytes = Buffer.from(given);
+    return bytes.length === tokenBytes.length && timingSafeEqual(bytes, tokenBytes);
+  }
+
+  // First failing header guard as [status, code], or null when every one holds. The Host header was
+  // already checked by route(), so it is a string equal to 127.0.0.1:<port> or localhost:<port>.
+  function headerRefusal(req) {
+    const h = req.headers;
+    if (h['sec-fetch-site'] !== 'same-origin') return [403, 'FORBIDDEN_SITE'];
+    if (h.origin !== `http://${h.host.toLowerCase()}`) return [403, 'FORBIDDEN_ORIGIN'];
+    const type = String(h['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+    if (type !== 'application/json') return [415, 'UNSUPPORTED_TYPE'];
+    if (!tokenMatches(h['x-board-token'])) return [403, 'FORBIDDEN_TOKEN'];
+    return null;
+  }
+
+  // Resolves {buf}, {status, code} (413/408) or {aborted: true} (the client went away; nothing to answer).
+  function readBody(req) {
+    return new Promise((resolve) => {
+      if (Number(req.headers['content-length']) > MAX_BODY_BYTES) {
+        resolve({ status: 413, code: 'TOO_LARGE' });
+        return;
+      }
+      const chunks = [];
+      let size = 0;
+      let done = false;
+      const finish = (result) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      const timer = setTimeout(finish, bodyTimeoutMs, { status: 408, code: 'TIMEOUT' });
+      timer.unref();
+      req.on('data', (chunk) => {
+        size += chunk.length;
+        if (size > MAX_BODY_BYTES) finish({ status: 413, code: 'TOO_LARGE' });
+        else if (!done) chunks.push(chunk);
+      });
+      req.once('end', () => finish({ buf: Buffer.concat(chunks) }));
+      req.once('close', () => finish({ aborted: true }));
+    });
+  }
+
+  function validAnswer(b) {
+    if (!Object.keys(b).every((k) => ANSWER_KEYS.has(k))) return false;
+    if (!Number.isSafeInteger(b.id) || b.id <= 0 || typeof b.sessionId !== 'string') return false;
+    const hasOption = Object.hasOwn(b, 'option');
+    const hasText = Object.hasOwn(b, 'text');
+    if (hasOption === hasText) return false;
+    return hasOption ? ANSWER_OPTIONS.has(b.option) : typeof b.text === 'string';
+  }
+  function validFocus(b) {
+    const keys = Object.keys(b);
+    return keys.length === 1 && keys[0] === 'sessionId' && typeof b.sessionId === 'string';
+  }
+  // The parsed body when it is a JSON object with exactly the keys the route allows, else null.
+  function parseWriteBody(buf, pathname) {
+    let value;
+    try {
+      value = JSON.parse(UTF8.decode(buf));
+    } catch {
+      return null; // malformed JSON / UTF-8 is a 400 for the caller, not a server fault
+    }
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+    return (pathname === '/answer' ? validAnswer(value) : validFocus(value)) ? value : null;
+  }
+
+  // Runs the callback and owns the write slot until the callback settles. The deadline only picks the moment the
+  // caller answers (WRITE_TIMED_OUT -> 504): Promise.race does not cancel the callback, so the slot is NOT freed
+  // there. A rejection that arrives after the deadline has no response left to fail, so it is reported here.
+  async function callWriteHandler(handler, body) {
+    const call = Promise.resolve().then(() => handler(body));
+    let timer;
+    let timedOut = false;
+    const deadline = new Promise((resolve) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        resolve(WRITE_TIMED_OUT);
+      }, writeTimeoutMs);
+      timer.unref();
+    });
+    call.then(
+      () => { writeInFlight = false; },
+      (err) => {
+        writeInFlight = false;
+        if (timedOut) report('server:sse', err);
+      },
+    );
+    try {
+      return await Promise.race([call, deadline]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function serveWrite(req, res, pathname, handler) {
+    const refusal = headerRefusal(req);
+    if (refusal) {
+      json(res, refusal[0], { ok: false, code: refusal[1] });
+      return;
+    }
+    if (writeInFlight) {
+      json(res, 429, { ok: false, code: 'BUSY' }, { 'Retry-After': '1' });
+      return;
+    }
+    writeInFlight = true;
+    let slotHandedToCallback = false; // once the callback runs it, not this function, frees the slot
+    try {
+      const got = await readBody(req);
+      if (got.aborted) return;
+      if (got.status) {
+        json(res, got.status, { ok: false, code: got.code }, { Connection: 'close' });
+        return;
+      }
+      const body = parseWriteBody(got.buf, pathname);
+      if (!body) {
+        json(res, 400, { ok: false, code: 'BAD_REQUEST' });
+        return;
+      }
+      let result;
+      try {
+        slotHandedToCallback = true;
+        result = await callWriteHandler(handler, body);
+      } catch (err) {
+        report('server:sse', err);
+        json(res, 500, { ok: false, code: 'INTERNAL' });
+        return;
+      }
+      if (result === WRITE_TIMED_OUT) {
+        json(res, 504, { ok: false, code: 'TIMEOUT' });
+        return;
+      }
+      if (!result || !Number.isInteger(result.status) || result.status < 200 || result.status > 599 || typeof result.json !== 'object' || result.json === null) {
+        report('server:sse', new Error(`${pathname} callback returned no {status, json}`));
+        json(res, 500, { ok: false, code: 'INTERNAL' });
+        return;
+      }
+      json(res, result.status, result.json);
+      recoverSse();
+    } finally {
+      if (!slotHandedToCallback) writeInFlight = false;
+    }
+  }
+
   async function route(req, res) {
     if (!hostAllowed(req.headers.host)) {
       plain(res, 403, 'forbidden host');
       return;
     }
-    if (req.method !== 'GET') {
-      plain(res, 405, 'method not allowed', { Allow: 'GET' });
-      return;
-    }
     const q = req.url.indexOf('?');
     const pathname = q < 0 ? req.url : req.url.slice(0, q);
+    const writeHandler = writeHandlers.get(pathname);
+    if (req.method === 'POST' && writeHandler) {
+      await serveWrite(req, res, pathname, writeHandler);
+      return;
+    }
+    if (req.method !== 'GET') {
+      plain(res, 405, 'method not allowed', { Allow: writeHandler ? 'POST' : 'GET' });
+      return;
+    }
     if (GATED_PATHS.has(pathname)) {
       const site = req.headers['sec-fetch-site'];
       if (site !== undefined && !SITE_OK.has(site)) {

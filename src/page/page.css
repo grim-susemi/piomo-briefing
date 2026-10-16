@@ -112,6 +112,52 @@ h2 { margin: 10px 0 4px; font-size: 16px; }
 .dline.ans { font-family: var(--mono); }
 .arrow { color: var(--muted); }
 
+/* answer controls (server page only: view.js answerBox, page.js 'board answers'): A/B/C buttons with the recommended one
+ * primary, reply box, confirm row naming the receiving tab, send state and error. The /decide line drops to small print.
+ * The [그 창으로 이동] button (view.js focusBtn, server page) wears the same clothes as the answer buttons. */
+.ans-box { display: grid; gap: 4px; margin: 4px 0 2px; }
+.ans-opts, .ans-confirm, .ans-acts, .ans-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.ans-opt, .ans-write, .ans-go, .ans-cancel, .focusbtn {
+  max-width: 100%; padding: 2px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel);
+  font-size: 12px; line-height: 18px; text-align: left; overflow-wrap: anywhere;
+}
+.ans-opt:hover, .ans-write:hover, .ans-cancel:hover, .focusbtn:hover { border-color: var(--accent); color: var(--accent); }
+.ans-opt.is-rec, .ans-go { border-color: var(--accent); background: var(--accent); color: var(--panel); font-weight: 700; }
+.ans-opt.is-rec:hover, .ans-go:hover { background: color-mix(in srgb, var(--accent) 82%, var(--fg)); color: var(--panel); }
+.ans-opt[aria-pressed="true"], .ans-write[aria-expanded="true"] { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent); }
+.ans-opt:focus-visible, .ans-write:focus-visible, .ans-go:focus-visible, .ans-cancel:focus-visible, .focusbtn:focus-visible, .ans-text:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.ans-rec { display: inline-block; margin-left: 2px; padding: 0 5px; border-radius: 9px; background: var(--panel); color: var(--accent); font-size: 11px; line-height: 16px; }
+.ans-confirm { padding: 4px 8px; border: 1px solid var(--accent); border-radius: 6px; background: var(--spy-bg); }
+.ans-q { flex: 1 1 240px; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.ans-quote { color: var(--muted); font-weight: 400; overflow-wrap: anywhere; }
+.ans-reply { display: grid; gap: 4px; }
+.ans-text {
+  width: 100%; min-height: 4.4em; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px;
+  background: var(--panel); color: var(--fg); font: inherit; resize: vertical;
+}
+.ans-hint { color: var(--muted); font-size: 11px; }
+.ans-count { margin-left: auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ans-state, .ans-err { margin: 0; font-weight: 600; }
+.ans-state { color: var(--teal); }
+.ans-state::before {
+  content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%;
+  background: currentColor; vertical-align: middle; animation: ans-pulse 1s ease-in-out infinite alternate;
+}
+.ans-err { color: var(--red); }
+/* [그 창으로 이동]: the result of the click, right beside the button (view.js focusBtn, server page) */
+.focus-res { font-size: 12px; font-weight: 600; }
+.focus-res.ok { color: var(--teal); }
+.focus-res.err { color: var(--red); }
+.dcard.can-answer .dline.ans { font-family: inherit; font-size: 11px; color: var(--muted); }
+.dcard.can-answer .dline.ans code { font-size: 11px; }
+.dsent { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin: 0; padding: 1px 0; }
+@keyframes ans-pulse { from { opacity: 1; } to { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) {
+  .ans-state::before { animation: none; }
+}
+
 /* buttons inside cards */
 .copy, .more, .detail-btn, .legend-btn, .toc-toggle {
   border: 1px solid var(--line); background: var(--panel); border-radius: 5px; padding: 0 6px; font-size: 11px; line-height: 18px;

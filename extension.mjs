@@ -34,7 +34,7 @@ import { execFile as nodeExecFile, execFileSync as nodeExecFileSync } from 'node
 import { validateBrief } from './src/schema.mjs';
 import { openStore } from './src/store.mjs';
 import { collectAuto } from './src/collect.mjs';
-import { applyDecide, formatDecideResult } from './src/decide.mjs';
+import { applyDecide, applyBoardAnswer, formatDecideResult } from './src/decide.mjs';
 import { renderPageMaybe, buildViewModel, pageHtml, serverInfoOf, OWN_GENERATION } from './src/render.mjs';
 import { createServerHost } from './src/server-host.mjs';
 import { createWorkersLive } from './src/workers-live.mjs';
@@ -44,6 +44,7 @@ import {
   injectRule, replyOverBudget, fitReply, assistantText, hasToolCall, parseHandoff,
 } from './src/rule.mjs';
 import { openPage } from './src/open-page.mjs';
+import { readTab, herdrBin } from './src/herdr-tab.mjs';
 import * as deliverMod from './src/deliver.mjs';
 import * as mirrorMod from './src/mirror.mjs';
 
@@ -312,6 +313,20 @@ export function createBriefingExtension(opts = {}) {
       store.replace(`sessions/${sid}/meta.json`, meta);
     }
 
+    // herdr tab label/number for the board's card names (src/herdr-tab.mjs). Fire and forget: a failure (not herdr, herdr
+    // missing, timeout) keeps the prior values; a change is saved and shown by one soft publish.
+    function refreshTab() {
+      const forSid = sid;
+      return readTab({ env, execFile: exec }).then((tab) => {
+        if (!tab || !active || !meta || sid !== forSid) return;
+        if (meta.tabLabel === tab.tabLabel && meta.tabNumber === tab.tabNumber) return;
+        meta.tabLabel = tab.tabLabel;
+        meta.tabNumber = tab.tabNumber;
+        try { saveMeta(); } catch (err) { recordError('meta', err); return; }
+        void softPublish();
+      });
+    }
+
     // Errors are kept per source in meta.errors (src/errors.mjs). A source records its own error and clears only its own
     // entry; each change is saved and followed by exactly one publish, so the page always matches meta.
     function recordError(source, err) {
@@ -434,6 +449,80 @@ export function createBriefingExtension(opts = {}) {
       return host.ensure().catch((err) => { hostError('server:lock', err); return null; });
     }
 
+    // ---- board write hooks: POST /answer and POST /focus ----
+    // src/server.mjs has already checked origin, token and body shape; the host answers 503 while the board is paused. They run
+    // in the process that owns the server, so they read other conversations from the store, never from this conversation's meta.
+    // Both always settle (the server holds its one write slot until they do), never throw, and the HTTP reply is only ever a
+    // bare code. A genuine I/O or herdr failure (not a refusal such as 404/409/400) is recorded like every other source: once,
+    // as meta.errors.answer / meta.errors.focus (chip on the board, detail in meta.json only, cleared by that source's next
+    // success). The page token never reaches these hooks; the request body carries no secret.
+    const BOARD_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+    const TAB_ID = /^w\d+:t[0-9A-Za-z]+$/;
+    const ANSWER_STATUS = { NOT_FOUND: 404, SESSION_MISMATCH: 409, CLOSED: 409, ANSWERED: 409, BAD_OPTION: 400, BAD_TEXT: 400, BAD_REQUEST: 400, IO_ERROR: 500 };
+    const FOCUS_TIMEOUT_MS = 3000;
+    const FOCUS_GUARD_MS = 4000; // the reply is sent even if execFile never calls back
+    const boardReply = (status, code) => ({ status, json: code ? { ok: false, code } : { ok: true } });
+    const clip = (text) => String(text).slice(0, 300);
+    // why an execFile call failed: killed by its timeout, else the errno string (ENOENT) or the child's exit code
+    const reasonOf = (err) => (err && err.killed ? 'TIMEOUT' : err && err.code !== undefined && err.code !== null ? err.code : 'ERROR');
+    const messageOf = (err) => clip(err && err.message ? err.message : err);
+    const answerFault = (body, detail) => {
+      hostError('answer', new Error(`상황판 답 기록 실패(#${body.id}, IO_ERROR)${detail ? `: ${clip(detail)}` : ''}`));
+      return boardReply(500, 'IO_ERROR');
+    };
+
+    // sessions/<sid>/meta.json of any conversation: null when absent or when the id is not a plain id; throws on a read fault
+    const metaOf = (sessionId) => (BOARD_SESSION_ID.test(sessionId) ? store.readRecord(`sessions/${sessionId}/meta.json`) : null);
+
+    function boardAnswer(body) {
+      if (body.text !== undefined) {
+        // free text only for a conversation that says it can take it (a meta from before that capability has no answerKinds)
+        let target;
+        try { target = metaOf(body.sessionId); } catch (err) { return answerFault(body, messageOf(err)); }
+        if (!target || !Array.isArray(target.answerKinds) || !target.answerKinds.includes('text')) return boardReply(409, 'NO_TEXT_SUPPORT');
+      }
+      const res = applyBoardAnswer(store, body, nowFn());
+      if (res.ok) {
+        hostRecover('answer');
+        if (active && !shuttingDown) refreshSoon(false); // open pages see the answer state through this publish
+        return boardReply(200);
+      }
+      // `detail` (log-only, may hold a file path) goes to the recorded diagnostic, never into the reply
+      if (res.code === 'IO_ERROR' || ANSWER_STATUS[res.code] === undefined) return answerFault(body, res.detail);
+      return boardReply(ANSWER_STATUS[res.code], res.code);
+    }
+
+    function boardFocus(body) {
+      let target;
+      try {
+        target = metaOf(body.sessionId);
+      } catch (err) {
+        hostError('focus', new Error(`상황판 창 이동 실패(대화 ${body.sessionId}, IO_ERROR): ${messageOf(err)}`));
+        return boardReply(500, 'IO_ERROR');
+      }
+      const tabId = target && typeof target.tabId === 'string' ? target.tabId : '';
+      if (!TAB_ID.test(tabId)) return boardReply(404, 'NOT_FOUND'); // nothing reaches herdr with an id of any other shape
+      return new Promise((resolve) => {
+        let done = false;
+        let guard = null;
+        // The reply goes out first (the server's write slot is held until it does); the first outcome wins and is recorded once.
+        const finish = (err) => {
+          if (done) return;
+          done = true;
+          timers.clearTimeout(guard);
+          resolve(err ? boardReply(502, 'HERDR_FAILED') : boardReply(200));
+          if (err) hostError('focus', new Error(`herdr tab focus 실패(대화 ${body.sessionId}, ${reasonOf(err)}): ${messageOf(err)}`));
+          else hostRecover('focus');
+        };
+        guard = unref(timers.setTimeout(() => finish(Object.assign(new Error(`${FOCUS_GUARD_MS}ms 안에 응답이 없음`), { code: 'TIMEOUT' })), FOCUS_GUARD_MS));
+        try {
+          exec(herdrBin(env), ['tab', 'focus', tabId], { timeout: FOCUS_TIMEOUT_MS, windowsHide: true }, (err) => finish(err || null));
+        } catch (err) {
+          finish(err || new Error('herdr 실행 실패')); // a synchronous spawn failure is the same as herdr missing
+        }
+      });
+    }
+
     function collect(ctx, { readTaskRecords = false, cache = autoCache } = {}) {
       let branch = [];
       try { branch = ctx.sessionManager.getBranch(); } catch { branch = []; }
@@ -508,23 +597,33 @@ export function createBriefingExtension(opts = {}) {
     }
 
     // ---- blocks=true notification: herdr CLI when usable, else ctx.ui.notify ----
+    const HERDR_TIMEOUT_MS = 3000;
+    // Every herdr call is asynchronous, gets an argument array (never a shell string) and a 3000 ms bound; the error is
+    // resolved, never rejected, so a hung or failing herdr cannot throw into the conversation.
+    function herdrCall(herdr, args) {
+      return new Promise((resolve) => {
+        let done = false;
+        const finish = (err) => { if (!done) { done = true; resolve(err || null); } };
+        try {
+          exec(herdr, args, { timeout: HERDR_TIMEOUT_MS, windowsHide: true }, (err) => finish(err || null));
+        } catch (err) {
+          finish(err || new Error('herdr 실행 실패')); // a synchronous spawn failure is the same as herdr missing
+        }
+      });
+    }
     function notifyDecision(ctx, d) {
       if (notified.has(d.id)) return;
       notified.add(d.id);
       const title = `결정 #${d.id} 필요: ${d.question}`;
       const body = `상황판 - ${meta.project || ''} /decide ${d.id}${d.recommend}`;
       const herdr = env.HERDR_BIN_PATH;
-      let usable = false;
-      if (herdr && exists(herdr)) {
-        try { execSync(herdr, ['notification', '--help'], { stdio: 'ignore', timeout: 5000 }); usable = true; } catch { usable = false; }
-      }
-      if (usable) {
-        exec(herdr, ['notification', 'show', title, '--body', body, '--sound', 'request'], (err) => {
-          if (err) say(ctx, `${title} (${body})`, 'warning');
-        });
-        return;
-      }
-      say(ctx, `${title} (${body})`, 'warning');
+      const fallback = () => say(ctx, `${title} (${body})`, 'warning');
+      if (!herdr || !exists(herdr)) { fallback(); return; }
+      // Probe first: an older herdr without `notification` must fall back instead of printing its own error. Both calls
+      // stay off the conversation's critical path; whichever of the two fails (or times out) falls back once.
+      herdrCall(herdr, ['notification', '--help'])
+        .then((err) => (err ? err : herdrCall(herdr, ['notification', 'show', title, '--body', body, '--sound', 'request'])))
+        .then((err) => { if (err) fallback(); });
     }
 
     // ---- brief tool ----
@@ -586,6 +685,7 @@ export function createBriefingExtension(opts = {}) {
       meta.title = brief.title;
       try { meta.auto = collect(ctx); clearError(meta, 'collect'); } catch (err) { setError(meta, 'collect', `collect: ${err.message}`, t); }
       saveMeta();
+      void refreshTab();
       const res = await refresh();
       for (const d of created) if (d.blocks) notifyDecision(ctx, d);
 
@@ -881,7 +981,9 @@ export function createBriefingExtension(opts = {}) {
             return buildViewModel(changed ? store.readSnapshot() : snap, t, { generation, server: info.server, serverError: info.error });
           },
           readSnapshot: () => store.readSnapshot(),
-          getPage: (vm) => pageHtml(vm, generation, { mode: 'server' }),
+          getPage: (vm, token) => pageHtml(vm, generation, { mode: 'server', token }),
+          answer: boardAnswer,
+          focus: boardFocus,
           reclaimStale: (rel, rec) => store.reclaimStale(rel, rec),
           onError: hostError,
           onRecover: hostRecover,
@@ -974,8 +1076,10 @@ export function createBriefingExtension(opts = {}) {
           project: basename(String(ctx.cwd).replace(/[\\/]+$/, '')),
           title: (typeof pi.getSessionName === 'function' && pi.getSessionName()) || prior.title || basename(String(ctx.cwd)),
           paneId: env.HERDR_PANE_ID ?? prior.paneId ?? '',
+          tabId: env.HERDR_TAB_ID ?? prior.tabId ?? '',
           workerIds: Array.isArray(prior.workerIds) ? prior.workerIds : [],
           workers: Array.isArray(prior.workers) ? prior.workers : [],
+          answerKinds: ['option', 'text'], // what this generation's deliverer accepts: the board offers free text only when 'text' is here
           lastActivityAt: typeof prior.lastActivityAt === 'number' ? prior.lastActivityAt : t,
           running: false,
           turnDidWork: false,
@@ -994,6 +1098,7 @@ export function createBriefingExtension(opts = {}) {
           registerSurface();
         }
         saveMeta();
+        void refreshTab();
         if (!deliverer && typeof makeDeliverer === 'function') {
           deliverer = makeDeliverer({ pi, store, stateDir, pagePath, getSessionId: () => sid, getMeta: () => meta, saveMeta, refresh, enabled, now: nowFn, env });
         }

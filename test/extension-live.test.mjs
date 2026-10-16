@@ -307,6 +307,67 @@ test('GET / is this generation even when STATE holds an older index.html and an 
   assert.ok(!page.body.includes('old gen 1 page'));
 });
 
+test('board writes through the real server: a store fault and a failing herdr leave a diagnostic in meta.errors, the replies stay bare codes, the token is in none of it; the next success clears both', { timeout: 30_000 }, async (t) => {
+  const ctl = { deny: false, focusFails: true };
+  const faulty = { ...nodeFs, readFileSync: (p, ...a) => {
+    if (ctl.deny && /\/decisions\/000001\.json$/.test(norm(String(p)))) throw Object.assign(new Error(`EIO: i/o error, open '${norm(String(p))}'`), { code: 'EIO' });
+    return nodeFs.readFileSync(p, ...a);
+  } };
+  const focusArgs = [];
+  const execFile = (file, args, options, cb) => {
+    focusArgs.push(args);
+    queueMicrotask(() => cb(ctl.focusFails ? Object.assign(new Error('Command failed: herdr tab focus'), { code: 1 }) : null, '', ''));
+  };
+  const quiet = () => ({ wake: async () => {}, pendingIds: () => [], dispose: async () => {} });
+  const s = make(t, { server: true, fs: faulty, extra: { execFile, createDeliverer: quiet } });
+  await s.start();
+  await s.brief(goodBrief({ decisions: [decision()] }));
+  mkdirSync(join(s.stateDir, 'sessions', 'sess-B'), { recursive: true });
+  writeFileSync(join(s.stateDir, 'sessions', 'sess-B', 'meta.json'), JSON.stringify({ sessionId: 'sess-B', tabId: 'w1:t5N' }));
+  const url = serverUrl(s.stateDir);
+  const port = new URL(url).port;
+  const token = /<meta name="omo-board-token" content="([^"]+)">/.exec((await get(url)).body)[1];
+  const post = (path, obj) => new Promise((resolve, reject) => {
+    const body = JSON.stringify(obj);
+    const headers = { Connection: 'close', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), 'Sec-Fetch-Site': 'same-origin', Origin: `http://127.0.0.1:${port}`, 'X-Board-Token': token };
+    const req = http.request({ host: '127.0.0.1', port, path, method: 'POST', agent: false, headers }, (res) => {
+      let out = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { out += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: out }));
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
+  const walk = (dir) => nodeFs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
+
+  ctl.deny = true;
+  const answer = await post('/answer', { id: 1, sessionId: 'sess-A', option: 'A' });
+  const focus = await post('/focus', { sessionId: 'sess-B' });
+  assert.deepEqual([answer.status, answer.body], [500, '{"ok":false,"code":"IO_ERROR"}']);
+  assert.deepEqual([focus.status, focus.body], [502, '{"ok":false,"code":"HERDR_FAILED"}']);
+  assert.deepEqual(focusArgs, [['tab', 'focus', 'w1:t5N']]);
+  assert.deepEqual(Object.keys(s.meta().errors).sort(), ['answer', 'focus']);
+  assert.match(s.meta().errors.answer.message, /i\/o error, open '.*decisions\/000001\.json'/, 'the cause survives in the recorded diagnostic');
+  assert.match(s.meta().errors.focus.message, /Command failed/);
+
+  const model = await get(`${url}data.json`);
+  assert.ok(model.body.includes('오류 있음'), 'the board shows the failure chip');
+  const detailIn = walk(s.stateDir).filter((f) => readFileSync(f, 'utf8').includes('i/o error'));
+  assert.deepEqual(detailIn.map((f) => norm(f).split('/state/')[1]), ['sessions/sess-A/meta.json'], 'the detail is in the owner\'s meta.json and nowhere a page or reply can read it');
+  for (const [what, text] of [['answer reply', answer.body], ['focus reply', focus.body], ['/data.json', model.body], ...walk(s.stateDir).map((f) => [norm(f), readFileSync(f, 'utf8')])]) {
+    assert.ok(!text.includes(token), `${what} carries the token`);
+  }
+  assert.ok(!model.body.includes('i/o error') && !model.body.includes('Command failed'), '/data.json has no detail');
+
+  ctl.deny = false;
+  ctl.focusFails = false;
+  assert.equal((await post('/answer', { id: 1, sessionId: 'sess-A', option: 'A' })).status, 200);
+  assert.equal((await post('/focus', { sessionId: 'sess-B' })).status, 200);
+  assert.deepEqual(s.meta().errors, {}, 'the next success of each source cleared its entry');
+  assert.ok(!(await get(`${url}data.json`)).body.includes('오류 있음'), 'and the chip');
+});
+
 test('/brief opens the live address when the server is up, the file page otherwise', { timeout: 30_000 }, async (t) => {
   const s = make(t, { server: true });
   await s.start();

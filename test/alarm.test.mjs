@@ -480,6 +480,24 @@ test('band text is exact: 답 기다림: <대화> · <문구 40자>, and model t
   assert.deepEqual(texts, { d1: `답 기다림: 대화 하나 · ${'x'.repeat(40)}`, d2: `답 기다림: S9 · ${'😀'.repeat(39)}…` }, '40 is kept, code points not UTF-16 units');
 });
 
+test('band names the herdr tab: 🗂 <label> #<n> · <title>, else 창 <pane> · <title>, escaped in text and tooltip', () => {
+  const p = makePage();
+  p.update([
+    item('d1', { title: '작업', tabLabel: '수리', tabNumber: 181, paneId: 'w1:pR2', at: T0 + 3 }),
+    item('d2', { title: '작업', tabLabel: '', tabNumber: null, paneId: 'w1:pR2', at: T0 + 2 }),
+    item('d3', { title: '<b>대화</b>', tabLabel: '<i>수리</i>', tabNumber: 9, at: T0 + 1 }),
+  ]);
+  const byKey = Object.fromEntries(p.rows().map((r) => [r.key, r]));
+  assert.equal(byKey.d1.text, '답 기다림: 🗂 수리 #181 · 작업 · 질문 d1?');
+  assert.equal(byKey.d2.text, '답 기다림: 창 w1:pR2 · 작업 · 질문 d2?');
+  assert.equal(byKey.d3.text, '답 기다림: 🗂 <i>수리</i> #9 · <b>대화</b> · 질문 d3?');
+  const tip = (r) => decode(/class="alarm-text" title="([^"]*)"/.exec(r.html)[1]);
+  assert.equal(tip(byKey.d1), '답 기다림: 🗂 수리 #181 · 작업 · 질문 d1?');
+  assert.equal(tip(byKey.d2), '답 기다림: 창 w1:pR2 · 작업 · 질문 d2?');
+  assert.equal(tip(byKey.d3), '답 기다림: 🗂 <i>수리</i> #9 · <b>대화</b> · 질문 d3?');
+  assert.ok(!p.html().includes('<i>') && !p.html().includes('<b>대화'), 'escaped');
+});
+
 test('the chime is 880 Hz then 1320 Hz, 120 ms each, peak gain 0.15, made in WebAudio (no sound file)', () => {
   const p = makePage();
   p.update([]);
