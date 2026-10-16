@@ -148,7 +148,7 @@ h2 { margin: 10px 0 4px; font-size: 16px; }
 .fatal { margin: 20px; color: var(--red); font-weight: 700; }
 
 @media (max-width: 599px) {
-  .app { grid-template-columns: 1fr; }
+  .app { grid-template-columns: minmax(0, 1fr); } /* 1fr alone grows to the widest nowrap line (collapsed plan summary) and the page scrolls sideways */
   .toc { position: sticky; top: 0; z-index: 5; height: auto; max-height: 100vh; border-right: 0; border-bottom: 1px solid var(--line); padding: 6px 8px; }
   .toc-toggle { display: inline-block; padding: 2px 10px; font-size: 13px; }
   .toc .toc-body { display: none; padding-top: 6px; }

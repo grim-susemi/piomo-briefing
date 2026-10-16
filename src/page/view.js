@@ -213,6 +213,28 @@
     return html + '</div>';
   }
 
+  // Worker lines and plan block of a card. The block renderers are separate classic scripts (workers-view.js, plan-view.js);
+  // a page without them (older generation, unit tests of this file) simply draws the card without these blocks.
+  function liveBlocks(s, n, ui, now) {
+    var html = '';
+    var wv = g.BriefWorkersView, pv = g.BriefPlanView;
+    var live = obj(s.live);
+    if (wv && live && arr(live.workers).length) {
+      // the pulse phase and elapsed text follow the wall clock, not the age of the data (workers-view.js)
+      html += wv.render(live, typeof ui.wallNow === 'number' ? ui.wallNow : Date.now(), { esc: esc, expanded: ui.expanded });
+    }
+    if (pv) {
+      var plan = obj(s.plan), link = obj(s.planLink);
+      if (plan) html += '<div class="plan-slot">' + pv.render(plan, now, { esc: esc, expanded: ui.expanded }) + '</div>';
+      else if (link) {
+        var owner = ui.byId ? own(ui.byId, str(link.ownerId)) : null;
+        var target = owner ? { target: owner.dom, tab: owner.tab } : {};
+        html += '<div class="plan-slot">' + pv.renderLink(Object.assign({}, link, target), { esc: esc }) + '</div>';
+      }
+    }
+    return html;
+  }
+
   function card(n, ui, now) {
     var s = n.raw;
     var expanded = ui.expanded;
@@ -230,6 +252,7 @@
       '<span class="title">' + esc(view.title) + '</span>' +
       '<span class="time">⏱ ' + esc(when(s.lastActivityAt != null ? s.lastActivityAt : s.lastBriefAt, now)) + '</span></div>' +
       '<p class="hl"><span class="sym">▸</span>' + esc(s.headline || '아직 보고 없음') + '</p>';
+    html += liveBlocks(s, n, ui, now);
 
     var q = obj(s.openQuestion);
     if (q) {
@@ -292,7 +315,9 @@
     var byTab = { wait: [], run: [], done: [] };
     sessions.forEach(function (n) { byTab[n.tab].push(n); });
     var tab = own(byTab, ui.tab) ? ui.tab : (byTab.wait.length ? 'wait' : byTab.run.length ? 'run' : sessions.length ? 'done' : 'wait');
-    var uiN = { expanded: expanded };
+    var byId = Object.create(null);
+    sessions.forEach(function (n) { byId[n.id] = n; });
+    var uiN = { expanded: expanded, byId: byId, wallNow: num(ui.wallNow) };
 
     var openCount = 0, blocked = 0, stale = 0;
     sessions.forEach(function (n) {
@@ -329,7 +354,8 @@
 
     var main = '<main class="main"><header class="sum">' +
       '<p class="sumline">결정 대기 ' + openCount + ' · 막힘 ' + blocked + ' · 오래됨 ' + stale + ' · ⏱ 마지막 갱신 ' + hhmm(now) + '</p>' +
-      '<p class="note">브리핑이 켜진 대화 ' + sessions.length + '개만 보입니다 - 설치 전부터 열려 있던 대화는 새로 열어야 나타납니다</p></header>';
+      '<p class="note">브리핑이 켜진 대화 ' + sessions.length + '개만 보입니다 - 설치 전부터 열려 있던 대화는 새로 열어야 나타납니다</p>' +
+      (g.BriefAlarm ? '<p class="sum-tools">' + g.BriefAlarm.soundButtonHtml() + '</p>' : '') + '</header>';
 
     var label = TABS.filter(function (t) { return t.key === tab; })[0].label;
     main += '<section class="tabpanel" role="tabpanel" aria-labelledby="tab-' + tab + '" data-tab="' + tab + '"><h2>' + esc(label) + '</h2>';

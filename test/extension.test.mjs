@@ -96,7 +96,7 @@ test('gate: hasUI=false (print/json) registers no tool/command', async (t) => {
 test('gate: lead registers brief tool, brief and decide commands', async (t) => {
   const s = lead(t);
   await s.start();
-  assert.deepEqual(s.host.registrations.tools, ['brief']);
+  assert.deepEqual(s.host.registrations.tools, ['brief', 'plan_brief']);
   assert.deepEqual([...s.host.registrations.commands].sort(), ['brief', 'decide']);
   for (const ev of ['before_agent_start', 'input', 'agent_start', 'tool_result', 'message_end', 'agent_before_settle', 'agent_settled', 'session_shutdown']) {
     assert.ok(s.host.registrations.on.includes(ev), ev);
@@ -105,7 +105,7 @@ test('gate: lead registers brief tool, brief and decide commands', async (t) => 
   assert.equal(s.host.handlers.get('before_agent_start')[0].options.previewSafe, true);
   // a second session_start does not double-register
   await s.start();
-  assert.deepEqual(s.host.registrations.tools, ['brief']);
+  assert.deepEqual(s.host.registrations.tools, ['brief', 'plan_brief']);
 });
 
 test('defaultStateDir honors OMO_BRIEFING_STATE_DIR', () => {

@@ -18,7 +18,7 @@ function assertFits(out, page = PAGE) {
 
 test('rule text carries the marker and the owner-decision caveat', () => {
   assert.ok(RULE_TEXT.startsWith(RULE_MARKER));
-  assert.equal(RULE_MARKER, '<!-- omo-briefing-rule v1 -->');
+  assert.equal(RULE_MARKER, '<!-- omo-briefing-rule v2 -->');
   assert.ok(RULE_TEXT.includes('[결정 전달] #N -> X'));
   assert.ok(RULE_TEXT.includes('10줄·700자'));
 });
@@ -122,4 +122,11 @@ test('parseHandoff picks For you/Now/Next lines, each cut at 100 code points', (
   assert.equal(out[1], 'Now: 쓰는 중');
   assert.equal(out[2], 'Next: 다음');
   assert.deepEqual(parseHandoff('그냥 글'), []);
+});
+
+test('rule v2 names plan_brief; an older v1 rule in the prompt does not stop v2 from being added once', () => {
+  assert.ok(RULE_TEXT.includes('plan_brief'));
+  const withOld = injectRule('base\n<!-- omo-briefing-rule v1 -->\nold rule');
+  assert.equal(withOld.split(RULE_MARKER).length - 1, 1);
+  assert.equal(injectRule(withOld), withOld);
 });

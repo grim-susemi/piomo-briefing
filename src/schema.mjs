@@ -11,7 +11,7 @@ function strField(errors, obj, path, { min = 1, max }) {
   const v = obj?.[path.split('.').pop()];
   return checkStr(errors, path, v, { min, max });
 }
-function checkStr(errors, path, v, { min = 1, max }) {
+export function checkStr(errors, path, v, { min = 1, max }) {
   if (typeof v !== 'string') { errors.push(`${path}: 문자열 필요`); return null; }
   const n = len(v);
   if (n < min) { errors.push(`${path}: ${min}자 이상 필요(현재 ${n})`); return null; }
@@ -82,12 +82,8 @@ function checkRow(errors, warnings, path, item, fns) {
   if (sha !== undefined) item.evidenceSha256 = sha;
 }
 
-function checkDecision(errors, path, d, fns, sessionId) {
-  if (typeof d !== 'object' || d === null) { errors.push(`${path}: 결정 객체 필요`); return; }
-  if (d.id !== undefined) {
-    checkId(errors, `${path}.id`, d.id, fns);
-  }
-  checkStr(errors, path + '.question', d.question, { min: 1, max: 100 });
+// 선택지·추천·이유·blocks 검사. brief 결정과 plan_brief의 open 질문이 같은 규칙을 쓴다.
+export function checkDecisionOptions(errors, path, d) {
   const opts = d.options;
   if (typeof opts !== 'object' || opts === null) { errors.push(`${path}.options: 선택지 2개 이상 필요`); return; }
   const keys = ['A', 'B', 'C'].filter((k) => opts[k] !== undefined);
@@ -110,6 +106,15 @@ function checkDecision(errors, path, d, fns, sessionId) {
   }
   checkStr(errors, path + '.reason', d.reason, { min: 1, max: 100 });
   if (typeof d.blocks !== 'boolean') errors.push(`${path}.blocks: 불리언 필요`);
+}
+
+export function checkDecision(errors, path, d, fns, sessionId) {
+  if (typeof d !== 'object' || d === null) { errors.push(`${path}: 결정 객체 필요`); return; }
+  if (d.id !== undefined) {
+    checkId(errors, `${path}.id`, d.id, fns);
+  }
+  checkStr(errors, path + '.question', d.question, { min: 1, max: 100 });
+  checkDecisionOptions(errors, path, d);
 }
 
 export function validateBrief(input, fns = {}) {

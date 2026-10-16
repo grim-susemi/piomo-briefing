@@ -159,7 +159,64 @@ function releaseRenderLock(stateDir) {
   try { unlinkSync(join(stateDir, 'render.lock')); } catch {}
 }
 
-function main(argv) {
+// The single closing line of an install: the live board address when STATE/server.json
+// names a port whose /health answers, otherwise the owner's instruction. A health check
+// that fails is NOT an install error (exit stays 0); it only appends the exception
+// sentence, because the owning conversation may not have started the server yet, or may
+// already have exited. The record read is size-bounded and retried the way the board server
+// reads its own records, and an unreadable record is never reported as an absent one.
+const NO_LIVE_BOARD = '실시간 상황판은 새 대화에서 /brief를 치면 켜집니다';
+const HEALTH_EXCEPTION = '(server.json은 있는데 지금 health 응답이 없습니다 - 오류는 아닙니다)';
+// The same conventions src/server-host.mjs readSmall applies to a STATE record: the same transient
+// error classes (RETRY_CODES), the same three bounded delays, and the same record bound
+// (plan IS-10, '읽기는 정확한 경로·재시도·크기 제한').
+const MAX_RECORD_CHARS = 4096;
+const MAX_RECORD_BYTES = MAX_RECORD_CHARS * 4; // one code point is at most 4 UTF-8 bytes
+const RETRY_DELAYS_MS = [20, 40, 80];
+
+// {text} | {oversized:true}; throws when the record is still unreadable after the bounded retries.
+function readServerRecord(file) {
+  for (let i = 0; ; i++) {
+    try {
+      // Size first, so an over-limit record is refused before any of its content is read.
+      if (statSync(file).size > MAX_RECORD_BYTES) return { oversized: true };
+      const text = readFileSync(file, 'utf8');
+      return text.length > MAX_RECORD_CHARS ? { oversized: true } : { text };
+    } catch (err) {
+      if (!RETRY_CODES.has(err && err.code) || i >= RETRY_DELAYS_MS.length) throw err;
+      sleepSync(RETRY_DELAYS_MS[i]);
+    }
+  }
+}
+
+async function liveBoardLine(stateDir) {
+  let raw;
+  try {
+    const record = readServerRecord(join(stateDir, 'server.json'));
+    if (record.oversized) return NO_LIVE_BOARD;
+    raw = record.text;
+  } catch (err) {
+    // Absent is not the same as unreadable (plan Scope: a record that cannot be read must not be
+    // counted as 'nothing there'). Only ENOENT means there is no record at all; every other
+    // failure keeps the exception sentence, so an unreadable record stays visibly different.
+    return err && err.code === 'ENOENT' ? NO_LIVE_BOARD : NO_LIVE_BOARD + ' ' + HEALTH_EXCEPTION;
+  }
+  let rec = null;
+  try { rec = JSON.parse(raw); } catch { rec = null; } // torn or hand-edited file: no address to announce
+  if (!rec || !Number.isInteger(rec.port)) return NO_LIVE_BOARD + ' ' + HEALTH_EXCEPTION;
+  const url = `http://127.0.0.1:${rec.port}/`;
+  try {
+    const res = await fetch(url + 'health', { signal: AbortSignal.timeout(1000) });
+    const body = res.ok ? await res.json() : null;
+    if (!body || body.ok !== true) return NO_LIVE_BOARD + ' ' + HEALTH_EXCEPTION;
+    return `실시간 상황판: ${url}`;
+  } catch {
+    // refused, timed out or answered with something that is not JSON: still not an error
+    return NO_LIVE_BOARD + ' ' + HEALTH_EXCEPTION;
+  }
+}
+
+async function main(argv) {
   let agentDir = null;
   let dryRun = false;
   let uninstall = false;
@@ -285,6 +342,7 @@ function main(argv) {
     }
   }
   if (existsSync(readmeSrc)) replaceWrite(join(agentDir, 'briefing', 'README.ko.md'), readFileSync(readmeSrc, 'utf8'));
+  console.log(await liveBoardLine(stateDir));
 }
 
-main(process.argv.slice(2));
+await main(process.argv.slice(2));

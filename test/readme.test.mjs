@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEFAULT_PORT_BASE, PORT_COUNT } from '../src/server-host.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = dirname(HERE);
 const README = join(REPO, 'README.ko.md');
+const LINE_CAP = 130;
+const MIN_SECTIONS = 8; // structure only: section wording is never pinned (the plan forbids prose pins)
 const EXTENSION = readFileSync(join(REPO, 'extension.mjs'), 'utf8');
 const INSTALL = readFileSync(join(REPO, 'scripts', 'install.mjs'), 'utf8');
 
@@ -57,12 +60,14 @@ const REQUIRED_TABLES = [
 function check(text) {
   const problems = [];
   const lines = text.split('\n');
-  if (lines.length > 80) problems.push(`lines ${lines.length} > 80`);
+  if (lines.length > LINE_CAP) problems.push(`lines ${lines.length} > ${LINE_CAP}`);
   if (/[\u2013\u2014]/.test(text)) problems.push('en/em dash');
 
-  const headings = lines.filter((l) => l.startsWith('## ')).map((l) => l.replace(/^## \d+\.\s*/, ''));
-  const want = ['열기', '보는 법', '답하는 법', '일시 끄기', '완전 제거', '알아둘 것'];
-  if (JSON.stringify(headings) !== JSON.stringify(want)) problems.push(`headings ${JSON.stringify(headings)}`);
+  // Structure only: at least MIN_SECTIONS numbered sections, numbered 1..N in order. What a
+  // section is called is free; no production consumer dispatches on the guide's headings.
+  const numbered = lines.map((l) => /^## (\d+)\. /.exec(l)).filter(Boolean).map((m) => Number(m[1]));
+  if (numbered.length < MIN_SECTIONS) problems.push(`sections ${numbered.length} < ${MIN_SECTIONS}`);
+  else if (numbered.some((n, i) => n !== i + 1)) problems.push(`sections are not numbered 1..${numbered.length}: ${numbered.join(',')}`);
 
   for (const m of text.matchAll(/(?<![\p{L}\p{N}_:.\/-])\/([a-z][a-z-]*)(?: (on|off|path)\b)?/gu)) {
     if (!REGISTERED.has(m[1])) problems.push(`unregistered command /${m[1]}`);
@@ -104,15 +109,35 @@ function check(text) {
       }
     }
   }
-  for (const s of ['나를 기다림', '진행 중', '끝남', '새 내용 있음', '표시 뜻', '브리핑 꺼짐:', '브리핑 켜짐:', '반영:', 'omo-briefing.js', 'generations and state kept']) {
+  for (const s of ['나를 기다림', '진행 중', '끝남', '선택·입력이 끝나면 반영', '표시 뜻', '브리핑 꺼짐:', '브리핑 켜짐:', '반영:', 'omo-briefing.js', 'generations and state kept']) {
     if (text.includes(s) && !SOURCE.includes(s)) problems.push(`not in code: ${s}`);
+  }
+
+  // Live-board facts, checked against the code rather than pinned as prose: every port the guide
+  // names must be one the board actually serves, and the sound toggle and server record exist.
+  const portRange = `${DEFAULT_PORT_BASE}..${DEFAULT_PORT_BASE + PORT_COUNT - 1}`;
+  const addrPorts = [...text.matchAll(/127\.0\.0\.1:(\d+)/g)].map((m) => Number(m[1]));
+  const fiveDigit = [...text.matchAll(/\b(4\d{4})\b/g)].map((m) => Number(m[1]));
+  for (const p of new Set([...addrPorts, ...fiveDigit])) {
+    if (p < DEFAULT_PORT_BASE || p > DEFAULT_PORT_BASE + PORT_COUNT - 1) problems.push(`port ${p} outside the board range ${portRange}`);
+  }
+  if (!addrPorts.includes(DEFAULT_PORT_BASE)) problems.push(`the default board port ${DEFAULT_PORT_BASE} is not named`);
+
+  const LIVE_FACTS = [
+    ['🔔', ['🔔']],
+    ['🔕', ['🔕']],
+    ['server.json', ['server.json']],
+  ];
+  for (const [shown, code] of LIVE_FACTS) {
+    if (!text.includes(shown)) problems.push(`missing live-board fact: ${shown}`);
+    else for (const c of code) if (!SOURCE.includes(c)) problems.push(`not in code: ${c}`);
   }
   return problems;
 }
 
 const text = readFileSync(README, 'utf8');
 
-test('README.ko.md matches the code (commands, flags, paths, chips, headings, size)', () => {
+test('README.ko.md matches the code (commands, flags, paths, chips, structure, size)', () => {
   assert.deepEqual(check(text), []);
 });
 
@@ -125,9 +150,25 @@ test('README.ko.md names every registered command and the uninstall flag', () =>
 test('negative: unregistered command, unknown flag, too many lines, and em dash are caught', () => {
   assert.deepEqual(check(text + '\n`/brief-x`\n'), ['unregistered command /brief-x']);
   assert.ok(check(text + '\n--no-such-flag\n').includes('unknown flag --no-such-flag'));
-  assert.ok(check(text + '\n'.repeat(10)).some((p) => p.startsWith('lines ')));
+  assert.ok(check(text + '\n'.repeat(LINE_CAP)).some((p) => p.startsWith('lines ')));
   assert.ok(check(text + '\n\u2014\n').includes('en/em dash'));
   assert.ok(check(text.replace('| 증거 있음 |', '| 증거 있슴x |')).some((p) => p.startsWith('not in code')));
+});
+
+test('negative: the live address, sound toggle and server record line are enforced', () => {
+  const noPorts = text.replace(/127\.0\.0\.1:\d+/g, '127.0.0.1:1');
+  assert.ok(check(noPorts).includes(`the default board port ${DEFAULT_PORT_BASE} is not named`));
+  assert.ok(check(text.replace('47326', '47400')).some((p) => p.startsWith('port 47400 outside')));
+  assert.ok(check(text.replace(/🔔/g, '')).includes('missing live-board fact: 🔔'));
+  assert.ok(check(text.replace(/🔕/g, '')).includes('missing live-board fact: 🔕'));
+  assert.ok(check(text.replace(/server\.json/g, 'records.json')).includes('missing live-board fact: server.json'));
+});
+
+test('negative: section wording is free, but the section structure is checked', () => {
+  const reworded = text.replace('## 5. 작업자 줄 읽기', '## 5. 작업자들이 무엇을 하는지 보기');
+  assert.deepEqual(check(reworded), [], 'a heading synonym must not fail the guide checks');
+  assert.ok(check(text.replace(/^## 5\. .*\n/m, '')).some((p) => p.startsWith('sections are not numbered')), 'a dropped section is caught');
+  assert.ok(check(text.replace(/^## \d+\. .*\n/gm, '')).includes(`sections 0 < ${MIN_SECTIONS}`), 'a guide with no sections is caught');
 });
 
 test('negative: removing tables, rows, or the absolute install path is caught', () => {

@@ -1,0 +1,87 @@
+/* omo-briefing live worker rows. Loaded after page.css and uses only its color variables:
+ * teal = running (1200 ms pulse; workers-view.js starts it at -(now % 1200) ms so a redraw keeps the beat),
+ * green = done, red = error, yellow = no response for 10 min, gray = waiting / cancelled / lost.
+ * Row slides (350 ms) and the leaving-card fold (400 ms) are Web Animations started by workers-view.js;
+ * prefers-reduced-motion turns every animation in this file off. */
+.w-block { margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--line); }
+.w-sum { margin: 0 0 2px; font-size: 11px; font-weight: 700; color: var(--muted); }
+.w-rows { list-style: none; margin: 0; padding: 0; }
+.w-more { margin: 2px 0 0 24px; font-size: 11px; color: var(--muted); }
+
+/* one dense line per worker; the mark hangs in the left padding so names line up */
+.w-row {
+  display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px;
+  padding: 1px 6px 1px 24px; border-radius: 5px; line-height: 20px;
+}
+.w-row + .w-row { margin-top: 1px; }
+.w-row.w-running { background: linear-gradient(90deg, var(--teal-bg), transparent 70%); }
+.w-row.w-stale { background: linear-gradient(90deg, var(--yellow-bg), transparent 70%); }
+
+.w-dot { flex: none; width: 14px; margin-left: -20px; font-size: 12px; text-align: center; color: var(--gray); }
+.w-running > .w-dot { width: 8px; height: 8px; margin: 0 3px 0 -17px; border-radius: 50%; background: var(--teal); animation: w-pulse 1200ms ease-out infinite; }
+.w-stale > .w-dot { width: 8px; height: 8px; margin: 0 3px 0 -17px; border-radius: 50%; background: var(--yellow); animation: none; }
+.w-done > .w-dot { color: var(--green); font-weight: 700; }
+.w-error > .w-dot { color: var(--red); font-weight: 700; }
+
+.w-name { flex: 0 1 auto; min-width: 0; max-width: 22em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.w-done .w-name, .w-cancelled .w-name, .w-lost .w-name { font-weight: 400; color: var(--muted); }
+.w-tags { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); }
+.w-tag + .w-tag { margin-left: 4px; }
+.w-model { color: var(--accent); font-weight: 600; }
+.w-time { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.w-step { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); }
+.w-running .w-step { color: var(--fg); }
+.w-stale .w-step { color: var(--yellow); font-weight: 600; }
+.w-error .w-step { color: var(--red); }
+.w-row .w-todo-btn { flex: none; margin: 0; }
+
+/* the worker's own todo list, opened with the row's toggle */
+.w-todos {
+  flex: 0 0 100%; order: 9; list-style: none; margin: 2px 0 4px; padding: 2px 0 2px 6px;
+  border-left: 2px solid var(--line); font-size: 12px; line-height: 18px;
+}
+.w-todo { display: flex; align-items: baseline; gap: 4px; padding: 0 6px; border-radius: 4px; }
+.w-tsym { flex: none; width: 1.2em; text-align: center; }
+.w-ttext { min-width: 0; overflow-wrap: anywhere; }
+.w-t-done { color: var(--muted); }
+.w-t-done .w-tsym { color: var(--green); }
+.w-t-doing { background: var(--teal-bg); color: var(--teal); font-weight: 700; }
+.w-t-todo .w-tsym { color: var(--gray); }
+.w-t-dropped { color: var(--muted); }
+.w-t-dropped .w-ttext { text-decoration: line-through; }
+.w-todo-more { padding-left: calc(1.2em + 10px); font-size: 11px; color: var(--muted); }
+
+/* marks that just changed pop once; a todo that just turned ✔ also flashes green */
+.w-just-ended > .w-dot, .w-just-done .w-tsym { animation: w-pop 350ms cubic-bezier(.2, .8, .2, 1); }
+.w-todo.w-just-done { animation: w-flash 900ms ease-out; }
+.w-ghost { overflow: hidden; }
+
+@keyframes w-pulse {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--teal) 55%, transparent); }
+  60% { transform: scale(.8); box-shadow: 0 0 0 6px color-mix(in srgb, var(--teal) 0%, transparent); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--teal) 0%, transparent); }
+}
+@keyframes w-pop {
+  0% { transform: scale(.2); opacity: 0; }
+  60% { transform: scale(1.4); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes w-flash {
+  from { background-color: var(--green-bg); }
+  to { background-color: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .w-running > .w-dot, .w-just-ended > .w-dot, .w-just-done, .w-just-done .w-tsym { animation: none; }
+}
+
+/* phones: line 1 = mark, name, elapsed; line 2 = what it is doing, then tags (they give way first), todo toggle */
+@media (max-width: 599px) {
+  .w-row::after { content: ""; order: 4; flex: 0 0 100%; height: 0; }
+  .w-dot { order: 1; }
+  .w-name { order: 2; flex: 1 1 0; max-width: none; }
+  .w-time { order: 3; }
+  .w-step { order: 5; flex: 0 1 auto; }
+  .w-tags { order: 6; flex: 1 4 0; }
+  .w-row .w-todo-btn { order: 7; }
+}

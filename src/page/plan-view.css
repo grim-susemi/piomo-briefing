@@ -1,0 +1,78 @@
+/* Plan colors: green=done, teal=doing/current, gray=todo, gray dashed=stopped, red=blocked. */
+.plan-view { min-width: 0; margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--line); }
+.plan-summary-line { position: relative; display: block; min-width: 0; line-height: 22px; height: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plan-summary-line:last-child { padding-right: 88px; color: var(--muted); font-size: 12px; }
+.plan-summary-line .plan-toggle { position: absolute; top: 1px; right: 0; margin: 0; }
+.plan-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.plan-head .plan-toggle { margin: 0 0 0 auto; }
+.plan-path { display: flex; align-items: baseline; gap: 5px; margin: 3px 0; color: var(--muted); }
+.plan-path code { min-width: 0; overflow-wrap: anywhere; }
+.plan-path .copy { flex: none; }
+.plan-stage-note, .plan-checked { margin: 2px 0; color: var(--muted); font-size: 12px; }
+.plan-goal { margin: 6px 0; overflow-wrap: anywhere; }
+.plan-components { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 6px; padding: 0; list-style: none; }
+.plan-components .plan-box { flex: 1 1 170px; }
+.plan-component-text { display: block; margin-top: 2px; color: var(--muted); overflow-wrap: anywhere; }
+.plan-lanes { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(170px, 1fr); gap: 22px; overflow-x: auto; padding: 2px 1px 8px; }
+.plan-lane { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 6px; background: var(--panel); }
+.plan-lane:not(:last-child)::after { content: "→"; position: absolute; top: 6px; right: -19px; color: var(--muted); }
+.plan-lane.is-current { border-color: var(--teal); }
+.plan-wave-head { margin: 0 0 5px; font-size: 12px; overflow-wrap: anywhere; }
+.plan-now { display: inline-block; padding: 0 4px; border-radius: 4px; background: var(--teal-bg); color: var(--teal); font-size: 11px; }
+.plan-boxes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; margin: 0; padding: 0; list-style: none; }
+.plan-box { min-width: 0; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--gray-bg); color: var(--gray); }
+.plan-box.p-done { border-color: var(--green); background: var(--green-bg); color: var(--green); }
+.plan-box.p-doing { border-color: var(--teal); background: var(--teal-bg); color: var(--teal); }
+.plan-box.p-stopped { border-style: dashed; border-color: var(--gray); background: var(--gray-bg); color: var(--gray); }
+.plan-box.p-blocked { border-color: var(--red); background: var(--red-bg); color: var(--red); }
+.plan-box-id { display: block; font-size: 12px; }
+.plan-box-label { display: block; max-width: 7em; min-height: 2.9em; line-height: 1.45; overflow-wrap: anywhere; font-weight: 600; }
+.plan-deps { display: block; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.plan-empty-wave { color: var(--muted); font-size: 11px; }
+.plan-label { margin: 8px 0 3px; font-size: 12px; color: var(--muted); }
+.plan-task-table, .plan-qa-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+.plan-task-table th, .plan-task-table td, .plan-qa-table th, .plan-qa-table td { padding: 4px 5px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.plan-task-table th, .plan-qa-table th { color: var(--muted); font-weight: 600; }
+.plan-task-table th:nth-child(1) { width: 76px; }
+.plan-task-table th:nth-child(2) { width: 46px; }
+.plan-qa-table th:nth-child(1) { width: 46px; }
+.plan-qa-table th:nth-child(4) { width: 100px; }
+.plan-task.p-done .plan-task-state { color: var(--green); }
+.plan-task.p-doing .plan-task-state { color: var(--teal); }
+.plan-task.p-stopped .plan-task-state { color: var(--gray); }
+.plan-task.p-blocked .plan-task-state { color: var(--red); }
+.plan-mobile-arrow { display: none; }
+.plan-other-tasks[hidden], .plan-out-list[hidden] { display: none; }
+.plan-question-answer code { white-space: nowrap; }
+.plan-question.is-open .plan-question-text { font-weight: 600; }
+.plan-ideal, .plan-out-list { margin: 3px 0; padding-left: 20px; overflow-wrap: anywhere; }
+.plan-ideal b { font-size: 11px; color: var(--muted); }
+.plan-out { margin-top: 5px; }
+.plan-view .plan-toggle { margin-left: 0; }
+.plan-legend { margin: 7px 0 0; color: var(--muted); font-size: 11px; }
+.plan-link { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--accent); font-size: 12px; text-decoration: none; }
+.plan-link:hover { text-decoration: underline; }
+
+@media (max-width: 599px) {
+  .plan-lanes { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: minmax(0, 1fr); gap: 22px; overflow-x: visible; padding-bottom: 2px; }
+  .plan-lane:not(:last-child)::after { content: "↓"; top: auto; bottom: -20px; right: calc(50% - 6px); }
+  .plan-boxes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .plan-head .time { margin-left: 0; }
+  .plan-task-table, .plan-task-table tbody { display: block; }
+  .plan-task-table thead, .plan-qa-table thead { display: none; }
+  .plan-task-table tr { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: 2px 5px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+  .plan-task-table td { padding: 0; border: 0; }
+  .plan-task-table .plan-state-text { display: none; }
+  .plan-task-state { grid-column: 1; }
+  .plan-task-id { grid-column: 2; }
+  .plan-task-what { grid-column: 3; }
+  .plan-task-done { grid-column: 1 / -1; color: var(--muted); }
+  .plan-mobile-arrow { display: inline; }
+  .plan-qa-table, .plan-qa-table tbody { display: block; }
+  .plan-qa-table tr { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 3px 5px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+  .plan-qa-table td { padding: 0; border: 0; }
+  .plan-question-id { grid-column: 1; grid-row: 1; }
+  .plan-question-text { grid-column: 2; grid-row: 1; }
+  .plan-question-answer, .plan-question-state { grid-column: 2; }
+  .plan-task-table .plan-other-tasks[hidden] { display: none; }
+}

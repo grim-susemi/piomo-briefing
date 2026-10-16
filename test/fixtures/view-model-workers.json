@@ -1,0 +1,207 @@
+{
+  "schema": 1,
+  "seq": 41,
+  "generatedAt": 1791946560345,
+  "sessions": [
+    {
+      "id": "s-w1",
+      "project": "piomo-briefing",
+      "cwd": "C:/Users/USER/orca/projects/piomo-briefing",
+      "title": "상황판 실시간 작업",
+      "paneId": "w2-p1",
+      "workName": "piomo-briefing-plan-view",
+      "status": "in_progress",
+      "statusKey": "in_progress",
+      "tab": "진행 중",
+      "chips": [],
+      "headline": "작업자 3명이 화면 조각을 나눠 만드는 중",
+      "lastActivityAt": 1791946555345,
+      "live": {
+        "workers": [
+          {
+            "id": "st_01a14091",
+            "name": "서버 본체 만들기",
+            "kind": "deep-low",
+            "model": "Sol 6.1",
+            "state": "done",
+            "step": "",
+            "startedAt": "2026-10-14T02:26:00.345Z",
+            "endedAt": "2026-10-14T02:38:30.345Z",
+            "updatedAt": "2026-10-14T02:38:30.345Z",
+            "childSessionId": "01a14091-0000-7000-8000-000000000001",
+            "stale": false,
+            "todo": {
+              "items": [
+                { "text": "경로·헤더 규칙 테스트", "status": "completed" },
+                { "text": "SSE 형식 구현", "status": "completed" },
+                { "text": "포트 탐색 구현", "status": "completed" },
+                { "text": "닫기 500ms 확인", "status": "completed" },
+                { "text": "증거 기록", "status": "completed" }
+              ],
+              "total": 5,
+              "more": 0,
+              "done": 5
+            }
+          },
+          {
+            "id": "st_01a14092",
+            "name": "알람 소리 시험",
+            "kind": "quick",
+            "model": "GLM 5.3 Flash",
+            "state": "error",
+            "step": "",
+            "startedAt": "2026-10-14T02:46:00.345Z",
+            "endedAt": "2026-10-14T02:54:00.345Z",
+            "updatedAt": "2026-10-14T02:54:00.345Z",
+            "stale": false,
+            "todo": null
+          },
+          {
+            "id": "st_01a14094",
+            "name": "작업자 줄·움직임",
+            "kind": "visual-engineering",
+            "model": "Opus 5.5",
+            "state": "running",
+            "step": "edit · src/page/workers-view.css",
+            "startedAt": "2026-10-14T02:52:48.345Z",
+            "updatedAt": "2026-10-14T02:55:55.345Z",
+            "childSessionId": "01a14094-0000-7000-8000-000000000003",
+            "stale": false,
+            "todo": {
+              "items": [
+                { "text": "플랜 행 읽기", "status": "completed" },
+                { "text": "픽스처와 테스트 작성", "status": "completed" },
+                { "text": "빨간 출력 저장", "status": "completed" },
+                { "text": "workers-view.js 작성", "status": "in_progress" },
+                { "text": "workers-view.css 작성", "status": "pending" },
+                { "text": "실제 Chrome 캡처", "status": "pending" },
+                { "text": "옛 미리보기 재사용", "status": "abandoned" }
+              ],
+              "total": 7,
+              "more": 0,
+              "done": 4
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "s-w2",
+      "project": "piomo-briefing",
+      "cwd": "C:/Users/USER/orca/projects/piomo-briefing",
+      "title": "계획 보기 연결",
+      "paneId": "w2-p2",
+      "workName": "plan-view-wiring",
+      "status": "in_progress",
+      "statusKey": "in_progress",
+      "tab": "진행 중",
+      "chips": ["작업 중"],
+      "headline": "계획 상태와 작업자 정보를 상황판에 잇는 중",
+      "lastActivityAt": 1791946558345,
+      "live": {
+        "workers": [
+          {
+            "id": "st_01a14081",
+            "name": "옛 설치기 정리",
+            "kind": "quick",
+            "model": "Sol 6.1",
+            "state": "cancelled",
+            "step": "",
+            "startedAt": "2026-10-14T02:36:00.345Z",
+            "endedAt": "2026-10-14T02:41:00.345Z",
+            "updatedAt": "2026-10-14T02:41:00.345Z",
+            "stale": false
+          },
+          {
+            "id": "st_01a14080",
+            "name": "계획 상태 읽기",
+            "kind": "deep-low",
+            "model": "Opus 5.5",
+            "state": "running",
+            "step": "응답 없음 10분",
+            "startedAt": "2026-10-14T01:54:00.345Z",
+            "updatedAt": "2026-10-14T02:45:00.345Z",
+            "stale": true
+          },
+          {
+            "id": "st_01a14095",
+            "name": "알람 화면",
+            "state": "waiting",
+            "step": "정보 대기",
+            "stale": false
+          },
+          {
+            "id": "st_01a14082",
+            "name": "통합 시험 준비",
+            "kind": "deep-low",
+            "model": "Opus 5.5",
+            "state": "lost",
+            "step": "",
+            "endedAt": "2026-10-14T02:30:00.345Z",
+            "updatedAt": "2026-10-14T02:30:00.345Z",
+            "stale": false
+          },
+          {
+            "id": "st_01a14096",
+            "name": "확장 연결",
+            "kind": "deep-low",
+            "model": "Opus 5.5",
+            "state": "running",
+            "step": "bash · node --test test/render.test.mjs",
+            "startedAt": "2026-10-14T02:55:15.345Z",
+            "updatedAt": "2026-10-14T02:55:58.345Z",
+            "stale": false,
+            "todo": {
+              "items": [
+                { "text": "연결 단계 1", "status": "completed" },
+                { "text": "연결 단계 2", "status": "completed" },
+                { "text": "연결 단계 3", "status": "completed" },
+                { "text": "연결 단계 4", "status": "completed" },
+                { "text": "연결 단계 5", "status": "completed" },
+                { "text": "연결 단계 6", "status": "completed" },
+                { "text": "연결 단계 7", "status": "completed" },
+                { "text": "연결 단계 8", "status": "completed" },
+                { "text": "연결 단계 9", "status": "completed" },
+                { "text": "연결 단계 10", "status": "completed" },
+                { "text": "연결 단계 11", "status": "completed" },
+                { "text": "연결 단계 12", "status": "completed" },
+                { "text": "연결 단계 13", "status": "in_progress" },
+                { "text": "연결 단계 14", "status": "pending" },
+                { "text": "연결 단계 15", "status": "pending" },
+                { "text": "연결 단계 16", "status": "pending" },
+                { "text": "연결 단계 17", "status": "pending" },
+                { "text": "연결 단계 18", "status": "pending" },
+                { "text": "연결 단계 19", "status": "pending" },
+                { "text": "연결 단계 20", "status": "pending" },
+                { "text": "연결 단계 21", "status": "pending" },
+                { "text": "연결 단계 22", "status": "pending" },
+                { "text": "연결 단계 23", "status": "pending" },
+                { "text": "연결 단계 24", "status": "pending" },
+                { "text": "연결 단계 25", "status": "pending" },
+                { "text": "연결 단계 26", "status": "pending" },
+                { "text": "연결 단계 27", "status": "pending" },
+                { "text": "연결 단계 28", "status": "pending" },
+                { "text": "연결 단계 29", "status": "pending" },
+                { "text": "연결 단계 30", "status": "pending" }
+              ],
+              "total": 34,
+              "more": 4,
+              "done": 12
+            }
+          },
+          {
+            "id": "st_01a14097",
+            "name": "설치 안내서",
+            "kind": "quick",
+            "model": "Sol 6.1",
+            "state": "waiting",
+            "step": "",
+            "startedAt": "2026-10-14T02:55:52.345Z",
+            "updatedAt": "2026-10-14T02:55:52.345Z",
+            "stale": false
+          }
+        ]
+      }
+    }
+  ]
+}

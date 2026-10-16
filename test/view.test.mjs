@@ -263,15 +263,13 @@ function loadPage() {
   return { page: ctx.BriefPage, badge: byId['new-badge'], shown, root: byId.app, ctx, byId, body: document.body, fire };
 }
 
-test('badge apply keeps the tab the owner sees, even an untouched default', () => {
+test('a larger seq applies by itself and keeps the tab the owner sees, even an untouched default', () => {
   const { page, badge, shown, root } = loadPage();
   page.receive({ ...clone(FIXTURE), seq: 1, sessions: clone(FIXTURE).sessions.filter((s) => s.tab === '진행 중') });
   assert.equal(shown(), 'run');
+  page.state.appliedAt = 0; // the 500 ms apply throttle is covered in page.test.mjs
   page.receive({ ...clone(FIXTURE), seq: 2 });
-  assert.equal(badge.hidden, false);
-  assert.equal(shown(), 'run', 'not applied before click');
-  badge.listeners.click();
-  assert.equal(page.state.seq, 2);
+  assert.equal(page.state.seq, 2, 'applied without a click');
   assert.equal(badge.hidden, true);
   assert.equal(shown(), 'run', 'tab kept after apply');
   assert.ok(!root.innerHTML.includes('class="fatal"'));

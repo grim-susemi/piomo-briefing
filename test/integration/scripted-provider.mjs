@@ -5,6 +5,7 @@
 //   last message is a tool result              -> text "끝"
 //   last user text has "[보고 길이]"             -> text "상황판: <SCRIPTED_PAGE_PATH>" (answers the extension's rewrite request)
 //   last user text has "BRIEFJSON:{...}"        -> one `brief` tool call with that JSON
+//   last user text has "TOOLCALL:<name>:{json}" -> one tool call <name> with that JSON (one line; plan_brief / task scenarios of plan todo 14)
 //   last user text has "COUNT3"                 -> text "1\n2\n3\n끝"; after the first delta the run stays streaming until the
 //                                               file SCRIPTED_HOLD_FILE exists (event driven, no timed delay)
 //   anything else (e.g. the delivered decision) -> text "확인"
@@ -55,6 +56,8 @@ function plan(messages) {
   if (text.includes('[보고 길이]')) return { kind: 'text', parts: [`상황판: ${process.env.SCRIPTED_PAGE_PATH ?? ''}`] };
   const at = text.indexOf('BRIEFJSON:');
   if (at >= 0) return { kind: 'tool', name: 'brief', args: JSON.parse(text.slice(at + 'BRIEFJSON:'.length).split('\n')[0].trim()) };
+  const call = /TOOLCALL:([A-Za-z_][\w-]*):(\{.*\})/.exec(text.split('\n').find((l) => l.includes('TOOLCALL:')) ?? '');
+  if (call) return { kind: 'tool', name: call[1], args: JSON.parse(call[2]) };
   if (text.includes('COUNT3')) return { kind: 'text', parts: ['1\n', '2\n', '3\n', '끝'], slow: true };
   return { kind: 'text', parts: ['확인'] };
 }

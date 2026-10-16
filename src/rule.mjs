@@ -1,7 +1,7 @@
 // omo-briefing src/rule.mjs - 보고 규칙 문구, 마지막 답 길이 계산, fitReply, 인계 블록 파서.
 // 순수 함수와 상수만 둔다(파일·프로세스 접근 없음).
 
-export const RULE_MARKER = '<!-- omo-briefing-rule v1 -->';
+export const RULE_MARKER = '<!-- omo-briefing-rule v2 -->';
 
 export const RULE_TEXT = `${RULE_MARKER}
 [보고 규칙 - omo-briefing]
@@ -9,7 +9,10 @@ export const RULE_TEXT = `${RULE_MARKER}
 - 채팅 마지막 답은 짧게: 기존 하네스가 요구하는 라우팅 줄과 인계 블록 라벨은 유지하되, '사용자에게 알릴 내용' 칸은 짧은 문장 3개 이내 + '상황판: <절대경로>'. 마지막 답 전체는 빈 줄 제외 10줄·700자 이내. 자세한 내용은 brief에 둔다.
 - 소유자가 정할 것은 brief.decisions에 선택지·결과·추천·이유로 넣는다. 지금 답이 꼭 필요하면 질문 도구도 함께 쓴다.
 - 증거 파일 절대경로가 있을 때만 truth=evidence, 실사용에 반영됐을 때만 applied=live, 실사용에 올릴 것이 없는 항목(조사·문서 등)은 applied=none.
-- '[결정 전달] #N -> X' 메시지는 소유자의 답이다. 그 답은 계획 선택일 뿐 설치·푸시·삭제 승인이 아니다.`;
+- '[결정 전달] #N -> X' 메시지는 소유자의 답이다. 그 답은 계획 선택일 뿐 설치·푸시·삭제 승인이 아니다.
+- ulw-plan 계획을 세울 때: 질문 도구로 승인을 묻기 직전, 계획 파일을 쓰거나 고친 직후, 검토 결과를 반영한 직후 plan_brief를 한 번 호출한다.
+- 할 일 id는 계획 파일 todo 번호 그대로(1, 2, F1); 한 번 쓴 id는 다른 뜻으로 다시 쓰지 않는다.
+- 질문 도구로 지금 묻는 질문은 open으로 넣지 말고, 답을 받은 뒤 answered로 넣는다.`;
 
 export const REWRITE_PROMPT = "[보고 길이] 직전 답이 길거나 상황판 경로가 없어. '상황판: <절대경로>'를 포함해 3문장 이내로 마지막 답만 다시 써. 도구는 쓰지 마.";
 

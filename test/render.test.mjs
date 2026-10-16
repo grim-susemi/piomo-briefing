@@ -379,7 +379,9 @@ describe('renderPage', () => {
     const html = fs.readFileSync(join(store.root, 'index.html'), 'utf8');
     assert.match(html, /BriefView/); // view.js inlined
     assert.match(html, /__briefData/); // page.js inlined
-    assert.doesNotMatch(html, /<script[^>]+src=|<link[^>]+href=|https?:\/\//); // no external requests
+    // no external requests; the one <link> is the inline data: icon that keeps the board server's 404 for /favicon.ico out of the console
+    assert.doesNotMatch(html, /<script[^>]+src=|<link(?![^>]+href="data:,")[^>]+href=|https?:\/\//);
+    assert.equal((html.match(/<link[^>]+href=/g) ?? []).length, 1);
   });
 
   test('seq is max(published.json, data.js) + 1: an older valid manifest never rolls the board back', (t) => {

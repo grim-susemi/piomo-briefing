@@ -1,0 +1,239 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SOURCE = fs.readFileSync(path.join(ROOT, 'src/page/plan-view.js'), 'utf8');
+const VIEW_SOURCE = fs.readFileSync(path.join(ROOT, 'src/page/view.js'), 'utf8');
+const FIXTURE = JSON.parse(fs.readFileSync(path.join(ROOT, 'test/fixtures/view-model-plan.json'), 'utf8'));
+const NOW = Date.parse('2026-10-15T13:05:00+09:00');
+const clone = (v) => JSON.parse(JSON.stringify(v));
+const count = (s, re) => (s.match(re) || []).length;
+
+function load() {
+  const context = {};
+  vm.runInNewContext(VIEW_SOURCE, context, { filename: 'view.js' });
+  vm.runInNewContext(SOURCE, context, { filename: 'plan-view.js' });
+  assert.equal(typeof context.BriefPlanView?.render, 'function');
+  assert.equal(typeof context.BriefPlanView?.renderLink, 'function');
+  return { view: context.BriefPlanView, esc: context.BriefView.escapeHtml };
+}
+
+function expanded(plan = FIXTURE, all = false) {
+  const state = { ['plan:' + plan.planId]: true };
+  if (all) {
+    state['plan-tasks:' + plan.planId] = true;
+    state['plan-out:' + plan.planId] = true;
+  }
+  return state;
+}
+
+function render(plan = FIXTURE, state = expanded(plan)) {
+  const { view, esc } = load();
+  return view.render(plan, NOW, { expanded: state, esc });
+}
+
+function anchors(html) {
+  return [...html.matchAll(/data-anchor="([^"]+)"/g)].map((m) => m[1]);
+}
+
+// Enumerate the public anchor contract independently of the renderer.
+function expectedAnchors(plan) {
+  const p = plan.planId;
+  const out = [p + '/goal/main'];
+  for (const i of plan.ideal) out.push(p + '/is/' + i.id, p + '/is/' + i.id + '/text');
+  for (const c of plan.components) out.push(p + '/comp/' + c.id, p + '/comp/' + c.id + '/label', p + '/comp/' + c.id + '/text');
+  for (const w of plan.waves) out.push(p + '/wave/' + w.n, p + '/wave/' + w.n + '/label');
+  for (const t of plan.tasks) out.push(p + '/task/' + t.id, ...['label', 'what', 'done'].map((f) => p + '/task/' + t.id + '/' + f));
+  for (const q of plan.questions) out.push(p + '/q/' + q.id, p + '/q/' + q.id + '/text', p + '/q/' + q.id + '/answer');
+  for (let i = 0; i < plan.outOfScope.length; i++) out.push(p + '/out/' + (i + 1), p + '/out/' + (i + 1) + '/text');
+  return out;
+}
+
+test('fixture supplies four waves, twelve tasks, three question states and one stopped task', () => {
+  assert.equal(FIXTURE.waves.length, 4);
+  assert.equal(FIXTURE.tasks.length, 12);
+  assert.deepEqual(FIXTURE.questions.map((q) => q.state).sort(), ['answered', 'default', 'open']);
+  assert.equal(FIXTURE.tasks.filter((t) => t.state === 'stopped').length, 1);
+});
+
+test('classic script loads by itself and does not need a DOM', () => {
+  const context = {};
+  vm.runInNewContext(SOURCE, context);
+  const link = context.BriefPlanView.renderLink(FIXTURE);
+  assert.equal(typeof link, 'string');
+  assert.ok(link.length > 0);
+});
+
+test('four lanes show their own tasks and only the first unfinished lane is current', () => {
+  const html = render();
+  assert.equal(count(html, /data-plan-wave="/g), 4);
+  assert.equal(count(html, /class="plan-now"/g), 1);
+  const lanes = html.split('<section class="plan-lane').slice(1);
+  assert.equal(lanes.length, 4);
+  assert.ok(!lanes[0].includes('class="plan-now"'));
+  assert.ok(lanes[1].includes('data-plan-wave="2"'));
+  assert.ok(lanes[1].includes('class="plan-now"'));
+  for (const lane of lanes) assert.equal(count(lane.split('</section>')[0], /class="plan-box /g), 3);
+  assert.ok(html.includes('←2·3'));
+});
+
+test('all-done plans have no current lane and changing progress advances the lane', () => {
+  const plan = clone(FIXTURE);
+  plan.tasks.forEach((t) => { if (t.wave === 2) t.state = 'done'; });
+  let html = render(plan);
+  const third = html.split('data-plan-wave="3"')[1].split('</section>')[0];
+  assert.ok(third.includes('class="plan-now"'));
+  plan.tasks.forEach((t) => { t.state = 'done'; });
+  html = render(plan);
+  assert.equal(count(html, /class="plan-now"/g), 0);
+});
+
+test('fully expanded HTML has every element and field anchor exactly once with the public format', () => {
+  const html = render(FIXTURE, expanded(FIXTURE, true));
+  const actual = anchors(html);
+  assert.equal(actual.length, new Set(actual).size);
+  assert.deepEqual(actual.slice().sort(), expectedAnchors(FIXTURE).sort());
+  for (const a of actual) {
+    assert.match(a, /^p[0-9a-f]{12}\/(goal|is|comp|wave|task|q|out)\/[^/]+(?:\/(label|what|done|text|answer))?$/);
+  }
+  assert.ok(!html.includes('class="plan-other-tasks" hidden'));
+  assert.ok(!html.includes('class="plan-out-list" hidden'));
+});
+
+test('collapsed HTML is exactly two summary lines, has no duplicate anchors, and uses the exp channel', () => {
+  const html = render(FIXTURE, {});
+  assert.equal(html.split('\n').length, 2);
+  assert.equal(count(html, /class="plan-summary-line"/g), 2);
+  assert.equal(count(html, /<br\b/g), 0);
+  assert.equal(anchors(html).length, new Set(anchors(html)).size);
+  assert.equal(anchors(html).length, 0);
+  assert.ok(html.includes('data-act="exp" data-key="plan:' + FIXTURE.planId + '"'));
+  assert.ok(html.includes('aria-expanded="false"'));
+  assert.ok(html.includes('1✔ 2● 3○ 4○'));
+  assert.ok(html.includes('4/12'));
+  assert.ok(!html.includes('plan-lanes'));
+});
+
+test('execution-session link is one line, navigates to the owner and has no anchors', () => {
+  const { view } = load();
+  const plan = { ...clone(FIXTURE), target: 'c-owner-0', tab: 'run' };
+  const html = view.renderLink(plan);
+  assert.equal(html.split('\n').length, 1);
+  assert.equal(count(html, /data-anchor/g), 0);
+  assert.ok(html.includes('data-goto="c-owner-0"'));
+  assert.ok(html.includes('data-tab="run"'));
+  assert.ok(!html.includes('data-act="exp"'));
+});
+
+test('open Q&A row sorts first and copies the decision id and recommendation', () => {
+  const html = render();
+  const rows = html.split('<tr class="plan-question ').slice(1);
+  assert.equal(rows.length, 3);
+  assert.ok(rows[0].startsWith('is-open"'));
+  assert.ok(rows[0].includes('data-decision="15"'));
+  assert.ok(rows[0].includes('data-copy="/decide 15A"'));
+  assert.ok(rows.some((row) => row.includes('소유자 A')));
+  assert.ok(rows.some((row) => row.includes('class="chip x-info plan-default"')));
+  const plan = clone(FIXTURE);
+  plan.questions.find((q) => q.state === 'open').recommend = 'B';
+  assert.ok(render(plan).includes('data-copy="/decide 15B"'));
+});
+
+test('only current-wave task rows are initially visible; the remainder uses a separate exp key', () => {
+  const html = render();
+  const current = html.split('<tbody class="plan-current-tasks">')[1].split('</tbody>')[0];
+  assert.deepEqual([...current.matchAll(/data-plan-task-row="([^"]+)"/g)].map((m) => m[1]), ['4', '5', '6']);
+  assert.ok(html.includes('class="plan-other-tasks" hidden'));
+  assert.ok(html.includes('data-key="plan-tasks:' + FIXTURE.planId + '"'));
+  assert.ok(html.includes('외 9개'));
+  assert.ok(html.includes('data-key="plan-out:' + FIXTURE.planId + '"'));
+  assert.ok(html.includes('class="plan-out-list" hidden'));
+});
+
+test('stopped boxes are distinct from blocked dependents and use the dashed CSS rule', () => {
+  const html = render();
+  const stopped = html.split('class="plan-box p-stopped"')[1].split('</li>')[0];
+  const blocked = html.split('class="plan-box p-blocked"')[1].split('</li>')[0];
+  assert.ok(stopped.includes('/task/5"'));
+  assert.ok(blocked.includes('/task/7"'));
+  assert.ok(blocked.includes('막힘'));
+  const css = fs.readFileSync(path.join(ROOT, 'src/page/plan-view.css'), 'utf8');
+  assert.match(css, /\.plan-box\.p-stopped\s*\{[^}]*border-style:\s*dashed/);
+  assert.match(css, /\.plan-box\.p-stopped\s*\{[^}]*var\(--gray\)/);
+});
+
+test('tasks-empty components render as one large-parts lane with complete anchors', () => {
+  const plan = clone(FIXTURE);
+  plan.tasks = [];
+  plan.waves = [];
+  plan.stage = 'gate';
+  const html = render(plan, expanded(plan, true));
+  assert.equal(count(html, /class="plan-lane/g), 2); // lane scroller plus its single lane
+  assert.equal(count(html, /data-plan-components/g), 1);
+  assert.ok(html.includes('큰 덩어리'));
+  assert.equal(count(html, /class="plan-box p-todo"/g), 2);
+  assert.deepEqual(anchors(html).sort(), expectedAnchors(plan).sort());
+  assert.ok(!html.includes('class="plan-task-table"'));
+});
+
+test('dynamic fields and attributes, including link data, are escaped', () => {
+  const plan = clone(FIXTURE);
+  const bad = '<script>"&\'`</script>\nnext';
+  plan.goal = bad;
+  plan.stageNote = bad;
+  plan.source.slug = bad;
+  plan.source.planPath = bad;
+  plan.chips = [bad];
+  plan.ideal[0].text = bad;
+  plan.components[0].label = bad;
+  plan.components[0].text = bad;
+  plan.waves[0].label = bad;
+  plan.tasks[0].label = bad;
+  plan.tasks[0].what = bad;
+  plan.tasks[0].done = bad;
+  plan.questions.forEach((q) => { q.text = bad; });
+  plan.questions.find((q) => q.state === 'answered').answer = bad;
+  plan.outOfScope = [bad];
+  const { view, esc } = load();
+  for (const html of [render(plan, expanded(plan, true)), render(plan, {}), view.renderLink({ ...plan, target: bad, tab: bad })]) {
+    assert.ok(!html.includes('<script>'));
+    assert.ok(html.includes('&lt;script&gt;'));
+    assert.ok(!html.includes('"&\'`'));
+  }
+  const seen = [];
+  view.render(plan, NOW, { expanded: expanded(plan, true), esc(value) { seen.push(value); return esc(value); } });
+  assert.ok(seen.includes(bad), 'the injected esc is used on model strings');
+  for (const html of [render(plan, {}), view.renderLink(plan)]) assert.ok(html.split('\n').length <= 2);
+});
+
+test('stage mapping handles all seven stages and prototype names are not used as labels', () => {
+  const { view, esc } = load();
+  const labels = { shaping: '구상', gate: '승인 대기', review: '검토 중', ready: '실행 준비', running: '실행 중', done: '끝남', dropped: '중단' };
+  for (const [stage, label] of Object.entries(labels)) {
+    const html = view.render({ ...FIXTURE, stage }, NOW, { expanded: {}, esc });
+    assert.ok(html.includes(label), stage);
+  }
+  const html = view.render({ ...FIXTURE, stage: 'constructor' }, NOW, { expanded: {}, esc });
+  assert.ok(!html.includes('function Object'));
+});
+
+test('revision time, checked time, unchanged chips and path copy are present without percentages', () => {
+  const html = render();
+  assert.match(html, /⏱ r3 \d\d:\d\d/);
+  assert.ok(html.includes('data-copy="' + FIXTURE.source.planPath + '"'));
+  assert.ok(html.includes('class="plan-checked"'));
+  for (const chip of FIXTURE.chips) assert.ok(html.includes(chip));
+  for (const output of [html, render(FIXTURE, {}), load().view.renderLink(FIXTURE)]) assert.ok(!output.includes('%'));
+});
+
+test('rendering is deterministic and does not mutate the input or expansion state', () => {
+  const plan = clone(FIXTURE);
+  const state = expanded(plan, true);
+  const before = JSON.stringify({ plan, state });
+  assert.equal(render(plan, state), render(plan, state));
+  assert.equal(JSON.stringify({ plan, state }), before);
+});

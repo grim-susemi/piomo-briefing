@@ -1,0 +1,55 @@
+/* omo-briefing alarm band (alarm.js): a red strip at the top while something waits for the owner's answer.
+ * Colors and sizes are page.css tokens; --alarm-h is the band height, kept current by alarm.js (0 when hidden). */
+:root { --alarm-h: 0px; }
+
+/* room for the sticky band: page.css owns these rules, the band only adds its own height to their values */
+html:root { scroll-padding-top: calc(12px + var(--alarm-h)); } /* page.css html: 12px */
+body .toc { top: var(--alarm-h); }
+body .new-badge { top: calc(10px + var(--alarm-h)); } /* page.css .new-badge: 10px */
+@media (min-width: 600px) {
+  body .toc { height: calc(100vh - var(--alarm-h)); }
+}
+
+.alarm-band {
+  --alarm-bg: var(--red); --alarm-fg: var(--panel);
+  position: sticky; top: 0; z-index: 40; /* under page.js live status (50), over the sidebar */
+  padding: 4px 12px; background: var(--alarm-bg); color: var(--alarm-fg);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--red) 45%, transparent);
+}
+.alarm-band[hidden] { display: none; }
+.alarm-row { display: flex; align-items: center; gap: 8px; min-height: 24px; margin: 0; border-radius: 4px; }
+.alarm-row + .alarm-row { border-top: 1px solid color-mix(in srgb, var(--alarm-fg) 25%, transparent); }
+.alarm-text { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.alarm-who { font-weight: 700; }
+.alarm-act { flex: none; display: flex; align-items: center; gap: 6px; }
+.alarm-tag {
+  padding: 0 6px; border-radius: 9px; background: var(--alarm-fg); color: var(--alarm-bg);
+  font-size: 11px; font-weight: 700; line-height: 18px; white-space: nowrap;
+}
+.alarm-go, .alarm-unlock {
+  padding: 0 8px; border: 1px solid var(--alarm-fg); border-radius: 5px; background: transparent; color: var(--alarm-fg);
+  font-size: 11px; font-weight: 700; line-height: 18px;
+}
+.alarm-unlock { border-style: dashed; font-size: 12px; }
+.alarm-go:hover, .alarm-go:focus-visible, .alarm-unlock:hover, .alarm-unlock:focus-visible { background: var(--alarm-fg); color: var(--alarm-bg); }
+.alarm-more, .alarm-note { margin: 0; font-size: 12px; line-height: 20px; }
+.alarm-live { color: var(--alarm-fg); font-weight: 700; }
+.alarm-row.is-new { animation: alarm-flash 900ms ease-out; }
+@keyframes alarm-flash {
+  from { background: color-mix(in srgb, var(--alarm-fg) 35%, transparent); }
+  to { background: transparent; }
+}
+
+/* header sound toggle (BriefAlarm.soundButtonHtml), same shape as the other small page buttons */
+.alarm-sound { padding: 0 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); font-size: 11px; line-height: 18px; }
+.alarm-sound:hover { border-color: var(--accent); color: var(--accent); }
+.alarm-sound.is-off { color: var(--muted); }
+
+@media (prefers-reduced-motion: reduce) {
+  .alarm-row.is-new { animation: none; }
+}
+@media (max-width: 599px) {
+  .alarm-band { padding: 4px 8px; }
+  .alarm-row { gap: 6px; }
+  body .new-badge { top: calc(6px + var(--alarm-h)); } /* page.css narrow .new-badge: 6px */
+}

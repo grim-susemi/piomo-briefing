@@ -1,0 +1,49 @@
+{
+  "planId": "p123456789abc",
+  "rev": 3,
+  "at": "2026-10-15T13:02:00+09:00",
+  "checkedAt": "2026-10-15T13:04:00+09:00",
+  "source": {
+    "root": "C:/work/briefing",
+    "slug": "living-board",
+    "planPath": "C:/work/briefing/.omo/plans/living-board.md"
+  },
+  "stage": "running",
+  "stageNote": "화면을 연결하는 중",
+  "goal": "계획과 진행 상황을 한눈에 보고 결정한다",
+  "chips": ["계획 파일이 요약 뒤에 바뀜", "요약에 없는 할 일 1개"],
+  "ideal": [
+    { "id": "IS-1", "text": "목표와 현재 단계를 한눈에 본다" },
+    { "id": "IS-2", "text": "질문에 답할 명령을 바로 복사한다" }
+  ],
+  "components": [
+    { "id": "model", "label": "계획 정보", "text": "요약과 읽기 전용 상태를 합친다" },
+    { "id": "screen", "label": "상황판 화면", "text": "목표부터 성공 기준까지 보여준다" }
+  ],
+  "waves": [
+    { "n": 1, "label": "기초 정보" },
+    { "n": 2, "label": "계획 화면" },
+    { "n": 3, "label": "연결 시험" },
+    { "n": 4, "label": "실사용 설치" }
+  ],
+  "tasks": [
+    { "id": "1", "wave": 1, "label": "연결 확인", "what": "대화와 작업을 맞춘다", "done": "같은 대화의 작업을 찾는다", "deps": [], "state": "done" },
+    { "id": "2", "wave": 1, "label": "입력 검사", "what": "계획 입력을 검사한다", "done": "잘못된 입력을 거절한다", "deps": [], "state": "done" },
+    { "id": "3", "wave": 1, "label": "상태 읽기", "what": "읽기 전용 상태를 만든다", "done": "체크박스와 원장을 반영한다", "deps": [], "state": "done" },
+    { "id": "4", "wave": 2, "label": "계획 요약", "what": "계획 저장을 연결한다", "done": "판과 질문이 저장된다", "deps": ["2", "3"], "state": "done" },
+    { "id": "5", "wave": 2, "label": "모바일 표", "what": "작은 화면에 표를 맞춘다", "done": "휴대폰에서 읽을 수 있다", "deps": ["2"], "state": "stopped" },
+    { "id": "6", "wave": 2, "label": "레인 화면", "what": "단계 레인을 만든다", "done": "지금 단계와 의존관계가 보인다", "deps": ["2", "3"], "state": "doing" },
+    { "id": "7", "wave": 3, "label": "화면 연결", "what": "계획을 카드에 넣는다", "done": "실제 카드 안에 계획이 보인다", "deps": ["4", "5", "6"], "state": "todo" },
+    { "id": "8", "wave": 3, "label": "자동 반영", "what": "펼침을 유지하며 갱신한다", "done": "보던 단계가 유지된다", "deps": ["6"], "state": "todo" },
+    { "id": "9", "wave": 3, "label": "실제 화면 시험", "what": "넓고 좁은 화면을 확인한다", "done": "두 화면에 겹침이 없다", "deps": ["7", "8"], "state": "todo" },
+    { "id": "10", "wave": 4, "label": "설치 준비", "what": "새 화면 파일을 묶는다", "done": "설치 파일이 완성된다", "deps": ["9"], "state": "todo" },
+    { "id": "11", "wave": 4, "label": "설치", "what": "새 세대를 설치한다", "done": "새 대화에서 상황판이 열린다", "deps": ["10"], "state": "todo" },
+    { "id": "12", "wave": 4, "label": "안내", "what": "사용법을 남긴다", "done": "소유자가 새 화면을 열 수 있다", "deps": ["11"], "state": "todo" }
+  ],
+  "questions": [
+    { "id": "Q2", "text": "표시할 언어는?", "state": "answered", "answer": "A", "by": "owner" },
+    { "id": "Q3", "text": "상황판 색은?", "state": "default", "answer": "기존 색", "by": "agent" },
+    { "id": "Q1", "text": "설치를 지금 진행할까요?", "state": "open", "decisionId": 15, "options": { "A": { "text": "진행", "consequence": "새 세대를 설치한다" }, "B": { "text": "보류", "consequence": "현재 화면을 유지한다" } }, "recommend": "A", "reason": "화면 확인 뒤 진행한다", "blocks": true }
+  ],
+  "outOfScope": ["화면에서 바로 답하기", "계획 파일 직접 수정"]
+}

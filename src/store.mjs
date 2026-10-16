@@ -8,6 +8,9 @@
 // - allocDecisionId(record?): global monotonic id = max(decisions/*)+1, created with wx.
 // - reclaimStale(rel, staleRecord): atomic recovery of a dead-pid lock/claim via hard-link tombstone.
 // - readSnapshot(): the whole layout; broken JSON goes to readErrors, the rest is still read.
+// - writePlanRev(planId, record): plans/<planId>/rev-NNNNNN.json, next number by wx (EEXIST -> next number, <=5 times),
+//   then only the newest 10 revs are kept; a failed delete is RETURNED (pruneError), never thrown (the rev is saved).
+// - readPlans(): per plan the newest rev + status.json (plans/<planId>/); writePlanStatus(): replace-write of status.json.
 //
 // This module only touches files under its root; it never touches `.omo/senpi-task`.
 import * as nodeFs from 'node:fs';
@@ -22,6 +25,10 @@ const READ_RETRY_DELAYS_MS = [2, 4, 8, 16, 32, 64, 100];
 const BRIEFS_KEPT = 20;
 const BRIEF_PATH = /^sessions\/([^/]+)\/briefs\/(\d+)\.json$/;
 const NUMBERED = /^(\d+)\.json$/;
+const PLAN_ID = /^p[0-9a-f]{12}$/;
+const REV_FILE = /^rev-(\d{6,})\.json$/;
+const REVS_KEPT = 10;
+const REV_EEXIST_RETRIES = 5;
 
 export function isPidAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -192,6 +199,53 @@ export function openStore(root, opts = {}) {
     }
   }
 
+  function planDir(planId) {
+    if (typeof planId !== 'string' || !PLAN_ID.test(planId)) throw new Error('invalid planId: ' + planId);
+    return `plans/${planId}`;
+  }
+
+  function listRevs(planId) {
+    let names;
+    try { names = fs.readdirSync(abs(planDir(planId))); } catch (err) { if (isMissing(err)) return []; throw err; }
+    const out = [];
+    for (const name of names) {
+      const m = REV_FILE.exec(name);
+      if (m) out.push({ name, n: Number(m[1]) });
+    }
+    return out.sort((x, y) => x.n - y.n);
+  }
+
+  // Keeps the newest REVS_KEPT revs. Returns the first delete error (the other deletes are still tried), or null.
+  function prunePlanRevs(planId) {
+    const revs = listRevs(planId);
+    let failure = null;
+    for (const old of revs.slice(0, Math.max(0, revs.length - REVS_KEPT))) {
+      try { fs.unlinkSync(abs(`${planDir(planId)}/${old.name}`)); } catch (err) { if (!isMissing(err) && failure === null) failure = err; }
+    }
+    return failure;
+  }
+
+  /** @returns {{rev:number, rel:string, pruneError:Error|null}} throws if no number could be taken or the write fails */
+  function writePlanRev(planId, record) {
+    const dir = planDir(planId);
+    let rev = listRevs(planId).reduce((max, e) => Math.max(max, e.n), 0) + 1;
+    for (let attempt = 0; ; attempt++) {
+      const rel = `${dir}/rev-${pad6(rev)}.json`;
+      try {
+        writeNew(rel, { ...record, rev });
+        return { rev, rel, pruneError: prunePlanRevs(planId) };
+      } catch (err) {
+        if (err.code !== 'EEXIST' || attempt >= REV_EEXIST_RETRIES) throw err;
+        // someone else took this number (another process): look again, never reuse or overwrite
+        rev = Math.max(rev + 1, listRevs(planId).reduce((max, e) => Math.max(max, e.n), 0) + 1);
+      }
+    }
+  }
+
+  function writePlanStatus(planId, status) {
+    replace(`${planDir(planId)}/status.json`, status);
+  }
+
   function nextBriefSeq(sid) {
     return listNumbered(abs(`sessions/${sid}/briefs`)).reduce((max, e) => Math.max(max, e.n), 0) + 1;
   }
@@ -205,7 +259,7 @@ export function openStore(root, opts = {}) {
     replace('settings.json', { ...settings, enabled: settings.enabled !== false });
   }
 
-  function readSnapshot() {
+  function makeReader() {
     const readErrors = [];
     let maxMtime = 0;
 
@@ -237,6 +291,30 @@ export function openStore(root, opts = {}) {
       try { return fs.readdirSync(abs(relDir), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort(); }
       catch (err) { if (isMissing(err)) return []; throw err; }
     };
+    return { readErrors, load, names, dirs, maxMtime: () => maxMtime };
+  }
+
+  // Newest rev + status.json per plan folder. A file that cannot be read/parsed is reported in that plan's readErrors
+  // (and the reader's), never turned into 'no rev'.
+  function collectPlans({ readErrors, load, names, dirs }) {
+    return dirs('plans').filter((id) => PLAN_ID.test(id)).map((planId) => {
+      const before = readErrors.length;
+      const newest = names(`plans/${planId}`, REV_FILE)
+        .map((name) => ({ name, n: Number(REV_FILE.exec(name)[1]) }))
+        .sort((x, y) => y.n - x.n)[0];
+      const rev = newest ? load(`plans/${planId}/${newest.name}`) ?? null : null;
+      const status = load(`plans/${planId}/status.json`) ?? null;
+      return { planId, rev, status, readErrors: readErrors.slice(before) };
+    });
+  }
+
+  function readPlans() {
+    return collectPlans(makeReader());
+  }
+
+  function readSnapshot() {
+    const reader = makeReader();
+    const { readErrors, load, names, dirs } = reader;
     const byId = (relDir) => names(relDir, NUMBERED)
       .map((name) => ({ n: Number(NUMBERED.exec(name)[1]), v: load(`${relDir}/${name}`) }))
       .filter((e) => e.v !== undefined)
@@ -259,6 +337,7 @@ export function openStore(root, opts = {}) {
       .map((n) => ({ sid: n.slice(0, -5), data: load(`mirror/${n}`) }))
       .filter((m) => m.data !== undefined);
 
+    const plans = collectPlans(reader);
     const published = load('published.json', false) ?? null;
     return {
       settings,
@@ -269,11 +348,12 @@ export function openStore(root, opts = {}) {
       claims: byId('claims'),
       receipts: byId('receipts'),
       mirror,
+      plans,
       published,
       readErrors,
-      maxMtime,
+      maxMtime: reader.maxMtime(),
     };
   }
 
-  return { root, writeNew, replace, readText, readRecord, reclaimStale, allocDecisionId, nextBriefSeq, readSnapshot, readSettings, writeSettings };
+  return { root, writeNew, replace, readText, readRecord, reclaimStale, allocDecisionId, nextBriefSeq, readSnapshot, readSettings, writeSettings, writePlanRev, writePlanStatus, readPlans };
 }

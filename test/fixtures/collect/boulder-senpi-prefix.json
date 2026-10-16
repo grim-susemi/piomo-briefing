@@ -1,0 +1,159 @@
+{
+  "schema_version": 2,
+  "active_work_id": "piomo-briefing-plan-view-e1-01a13bd0",
+  "works": {
+    "piomo-briefing-plan-view-e1-01a13bd0": {
+      "work_id": "piomo-briefing-plan-view-e1-01a13bd0",
+      "active_plan": ".omo/plans/piomo-briefing-plan-view.md",
+      "plan_name": "piomo-briefing-plan-view",
+      "session_ids": [
+        "senpi:01a13bd0-ade9-7eb0-a6a7-06bbf047fe6f"
+      ],
+      "status": "active",
+      "phase": "Wave 1 기초",
+      "current_task": "1",
+      "completed_tasks": [],
+      "task_count": 16,
+      "updated_at": "2026-10-15T00:00:00.000Z",
+      "started_at": "2026-10-14T00:00:00.000Z"
+    },
+    "piomo-living-briefing-e1-01a13bd0": {
+      "work_id": "piomo-living-briefing-e1-01a13bd0",
+      "active_plan": ".omo/plans/piomo-living-briefing.md",
+      "plan_name": "piomo-living-briefing",
+      "session_ids": [
+        "senpi:01a13bd0-ade9-7eb0-a6a7-06bbf047fe6f"
+      ],
+      "status": "completed",
+      "phase": "completed — 16/16 [x]",
+      "current_task": null,
+      "completed_tasks": ["1", "2", "3", "4"],
+      "task_count": 16,
+      "updated_at": "2026-10-01T00:00:00.000Z",
+      "started_at": "2026-09-28T00:00:00.000Z"
+    },
+    "once-human-structure-study-e1-01a13b5f": {
+      "work_id": "once-human-structure-study-e1-01a13b5f",
+      "active_plan": ".omo/plans/once-human-structure-study.md",
+      "plan_name": "once-human-structure-study",
+      "session_ids": [
+        "01a13b5f-392b-7e43-96aa-82f29d85407a"
+      ],
+      "status": "active",
+      "phase": "Wave 2",
+      "current_task": "7",
+      "completed_tasks": ["1", "2", "3", "4", "5", "6"],
+      "task_count": 16
+    },
+    "optiscaler-nr-ui-feedback-e1-01a12466": {
+      "work_id": "optiscaler-nr-ui-feedback-e1-01a12466",
+      "active_plan": ".omo/plans/optiscaler-nr-ui-feedback.md",
+      "plan_name": "optiscaler-nr-ui-feedback",
+      "session_ids": [
+        "senpi:01a12466-aa9f-74e8-9f13-887e8c17715c"
+      ],
+      "status": "completed",
+      "phase": "candidate verified",
+      "current_task": "29",
+      "completed_tasks": ["1", "2"],
+      "task_count": 30,
+      "updated_at": "2026-10-05T00:00:00.000Z"
+    },
+    "optiscaler-nr-all29-resume-01a12466": {
+      "work_id": "optiscaler-nr-all29-resume-01a12466",
+      "active_plan": ".omo/plans/optiscaler-nr-present-addon-options.md",
+      "plan_name": "optiscaler-nr-present-addon-options",
+      "session_ids": [
+        "senpi:01a12466-aa9f-74e8-9f13-887e8c17715c"
+      ],
+      "status": "completed",
+      "phase": "all 29 verified",
+      "current_task": "29",
+      "completed_tasks": ["1", "2", "3"],
+      "task_count": 29,
+      "updated_at": "2026-10-10T00:00:00.000Z"
+    },
+    "crimson-building-reset-e1-01a11180": {
+      "work_id": "crimson-building-reset-e1-01a11180",
+      "active_plan": ".omo/plans/crimson-native-building-reset-v2-20261006.md",
+      "plan_name": "crimson-native-building-reset-v2-20261006",
+      "session_ids": [
+        "senpi:01a11180-e646-727e-8eb3-af01c09975e1"
+      ],
+      "status": "completed",
+      "phase": "T1 not complete",
+      "current_task": "2",
+      "completed_tasks": ["1"],
+      "task_count": 21,
+      "updated_at": "2026-10-12T00:00:00.000Z"
+    },
+    "pi-routing-removable-extension-e1-804b1cc0": {
+      "work_id": "pi-routing-removable-extension-e1-804b1cc0",
+      "active_plan": ".omo/plans/pi-routing-removable-extension.md",
+      "plan_name": "pi-routing-removable-extension",
+      "session_ids": [
+        "senpi:01a11180-e646-727e-8eb3-af01c09975e1"
+      ],
+      "status": "discarded",
+      "phase": "Discarded; preserved reference only",
+      "current_task": null,
+      "completed_tasks": ["1", "2", "3", "4", "5", "6"],
+      "task_count": 13,
+      "updated_at": "2026-10-01T00:00:00.000Z"
+    },
+    "herdr-restart-recovery-paused-old": {
+      "work_id": "herdr-restart-recovery-paused-old",
+      "active_plan": ".omo/plans/omo-herdr-dashboard-restart-recovery.md",
+      "plan_name": "herdr-start-old",
+      "session_ids": [
+        "senpi:01a1262b-06fd-719b-bbfd-7b0152ac693a"
+      ],
+      "status": "paused",
+      "phase": "Implementation wave, tasks 1-8",
+      "current_task": "1",
+      "completed_tasks": [],
+      "task_count": 8,
+      "started_at": "2026-10-02T00:00:00.000Z"
+    },
+    "herdr-restart-recovery-paused-new": {
+      "work_id": "herdr-restart-recovery-paused-new",
+      "active_plan": ".omo/plans/omo-herdr-dashboard-restart-recovery.md",
+      "plan_name": "herdr-start-new",
+      "session_ids": [
+        "senpi:01a1262b-06fd-719b-bbfd-7b0152ac693a"
+      ],
+      "status": "paused",
+      "phase": "recovery wave 2",
+      "current_task": "5",
+      "completed_tasks": ["1", "2", "3", "4"],
+      "task_count": 8,
+      "started_at": "2026-10-09T00:00:00.000Z"
+    },
+    "no-timestamp-first": {
+      "work_id": "no-timestamp-first",
+      "active_plan": ".omo/plans/no-timestamp-first.md",
+      "plan_name": "no-ts-first",
+      "session_ids": [
+        "senpi:01a1aaaa-1111-7000-8000-000000000001"
+      ],
+      "status": "paused",
+      "phase": "ph",
+      "current_task": "1",
+      "completed_tasks": [],
+      "task_count": 2
+    },
+    "no-timestamp-second": {
+      "work_id": "no-timestamp-second",
+      "active_plan": ".omo/plans/no-timestamp-second.md",
+      "plan_name": "no-ts-second",
+      "session_ids": [
+        "senpi:01a1aaaa-1111-7000-8000-000000000001"
+      ],
+      "status": "paused",
+      "phase": "ph",
+      "current_task": "2",
+      "completed_tasks": ["1"],
+      "task_count": 2
+    }
+  }
+}

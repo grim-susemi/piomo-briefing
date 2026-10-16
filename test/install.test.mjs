@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
+import http from 'node:http';
+import net from 'node:net';
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, statSync, rmSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,7 +34,61 @@ function makeAgentDir() {
   writeFileSync(join(dir, 'extensions', 'other-ext.js'), '// third party\n');
   return dir;
 }
-const run = (args) => spawnSync(process.execPath, [INSTALL, ...args], { encoding: 'utf8' });
+const run = (args, env) => spawnSync(process.execPath, [INSTALL, ...args], { encoding: 'utf8', ...(env ? { env } : {}) });
+// The installer must run without blocking this process while a stub server answers it:
+// spawnSync would freeze the event loop that has to reply to the health check.
+function runAsync(args, env) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [INSTALL, ...args], env ? { env } : {});
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
+}
+
+// The plan's one closing line of an install, and the extra sentence a failed health
+// check adds to it (never an install error).
+const GUIDANCE = '실시간 상황판은 새 대화에서 /brief를 치면 켜집니다';
+const HEALTH_EXCEPTION = '오류는 아닙니다';
+const lastLine = (r) => r.stdout.trimEnd().split('\n').at(-1);
+
+// A port nobody listens on: bind it, read it, release it. Deterministic, no sleep.
+async function closedPort() {
+  const srv = net.createServer();
+  await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve));
+  const port = srv.address().port;
+  await new Promise((resolve) => srv.close(resolve));
+  return port;
+}
+
+// A real /health server, so the announced address is proven by an answer, not by a string. It binds
+// inside the port window this task is assigned (47550+), taking the first free port so a concurrent
+// harness run cannot collide with it.
+async function healthServer() {
+  const srv = http.createServer((req, res) => {
+    if (req.url === '/health') { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}'); }
+    else { res.writeHead(404); res.end(); }
+  });
+  const stop = () => new Promise((resolve) => { srv.closeAllConnections(); srv.close(resolve); });
+  for (let port = 47550; port < 47560; port++) {
+    const listening = await new Promise((resolve) => {
+      const onErr = () => { srv.removeListener('listening', onOk); resolve(false); };
+      const onOk = () => { srv.removeListener('error', onErr); resolve(true); };
+      srv.once('error', onErr);
+      srv.once('listening', onOk);
+      srv.listen(port, '127.0.0.1');
+    });
+    if (listening) return { port, stop };
+  }
+  throw new Error('no free health stub port in 47550..47559');
+}
+const seedServerRecord = (state, port) => {
+  mkdirSync(state, { recursive: true });
+  writeFileSync(join(state, 'server.json'), JSON.stringify({
+    pid: process.pid, at: 'fixture', nonce: 'fixture', sessionId: 'owner', port, generation: 4,
+  }));
+};
 
 // Injects an fs.linkSync failure at the real filesystem boundary, so a stale
 // render.lock must be recovered by the product code and cannot be recovered.
@@ -43,6 +99,33 @@ function denyLinkPreload() {
     "const fs = require('node:fs');",
     "const { syncBuiltinESMExports } = require('node:module');",
     "fs.linkSync = () => { throw Object.assign(new Error('injected link failure'), { code: 'EPERM' }); };",
+    'syncBuiltinESMExports();',
+    '',
+  ].join('\n'));
+  return {
+    env: { ...process.env, NODE_OPTIONS: '--require="' + preload.replace(/\\/g, '/') + '"' },
+    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+  };
+}
+
+// Injects an EPERM on the STATE server.json record only: the first `failures` calls to
+// statSync/readFileSync for that path throw, every later call goes through. The call log counts the
+// record-path calls the installer actually made, so bounded retries can be counted.
+function flakyIoPreload({ failures, log }) {
+  const dir = mkdtempSync(join(os.tmpdir(), 'briefing-flaky-io-'));
+  const preload = join(dir, 'flaky-io.cjs');
+  writeFileSync(preload, [
+    "const fs = require('node:fs');",
+    "const { syncBuiltinESMExports } = require('node:module');",
+    'const LIMIT = ' + failures + ';',
+    'const LOG = ' + JSON.stringify(log) + ';',
+    'const realStat = fs.statSync, realRead = fs.readFileSync;',
+    'let used = 0;',
+    "const isRecord = (p) => typeof p === 'string' && /server\\.json$/.test(p.replace(/\\\\/g, '/'));",
+    'const note = () => { try { fs.appendFileSync(LOG, "x"); } catch {} };',
+    'const boom = () => { throw Object.assign(new Error("injected EPERM"), { code: "EPERM" }); };',
+    'fs.statSync = function (p, ...rest) { if (!isRecord(p)) return realStat.call(fs, p, ...rest); note(); if (used++ < LIMIT) boom(); return realStat.call(fs, p, ...rest); };',
+    'fs.readFileSync = function (p, ...rest) { if (!isRecord(p)) return realRead.call(fs, p, ...rest); note(); if (used++ < LIMIT) boom(); return realRead.call(fs, p, ...rest); };',
     'syncBuiltinESMExports();',
     '',
   ].join('\n'));
@@ -81,6 +164,7 @@ const boardBytes = (state) => ({
 
 test('first install creates generation-000001, shim, current.json and empty state page', () => {
   const agent = makeAgentDir();
+  const otherBefore = sha256(join(agent, 'extensions', 'other-ext.js'));
   const r = run(['--agent-dir', agent]);
   assert.equal(r.status, 0, r.stderr);
   const gen = join(agent, 'briefing', 'integration', 'generation-000001');
@@ -101,8 +185,131 @@ test('first install creates generation-000001, shim, current.json and empty stat
   );
   const page = readFileSync(join(agent, 'briefing', 'state', 'index.html'), 'utf8');
   assert.ok(page.includes('아직 보고 없음 - 새로 연 OMO 대화부터 표시됨'), 'empty page phrase');
-  assert.equal(sha256(join(agent, 'extensions', 'other-ext.js')), sha256(join(agent, 'extensions', 'other-ext.js')));
+  // The generation is a copy of the built dist: the expected file list is computed
+  // independently from the dist listing, so a missing or extra file fails here.
+  const distFiles = tree(join(REPO, 'dist'));
+  assert.ok(distFiles.length > 10, 'dist listing looks empty: ' + distFiles.length);
+  assert.deepEqual(tree(gen), distFiles, 'generation holds exactly the dist listing');
+  assert.equal(sha256(join(agent, 'extensions', 'other-ext.js')), otherBefore, 'third-party extension bytes unchanged');
+  assert.equal(lastLine(r), GUIDANCE, 'closing guidance line, got: ' + JSON.stringify(r.stdout));
   rmSync(agent, { recursive: true, force: true });
+});
+
+test('install prints the live board address when STATE/server.json answers health', async () => {
+  const agent = makeAgentDir();
+  const health = await healthServer();
+  try {
+    seedServerRecord(join(agent, 'briefing', 'state'), health.port);
+    const r = await runAsync(['--agent-dir', agent]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(lastLine(r), `실시간 상황판: http://127.0.0.1:${health.port}/`, r.stdout);
+    rmSync(agent, { recursive: true, force: true });
+  } finally {
+    await health.stop();
+  }
+});
+
+test('install keeps exit 0 and only adds the exception sentence when server.json health fails', async () => {
+  const agent = makeAgentDir();
+  seedServerRecord(join(agent, 'briefing', 'state'), await closedPort());
+  const r = run(['--agent-dir', agent]);
+  assert.equal(r.status, 0, r.stderr);
+  const line = lastLine(r);
+  assert.ok(line.startsWith(GUIDANCE), 'guidance line, got: ' + line);
+  assert.ok(line.includes(HEALTH_EXCEPTION), 'exception sentence, got: ' + line);
+  assert.ok(!/http:\/\/127\.0\.0\.1:/.test(r.stdout), 'no address on a failed health check');
+  rmSync(agent, { recursive: true, force: true });
+});
+
+test('install prints one guidance line when server.json is absent', () => {
+  const agent = makeAgentDir();
+  const r = run(['--agent-dir', agent]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(lastLine(r), GUIDANCE, 'one guidance line, got: ' + JSON.stringify(r.stdout));
+  assert.ok(!/http:\/\/127\.0\.0\.1:/.test(r.stdout), 'no address without server.json');
+  rmSync(agent, { recursive: true, force: true });
+});
+
+test('install rejects an oversized server record without announcing its address', async () => {
+  const agent = makeAgentDir();
+  const health = await healthServer();
+  try {
+    // A usable, healthy address hidden behind an over-limit record: the record must be refused on
+    // size alone (the size is checked before the content is read), so no address is ever announced.
+    mkdirSync(join(agent, 'briefing', 'state'), { recursive: true });
+    writeFileSync(join(agent, 'briefing', 'state', 'server.json'), JSON.stringify({
+      pid: process.pid, at: 'fixture', nonce: 'fixture', sessionId: 'owner',
+      port: health.port, generation: 4, padding: 'x'.repeat(8 * 1024 * 1024),
+    }));
+    const r = await runAsync(['--agent-dir', agent]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(lastLine(r), GUIDANCE, 'guidance line, got: ' + lastLine(r));
+    assert.ok(!r.stdout.includes(String(health.port)), 'an oversized record must not produce an address');
+    assert.equal(r.stderr, '', 'no stack trace on stderr');
+    rmSync(agent, { recursive: true, force: true });
+  } finally {
+    await health.stop();
+  }
+});
+
+test('install retries a transient EPERM on the record and still announces the live address', async () => {
+  const agent = makeAgentDir();
+  const health = await healthServer();
+  const log = join(agent, 'record-calls.txt');
+  try {
+    seedServerRecord(join(agent, 'briefing', 'state'), health.port);
+    const flaky = flakyIoPreload({ failures: 1, log });
+    let r;
+    try { r = await runAsync(['--agent-dir', agent], flaky.env); } finally { flaky.cleanup(); }
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(lastLine(r), `실시간 상황판: http://127.0.0.1:${health.port}/`,
+      'one transient read failure must not hide a healthy board: ' + lastLine(r));
+    assert.equal(r.stderr, '');
+    assert.ok(readFileSync(log, 'utf8').length >= 2, 'the record was read again after the transient failure');
+    rmSync(agent, { recursive: true, force: true });
+  } finally {
+    await health.stop();
+  }
+});
+
+test('install gives up after bounded retries on a persistent EPERM and calls it unreadable', () => {
+  const agent = makeAgentDir();
+  const log = join(agent, 'record-calls.txt');
+  seedServerRecord(join(agent, 'briefing', 'state'), 47560);
+  const flaky = flakyIoPreload({ failures: Number.MAX_SAFE_INTEGER, log });
+  let r;
+  try { r = run(['--agent-dir', agent], flaky.env); } finally { flaky.cleanup(); }
+  assert.equal(r.status, 0, r.stderr);
+  const line = lastLine(r);
+  assert.ok(line.startsWith(GUIDANCE), 'one closing guidance line, got: ' + line);
+  assert.ok(line.includes(HEALTH_EXCEPTION), 'a persistent failure is unreadable, not absent: ' + line);
+  assert.equal(r.stderr, '', 'no stack trace');
+  const calls = readFileSync(log, 'utf8').length;
+  assert.ok(calls > 1, 'the read boundary retried, got ' + calls + ' record calls');
+  assert.ok(calls <= 8, 'retries must stay bounded, got ' + calls + ' record calls');
+  rmSync(agent, { recursive: true, force: true });
+});
+
+test('install tells an unreadable record apart from an absent one', () => {
+  const absentAgent = makeAgentDir();
+  const absent = run(['--agent-dir', absentAgent]);
+  const unreadableAgent = makeAgentDir();
+  mkdirSync(join(unreadableAgent, 'briefing', 'state', 'server.json'), { recursive: true }); // a directory in its place
+  const unreadable = run(['--agent-dir', unreadableAgent]);
+  try {
+    assert.equal(absent.status, 0, absent.stderr);
+    assert.equal(unreadable.status, 0, unreadable.stderr);
+    const absentLine = lastLine(absent);
+    const unreadableLine = lastLine(unreadable);
+    assert.equal(absentLine, GUIDANCE, 'ENOENT: exactly the one guidance line');
+    assert.ok(unreadableLine.startsWith(GUIDANCE), 'unreadable keeps the one closing line: ' + unreadableLine);
+    assert.ok(unreadableLine.includes(HEALTH_EXCEPTION), 'unreadable adds the exception sentence: ' + unreadableLine);
+    assert.notEqual(unreadableLine, absentLine, 'an unreadable record must not look like an absent one');
+    assert.equal(unreadable.stderr, '', 'no stack trace');
+  } finally {
+    rmSync(absentAgent, { recursive: true, force: true });
+    rmSync(unreadableAgent, { recursive: true, force: true });
+  }
 });
 
 test('second install creates generation-000002 and leaves generation-000001 untouched', () => {

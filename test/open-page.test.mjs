@@ -46,6 +46,20 @@ test('a chrome non-zero exit is reported', () => {
   assert.equal(errors.length, 1);
 });
 
+test('a live http URL is handed to Chrome unchanged', () => {
+  const { calls, execFile } = fakeExec();
+  const r = openPage('http://127.0.0.1:47317/', { platform: 'win32', exists: (p) => p === CHROME_PATH, execFile });
+  assert.equal(r.launcher, 'chrome');
+  assert.deepEqual(calls, [{ cmd: CHROME_PATH, args: ['http://127.0.0.1:47317/'] }]);
+});
+
+test('without Chrome a live URL is handed to explorer.exe unchanged (no backslashes)', () => {
+  const { calls, execFile } = fakeExec();
+  const r = openPage('http://localhost:47318/', { platform: 'win32', exists: () => false, execFile });
+  assert.equal(r.launcher, 'explorer');
+  assert.deepEqual(calls, [{ cmd: 'explorer.exe', args: ['http://localhost:47318/'] }]);
+});
+
 test('non-windows platforms are refused with the path in the message', () => {
   assert.throws(() => openPage('/x/index.html', { platform: 'linux', exists: () => false, execFile: () => ({}) }), /\/x\/index\.html/);
 });

@@ -3,12 +3,19 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { collectAuto } from '../src/collect.mjs';
+import { collectAuto, normSessionId, todoPayload, strictTasks } from '../src/collect.mjs';
 
 const FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'collect');
 const NATIVE_TODO = JSON.parse(readFileSync(path.join(FIX, 'todo-native.json'), 'utf8'));
 const LEGACY_TODOS = JSON.parse(readFileSync(path.join(FIX, 'todo-legacy.json'), 'utf8')).entries;
 const FIXTURE_BOULDER = JSON.parse(readFileSync(path.join(FIX, 'boulder.json'), 'utf8'));
+const SENPI_BOULDER = JSON.parse(readFileSync(path.join(FIX, 'boulder-senpi-prefix.json'), 'utf8'));
+const S_LEAD = '01a13bd0-ade9-7eb0-a6a7-06bbf047fe6f';
+const S_BARE = '01a13b5f-392b-7e43-96aa-82f29d85407a';
+const S_TWO_DONE = '01a12466-aa9f-74e8-9f13-887e8c17715c';
+const S_DISCARDED = '01a11180-e646-727e-8eb3-af01c09975e1';
+const S_STARTED_AT = '01a1262b-06fd-719b-bbfd-7b0152ac693a';
+const S_NO_TIME = '01a1aaaa-1111-7000-8000-000000000001';
 const TASK_RECORD = JSON.parse(readFileSync(path.join(FIX, 'task-record.json'), 'utf8'));
 
 const NOW = 1_700_000_000_000;
@@ -311,4 +318,152 @@ test('completed_tasks 숫자 형태와 매칭 없는 세션 처리', () => {
   assert.deepEqual(hit.work, { name: 'p', phase: 'ph', current: '5', done: 4, total: 10 });
   const miss = collectAuto({ cwd: 'C:/w', sessionId: 's9', branchEntries: [], workerIds: [], readFile, now: NOW + 61_000, cache: {} });
   assert.ok(!('work' in miss));
+});
+
+// --- GAP-10: boulder `senpi:<uuid>` vs bare session id -------------------------
+
+function senpiFixture() {
+  return memFs({ 'C:/w/.omo/boulder.json': JSON.stringify(SENPI_BOULDER) });
+}
+
+function workFor(sessionId) {
+  const { readFile } = senpiFixture();
+  return collectAuto({ cwd: 'C:/w', sessionId, branchEntries: [], workerIds: [], readFile, now: NOW, cache: {} });
+}
+
+test('normSessionId: 앞 senpi:만 제거, 문자열 아니면 빈 값', () => {
+  assert.equal(normSessionId('senpi:01a13bd0-ade9'), '01a13bd0-ade9');
+  assert.equal(normSessionId('01a13bd0-ade9'), '01a13bd0-ade9');
+  assert.equal(normSessionId('senpi:senpi:x'), 'senpi:x');
+  assert.equal(normSessionId(''), '');
+  assert.equal(normSessionId(undefined), '');
+  assert.equal(normSessionId(null), '');
+  assert.equal(normSessionId(42), '');
+  assert.equal(normSessionId({ id: 'senpi:x' }), '');
+});
+
+test('GAP-10: boulder senpi:<uuid> + 입력 맨 uuid -> work 선택 (진행 work)', () => {
+  const out = workFor(S_LEAD);
+  assert.deepEqual(out.work, { name: 'piomo-briefing-plan-view', phase: 'Wave 1 기초', current: '1', done: 0, total: 16 });
+});
+
+test('GAP-10: 입력에도 senpi: 접두가 있으면 같은 work', () => {
+  const out = workFor(`senpi:${S_LEAD}`);
+  assert.deepEqual(out.work, { name: 'piomo-briefing-plan-view', phase: 'Wave 1 기초', current: '1', done: 0, total: 16 });
+});
+
+test('GAP-10: boulder 맨 id + 입력 senpi: 접두 -> 선택', () => {
+  const out = workFor(`senpi:${S_BARE}`);
+  assert.deepEqual(out.work, { name: 'once-human-structure-study', phase: 'Wave 2', current: '7', done: 6, total: 16 });
+});
+
+test('GAP-10: 다른 id -> work 없음', () => {
+  const out = workFor('01a1ffff-0000-7000-8000-000000000000');
+  assert.ok(!('work' in out), '매칭 없으면 work 키 생략');
+});
+
+test('GAP-10: 완료 work와 진행 work에 같은 세션 -> 완료 아닌 work 우선', () => {
+  // crimson(completed, 2026-10-12) + pi-routing(discarded, 2026-10-01) 둘 다 이 세션
+  const out = workFor(`senpi:${S_DISCARDED}`);
+  assert.equal(out.work?.name, 'pi-routing-removable-extension');
+  // fixture work has current_task: null (finished, discarded) - passed through verbatim
+  assert.deepEqual(out.work, { name: 'pi-routing-removable-extension', phase: 'Discarded; preserved reference only', current: null, done: 6, total: 13 });
+});
+
+test('GAP-10: 완료 work 둘 -> 더 최근 updated_at', () => {
+  const out = workFor(`senpi:${S_TWO_DONE}`);
+  assert.equal(out.work?.name, 'optiscaler-nr-present-addon-options');
+});
+
+test('GAP-10: updated_at 없고 started_at만 있으면 더 최근 started_at', () => {
+  const out = workFor(`senpi:${S_STARTED_AT}`);
+  assert.equal(out.work?.name, 'herdr-start-new');
+});
+
+test('GAP-10: 시각이 둘 다 없으면 파일 뒤쪽 work', () => {
+  const out = workFor(`senpi:${S_NO_TIME}`);
+  assert.equal(out.work?.name, 'no-ts-second');
+});
+
+test('GAP-10: works가 배열인 boulder도 지원', () => {
+  const arrayWorks = { works: [
+    { work_id: 'a', plan_name: 'arr-old', phase: 'p', current_task: '1', completed_tasks: [], task_count: 2, session_ids: ['sess-arr'], status: 'completed', updated_at: '2026-09-01T00:00:00Z' },
+    { work_id: 'b', plan_name: 'arr-new', phase: 'p', current_task: '2', completed_tasks: ['1'], task_count: 2, session_ids: ['senpi:sess-arr'], status: 'active', updated_at: '2026-10-01T00:00:00Z' },
+  ] };
+  const { readFile } = memFs({ 'C:/w/.omo/boulder.json': JSON.stringify(arrayWorks) });
+  const out = collectAuto({ cwd: 'C:/w', sessionId: 'sess-arr', branchEntries: [], workerIds: [], readFile, now: NOW, cache: {} });
+  assert.deepEqual(out.work, { name: 'arr-new', phase: 'p', current: '2', done: 1, total: 2 });
+});
+
+test('GAP-10 악성 입력: session_ids 없음·문자열·비문자 원소, sessionId 없음', () => {
+  const weird = { works: {
+    'w-no-ids': { plan_name: 'no-ids', status: 'active', session_ids: null, task_count: 1, completed_tasks: [], phase: 'p', current_task: '1' },
+    'w-string-ids': { plan_name: 'string-ids', status: 'active', session_ids: 'senpi:sess-W', task_count: 1, completed_tasks: [], phase: 'p', current_task: '1' },
+    'w-junk-ids': { plan_name: 'junk-ids', status: 'active', session_ids: [null, 42, {}, 'senpi:sess-W'], task_count: 3, completed_tasks: [], phase: 'p', current_task: '1' },
+    'w-null': null,
+  } };
+  const { readFile } = memFs({ 'C:/w/.omo/boulder.json': JSON.stringify(weird) });
+  const hit = collectAuto({ cwd: 'C:/w', sessionId: 'sess-W', branchEntries: [], workerIds: [], readFile, now: NOW, cache: {} });
+  assert.deepEqual(hit.work, { name: 'junk-ids', phase: 'p', current: '1', done: 0, total: 3 });
+  for (const sessionId of [undefined, null, '', 'senpi:', 42]) {
+    const miss = collectAuto({ cwd: 'C:/w', sessionId, branchEntries: [], workerIds: [], readFile, now: NOW, cache: {} });
+    assert.ok(!('work' in miss), `sessionId ${String(sessionId)} 는 매칭 없음`);
+  }
+});
+
+test('todoPayload·strictTasks 내보내기: 기존 동작 그대로', () => {
+  const entry = { type: 'custom', customType: 'senpi.todo-state', data: { schema: 'v2', phases: [{ name: 'T', tasks: [
+    { content: 'a', status: 'in_progress' },
+    { content: 'b', status: 'pending' },
+  ] }] } };
+  assert.deepEqual(todoPayload(entry), entry.data);
+  assert.deepEqual(strictTasks(entry.data), entry.data.phases[0].tasks);
+  assert.equal(todoPayload({ customType: 'other' }), null);
+  assert.equal(todoPayload(null), null);
+  assert.deepEqual(strictTasks({ todos: [{ content: 'x', status: 'completed' }] }), [{ content: 'x', status: 'completed' }]);
+  assert.equal(strictTasks({ phases: [{ name: 'T', tasks: [{ content: 'x' }] }] }), null);
+  assert.equal(strictTasks({}), null);
+});
+
+// --- malformed work status: ranking must not coerce arbitrary JSON values ------
+// The baseline collector never read `status`, so a JSON status object (e.g.
+// {toString:null}, which JSON.parse produces verbatim) still produced a work
+// summary. Ranking may only read terminal status *strings*.
+
+test('T1-STATUS-NO-THROW: toString 없는 status 객체가 섞여도 예외 없이 요약 반환', () => {
+  const boulder = { works: {
+    'w-bad': {
+      plan_name: 'bad-status-plan', phase: 'p', current_task: '2',
+      completed_tasks: ['1'], task_count: 5, session_ids: ['sess-A'],
+      status: { toString: null },
+    },
+    'w-active': {
+      plan_name: 'active-plan', phase: 'q', current_task: '4',
+      completed_tasks: ['1', '2', '3'], task_count: 8, session_ids: ['sess-A'],
+      status: 'active',
+    },
+  } };
+  const { readFile } = memFs({ 'C:/w/.omo/boulder.json': JSON.stringify(boulder) });
+  const out = collectAuto({ cwd: 'C:/w', sessionId: 'sess-A', branchEntries: [], workerIds: [], readFile, now: NOW, cache: {} });
+  // 둘 다 완료 아님이고 시각도 없으니 삽입 순서 뒤쪽 work가 뽑힌다 (기존 tie-break).
+  // 요점은 요약을 돌려준다는 것 - status를 문자열로 바꾸려 들면 여기서 던진다.
+  assert.deepEqual(out.work, { name: 'active-plan', phase: 'q', current: '4', done: 3, total: 8 });
+});
+
+test('T1-STATUS-RANK: 문자열 아닌 status는 완료로 보지 않는다', () => {
+  const boulder = { works: {
+    'w-bad': {
+      plan_name: 'bad-status-plan', phase: 'p', current_task: '2',
+      completed_tasks: [], task_count: 3, session_ids: ['sess-A'],
+      status: { toString: null }, updated_at: '2026-09-01T00:00:00Z',
+    },
+    'w-done': {
+      plan_name: 'done-plan', phase: 'p', current_task: '9',
+      completed_tasks: ['1'], task_count: 9, session_ids: ['sess-A'],
+      status: 'completed', updated_at: '2026-10-01T00:00:00Z',
+    },
+  } };
+  const { readFile } = memFs({ 'C:/w/.omo/boulder.json': JSON.stringify(boulder) });
+  const out = collectAuto({ cwd: 'C:/w', sessionId: 'sess-A', branchEntries: [], workerIds: [], readFile, now: NOW, cache: {} });
+  assert.equal(out.work?.name, 'bad-status-plan');
 });

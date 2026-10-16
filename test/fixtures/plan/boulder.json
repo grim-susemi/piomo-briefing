@@ -1,0 +1,79 @@
+{
+  "schema_version": 2,
+  "works": {
+    "optiscaler-nr-all29-resume-01a12466": {
+      "work_id": "optiscaler-nr-all29-resume-01a12466",
+      "active_plan": ".omo/plans/optiscaler-nr-present-addon-options.md",
+      "plan_name": "optiscaler-nr-present-addon-options",
+      "session_ids": [
+        "senpi:01a12466-aa9f-74e8-9f13-887e8c17715c"
+      ],
+      "previous_session_id": "senpi:01a106ff-4c92-79ec-a9e6-eae0f06bd38a",
+      "status": "completed",
+      "worktree_path": "C:/omo-research/optiscaler-nr-present-addon-options-wt-wave-c",
+      "delivery_mode": "direct-local-uninstalled",
+      "phase": "Original29 local candidate verified; owner handoff",
+      "completed": 29,
+      "total": 29,
+      "current_task": "Original29 technical local-candidate scope verified; F1/F2/F4 APPROVE and F3 confirmed. All owned QA closed, not installed; owner game/image acceptance separate.",
+      "notepad": ".omo/ulw-execute/optiscaler-nr-present-addon-options/e1-20261002-01a0fbd1/RESUME-20261010-01a12466.md",
+      "installed": false,
+      "commits_allowed": false,
+      "external_writes_allowed": false,
+      "game_actions_allowed": false,
+      "session_origins": {}
+    },
+    "optiscaler-nr-present-addon-options-01a0fbd1": {
+      "work_id": "optiscaler-nr-present-addon-options-01a0fbd1",
+      "active_plan": ".omo/plans/optiscaler-nr-present-addon-options.md",
+      "plan_name": "optiscaler-nr-present-addon-options",
+      "session_ids": [
+        "senpi:01a0fbd1-e8f5-77eb-ba0c-55ff763fdd62",
+        "codex:01a10389-47f6-7e23-9bb8-566fe291f2ff",
+        "senpi:01a106ff-4c92-79ec-a9e6-eae0f06bd38a"
+      ],
+      "status": "paused",
+      "ledger": ".omo/ulw-execute/optiscaler-nr-present-addon-options/e1-20261002-01a0fbd1/ledger.jsonl"
+    },
+    "piomo-living-briefing-e1-01a13bd0": {
+      "work_id": "piomo-living-briefing-e1-01a13bd0",
+      "active_plan": ".omo/plans/piomo-living-briefing.md",
+      "plan_name": "piomo-living-briefing",
+      "session_ids": [
+        "senpi:01a13bd0-ade9-7eb0-a6a7-06bbf047fe6f"
+      ],
+      "status": "completed",
+      "worktree_path": null,
+      "planned_worktree_path": null,
+      "worktree_exempt": "REPO C:/Users/USER/orca/projects/piomo-briefing does not exist yet (todo 1 runs git init) and the plan forbids commits, so git worktree add has no base commit; workers write directly in REPO (recorded deviation, same as once-human work)",
+      "delivery_mode": "direct-local-uncommitted",
+      "reviewed_plan_sha256": "3e9042299eaf13c635fb900bd642ef5caeab743303aefa7a3d3b02fe1cbbb1e9",
+      "review_receipt": "st_01a13c3c OKAY (r10)",
+      "phase": "Wave 1",
+      "current_task": "1",
+      "completed_tasks": [],
+      "task_count": 20,
+      "implementation_allowed": true,
+      "commits_allowed": false,
+      "live_install_allowed": "todo 15 only (plan scope)",
+      "ledger": ".omo/ulw-execute/piomo-living-briefing-e1-01a13bd0/ledger.jsonl",
+      "topology": "todo 1 first, then 2-5 parallel; later waves per dependency matrix",
+      "session_origins": {},
+      "task_sessions": {},
+      "completed_at": "2026-10-15T08:53:15.510Z"
+    },
+    "piomo-briefing-plan-view-e1-01a13bd0": {
+      "work_id": "piomo-briefing-plan-view-e1-01a13bd0",
+      "active_plan": ".omo/plans/piomo-briefing-plan-view.md",
+      "plan_name": "piomo-briefing-plan-view",
+      "session_ids": [
+        "senpi:01a13bd0-ade9-7eb0-a6a7-06bbf047fe6f"
+      ],
+      "status": "active",
+      "worktree_path": null,
+      "ledger": ".omo/ulw-execute/piomo-briefing-plan-view-e1-01a13bd0/ledger.jsonl",
+      "started_at": "2026-10-15T13:08:00.515Z",
+      "delivery": "direct-local-uncommitted"
+    }
+  }
+}

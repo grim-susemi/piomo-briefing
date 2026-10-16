@@ -35,7 +35,10 @@ import { validateBrief } from './src/schema.mjs';
 import { openStore } from './src/store.mjs';
 import { collectAuto } from './src/collect.mjs';
 import { applyDecide, formatDecideResult } from './src/decide.mjs';
-import { renderPage } from './src/render.mjs';
+import { renderPageMaybe, buildViewModel, pageHtml, serverInfoOf, OWN_GENERATION } from './src/render.mjs';
+import { createServerHost } from './src/server-host.mjs';
+import { createWorkersLive } from './src/workers-live.mjs';
+import { createPlanTool } from './src/plan-tool.mjs';
 import { setError, clearError, errorsOf, normalizeErrors } from './src/errors.mjs';
 import {
   REWRITE_PROMPT, injectRule, replyOverBudget, fitReply, assistantText, hasToolCall, parseHandoff,
@@ -55,6 +58,10 @@ const STATUS_FIELD_RE = new RegExp(`\\bstatus\\s*[:=]\\s*${STATUS_WORD}\\b`, 'i'
 const STATUS_NOW_RE = new RegExp(`\\bnow\\s+${STATUS_WORD}\\b`, 'i');
 const WORKER_ID_ONE_RE = /^st_[0-9a-z]+$/;
 const WORKERS_MAX = 200;
+const SOFT_RETRY_MS = 1000; // a soft publish that found render.lock busy tries again after this
+const SOFT_FAIL_MS = 30_000; // ... and only after failing this long is it a `render` error
+const SHUTDOWN_STEP_MS = 1200; // bound of each awaited step of session_shutdown (the host allows 2s)
+const RPC_CHANNEL = 'senpi:extension-rpc-event';
 const pad6 = (n) => String(n).padStart(6, '0');
 const slashed = (p) => String(p).replace(/\\/g, '/');
 
@@ -211,6 +218,12 @@ export function createBriefingExtension(opts = {}) {
     const open = opts.openPage ?? openPage;
     const makeDeliverer = opts.createDeliverer ?? deliverMod.createDeliverer;
     const makeMirror = opts.createMirror ?? mirrorMod.createMirror;
+    const generation = opts.generation !== undefined ? opts.generation : OWN_GENERATION;
+    const timers = opts.timers ?? { setTimeout, clearTimeout, setInterval, clearInterval };
+    const unref = (h) => { if (h && typeof h.unref === 'function') h.unref(); return h; };
+    // The installed shim never injects a state folder. A test or QA run that does gets no board server (so unit tests never
+    // open ports) unless it asks for one with `server: true`.
+    const serverOn = opts.server !== undefined ? opts.server === true : opts.stateDir === undefined;
 
     let active = false;
     let registered = false;
@@ -226,6 +239,20 @@ export function createBriefingExtension(opts = {}) {
     const autoCache = {};
     const recordCache = {}; // /brief task-record reads: one cache for the lifetime of this extension instance (60s TTL in collectAuto)
     const notified = new Set();
+    let host = null; // board server host (src/server-host.mjs), lead sessions only
+    let workersLive = null; // live worker rows from the task bus (src/workers-live.mjs)
+    let planTool = null; // plan_brief (src/plan-tool.mjs), rebuilt per session id
+    let rpcOff = null; // unsubscribe of the one task-bus subscription
+    let earlyRpc = null; // newest task snapshot that arrived before the session existed
+    let shuttingDown = false;
+    let shutdownDirty = false; // an error was recorded while shutting down: one soft publish shows it
+    let ensuring = false; // session_start brings the server up before its first publish: that publish already knows the address
+    let softTimer = null;
+    let softBusySince = null;
+    let inflight = null; // the running publish
+    let queued = null; // the one publish waiting behind it
+    let queuedSoft = true;
+    let renderUnshown = false; // the recorded `render` error is one whose chip no published page has shown yet
 
     const say = (ctx, text, level = 'info') => {
       const ui = (ctx && ctx.ui) || (lastCtx && lastCtx.ui);
@@ -250,39 +277,126 @@ export function createBriefingExtension(opts = {}) {
       if (!meta) return;
       if (!setError(meta, source, `${source}: ${err && err.message ? err.message : String(err)}`, nowFn())) return; // same message already shown
       try { saveMeta(); } catch { /* the failure above is already kept in memory; nothing more can be written */ }
-      try { refresh(); } catch { /* refresh records its own failure */ }
+      if (shuttingDown) shutdownDirty = true;
+      refreshSoon(shuttingDown); // never rejects: a failed publish is recorded as the `render` source
     }
 
     function settle(source) {
       if (!meta || !clearError(meta, source)) return;
       try { saveMeta(); } catch { /* kept in memory */ }
-      try { refresh(); } catch { /* refresh records its own failure */ }
+      refreshSoon(shuttingDown);
     }
 
-    function publish() {
-      return renderPage(store, nowFn(), {
+    // Pause state for the new async sources: an unreadable settings file counts as paused (as enabled() does), but the
+    // 'settings' error itself is recorded by enabled() on the normal paths, not here.
+    const quietEnabled = () => {
+      try { return store.readSettings().enabled !== false; } catch { return false; }
+    };
+    // error/recover of the server host, workers-live and the soft publish: nothing is written or published while paused
+    // the owner switched the board off (/brief off): a failed settings read is NOT a pause here, so its error chip still goes out
+    const pausedNow = () => {
+      try { return store.readSettings().enabled === false; } catch { return false; }
+    };
+    const pausedResult = () => ({ ok: false, paused: true, seqs: [], error: '브리핑이 꺼져 있어 게시하지 않았습니다' });
+    const hostError = (key, err) => { if (quietEnabled()) recordError(key, err); };
+    const hostRecover = (key) => { if (quietEnabled()) settle(key); };
+
+    // Publishes wait for a busy render.lock with an awaited timer (never blocks the terminal); `soft` takes the lock once.
+    function publish(soft) {
+      return renderPageMaybe(store, nowFn(), {
+        generation,
         ...(opts.renderOpts ?? {}),
         sessionId: sid,
+        canPublish: () => !pausedNow(),
+        soft: soft === true || shuttingDown,
         pendingDeliveries: deliverer && typeof deliverer.pendingIds === 'function' ? deliverer.pendingIds() : [],
       });
     }
 
     // One publish. Only the render source's own entry is touched: a previous render failure is cleared BEFORE publishing (so a
     // good page carries no stale chip) and re-recorded if this publish fails too. Errors of other sources stay as they are.
-    function refresh() {
-      if (clearError(meta, 'render')) saveMeta();
-      const res = publish();
-      if (!res.ok) {
+    const failedPublish = (err) => ({ ok: false, seqs: [], error: `게시 실패: ${err && err.message ? err.message : String(err)}` });
+
+    // Bookkeeping after a publish finished: record/clear the `render` source, tell the board server.
+    function finishRefresh(res, clearFirst) {
+      if (res.busy || res.paused) {
+        // soft publish: the lock was busy and nothing was recorded or changed; paused: nothing was written at all
+      } else if (!res.ok) {
+        // unshown: nothing reached the page (lock never taken), so the chip can only appear on the NEXT publish that gets through
+        renderUnshown = res.unshown === true;
         setError(meta, 'render', res.error, nowFn());
         saveMeta();
+      } else {
+        renderUnshown = false;
+        if (!clearFirst && clearError(meta, 'render')) {
+          saveMeta();
+          void softPublish(); // the page that just went out showed the old chip once; this one is clean
+        }
+        if (host) host.notifyPublished(); // the board server rebuilds its view and pushes it to open pages
       }
       return res;
+    }
+
+    // One publish at a time; a request that arrives meanwhile shares ONE follow-up publish (hard if any requester was hard).
+    // A free render.lock means the publish finishes inside this very call (nothing is "in flight"); only a busy lock makes it
+    // wait on an awaited timer. The promise never rejects.
+    function refresh(soft = false) {
+      if (!inflight) {
+        const hadError = Boolean(meta.errors && meta.errors.render);
+        // A hard publish clears a previous `render` error first (so a good page carries no stale chip). A soft publish that
+        // may find the lock busy keeps it until a publish really got through.
+        // ... and a hard publish keeps one that never reached the page, so that the next publish shows it once.
+        const clearFirst = !hadError || (!soft && !renderUnshown);
+        if (clearFirst && clearError(meta, 'render')) saveMeta();
+        let out;
+        try { out = publish(soft); } catch (err) { out = failedPublish(err); }
+        if (out && typeof out.then === 'function') {
+          inflight = out
+            .then((r) => r, failedPublish)
+            .then((r) => finishRefresh(r, clearFirst))
+            .finally(() => { inflight = null; });
+          return inflight;
+        }
+        return Promise.resolve(finishRefresh(out, clearFirst));
+      }
+      if (!queued) {
+        queuedSoft = soft;
+        queued = inflight.then(() => {
+          queued = null;
+          if (pausedNow()) return pausedResult(); // /brief off came while this one waited: it is dropped, not run
+          return refresh(queuedSoft);
+        });
+      } else {
+        queuedSoft = queuedSoft && soft;
+      }
+      return queued;
+    }
+    // Synchronous contexts do not wait for the publish; its failure is recorded by doRefresh itself.
+    function refreshSoon(soft = false) { void refresh(soft); }
+
+    // Worker-driven publishes (rows, todos, status): take render.lock once; retry later; a `render` error only after 30s.
+    async function softPublish() {
+      if (!active || !meta || shuttingDown || !quietEnabled()) return;
+      const res = await refresh(true);
+      if (res.ok || !res.busy) { softBusySince = null; return; }
+      if (!quietEnabled()) return; // paused during the wait: no retry timer, no error entry
+      const t = nowFn();
+      if (softBusySince === null) softBusySince = t;
+      if (t - softBusySince > SOFT_FAIL_MS && setError(meta, 'render', res.error, t)) saveMeta(); // shown by the next publish that gets through
+      if (!softTimer) {
+        softTimer = unref(timers.setTimeout(() => { softTimer = null; void softPublish(); }, opts.softRetryMs ?? SOFT_RETRY_MS));
+      }
+    }
+
+    function ensureServer() {
+      if (!host) return Promise.resolve(null);
+      return host.ensure().catch((err) => { hostError('server:lock', err); return null; });
     }
 
     function collect(ctx, { readTaskRecords = false, cache = autoCache } = {}) {
       let branch = [];
       try { branch = ctx.sessionManager.getBranch(); } catch { branch = []; }
-      return collectAuto({
+      const next = collectAuto({
         cwd: ctx.cwd,
         sessionId: sid,
         branchEntries: branch,
@@ -293,6 +407,9 @@ export function createBriefingExtension(opts = {}) {
         now: nowFn(),
         cache,
       });
+      // live worker rows are kept by workers-live in meta.auto.live; a fresh collection must not erase them
+      if (meta.auto && meta.auto.live) next.live = meta.auto.live;
+      return next;
     }
 
     const guarded = (where, fn) => async (event, ctx) => {
@@ -315,6 +432,7 @@ export function createBriefingExtension(opts = {}) {
       const ids = [...new Set([...(text.match(WORKER_ID_RE) ?? []), ...structured.keys()])];
       if (ids.length === 0) return false;
       const starts = TASK_TOOL_RE.test(toolName);
+      const noted = [];
       let changed = false;
       for (const id of ids) {
         const known = meta.workers.find((w) => w.id === id);
@@ -328,7 +446,10 @@ export function createBriefingExtension(opts = {}) {
           changed = true;
         }
         if (!meta.workerIds.includes(id)) { meta.workerIds.push(id); changed = true; }
+        noted.push(id);
       }
+      // workers without a task-bus snapshot yet show as 'waiting for information' rows
+      if (workersLive && noted.length > 0) workersLive.noteTaskIds(noted);
       if (meta.workers.length > WORKERS_MAX) meta.workers.splice(0, meta.workers.length - WORKERS_MAX);
       if (meta.workerIds.length > WORKERS_MAX) meta.workerIds.splice(0, meta.workerIds.length - WORKERS_MAX);
       return changed;
@@ -424,7 +545,7 @@ export function createBriefingExtension(opts = {}) {
       meta.title = brief.title;
       try { meta.auto = collect(ctx); clearError(meta, 'collect'); } catch (err) { setError(meta, 'collect', `collect: ${err.message}`, t); }
       saveMeta();
-      const res = refresh();
+      const res = await refresh();
       for (const d of created) if (d.blocks) notifyDecision(ctx, d);
 
       const newText = created.length ? ` (새 결정 ${created.map((d) => `#${d.id}`).join(', ')})` : '';
@@ -441,7 +562,15 @@ export function createBriefingExtension(opts = {}) {
       const arg = String(args ?? '').trim();
       if (arg === 'off' || arg === 'on') {
         store.writeSettings({ ...store.readSettings(), enabled: arg === 'on' });
-        if (arg === 'on') refresh();
+        if (arg === 'on') {
+          await refresh();
+          await ensureServer();
+        } else {
+          // pause is global: soft-publish retries stop and the board server tells its pages, closes and lets go of its lock
+          if (softTimer) { timers.clearTimeout(softTimer); softTimer = null; }
+          softBusySince = null;
+          if (host) await host.onPaused();
+        }
         say(cctx, arg === 'on' ? '브리핑 켜짐: 규칙 주입·자동 갱신·전달 재개' : '브리핑 꺼짐: 규칙 주입·자동 갱신·전달 중지 (/brief on 으로 켜기)');
         return;
       }
@@ -456,11 +585,14 @@ export function createBriefingExtension(opts = {}) {
       meta.auto = collect(cctx, { readTaskRecords: true, cache: recordCache }); // the only path that reads senpi-task records
       clearError(meta, 'collect');
       saveMeta();
-      const res = refresh();
+      const res = await refresh();
       if (!res.ok) say(cctx, `상황판 갱신 실패: ${res.error}`, 'error');
+      // the live address when a healthy board server exists (this or another conversation owns it), else the file page
+      const served = await ensureServer();
+      const target = served && served.url ? served.url : pagePath;
       try {
-        open(pagePath, { onError: (e) => say(cctx, `상황판 열기 실패: ${e.message} (직접 여세요: ${pagePath})`, 'error') });
-        say(cctx, `상황판: ${pagePath}`);
+        open(target, { onError: (e) => say(cctx, `상황판 열기 실패: ${e.message} (직접 여세요: ${target})`, 'error') });
+        say(cctx, served && served.url ? `상황판(실시간): ${target}` : `상황판: ${pagePath} (실시간 서버 없음 - 오류 표시를 확인하세요)`);
       } catch (err) {
         say(cctx, err.message, 'warning');
       }
@@ -480,7 +612,7 @@ export function createBriefingExtension(opts = {}) {
         ? setError(meta, 'decide', `decide: ${readErrors.map((e) => `#${e.id} ${e.message}`).join('; ')}`, nowFn())
         : clearError(meta, 'decide');
       if (changed) saveMeta();
-      refresh();
+      await refresh();
       say(cctx, line, result.applied.length > 0 && result.errors.length === 0 ? 'info' : 'warning');
       if (deliverer && typeof deliverer.wake === 'function') await deliverer.wake(cctx, 'decide');
     }
@@ -520,7 +652,7 @@ export function createBriefingExtension(opts = {}) {
         }
         meta.lastActivityAt = nowFn();
         saveMeta();
-        refresh();
+        await refresh();
         if (deliverer && typeof deliverer.wake === 'function') await deliverer.wake(ctx, 'agent_start');
       }));
 
@@ -534,6 +666,7 @@ export function createBriefingExtension(opts = {}) {
           if (noteWorkers(toolName, textOf(event.content), event.isError === true, event.details)) dirty = true;
         }
         if (dirty) saveMeta();
+        if (planTool) planTool.onToolResult(event); // remembers plan/draft files this session wrote
         return undefined;
       }));
 
@@ -610,19 +743,34 @@ export function createBriefingExtension(opts = {}) {
         try { meta.auto = collect(ctx); clearError(meta, 'collect'); } catch (err) { setError(meta, 'collect', `collect: ${err.message}`, nowFn()); }
         run = freshRun();
         saveMeta();
-        refresh();
+        await refresh();
+        if (planTool) await planTool.onSettled(); // plan status + chips (60s cache); it publishes by itself when they changed
         if (deliverer && typeof deliverer.wake === 'function') await deliverer.wake(ctx, 'agent_settled');
       }));
 
       pi.on('session_shutdown', guarded('session_shutdown', async () => {
         if (!active) return;
+        // the host allows 2s: every awaited step below is bounded, publishes are soft (one lock attempt)
+        shuttingDown = true;
         meta.running = false;
         delete meta.pid;
         saveMeta();
+        if (rpcOff) { rpcOff(); rpcOff = null; }
+        if (softTimer) { timers.clearTimeout(softTimer); softTimer = null; }
+        if (workersLive) { workersLive.stop(); workersLive = null; }
         if (deliverer && typeof deliverer.dispose === 'function') await deliverer.dispose();
         if (mirror && typeof mirror.dispose === 'function') await mirror.dispose();
+        if (host) {
+          const h = host;
+          host = null;
+          await within(h.release(), SHUTDOWN_STEP_MS);
+        }
+        // an error recorded while shutting down (lock release, server close) is shown by exactly one more publish
+        if (shutdownDirty && quietEnabled()) await within(refresh(true), SHUTDOWN_STEP_MS);
+        else if (inflight) await within(inflight, SHUTDOWN_STEP_MS);
         deliverer = null;
         mirror = null;
+        planTool = null;
         active = false;
       }));
     }
@@ -639,6 +787,121 @@ export function createBriefingExtension(opts = {}) {
       });
       pi.registerCommand('brief', { description: '상황판 열기 | on | off | path', argumentHint: '[on|off|path]', handler: briefCommand });
       pi.registerCommand('decide', { description: '결정에 답하기: /decide 12A 13B (번호만 쓰면 추천안)', argumentHint: '12A 13B', handler: decideCommand });
+      // plan_brief is registered once; each session id gets its own plan tool, the registered tool delegates to the current one
+      const def = planTool.definition;
+      pi.registerTool({
+        name: def.name,
+        label: def.label,
+        description: def.description,
+        promptSnippet: def.promptSnippet,
+        promptGuidelines: def.promptGuidelines,
+        parameters: def.parameters,
+        execute: (id, params, ...rest) => {
+          if (!active || !planTool) throw new Error('브리핑이 이 세션에서 준비되지 않았습니다.');
+          return planTool.definition.execute(id, params, ...rest);
+        },
+      });
+    }
+
+    function within(promise, ms) {
+      let timer;
+      return Promise.race([promise, new Promise((resolve) => { timer = timers.setTimeout(resolve, ms); })])
+        .finally(() => timers.clearTimeout(timer));
+    }
+
+    // Plan tool, board server host and live worker rows of this session (lead sessions only; never called for workers).
+    let hostSid = null;
+    function setupLive(ctx) {
+      planTool = (opts.createPlanTool ?? createPlanTool)({
+        store,
+        sessionId: sid,
+        cwd: ctx.cwd,
+        isEnabled: enabled,
+        publish: () => refresh(),
+        onError: recordError,
+        onRecover: settle,
+        getMeta: () => meta,
+        saveMeta: () => saveMeta(),
+        pageUrl: () => (host && host.status().url) || pagePath,
+        now: nowFn,
+      });
+      if (serverOn && (!host || hostSid !== sid)) {
+        hostSid = sid;
+        host = (opts.createServerHost ?? createServerHost)({
+          stateDir,
+          sessionId: sid,
+          generation,
+          isEnabled: () => store.readSettings().enabled !== false, // a read failure throws: the host reports it and treats it as paused
+          buildViewModel: (snap, t) => {
+            const info = serverInfoOf(store);
+            return buildViewModel(snap, t, { generation, server: info.server, serverError: info.error });
+          },
+          readSnapshot: () => store.readSnapshot(),
+          getPage: (vm) => pageHtml(vm, generation, { mode: 'server' }),
+          reclaimStale: (rel, rec) => store.reclaimStale(rel, rec),
+          onError: hostError,
+          onRecover: hostRecover,
+          // the file page shows 'open live view' only when it knows the address: publish again when it changes
+          onChange: () => { if (active && !shuttingDown && !ensuring && quietEnabled()) refreshSoon(true); },
+          env,
+          timers,
+          ...(opts.hostOptions ?? {}),
+        });
+      }
+      if (workersLive) workersLive.stop();
+      workersLive = (opts.createWorkersLive ?? createWorkersLive)({
+        sessionId: () => sid,
+        cwd: ctx.cwd,
+        isEnabled: quietEnabled,
+        softPublish,
+        saveLive: (list) => {
+          if (!meta) return;
+          meta.auto = { ...(meta.auto && typeof meta.auto === 'object' ? meta.auto : {}), live: { workers: list } };
+          saveMeta();
+        },
+        onError: hostError,
+        onRecover: hostRecover,
+        ...(opts.timers ? { timers } : {}),
+        ...(opts.workersLiveOptions ?? {}),
+      });
+      workersLive.start();
+      if (earlyRpc) {
+        const early = earlyRpc;
+        earlyRpc = null;
+        workersLive.onRpcEvent(early);
+      }
+    }
+
+    // Only the fields normalizeTaskSnapshot reads (src/workers.mjs), strings clipped: no clone, no other getter is touched.
+    const keep = (v, max = 256) => (typeof v === 'string' ? v.slice(0, max) : typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+    const pick = (o, spec) => { const out = {}; for (const [k, max] of spec) { const v = keep(o[k], max); if (v !== undefined) out[k] = v; } return out; };
+    const TASK_FIELDS = ['task_id', 'parent_session_id', 'status', 'task_summary', 'description', 'name', 'agent_type', 'category', 'model_id', 'model', 'created_at', 'updated_at', 'terminal_at'].map((k) => [k]);
+    function pickSnapshot(data) {
+      const tasks = data && Array.isArray(data.tasks) ? data.tasks.slice(0, 256).map((raw) => {
+        if (!raw || typeof raw !== 'object') return raw;
+        const out = { ...pick(raw, TASK_FIELDS), ...pick(raw, [['child_session_id', 1024]]) };
+        const rm = raw.resolved_model;
+        if (rm && typeof rm === 'object') out.resolved_model = pick(rm, [['display'], ['model_id']]);
+        const lp = raw.live_progress;
+        if (lp && typeof lp === 'object') out.live_progress = pick(lp, [['current_tool'], ['last_assistant_line'], ['started_at']]);
+        return out;
+      }) : data && data.tasks;
+      return { parent_session_id: keep(data && data.parent_session_id), tasks };
+    }
+
+    // One subscription to the task engine's snapshots (omo.task.updated), made at load. The handler copies only what it
+    // needs, does no I/O and never throws into the emitter. Before the session exists the newest snapshot is kept.
+    function onRpcEvent(event) {
+      try {
+        if (workersLive) workersLive.onRpcEvent(event);
+        else if (event && event.name === 'omo.task.updated') earlyRpc = { name: event.name, data: pickSnapshot(event.data) };
+      } catch (err) {
+        queueMicrotask(() => hostError('workers:snapshot', err));
+      }
+    }
+    if (pi.events && typeof pi.events.on === 'function') {
+      const off = pi.events.on(RPC_CHANNEL, onRpcEvent);
+      if (typeof off === 'function') rpcOff = off;
     }
 
     pi.on('session_start', async (_event, ctx) => {
@@ -647,7 +910,11 @@ export function createBriefingExtension(opts = {}) {
         // Lead gate: print/json mode (hasUI false) and in-process child sessions never run.
         let file;
         try { file = ctx.sessionManager.getSessionFile(); } catch { file = undefined; }
-        if (ctx.hasUI === false || isChildSessionFile(file)) { active = false; return; }
+        if (ctx.hasUI === false || isChildSessionFile(file)) {
+          active = false;
+          if (rpcOff) { rpcOff(); rpcOff = null; } // not a lead conversation: nothing listens for task snapshots
+          return;
+        }
         sid = ctx.sessionManager.getSessionId();
         if (!store) {
           stateDir = opts.stateDir ?? defaultStateDir(env);
@@ -673,7 +940,10 @@ export function createBriefingExtension(opts = {}) {
         delete meta.pid;
         normalizeErrors(meta); // per-source errors survive a restart until their own source succeeds
         active = true;
+        shuttingDown = false;
+        shutdownDirty = false;
         run = freshRun();
+        setupLive(ctx);
         if (!registered) {
           registered = true;
           registerHandlers();
@@ -688,7 +958,11 @@ export function createBriefingExtension(opts = {}) {
         }
         if (mirror && typeof mirror.attach === 'function') await mirror.attach(ctx);
         if (enabled()) {
-          refresh();
+          if (host) {
+            ensuring = true;
+            try { await ensureServer(); } finally { ensuring = false; }
+          }
+          await refresh();
           if (deliverer && typeof deliverer.wake === 'function') await deliverer.wake(ctx, 'session_start');
         }
       } catch (err) {

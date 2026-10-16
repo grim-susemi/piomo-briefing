@@ -32,26 +32,75 @@ function tryReadJson(readFile, path) {
   }
 }
 
-function pickWork(boulder, sessionId) {
-  if (!boulder || typeof boulder !== 'object' || !boulder.works || typeof boulder.works !== 'object') return undefined;
-  for (const work of Object.values(boulder.works)) {
-    if (!work || typeof work !== 'object') continue;
-    const ids = Array.isArray(work.session_ids) ? work.session_ids : [];
-    if (!ids.includes(sessionId)) continue;
-    const done = Array.isArray(work.completed_tasks) ? work.completed_tasks.length
-      : (typeof work.completed_tasks === 'number' ? work.completed_tasks : undefined);
-    return {
-      name: work.plan_name,
-      phase: work.phase,
-      current: work.current_task,
-      done,
-      total: work.task_count,
-    };
-  }
-  return undefined;
+// Boulder records sessions either bare (`01a13bd0-...`) or prefixed with
+// `senpi:` - both sides are normalized before comparing them.
+export function normSessionId(id) {
+  if (typeof id !== 'string') return '';
+  return id.startsWith('senpi:') ? id.slice(6) : id;
 }
 
-function todoPayload(entry) {
+const WORK_DONE = new Set(['completed', 'done', 'abandoned']);
+
+function workTs(work) {
+  for (const k of ['updated_at', 'started_at']) {
+    const v = work[k];
+    const t = typeof v === 'number' ? v : (typeof v === 'string' ? Date.parse(v) : NaN);
+    if (Number.isFinite(t)) return t;
+  }
+  return -Infinity;
+}
+
+// Only a terminal status *string* counts as finished. A boulder status may hold
+// any JSON value (e.g. `{"toString":null}`), so it is never coerced here - the
+// baseline collector read the same file and returned a summary instead of throwing.
+function isDoneWork(work) {
+  return typeof work.status === 'string' && WORK_DONE.has(work.status);
+}
+
+// negative when `cand` is a better match than `best`: unfinished work first,
+// then the most recent timestamp, then the later entry in the file.
+function betterWork(cand, candIdx, best, bestIdx) {
+  const candDone = isDoneWork(cand) ? 1 : 0;
+  const bestDone = isDoneWork(best) ? 1 : 0;
+  if (candDone !== bestDone) return candDone - bestDone;
+  const candTs = workTs(cand);
+  const bestTs = workTs(best);
+  if (candTs !== bestTs) return bestTs - candTs;
+  return bestIdx - candIdx;
+}
+
+function pickWork(boulder, sessionId) {
+  if (!boulder || typeof boulder !== 'object' || !boulder.works || typeof boulder.works !== 'object') return undefined;
+  const want = normSessionId(sessionId);
+  if (want === '') return undefined;
+  // `works` is keyed by work_id in the real boulder file; the array shape is
+  // accepted too because older records were seen written that way.
+  const works = Array.isArray(boulder.works) ? boulder.works : Object.values(boulder.works);
+  let best;
+  let bestIdx = -1;
+  for (let i = 0; i < works.length; i++) {
+    const work = works[i];
+    if (!work || typeof work !== 'object') continue;
+    const ids = Array.isArray(work.session_ids) ? work.session_ids : [];
+    if (!ids.some((id) => normSessionId(id) === want)) continue;
+    if (best === undefined || betterWork(work, i, best, bestIdx) < 0) {
+      best = work;
+      bestIdx = i;
+    }
+  }
+  if (best === undefined) return undefined;
+  const done = Array.isArray(best.completed_tasks) ? best.completed_tasks.length
+    : (typeof best.completed_tasks === 'number' ? best.completed_tasks : undefined);
+  return {
+    name: best.plan_name,
+    phase: best.phase,
+    current: best.current_task,
+    done,
+    total: best.task_count,
+  };
+}
+
+export function todoPayload(entry) {
   if (!entry || typeof entry !== 'object') return null;
   const ct = entry.customType;
   if (ct !== 'senpi.todo-state' && !(typeof ct === 'string' && (ct.startsWith('todowrite') || ct === 'todo-list'))) return null;
@@ -78,7 +127,7 @@ function isValidTask(t) {
 
 // Strict whole-entry validation: the newest payload must be fully well-formed.
 // Any malformed element -> null (caller omits todo, never partial, never fallback).
-function strictTasks(payload) {
+export function strictTasks(payload) {
   if (!isPlainObject(payload)) return null;
   if (payload.phases !== undefined) {
     if (!Array.isArray(payload.phases)) return null;

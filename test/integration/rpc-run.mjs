@@ -137,6 +137,7 @@ class Host {
     this.buf = '';
     this.stderr = '';
     this.exited = null;
+    this.closed = false; // the child's 'close' event (stdio drained): stop() waits for this, not just for 'exit'
   }
 
   start() {
@@ -159,6 +160,7 @@ class Host {
     });
     this.proc.stderr.setEncoding('utf8');
     this.proc.stderr.on('data', (c) => { this.stderr += c; });
+    this.proc.on('close', () => { this.closed = true; for (const l of [...this.listeners]) l(); });
     this.proc.on('exit', (code, sig) => {
       this.exited = { code, sig };
       for (const l of this.listeners) l();
@@ -211,9 +213,9 @@ class Host {
   eventsFrom(from) { return this.history.slice(from); }
 
   async stop() {
-    if (!this.proc || this.exited) return;
-    spawnSync('taskkill', ['/PID', String(this.proc.pid), '/T', '/F'], { stdio: 'ignore' });
-    await waitUntil(() => this.exited, { subscribe: (t) => { this.listeners.add(t); return () => this.listeners.delete(t); }, timeoutMs: 15000, what: `${this.label} exit` }).catch(() => {});
+    if (!this.proc || this.closed) return;
+    if (!this.exited) spawnSync('taskkill', ['/PID', String(this.proc.pid), '/T', '/F'], { stdio: 'ignore' });
+    await waitUntil(() => this.closed, { subscribe: (t) => { this.listeners.add(t); return () => this.listeners.delete(t); }, timeoutMs: 15000, what: `${this.label} exit` }).catch(() => {});
   }
 }
 
@@ -557,7 +559,13 @@ async function phaseReal() {
 }
 
 try {
-  if (args.phase === 'probe') await phaseProbe();
+  if (args.scenario === 'plan-view') {
+    const { runPlanView } = await import('./plan-view-scenario.mjs');
+    await runPlanView({
+      Host, waitUntil, isoEnv, readyHost, readJson, listDir, walk, sessionEntries, textOf, notifies, isSettled, isStart,
+      args, OUT, WORK, AGENT, STATE, HERE, REPO, SCRIPT_LOG, PIDS, EVENTS, slash, pad6,
+    });
+  } else if (args.phase === 'probe') await phaseProbe();
   else if (args.phase === 'scripted') await phaseScripted();
   else if (args.phase === 'real') await phaseReal();
   else throw new Error(`unknown --phase ${args.phase}`);
@@ -567,5 +575,5 @@ try {
   mergeSummary({ [`${args.phase}Error`]: String(err.message || err) });
   process.exitCode = 1;
 } finally {
-  if (!args.keep && args.phase === 'cleanup') fs.rmSync(WORK, { recursive: true, force: true });
+  if (!args.keep && (args.phase === 'cleanup' || args.scenario === 'plan-view')) fs.rmSync(WORK, { recursive: true, force: true });
 }

@@ -1,0 +1,41 @@
+{
+  "parent_session_id": "senpi:lead-session",
+  "tasks": [
+    {
+      "task_id": "st_workerA",
+      "parent_session_id": "lead-session",
+      "task_summary": "Worker summary",
+      "description": "Longer description",
+      "name": "worker-a",
+      "agent_type": "implementation",
+      "category": "deep-low",
+      "resolved_model": { "display": "Sol 6.1", "model_id": "sol-6.1" },
+      "status": "running",
+      "created_at": "2026-10-15T12:00:00.000Z",
+      "updated_at": "2026-10-15T12:01:00.000Z",
+      "child_session_id": "child-session-A",
+      "live_progress": {
+        "started_at": "2026-10-15T12:00:01.000Z",
+        "current_tool": "read",
+        "last_assistant_line": "Inspecting the module",
+        "activity": "streaming"
+      }
+    },
+    {
+      "task_id": "st_workerB",
+      "description": "Finished worker",
+      "category": "quick",
+      "resolved_model": { "model_id": "sol-6.1" },
+      "status": "completed",
+      "created_at": "2026-10-15T11:00:00.000Z",
+      "updated_at": "2026-10-15T11:05:01.000Z",
+      "terminal_at": "2026-10-15T11:05:00.000Z"
+    },
+    {
+      "task_id": "st_foreign",
+      "parent_session_id": "some-other-parent",
+      "name": "Not our worker",
+      "status": "running"
+    }
+  ]
+}

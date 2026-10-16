@@ -483,3 +483,114 @@ test('stress (node): 2 writers x 1000 replace + immediate reader on IPC/fs.watch
 test('stress (bun, if installed): same scenario', { timeout: 130000, skip: !realFs.existsSync('C:/Users/USER/.bun/bin/bun.exe') }, async () => {
   assertStress(await stress('C:/Users/USER/.bun/bin/bun.exe'));
 });
+
+
+// ---------------------------------------------------------------- plan revisions (plans/<planId>/)
+
+const PLAN_ID = 'p0123456789ab';
+const revName = (n) => 'rev-' + String(n).padStart(6, '0') + '.json';
+const planRevs = (root) => realFs.readdirSync(join(root, 'plans', PLAN_ID)).filter((n) => /^rev-/.test(n)).sort();
+
+test('writePlanRev: numbers count up from the highest existing rev, the store sets rev, bad planId throws', () => {
+  const root = tmpRoot();
+  try {
+    const store = openStore(root);
+    const a = store.writePlanRev(PLAN_ID, { schema: 'omo-plan/1', rev: 999, plan: { goal: 'a' } });
+    assert.deepEqual({ rev: a.rev, pruneError: a.pruneError }, { rev: 1, pruneError: null });
+    const text = realFs.readFileSync(join(root, 'plans', PLAN_ID, revName(1)), 'utf8');
+    assert.equal(JSON.parse(text).rev, 1, 'a rev in the record never overrides the real number');
+    assert.equal(JSON.parse(text).plan.goal, 'a');
+    realFs.writeFileSync(join(root, 'plans', PLAN_ID, revName(7)), '{}'); // a gap: numbering continues after the max
+    assert.equal(store.writePlanRev(PLAN_ID, { plan: {} }).rev, 8);
+    for (const bad of ['', 'p123', 'P0123456789ab', '../x', 'p0123456789ag']) {
+      assert.throws(() => store.writePlanRev(bad, {}), /invalid planId/, bad);
+      assert.throws(() => store.writePlanStatus(bad, {}), /invalid planId/, bad);
+    }
+  } finally { cleanup(root); }
+});
+
+test('adversarial stale_state: writePlanRev EEXIST collision moves to the next number and never overwrites the competitor', () => {
+  const root = tmpRoot();
+  try {
+    let raced = false;
+    const fs = {
+      ...realFs,
+      writeFileSync(f, d, o) {
+        if (!raced && /rev-000001\.json$/.test(String(f))) {
+          raced = true; // another process takes number 1 between our listing and our wx
+          realFs.writeFileSync(f, JSON.stringify({ competitor: true }));
+        }
+        return realFs.writeFileSync(f, d, o);
+      },
+    };
+    const store = openStore(root, { fs });
+    const res = store.writePlanRev(PLAN_ID, { plan: { goal: 'mine' } });
+    assert.equal(res.rev, 2);
+    assert.deepEqual(JSON.parse(realFs.readFileSync(join(root, 'plans', PLAN_ID, revName(1)), 'utf8')), { competitor: true });
+    assert.equal(JSON.parse(realFs.readFileSync(join(root, 'plans', PLAN_ID, revName(2)), 'utf8')).plan.goal, 'mine');
+  } finally { cleanup(root); }
+});
+
+test('writePlanRev: persistent EEXIST gives up after the first try + 5 retries and throws EEXIST; other errors are not retried', () => {
+  const root = tmpRoot();
+  try {
+    let calls = 0;
+    const always = openStore(root, { fs: { ...realFs, writeFileSync() { calls++; throw errnoErr('EEXIST'); } } });
+    assert.throws(() => always.writePlanRev(PLAN_ID, {}), { code: 'EEXIST' });
+    assert.equal(calls, 6);
+    calls = 0;
+    const eperm = openStore(root, { fs: { ...realFs, writeFileSync() { calls++; throw errnoErr('EPERM'); } } });
+    assert.throws(() => eperm.writePlanRev(PLAN_ID, {}), { code: 'EPERM' });
+    assert.equal(calls, 1);
+    assert.equal(realFs.existsSync(join(root, 'plans', PLAN_ID)) ? planRevs(root).length : 0, 0, 'no rev left behind');
+  } finally { cleanup(root); }
+});
+
+test('writePlanRev keeps the newest 10 revs; a failed delete is returned as pruneError, the rev stays saved', () => {
+  const root = tmpRoot();
+  try {
+    let failUnlink = false;
+    const fs = { ...realFs, unlinkSync(f) { if (failUnlink && /rev-\d+\.json$/.test(String(f))) throw errnoErr('EPERM'); return realFs.unlinkSync(f); } };
+    const store = openStore(root, { fs });
+    for (let i = 1; i <= 12; i++) assert.equal(store.writePlanRev(PLAN_ID, { i }).pruneError, null);
+    assert.deepEqual(planRevs(root), [3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(revName));
+    failUnlink = true;
+    const res = store.writePlanRev(PLAN_ID, { i: 13 });
+    assert.equal(res.rev, 13);
+    assert.equal(res.pruneError.code, 'EPERM');
+    assert.equal(planRevs(root).length, 11, 'nothing deleted, nothing thrown');
+    failUnlink = false;
+    assert.equal(store.writePlanRev(PLAN_ID, { i: 14 }).pruneError, null);
+    assert.deepEqual(planRevs(root), [5, 6, 7, 8, 9, 10, 11, 12, 13, 14].map(revName), 'caught up; numbers never reused');
+  } finally { cleanup(root); }
+});
+
+test('readPlans/readSnapshot: newest rev + status per plan; a broken newest rev is a readError, never an older rev', () => {
+  const root = tmpRoot();
+  try {
+    const store = openStore(root);
+    assert.deepEqual(store.readPlans(), []);
+    assert.deepEqual(store.readSnapshot().plans, []);
+    store.writePlanRev(PLAN_ID, { plan: { goal: 'one' } });
+    store.writePlanRev(PLAN_ID, { plan: { goal: 'two' } });
+    store.writePlanStatus(PLAN_ID, { schema: 'omo-plan-status/1', planId: PLAN_ID, boxes: { 1: 'x' } });
+    store.writePlanStatus(PLAN_ID, { schema: 'omo-plan-status/1', planId: PLAN_ID, boxes: { 1: ' ' } });
+    realFs.mkdirSync(join(root, 'plans', 'not-a-plan'), { recursive: true }); // foreign folder: ignored
+    const plans = store.readPlans();
+    assert.equal(plans.length, 1);
+    assert.equal(plans[0].planId, PLAN_ID);
+    assert.equal(plans[0].rev.rev, 2);
+    assert.equal(plans[0].rev.plan.goal, 'two');
+    assert.deepEqual(plans[0].status.boxes, { 1: ' ' });
+    assert.deepEqual(plans[0].readErrors, []);
+    assert.deepEqual(realFs.readdirSync(join(root, 'plans', PLAN_ID)).filter((n) => /tmp$/.test(n)), []);
+    assert.equal(store.readSnapshot().plans[0].rev.plan.goal, 'two');
+
+    realFs.writeFileSync(join(root, 'plans', PLAN_ID, revName(3)), '{ broken');
+    const broken = store.readSnapshot();
+    assert.equal(broken.plans[0].rev, null, 'not silently the previous rev');
+    assert.equal(broken.plans[0].readErrors.length, 1);
+    assert.ok(broken.readErrors.some((e) => e.rel === 'plans/' + PLAN_ID + '/' + revName(3)));
+    assert.equal(broken.plans[0].status.planId, PLAN_ID, 'the rest of the plan is still read');
+  } finally { cleanup(root); }
+});
