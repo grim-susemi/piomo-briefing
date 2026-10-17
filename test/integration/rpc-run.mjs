@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { reportOutcome, shouldRemoveWork } from './run-outcome.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
@@ -40,7 +41,8 @@ const args = (() => {
 if (!args.out) throw new Error('--out <evidence dir> is required');
 const OUT = slash(path.resolve(args.out));
 fs.mkdirSync(OUT, { recursive: true });
-const WORK = slash(path.resolve(args.work ?? fs.mkdtempSync(path.join(os.tmpdir(), 'piomo-rpc14-'))));
+const WORK_ARG = args.work; // undefined exactly when this run must create the dir itself (--work absent, or given with no value)
+const WORK = slash(path.resolve(WORK_ARG ?? fs.mkdtempSync(path.join(os.tmpdir(), 'piomo-rpc14-'))));
 fs.mkdirSync(WORK, { recursive: true });
 const AGENT = `${WORK}/agent`;
 const STATE = slash(path.resolve(args.state ?? `${AGENT}/briefing/state`));
@@ -570,11 +572,11 @@ try {
   else if (args.phase === 'scripted') await phaseScripted();
   else if (args.phase === 'real') await phaseReal();
   else throw new Error(`unknown --phase ${args.phase}`);
-  console.log(`phase ${args.phase} finished; work=${WORK}`);
+  reportOutcome({ mode: args.scenario ? 'scenario' : 'phase', name: args.scenario ?? args.phase, work: WORK, exitCode: process.exitCode });
 } catch (err) {
   console.error(`FAILED: ${err.stack || err}`);
   mergeSummary({ [`${args.phase}Error`]: String(err.message || err) });
   process.exitCode = 1;
 } finally {
-  if (!args.keep && (args.phase === 'cleanup' || args.scenario === 'plan-view' || args.scenario === 'board-answer')) fs.rmSync(WORK, { recursive: true, force: true });
+  if (shouldRemoveWork({ workGiven: WORK_ARG !== undefined, keep: args.keep, phase: args.phase, scenario: args.scenario })) fs.rmSync(WORK, { recursive: true, force: true });
 }

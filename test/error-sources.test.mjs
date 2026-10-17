@@ -11,6 +11,7 @@ import { createBriefingExtension } from '../extension.mjs';
 import { createDeliverer } from '../src/deliver.mjs';
 import { openStore } from '../src/store.mjs';
 import { renderPage } from '../src/render.mjs';
+import { tempDir } from './helpers/temp.mjs';
 import { makeFakePi, makeCtx } from './helpers/fake-pi.mjs';
 
 const FIX = JSON.parse(readFileSync(new URL('./fixtures/mirror/ask-user-events.json', import.meta.url), 'utf8'));
@@ -52,8 +53,7 @@ const decisionFiles = (stateDir) => (existsSync(join(stateDir, 'decisions')) ? n
 const quietDeliverer = () => ({ wake: async () => {}, pendingIds: () => [], dispose: async () => {} });
 
 function rig(t, { fs = nodeFs, createDeliverer: cd = quietDeliverer, session } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'omo-errsrc-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { dir, onDispose } = tempDir(t, 'omo-errsrc-');
   const stateDir = join(dir, 'state');
   let clock = 1_700_000_000_000;
   const host = makeFakePi();
@@ -65,6 +65,7 @@ function rig(t, { fs = nodeFs, createDeliverer: cd = quietDeliverer, session } =
     openPage: () => ({}), renderOpts: { sleep: () => {} }, createDeliverer: cd,
   })(host.pi);
   const { ctx, notes } = makeCtx({ sid: 'sess-A' });
+  onDispose(() => host.emit('session_shutdown', {}, ctx));
   const ask = (requestId = 'toolu_ask_001') => {
     const p = clone(FIX.asked);
     p.request.requestId = requestId;

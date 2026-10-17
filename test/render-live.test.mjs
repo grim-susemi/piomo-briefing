@@ -167,6 +167,30 @@ test('pageHtml inlines every page module and the first-paint model, with generat
   assert.equal(pageHtml(vm, null, { mode: 'file' }).includes('omo-briefing-generation'), false);
 });
 
+test('a publisher with no generation keeps a stamped page (data.js and seq still move); an older generation keeps a newer page; an unstamped page is still written', (t) => {
+  const store = fresh(t);
+  session(store, 'a');
+  assert.equal(renderPage(store, NOW, { generation: 9, isAlive: () => true }).ok, true);
+  const stamped = store.readText('index.html');
+  assert.match(stamped, /<meta name="omo-briefing-generation" content="9">/);
+  const seq0 = dataOf(store).seq;
+
+  session(store, 'b');
+  assert.equal(renderPage(store, NOW + 5, { generation: null, isAlive: () => true }).ok, true);
+  assert.equal(store.readText('index.html'), stamped, 'null generation: index.html byte-identical');
+  assert.ok(dataOf(store).seq > seq0, 'null generation: seq increased');
+  assert.deepEqual(dataOf(store).sessions.map((s) => s.id).sort(), ['a', 'b'], 'null generation: data.js updated');
+  const seq1 = dataOf(store).seq;
+
+  assert.equal(renderPage(store, NOW + 10, { generation: 8, isAlive: () => true }).ok, true);
+  assert.equal(store.readText('index.html'), stamped, 'gen 8 over gen 9: index.html byte-identical');
+  assert.ok(dataOf(store).seq > seq1);
+
+  store.replace('index.html', '<html>unstamped</html>');
+  assert.equal(renderPage(store, NOW + 15, { generation: null, isAlive: () => true }).ok, true);
+  assert.notEqual(store.readText('index.html'), '<html>unstamped</html>', 'an unstamped page is still written');
+});
+
 test('pageHtml carries the board write token as one meta in server mode only', () => {
   const vm = { schema: 1, seq: 7, gen: 4, sessions: [], waiting: [], server: null };
   const served = pageHtml(vm, 4, { mode: 'server', token: 'tok-1_x' });

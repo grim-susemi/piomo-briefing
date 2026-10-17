@@ -4,200 +4,114 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as nodeFs from 'node:fs';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, watch } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
-import { fork } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 import net from 'node:net';
-import { createBriefingExtension } from '../extension.mjs';
+import nodeTimers from 'node:timers';
+import promiseTimers from 'node:timers/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { planIdOf, rootAndSlugOf } from '../src/plan-schema.mjs';
 import { PLAN_CHIP_STALE, planChipMissing } from '../src/plan-tool.mjs';
-import { makeFakePi, makeCtx } from './helpers/fake-pi.mjs';
+import {
+  RPC, REGISTRY, nextBase, norm, text, goodBrief, decision, PLAN_TEXT, planInput,
+  fakeTimers, make, seqOf, parseData, readData, serverUrl, until, get, sse, startHolder,
+  settingsFaultFs, ERR_CHIP, chipsOf, workerSnap, nextMacrotask, noHooks, seedErrors,
+} from './helpers/live-fixture.mjs';
 
-const HOLDER = fileURLToPath(new URL('./helpers/lock-holder.mjs', import.meta.url));
-const RPC = 'senpi:extension-rpc-event';
-const REGISTRY = Symbol.for('omo.briefing.server');
-let portSeed = 47400;
-const nextBase = () => { const b = portSeed; portSeed += 12; return String(b); };
-const norm = (p) => p.replace(/\\/g, '/');
-const text = (r) => r.content.map((b) => b.text).join('\n');
-
-const goodBrief = (over = {}) => ({
-  title: '작업 하나', status: 'in_progress', headline: '목표까지 절반',
-  changes: [{ text: '고침', truth: 'reported', applied: 'candidate' }], done: [], next: '다음 일', decisions: [], ...over,
-});
-const decision = () => ({
-  question: '어느 쪽으로 갈까?',
-  options: { A: { text: '가', consequence: '빠름' }, B: { text: '나', consequence: '안전' } },
-  recommend: 'A', reason: '빨라서', blocks: false,
-});
-const PLAN_TEXT = ['# plan', '- [ ] 1. 첫째', '  Parallelization: Wave 1 | Blocked by: 없음 | Blocks: 2', '- [ ] 2. 둘째', '  Parallelization: Wave 2 | Blocked by: 1 | Blocks: 없음', ''].join('\n');
-const planInput = (planPath, over = {}) => ({
-  planPath, stage: 'review', stageNote: '', goal: '목표', ideal: [{ id: 'IS-1', text: '이상' }], components: [],
-  waves: [{ n: 1, label: '기초' }, { n: 2, label: '후속' }],
-  tasks: [
-    { id: '1', wave: 1, label: '첫째', what: '무엇', done: '끝', deps: [] },
-    { id: '2', wave: 2, label: '둘째', what: '무엇', done: '끝', deps: ['1'] },
-  ],
-  questions: [{
-    id: 'Q1', text: '진행할까요?', state: 'open',
-    options: { A: { text: '진행', consequence: '간다' }, B: { text: '보류', consequence: '선다' } },
-    recommend: 'A', reason: '빠르다', blocks: true,
-  }],
-  outOfScope: [], ...over,
-});
-
-function makeBus() {
-  const m = new Map();
-  return {
-    on(ch, fn) { if (!m.has(ch)) m.set(ch, new Set()); m.get(ch).add(fn); return () => m.get(ch).delete(fn); },
-    emit(ch, payload) { for (const fn of [...(m.get(ch) ?? [])]) fn(payload); },
-    listeners: (ch) => (m.get(ch) ? m.get(ch).size : 0),
+// Forward every caller unchanged. Synchronous retry chains share one microtask-delimited burst.
+function blockingBursts() {
+  const original = Atomics.wait;
+  const bursts = [];
+  let open = null;
+  Atomics.wait = function (...args) {
+    if (!open) {
+      const burst = { ms: 0 };
+      bursts.push(burst);
+      open = burst;
+      queueMicrotask(() => { if (open === burst) open = null; });
+    }
+    open.ms += Number(args[3] ?? Infinity);
+    return Reflect.apply(original, this, args);
   };
-}
-
-/** Manual timers: nothing runs by itself; runAll() fires every pending callback now. Counts every creation. */
-function fakeTimers() {
-  let n = 0;
-  const pending = new Map();
-  const t = {
-    created: 0,
-    setTimeout(fn) { t.created++; const h = { id: ++n, unref() {} }; pending.set(h, { fn, once: true }); return h; },
-    clearTimeout(h) { pending.delete(h); },
-    setInterval(fn) { t.created++; const h = { id: ++n, unref() {} }; pending.set(h, { fn, once: false }); return h; },
-    clearInterval(h) { pending.delete(h); },
-    pending: () => pending.size,
-    async runAll(rounds = 3) {
-      for (let i = 0; i < rounds; i++) {
-        for (const [h, { fn, once }] of [...pending]) {
-          if (once) pending.delete(h);
-          await fn();
-        }
-        await new Promise((r) => setImmediate(r));
-      }
+  return {
+    bursts,
+    restore: () => { Atomics.wait = original; },
+    assert: () => {
+      for (const burst of bursts) assert.ok(burst.ms <= 200, 'blocking burst requested ' + burst.ms + 'ms');
     },
   };
-  return t;
 }
 
-/** One lead conversation in its own temp project and STATE (or sharing `dir` with another one). */
-function make(t, o = {}) {
-  const { server = false, sid = 'sess-A', sessionKind = 'interactive', file, hasUI = true, fs, timers, dir: given, extra = {} } = o;
-  const dir = given ?? mkdtempSync(join(tmpdir(), 'omo-live-'));
-  const stateDir = join(dir, 'state');
-  const cwd = join(dir, 'proj');
-  mkdirSync(join(cwd, '.omo', 'plans'), { recursive: true });
-  const host = makeFakePi({ sessionKind, cwd });
-  const events = makeBus();
-  host.pi.events = events;
-  const env = { PATH: process.env.PATH, HERDR_BIN_PATH: '', OMO_BRIEFING_PORT_BASE: o.base ?? nextBase() };
-  const opened = [];
-  createBriefingExtension({
-    stateDir, env, server, generation: 4,
-    openPage: (p) => { opened.push(p); return { launcher: 'chrome', command: 'x', args: [] }; },
-    ...(fs ? { fs } : {}), ...(timers ? { timers } : {}), ...extra,
-  })(host.pi);
-  const { ctx, notes } = makeCtx({ cwd, sid, file: file ?? `C:/sessions/${sid}.jsonl`, hasUI });
-  let down = false;
-  const shutdown = async () => { if (!down) { down = true; await host.emit('session_shutdown', {}, ctx); } };
-  if (!given) {
-    t.after(async () => {
-      await shutdown();
-      rmSync(dir, { recursive: true, force: true });
-    });
-  } else {
-    t.after(shutdown);
+// Native callbacks, handles and promises still run normally; only requests and completion are observed.
+function shutdownTimers() {
+  const originals = [];
+  const entries = [];
+  const handles = new Map();
+  let armed = false;
+  const record = (api, ms) => {
+    let done;
+    const entry = { api, ms, scoped: armed, pending: true, fired: false, cleared: false, done: new Promise((r) => { done = r; }) };
+    entry.finish = () => { entry.pending = false; done(); };
+    entries.push(entry);
+    return entry;
+  };
+  const replace = (target, key, fn) => { originals.push([target, key, target[key]]); target[key] = fn(target[key]); };
+  for (const [label, target] of [['global', globalThis], ['timers', nodeTimers]]) {
+    for (const kind of ['Timeout', 'Interval']) {
+      replace(target, 'set' + kind, (original) => function (fn, ms, ...args) {
+        const entry = record(label + '.set' + kind, ms);
+        const handle = Reflect.apply(original, this, [function (...values) {
+          entry.fired = true;
+          if (kind === 'Timeout') entry.finish();
+          return Reflect.apply(fn, this, values);
+        }, ms, ...args]);
+        handles.set(handle, entry);
+        return handle;
+      });
+      replace(target, 'clear' + kind, (original) => function (handle) {
+        const entry = handles.get(handle);
+        if (entry) { entry.cleared = true; entry.finish(); }
+        return Reflect.apply(original, this, [handle]);
+      });
+    }
   }
+  replace(promiseTimers, 'setTimeout', (original) => function (ms, ...args) {
+    const entry = record('promises.setTimeout', ms);
+    return Reflect.apply(original, this, [ms, ...args]).then((value) => {
+      entry.fired = true; entry.finish(); return value;
+    }, (error) => { entry.finish(); throw error; });
+  });
+  replace(promiseTimers, 'setInterval', (original) => function (ms, ...args) {
+    const entry = record('promises.setInterval', ms);
+    const iterator = Reflect.apply(original, this, [ms, ...args]);
+    return (async function* () {
+      try { for await (const value of iterator) { entry.fired = true; yield value; } }
+      finally { entry.finish(); }
+    })();
+  });
+  syncBuiltinESMExports();
   return {
-    dir, stateDir, cwd, host, events, ctx, notes, opened, env, shutdown,
-    start: () => host.emit('session_start', { reason: 'startup' }, ctx),
-    brief: (input) => host.tool('brief').execute('call', input, undefined, undefined, ctx),
-    command: (name, args = '') => host.commands.get(name).handler(args, ctx),
-    meta: () => JSON.parse(readFileSync(join(stateDir, 'sessions', sid, 'meta.json'), 'utf8')),
+    entries,
+    arm: () => { armed = true; },
+    disarm: () => { armed = false; },
+    restore: () => {
+      armed = false;
+      for (const [target, key, original] of originals) target[key] = original;
+      syncBuiltinESMExports();
+    },
+    async drain() {
+      await Promise.all(entries.filter((e) => e.scoped && e.pending).map((e) => e.done));
+      await nextMacrotask();
+    },
   };
 }
 
-const seqOf = (stateDir) => JSON.parse(readFileSync(join(stateDir, 'published.json'), 'utf8')).seq;
-const parseData = (src) => {
-  const open = src.lastIndexOf('window.__briefData(') + 'window.__briefData('.length;
-  return JSON.parse(src.slice(open, src.lastIndexOf(');')));
-};
-const readData = (stateDir) => parseData(readFileSync(join(stateDir, 'data.js'), 'utf8'));
-const serverUrl = (stateDir) => `http://127.0.0.1:${JSON.parse(readFileSync(join(stateDir, 'server.json'), 'utf8')).port}/`;
-
-/** Resolves with pred()'s first truthy value, checked now and after every change in `dir`; rejects after `ms`. */
-function until(dir, pred, label, ms = 10_000) {
-  return new Promise((resolve, reject) => {
-    let watcher = null;
-    const timer = setTimeout(() => { watcher.close(); reject(new Error(`timeout waiting for ${label}`)); }, ms);
-    const check = () => {
-      let v = null;
-      try { v = pred(); } catch { v = null; } // a file caught mid-replace is simply "not yet"
-      if (v) { clearTimeout(timer); watcher.close(); resolve(v); }
-    };
-    watcher = watch(dir, check);
-    check();
-  });
-}
-
-function get(url, { headers = {} } = {}) {
-  return new Promise((resolve, reject) => {
-    const u = new URL(url);
-    const req = http.get({ host: '127.0.0.1', port: u.port, path: u.pathname, agent: false, headers }, (res) => {
-      let body = '';
-      res.setEncoding('utf8');
-      res.on('data', (c) => { body += c; });
-      res.on('end', () => resolve({ status: res.statusCode, body }));
-    });
-    req.on('error', reject);
-  });
-}
-
-function sse(url) {
-  return new Promise((resolve, reject) => {
-    const u = new URL(url);
-    const req = http.get({ host: '127.0.0.1', port: u.port, path: '/events', agent: false }, (res) => {
-      const state = { text: '', closed: false };
-      const waiters = new Set();
-      res.setEncoding('utf8');
-      res.on('data', (c) => { state.text += c; for (const w of [...waiters]) w(); });
-      res.on('close', () => { state.closed = true; for (const w of [...waiters]) w(); });
-      const waitFor = (pred, label, ms = 5000) => new Promise((ok, no) => {
-        let w = null;
-        const timer = setTimeout(() => { waiters.delete(w); no(new Error(`sse timeout waiting for ${label}: ${state.text.slice(-200)}`)); }, ms);
-        w = () => { if (pred(state.text)) { clearTimeout(timer); waiters.delete(w); ok(state.text); } };
-        waiters.add(w);
-        w();
-      });
-      resolve({ state, waitFor, close: () => req.destroy() });
-    });
-    req.on('error', reject);
-  });
-}
-
-function startHolder(t, stateDir, holdMs) {
-  const child = fork(HOLDER, [stateDir, String(holdMs)], { execArgv: [] });
-  const closed = new Promise((r) => child.once('close', r));
-  t.after(async () => { if (child.exitCode === null && child.signalCode === null) child.kill(); await closed; });
-  let released;
-  const releasedP = new Promise((r) => { released = r; });
-  child.on('message', (m) => { if (m && m.type === 'released') released(); });
-  return new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.on('message', (m) => {
-      if (m && m.type === 'held') resolve({ released: releasedP, release: () => child.send({ cmd: 'release' }) });
-    });
-  });
-}
-
-function lagProbe(every = 20) {
-  let last = performance.now();
-  let max = 0;
-  const h = setInterval(() => { const n = performance.now(); max = Math.max(max, n - last - every); last = n; }, every);
-  return { stop: () => clearInterval(h), max: () => max };
-}
+// Immediate ENOENT drains the real child reader before runAll's setImmediate checkpoint.
+// A settings failure during a pending real child-directory read is not covered here.
+const missingWorkerPath = () => Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+const enoentFs = { readdir: missingWorkerPath, stat: missingWorkerPath, open: missingWorkerPath };
 
 // ------------------------------------------------------------------ render.lock held by someone else
 
@@ -207,13 +121,20 @@ test('render.lock held 3s by another process: brief and /decide wait on timers, 
   await s.brief(goodBrief({ decisions: [decision()] }));
   const before = seqOf(s.stateDir);
   const holder = await startHolder(t, s.stateDir, 3000);
-  const lag = lagProbe();
-  const pBrief = s.brief(goodBrief({ headline: '락 중 보고' }));
-  const pDecide = s.command('decide', '1A');
-  await holder.released;
-  const [r] = await Promise.all([pBrief, pDecide]);
-  lag.stop();
-  assert.ok(lag.max() <= 200, `terminal stalled ${lag.max()}ms`);
+  const waits = blockingBursts();
+  let pending = true;
+  const turn = new Promise((resolve) => setImmediate(() => resolve(pending)));
+  let r;
+  try {
+    const pBrief = s.brief(goodBrief({ headline: '락 중 보고' }));
+    const pDecide = s.command('decide', '1A');
+    const publication = Promise.all([pBrief, pDecide]).finally(() => { pending = false; });
+    const ranWhilePending = await turn;
+    await holder.released;
+    [r] = await publication;
+    assert.equal(ranWhilePending, true, 'a real event-loop turn ran while publication was pending');
+    waits.assert();
+  } finally { waits.restore(); }
   assert.ok(text(r).startsWith('상황판 갱신됨'), text(r));
   assert.ok(seqOf(s.stateDir) >= before + 2, 'both publications went out');
   assert.equal(s.meta().errors.render, undefined);
@@ -221,57 +142,106 @@ test('render.lock held 3s by another process: brief and /decide wait on timers, 
 });
 
 test('render.lock never released: render error after ~5s with no data.js written and no stall; the next publish shows the chip once, the one after clears it (data.js and server view)', { timeout: 60_000 }, async (t) => {
-  const versions = [];
-  const fs = { ...nodeFs, renameSync(a, b) { if (/data\.js$/.test(String(b))) versions.push(nodeFs.readFileSync(a, 'utf8')); return nodeFs.renameSync(a, b); } };
-  const s = make(t, { server: true, fs });
-  await s.start();
-  await s.brief(goodBrief());
-  const url = serverUrl(s.stateDir);
-  const written = versions.length;
-  const dataBefore = readFileSync(join(s.stateDir, 'data.js'), 'utf8');
-  const holder = await startHolder(t, s.stateDir, 0);
-  const lag = lagProbe();
-  const r = await s.brief(goodBrief({ headline: '락 계속' }));
-  lag.stop();
-  assert.ok(lag.max() <= 200, `terminal stalled ${lag.max()}ms`);
-  assert.ok(text(r).includes('갱신되지 못함'), text(r));
-  assert.match(s.meta().errors.render.message, /render\.lock/, 'recorded in the real store');
-  assert.equal(versions.length, written, 'data.js was not written');
-  assert.equal(readFileSync(join(s.stateDir, 'data.js'), 'utf8'), dataBefore);
-  const during = JSON.parse((await get(`${url}data.json`)).body);
-  assert.ok(during.sessions[0].chips.includes('오류 있음'), 'the board server built from the store already shows the chip');
+  const original = globalThis.setTimeout;
+  const delays = [];
+  let recording = false;
+  globalThis.setTimeout = function (fn, ms, ...args) {
+    if (recording) delays.push(ms);
+    return Reflect.apply(original, this, [fn, ms, ...args]);
+  };
+  syncBuiltinESMExports();
+  try {
+    const versions = [];
+    const fs = { ...nodeFs, renameSync(a, b) { if (/data\.js$/.test(String(b))) versions.push(nodeFs.readFileSync(a, 'utf8')); return nodeFs.renameSync(a, b); } };
+    const s = make(t, { server: true, fs });
+    await s.start();
+    await s.brief(goodBrief());
+    const url = serverUrl(s.stateDir);
+    const written = versions.length;
+    const dataBefore = readFileSync(join(s.stateDir, 'data.js'), 'utf8');
+    const holder = await startHolder(t, s.stateDir, 0);
+    const waits = blockingBursts();
+    let pending = true;
+    const turn = new Promise((resolve) => setImmediate(() => resolve(pending)));
+    let r;
+    recording = true;
+    try {
+      const publication = s.brief(goodBrief({ headline: '락 계속' })).finally(() => { pending = false; });
+      const ranWhilePending = await turn;
+      r = await publication;
+      assert.equal(ranWhilePending, true, 'a real event-loop turn ran while publication was pending');
+      waits.assert();
+    } finally { recording = false; waits.restore(); }
+    const expected = [20, 40, 80, 160, 320, 640, 1280, 2560];
+    let retry = 0;
+    for (const delay of delays) if (delay === expected[retry]) retry++;
+    assert.equal(retry, expected.length, 'the native render retry sequence is an ordered subsequence: ' + delays);
+    assert.ok(text(r).includes('갱신되지 못함'), text(r));
+    assert.match(s.meta().errors.render.message, /render\.lock/, 'recorded in the real store');
+    assert.equal(versions.length, written, 'data.js was not written');
+    assert.equal(readFileSync(join(s.stateDir, 'data.js'), 'utf8'), dataBefore);
+    const during = JSON.parse((await get(`${url}data.json`)).body);
+    assert.ok(during.sessions[0].chips.includes('오류 있음'), 'the board server built from the store already shows the chip');
 
-  holder.release();
-  await holder.released;
-  const from = versions.length;
-  await s.brief(goodBrief({ headline: '락 풀린 뒤' }));
-  const after = versions.slice(from).map(parseData).map((d) => d.sessions[0].chips);
-  assert.ok(after.length >= 2, `two publications: ${after.length}`);
-  assert.ok(after[0].includes('오류 있음'), 'the first publication after the lock shows the render chip');
-  assert.ok(!after.at(-1).includes('오류 있음'), 'the next successful publication clears it');
-  assert.equal(s.meta().errors.render, undefined);
-  const healed = JSON.parse((await get(`${url}data.json`)).body);
-  assert.ok(!healed.sessions[0].chips.includes('오류 있음'));
+    holder.release();
+    await holder.released;
+    const from = versions.length;
+    await s.brief(goodBrief({ headline: '락 풀린 뒤' }));
+    const after = versions.slice(from).map(parseData).map((d) => d.sessions[0].chips);
+    assert.ok(after.length >= 2, `two publications: ${after.length}`);
+    assert.ok(after[0].includes('오류 있음'), 'the first publication after the lock shows the render chip');
+    assert.ok(!after.at(-1).includes('오류 있음'), 'the next successful publication clears it');
+    assert.equal(s.meta().errors.render, undefined);
+    const healed = JSON.parse((await get(`${url}data.json`)).body);
+    assert.ok(!healed.sessions[0].chips.includes('오류 있음'));
+  } finally {
+    globalThis.setTimeout = original;
+    syncBuiltinESMExports();
+  }
 });
 
 test('session_shutdown stays under 2s with three SSE pages open and render.lock held elsewhere; server and files are gone', { timeout: 60_000 }, async (t) => {
-  const s = make(t, { server: true });
-  await s.start();
-  await s.brief(goodBrief());
-  const url = serverUrl(s.stateDir);
-  const pages = await Promise.all([sse(url), sse(url), sse(url)]);
-  await Promise.all(pages.map((p) => p.waitFor((x) => x.includes('event: data'), 'first data')));
-  const holder = await startHolder(t, s.stateDir, 0);
-  const t0 = performance.now();
-  await s.host.emit('session_shutdown', {}, s.ctx);
-  const took = performance.now() - t0;
-  assert.ok(took < 2000, `shutdown took ${took}ms`);
-  assert.equal(existsSync(join(s.stateDir, 'server.lock')), false);
-  assert.equal(existsSync(join(s.stateDir, 'server.json')), false);
-  await Promise.all(pages.map((p) => p.waitFor(() => p.state.closed, 'stream closed')));
-  await assert.rejects(get(`${url}health`), /ECONNREFUSED/);
-  holder.release();
-  await holder.released;
+  const timers = shutdownTimers(); // before make(): the extension captures these functions
+  const { fs, hits, creations } = lockSpyFs();
+  let holder;
+  const pages = [];
+  try {
+    const s = make(t, { server: true, fs });
+    await s.start();
+    await s.brief(goodBrief());
+    const url = serverUrl(s.stateDir);
+    pages.push(...await Promise.all([sse(url), sse(url), sse(url)]));
+    await Promise.all(pages.map((p) => p.waitFor((x) => x.includes('event: data'), 'first data')));
+    holder = await startHolder(t, s.stateDir, 0);
+    const closed = pages.map((p) => p.waitFor(() => p.state.closed, 'stream closed'));
+    hits.length = 0;
+    creations.length = 0;
+    timers.arm();
+    try { await s.host.emit('session_shutdown', {}, s.ctx); }
+    finally { timers.disarm(); }
+    await Promise.all(closed);
+    const scoped = timers.entries.filter((e) => e.scoped);
+    t.diagnostic(JSON.stringify({ shutdownLockOps: hits, shutdownLockCreations: creations.length, errors: s.meta().errors, timers: scoped.map(({ api, ms, fired, cleared, pending }) => ({ api, ms, fired, cleared, pending })) }));
+    assert.deepEqual(scoped.filter((e) => e.fired && e.ms >= 2000).map((e) => [e.api, e.ms]), [], 'no shutdown timer of 2000ms or more fired or fulfilled');
+    assert.ok(scoped.some((e) => e.ms === 1200), 'the shutdown-owned step guard was observed');
+    assert.ok(scoped.filter((e) => e.ms === 1200 || e.ms === 500).every((e) => e.cleared && !e.fired), 'shutdown guards were cleared without firing');
+    assert.deepEqual(scoped.filter((e) => e.pending).map((e) => [e.api, e.ms]), [], 'no scoped timer was left pending');
+    assert.ok(creations.length <= 1, 'render.lock was created at most once during shutdown');
+    const released = JSON.parse(readFileSync(join(s.stateDir, 'server.lock'), 'utf8'));
+    assert.deepEqual(
+      { pid: released.pid, generation: released.generation, released: released.released, port: released.port },
+      { pid: process.pid, generation: 4, released: 'quit', port: Number(new URL(url).port) },
+    );
+    assert.equal(existsSync(join(s.stateDir, 'server.json')), false);
+    await assert.rejects(get(url + 'health'), /ECONNREFUSED/);
+  } finally {
+    timers.disarm();
+    try {
+      if (holder) { holder.release(); await holder.released; }
+      for (const page of pages) page.close();
+      await timers.drain();
+    } finally { timers.restore(); }
+  }
 });
 
 // ------------------------------------------------------------------ board server inside the extension
@@ -289,7 +259,11 @@ test('/reload: loading the extension twice in one process leaves one server; the
   assert.equal((await get(`${url}health`)).status, 200, 'the displaced instance leaves the running server alone');
   await b.shutdown();
   await assert.rejects(get(`${url}health`), /ECONNREFUSED/);
-  assert.equal(existsSync(join(a.stateDir, 'server.lock')), false);
+  const released = JSON.parse(readFileSync(join(a.stateDir, 'server.lock'), 'utf8'));
+  assert.deepEqual(
+    { pid: released.pid, generation: released.generation, released: released.released, port: released.port },
+    { pid: process.pid, generation: 4, released: 'quit', port: Number(new URL(url).port) },
+  );
 });
 
 test('GET / is this generation even when STATE holds an older index.html and an old-shape data.js', { timeout: 30_000 }, async (t) => {
@@ -445,8 +419,6 @@ test('started while paused: no lock, no server file, no listener', { timeout: 30
   mkdirSync(join(dir, 'state'), { recursive: true });
   writeFileSync(join(dir, 'state', 'settings.json'), JSON.stringify({ enabled: false }));
   const s = make(t, { server: true, dir });
-  // registered after make(): the session shutdown (which saves its meta) runs first, then the folder goes
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
   await s.start();
   assert.equal(existsSync(join(s.stateDir, 'server.lock')), false);
   assert.equal(existsSync(join(s.stateDir, 'server.json')), false);
@@ -546,11 +518,18 @@ test('B1: real plan_brief -> /decide 1B -> a later valid revision claiming "answ
 /** fs whose every call on a path naming render.lock is recorded (the pause guards must not even take the lock). */
 function lockSpyFs() {
   const hits = [];
+  const creations = [];
   const spy = { ...nodeFs };
   for (const [k, v] of Object.entries(nodeFs)) {
-    if (typeof v === 'function') spy[k] = (...a) => { if (typeof a[0] === 'string' && /render\.lock/.test(a[0])) hits.push(k); return v(...a); };
+    if (typeof v === 'function') spy[k] = (...a) => {
+      const lock = typeof a[0] === 'string' && /render\.lock$/.test(a[0]);
+      if (typeof a[0] === 'string' && /render\.lock/.test(a[0])) hits.push(k);
+      const result = v(...a);
+      if (lock && k === 'writeFileSync') creations.push(a[0]); // EEXIST attempts did not create the held lock
+      return result;
+    };
   }
-  return { fs: spy, hits };
+  return { fs: spy, hits, creations };
 }
 /** An injected workers adapter that only hands out the extension's real softPublish callback. */
 function captureSoft() {
@@ -609,23 +588,44 @@ test('B5: a task snapshot before the session exists is not cloned: irrelevant ge
   const s = make(t);
   const junk = 'x'.repeat(65_536);
   let reads = 0;
-  const snapshot = () => ({
-    parent_session_id: 'senpi:sess-A',
-    get irrelevant() { reads++; return junk; },
-    tasks: Array.from({ length: 256 }, (_, i) => ({
-      task_id: `st_t${i}`, parent_session_id: 'sess-A', status: 'running', task_summary: `작업 ${i}`, updated_at: new Date().toISOString(), junk,
+  const fields = new Set(['task_id', 'parent_session_id', 'status', 'task_summary', 'description', 'name', 'agent_type', 'category',
+    'model_id', 'model', 'created_at', 'updated_at', 'terminal_at', 'child_session_id', 'resolved_model', 'live_progress']);
+  for (let sample = 0; sample < 10; sample++) {
+    const logs = [];
+    const watched = (target, allowed) => {
+      const log = { reads: new Map(), other: [], ownKeys: 0, descriptors: 0, has: 0 };
+      logs.push(log);
+      return new Proxy(target, {
+        get(o, key, receiver) {
+          if (allowed.has(key)) log.reads.set(key, (log.reads.get(key) ?? 0) + 1);
+          else log.other.push(String(key));
+          return Reflect.get(o, key, receiver);
+        },
+        ownKeys(o) { log.ownKeys++; return Reflect.ownKeys(o); },
+        getOwnPropertyDescriptor(o, key) { log.descriptors++; return Reflect.getOwnPropertyDescriptor(o, key); },
+        has(o, key) { log.has++; return Reflect.has(o, key); },
+      });
+    };
+    // The array itself is intentionally not proxied: only the root and individual tasks are observed.
+    const tasks = Array.from({ length: 256 }, (_, i) => watched({
+      task_id: 'st_t' + i, parent_session_id: 'sess-A', status: 'running', task_summary: '작업 ' + i, updated_at: new Date().toISOString(), junk,
       get unused() { reads++; return junk; },
-    })),
-  });
-  let max = 0;
-  for (let i = 0; i < 10; i++) {
-    const data = snapshot();
-    const t0 = performance.now();
+    }, fields));
+    const data = watched({ parent_session_id: 'senpi:sess-A', tasks, get irrelevant() { reads++; return junk; } }, new Set(['parent_session_id', 'tasks']));
     s.events.emit(RPC, { name: 'omo.task.updated', data });
-    max = Math.max(max, performance.now() - t0);
+    const root = logs.at(-1);
+    assert.deepEqual([...root.reads].sort(), [['parent_session_id', 1], ['tasks', 2]], 'root access counts per snapshot');
+    assert.equal(logs.length - 1, 256, 'all 256 task objects were observed');
+    for (const log of logs.slice(0, -1)) {
+      assert.equal(log.reads.get('task_id'), 1, 'every task was visited');
+      for (const [field, count] of log.reads) assert.ok(count <= 1, field + ' read more than once per task per snapshot');
+    }
+    for (const log of logs) {
+      assert.deepEqual(log.other, [], 'no unselected fields were read');
+      assert.deepEqual([log.ownKeys, log.descriptors, log.has], [0, 0, 0], 'no enumeration, descriptors or membership checks');
+    }
   }
   assert.equal(reads, 0, 'no irrelevant getter was read');
-  assert.ok(max <= 5, `slowest of 10 early snapshots: ${max.toFixed(2)}ms`);
   await s.start();
   const rows = await until(s.stateDir, () => {
     const r = readData(s.stateDir).sessions[0]?.live?.workers;
@@ -636,46 +636,12 @@ test('B5: a task snapshot before the session exists is not cloned: irrelevant ge
 
 // ------------------------------------------------------------------ row 17: pause state and settings reads
 
-/** fs whose reads of settings.json fail with EACCES while ctl.deny is set (every failing read is counted). */
-function settingsFaultFs(ctl) {
-  return {
-    ...nodeFs,
-    readFileSync(p, ...a) {
-      if (ctl.deny && norm(String(p)).endsWith('/settings.json')) {
-        ctl.reads++;
-        throw Object.assign(new Error('EACCES: injected settings'), { code: 'EACCES' });
-      }
-      return nodeFs.readFileSync(p, ...a);
-    },
-    // when a test sets ctl.metaWrites = [], every meta.json the store saves is recorded (its text, read just before the rename)
-    renameSync(a, b) {
-      if (ctl.metaWrites && /meta\.json$/.test(String(b))) ctl.metaWrites.push(nodeFs.readFileSync(a, 'utf8'));
-      return nodeFs.renameSync(a, b);
-    },
-  };
-}
-const ERR_CHIP = '오류 있음';
-const chipsOf = (stateDir) => readData(stateDir).sessions[0]?.chips ?? [];
-const workerSnap = (...ids) => ({
-  parent_session_id: 'senpi:sess-A',
-  tasks: ids.map((id) => ({ task_id: id, parent_session_id: 'sess-A', status: 'running', task_summary: `일 ${id}`, updated_at: new Date().toISOString() })),
-});
-const nextMacrotask = () => new Promise((resolve) => setImmediate(resolve));
-/** Stub delivery/mirror: nothing else reads the pause state in the middle of a command, so a publish is the only reader. */
-const noHooks = { createDeliverer: () => ({}), createMirror: () => ({}) };
-/** An older error of another source, on disk before the extension starts. */
-function seedErrors(dir, errors) {
-  const folder = join(dir, 'state', 'sessions', 'sess-A');
-  mkdirSync(folder, { recursive: true });
-  writeFileSync(join(folder, 'meta.json'), JSON.stringify({ errors }));
-}
-
 test('row 17: a persistent EACCES on settings.json seen by the worker timers is recorded with its code, shows as the error chip, and the first good read clears it', { timeout: 60_000 }, async (t) => {
   const ctl = { deny: false, reads: 0 };
   const timers = fakeTimers();
   // workers-live rate-limits its publishes (2s) on its OWN clock; the fake timers never tick it, so it gets a clock the test moves
   const wl = { t: Date.now() };
-  const s = make(t, { fs: settingsFaultFs(ctl), timers, extra: { workersLiveOptions: { now: () => wl.t } } });
+  const s = make(t, { fs: settingsFaultFs(ctl), timers, extra: { workersLiveOptions: { now: () => wl.t, fs: enoentFs } } });
   await s.start();
   await s.brief(goodBrief());
   assert.equal(s.meta().errors.settings, undefined);
@@ -710,9 +676,8 @@ test('row 17: the settings error and its recovery touch only the settings key: a
   seedErrors(dir, { decide: { at: 1, message: 'decide: older error' } });
   const ctl = { deny: false, reads: 0 };
   const timers = fakeTimers();
-  const s = make(t, { dir, fs: settingsFaultFs(ctl), timers });
-  // registered after make(): the session shutdown (which saves its meta) runs first, then the folder goes
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const wl = { t: Date.now() };
+  const s = make(t, { dir, fs: settingsFaultFs(ctl), timers, extra: { workersLiveOptions: { now: () => wl.t, fs: enoentFs } } });
   await s.start();
   assert.equal(s.meta().errors.decide.message, 'decide: older error');
   s.events.emit(RPC, { name: 'omo.task.updated', data: workerSnap('st_w1') });

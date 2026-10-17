@@ -36,7 +36,7 @@ import { openStore } from './src/store.mjs';
 import { collectAuto } from './src/collect.mjs';
 import { applyDecide, applyBoardAnswer, formatDecideResult } from './src/decide.mjs';
 import { renderPageMaybe, buildViewModel, pageHtml, serverInfoOf, OWN_GENERATION } from './src/render.mjs';
-import { createServerHost } from './src/server-host.mjs';
+import { createServerHost, readInstalledGeneration } from './src/server-host.mjs';
 import { createWorkersLive } from './src/workers-live.mjs';
 import { createPlanTool } from './src/plan-tool.mjs';
 import { setError, clearError, errorsOf, normalizeErrors } from './src/errors.mjs';
@@ -220,6 +220,9 @@ export function createBriefingExtension(opts = {}) {
     const makeDeliverer = opts.createDeliverer ?? deliverMod.createDeliverer;
     const makeMirror = opts.createMirror ?? mirrorMod.createMirror;
     const generation = opts.generation !== undefined ? opts.generation : OWN_GENERATION;
+    const installedGeneration = opts.installedFile || Number.isInteger(OWN_GENERATION)
+      ? () => readInstalledGeneration(opts.installedFile ?? fileURLToPath(new URL('../../current.json', import.meta.url)), nodeFs.promises)
+      : async () => null;
     const timers = opts.timers ?? { setTimeout, clearTimeout, setInterval, clearInterval };
     const unref = (h) => { if (h && typeof h.unref === 'function') h.unref(); return h; };
     // The installed shim never injects a state folder. A test or QA run that does gets no board server (so unit tests never
@@ -485,7 +488,7 @@ export function createBriefingExtension(opts = {}) {
       if (res.ok) {
         hostRecover('answer');
         if (active && !shuttingDown) refreshSoon(false); // open pages see the answer state through this publish
-        return boardReply(200);
+        return { status: 200, json: { ok: true, id: body.id } }; // the reply names the decision it answered
       }
       // `detail` (log-only, may hold a file path) goes to the recorded diagnostic, never into the reply
       if (res.code === 'IO_ERROR' || ANSWER_STATUS[res.code] === undefined) return answerFault(body, res.detail);
@@ -890,7 +893,7 @@ export function createBriefingExtension(opts = {}) {
         if (deliverer && typeof deliverer.wake === 'function') await deliverer.wake(ctx, 'agent_settled');
       }));
 
-      pi.on('session_shutdown', guarded('session_shutdown', async () => {
+      pi.on('session_shutdown', guarded('session_shutdown', async (event) => {
         if (!active) return;
         // the host allows 2s: every awaited step below is bounded, publishes are soft (one lock attempt)
         shuttingDown = true;
@@ -905,7 +908,7 @@ export function createBriefingExtension(opts = {}) {
         if (host) {
           const h = host;
           host = null;
-          await within(h.release(), SHUTDOWN_STEP_MS);
+          await within(h.release(event?.reason), SHUTDOWN_STEP_MS);
         }
         // an error recorded while shutting down (lock release, server close) is shown by exactly one more publish
         if (shutdownDirty && enabled()) await within(refresh(true), SHUTDOWN_STEP_MS);
@@ -973,6 +976,7 @@ export function createBriefingExtension(opts = {}) {
           stateDir,
           sessionId: sid,
           generation,
+          installedGeneration,
           isEnabled: enabled, // never throws: an unreadable settings file is recorded as the 'settings' error and reads as paused
           buildViewModel: (snap, t) => {
             const info = serverInfoOf(store);
@@ -988,7 +992,16 @@ export function createBriefingExtension(opts = {}) {
           onError: hostError,
           onRecover: hostRecover,
           // the file page shows 'open live view' only when it knows the address: publish again when it changes
-          onChange: () => { if (active && !shuttingDown && !ensuring && enabled()) refreshSoon(true); },
+          onChange: (status) => {
+            if (status.role === 'stale' && meta.serverStale !== true) {
+              meta.serverStale = true;
+              saveMeta();
+            } else if ((status.role === 'owner' || status.role === 'client') && meta.serverStale) {
+              delete meta.serverStale;
+              saveMeta();
+            }
+            if (active && !shuttingDown && !ensuring && enabled()) refreshSoon(true);
+          },
           env,
           timers,
           ...(opts.hostOptions ?? {}),

@@ -31,6 +31,7 @@
     '응답 없음': 'x-dead',
     '보고 없음': 'x-norep',
     '오래됨': 'x-stale',
+    '이 대화는 예전 세대라 실시간 상황판을 맡지 않음 · 대화를 재시작하면 최신 상황판이 열림': 'x-stale x-server-stale',
     '기록 읽기 실패': 'x-err',
     '질문 미러 사용 불가': 'x-err',
     '오류 있음': 'x-err',
@@ -391,7 +392,10 @@
 
     var html = '<article class="card st-' + key + '" id="' + n.dom + '" data-card="' + esc(n.id) + '">' +
       '<div class="ch">' + chip('s-' + key, STATUS_LABEL[key]) +
-      extra.map(function (c) { return chip(own(EXTRA_CHIP, c) || 'x-info', c); }).join('') +
+      extra.map(function (c) {
+        if (own(EXTRA_CHIP, c) === 'x-stale x-server-stale') return '<span class="chip x-stale x-server-stale" style="white-space:normal;word-break:keep-all;overflow-wrap:anywhere" title="설치된 상황판보다 예전 세대인 대화입니다. 대화를 재시작하면 최신 세대가 실시간 상황판을 맡습니다.">' + esc(c) + '</span>';
+        return chip(own(EXTRA_CHIP, c) || 'x-info', c);
+      }).join('') +
       (view.workName ? '<span class="tag">[' + esc(view.workName) + ']</span>' : '') +
       '<span class="title">' + esc(whereLabel(view)) + '</span>' + focusBtn(fview, { live: live, focus: focus }) +
       '<span class="time">⏱ ' + esc(when(s.lastActivityAt != null ? s.lastActivityAt : s.lastBriefAt, now)) + '</span></div>' +

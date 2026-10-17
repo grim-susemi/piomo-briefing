@@ -34,7 +34,14 @@ const handlers = {
 process.on('message', async (m) => {
   try {
     const result = await handlers[m.cmd](m);
-    process.send({ id: m.id, result });
+    if (m.cmd === 'shutdown' && m.disconnectAfterReply === true) {
+      process.send({ id: m.id, result }, (err) => {
+        if (err) throw err;
+        process.disconnect();
+      });
+    } else {
+      process.send({ id: m.id, result });
+    }
   } catch (err) {
     process.send({ id: m.id, error: String((err && err.stack) || err) });
   }

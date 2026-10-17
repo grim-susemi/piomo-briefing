@@ -6,10 +6,11 @@ import http from 'node:http';
 import net from 'node:net';
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, statSync, rmSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import os from 'node:os';
 import { openStore } from '../src/store.mjs';
 import { renderPage } from '../src/render.mjs';
+import { tempDir } from './helpers/temp.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = dirname(HERE);
@@ -28,8 +29,8 @@ function tree(dir) {
   walk(dir);
   return out.sort();
 }
-function makeAgentDir() {
-  const dir = mkdtempSync(join(os.tmpdir(), 'briefing-agent-'));
+function makeAgentDir(t) {
+  const { dir } = tempDir(t, 'briefing-agent-');
   mkdirSync(join(dir, 'extensions'), { recursive: true });
   writeFileSync(join(dir, 'extensions', 'other-ext.js'), '// third party\n');
   return dir;
@@ -162,8 +163,8 @@ const boardBytes = (state) => ({
   pub: readFileSync(join(state, 'published.json'), 'utf8'),
 });
 
-test('first install creates generation-000001, shim, current.json and empty state page', () => {
-  const agent = makeAgentDir();
+test('first install creates generation-000001, shim, current.json and empty state page', (t) => {
+  const agent = makeAgentDir(t);
   const otherBefore = sha256(join(agent, 'extensions', 'other-ext.js'));
   const r = run(['--agent-dir', agent]);
   assert.equal(r.status, 0, r.stderr);
@@ -195,8 +196,8 @@ test('first install creates generation-000001, shim, current.json and empty stat
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('install prints the live board address when STATE/server.json answers health', async () => {
-  const agent = makeAgentDir();
+test('install prints the live board address when STATE/server.json answers health', async (t) => {
+  const agent = makeAgentDir(t);
   const health = await healthServer();
   try {
     seedServerRecord(join(agent, 'briefing', 'state'), health.port);
@@ -209,8 +210,8 @@ test('install prints the live board address when STATE/server.json answers healt
   }
 });
 
-test('install keeps exit 0 and only adds the exception sentence when server.json health fails', async () => {
-  const agent = makeAgentDir();
+test('install keeps exit 0 and only adds the exception sentence when server.json health fails', async (t) => {
+  const agent = makeAgentDir(t);
   seedServerRecord(join(agent, 'briefing', 'state'), await closedPort());
   const r = run(['--agent-dir', agent]);
   assert.equal(r.status, 0, r.stderr);
@@ -221,8 +222,8 @@ test('install keeps exit 0 and only adds the exception sentence when server.json
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('install prints one guidance line when server.json is absent', () => {
-  const agent = makeAgentDir();
+test('install prints one guidance line when server.json is absent', (t) => {
+  const agent = makeAgentDir(t);
   const r = run(['--agent-dir', agent]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(lastLine(r), GUIDANCE, 'one guidance line, got: ' + JSON.stringify(r.stdout));
@@ -230,8 +231,26 @@ test('install prints one guidance line when server.json is absent', () => {
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('install rejects an oversized server record without announcing its address', async () => {
-  const agent = makeAgentDir();
+test('install writes the extension shim before briefing/current.json (recorded write order, no mtime)', (t) => {
+  const agent = makeAgentDir(t);
+  const { dir } = tempDir(t, 'briefing-rec-');
+  const record = join(dir, 'writes.log');
+  const recorder = pathToFileURL(join(HERE, 'fixtures', 'install-recorder.mjs')).href;
+  const r = spawnSync(process.execPath, ['--import', recorder, INSTALL, '--agent-dir', agent], {
+    encoding: 'utf8', env: { ...process.env, OMO_INSTALL_RECORD: record },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const targets = readFileSync(record, 'utf8').split('\n').filter(Boolean);
+  const shim = targets.findIndex((p) => p.endsWith('extensions/omo-briefing.js'));
+  const current = targets.findIndex((p) => p.endsWith('briefing/current.json'));
+  assert.ok(shim >= 0 && current >= 0, 'both targets were recorded: ' + JSON.stringify(targets));
+  assert.ok(shim < current, `shim (${shim}) is written before current.json (${current})`);
+  assert.ok(r.stdout.includes('이미 열린 대화'), 'open conversations notice: ' + r.stdout);
+  assert.equal(lastLine(r), GUIDANCE, 'closing guidance stays the last line');
+});
+
+test('install rejects an oversized server record without announcing its address', async (t) => {
+  const agent = makeAgentDir(t);
   const health = await healthServer();
   try {
     // A usable, healthy address hidden behind an over-limit record: the record must be refused on
@@ -252,8 +271,8 @@ test('install rejects an oversized server record without announcing its address'
   }
 });
 
-test('install retries a transient EPERM on the record and still announces the live address', async () => {
-  const agent = makeAgentDir();
+test('install retries a transient EPERM on the record and still announces the live address', async (t) => {
+  const agent = makeAgentDir(t);
   const health = await healthServer();
   const log = join(agent, 'record-calls.txt');
   try {
@@ -272,8 +291,8 @@ test('install retries a transient EPERM on the record and still announces the li
   }
 });
 
-test('install gives up after bounded retries on a persistent EPERM and calls it unreadable', () => {
-  const agent = makeAgentDir();
+test('install gives up after bounded retries on a persistent EPERM and calls it unreadable', (t) => {
+  const agent = makeAgentDir(t);
   const log = join(agent, 'record-calls.txt');
   seedServerRecord(join(agent, 'briefing', 'state'), 47560);
   const flaky = flakyIoPreload({ failures: Number.MAX_SAFE_INTEGER, log });
@@ -290,10 +309,10 @@ test('install gives up after bounded retries on a persistent EPERM and calls it 
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('install tells an unreadable record apart from an absent one', () => {
-  const absentAgent = makeAgentDir();
+test('install tells an unreadable record apart from an absent one', (t) => {
+  const absentAgent = makeAgentDir(t);
   const absent = run(['--agent-dir', absentAgent]);
-  const unreadableAgent = makeAgentDir();
+  const unreadableAgent = makeAgentDir(t);
   mkdirSync(join(unreadableAgent, 'briefing', 'state', 'server.json'), { recursive: true }); // a directory in its place
   const unreadable = run(['--agent-dir', unreadableAgent]);
   try {
@@ -312,8 +331,8 @@ test('install tells an unreadable record apart from an absent one', () => {
   }
 });
 
-test('second install creates generation-000002 and leaves generation-000001 untouched', () => {
-  const agent = makeAgentDir();
+test('second install creates generation-000002 and leaves generation-000001 untouched', (t) => {
+  const agent = makeAgentDir(t);
   assert.equal(run(['--agent-dir', agent]).status, 0);
   const before = tree(join(agent, 'briefing', 'integration', 'generation-000001'))
     .map((f) => sha256(join(agent, 'briefing', 'integration', 'generation-000001', f)));
@@ -328,8 +347,8 @@ test('second install creates generation-000002 and leaves generation-000001 unto
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('non-managed omo-briefing.js refuses with exit 1 and writes nothing', () => {
-  const agent = makeAgentDir();
+test('non-managed omo-briefing.js refuses with exit 1 and writes nothing', (t) => {
+  const agent = makeAgentDir(t);
   writeFileSync(join(agent, 'extensions', 'omo-briefing.js'), '// user file\n');
   const before = tree(agent);
   const r = run(['--agent-dir', agent]);
@@ -338,8 +357,8 @@ test('non-managed omo-briefing.js refuses with exit 1 and writes nothing', () =>
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('--dry-run writes nothing', () => {
-  const agent = makeAgentDir();
+test('--dry-run writes nothing', (t) => {
+  const agent = makeAgentDir(t);
   const before = tree(agent);
   const r = run(['--agent-dir', agent, '--dry-run']);
   assert.equal(r.status, 0, r.stderr);
@@ -348,8 +367,8 @@ test('--dry-run writes nothing', () => {
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('--dry-run on a reinstall lists the re-render and writes nothing', () => {
-  const agent = makeAgentDir();
+test('--dry-run on a reinstall lists the re-render and writes nothing', (t) => {
+  const agent = makeAgentDir(t);
   assert.equal(run(['--agent-dir', agent]).status, 0);
   const state = join(agent, 'briefing', 'state');
   seedBoard(state, 42, 'OWNER-BOARD');
@@ -362,8 +381,8 @@ test('--dry-run on a reinstall lists the re-render and writes nothing', () => {
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('--uninstall removes only the managed shim', () => {
-  const agent = makeAgentDir();
+test('--uninstall removes only the managed shim', (t) => {
+  const agent = makeAgentDir(t);
   assert.equal(run(['--agent-dir', agent]).status, 0);
   const before = tree(agent).filter((f) => f.replace(/\\/g, '/') !== 'extensions/omo-briefing.js');
   assert.equal(run(['--agent-dir', agent, '--uninstall']).status, 0);
@@ -373,8 +392,8 @@ test('--uninstall removes only the managed shim', () => {
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('other files in extensions/ keep their bytes', () => {
-  const agent = makeAgentDir();
+test('other files in extensions/ keep their bytes', (t) => {
+  const agent = makeAgentDir(t);
   const hashBefore = sha256(join(agent, 'extensions', 'other-ext.js'));
   assert.equal(run(['--agent-dir', agent]).status, 0);
   assert.equal(run(['--agent-dir', agent]).status, 0);
@@ -389,8 +408,8 @@ test('missing agent dir and missing dist fail without writing', () => {
   assert.equal(r.status, 1);
 });
 
-test('reinstall re-renders a seeded seq-42 board through the renderer at seq 43', () => {
-  const agent = makeAgentDir();
+test('reinstall re-renders a seeded seq-42 board through the renderer at seq 43', (t) => {
+  const agent = makeAgentDir(t);
   assert.equal(run(['--agent-dir', agent]).status, 0);
   const state = join(agent, 'briefing', 'state');
   seedBoard(state, 42, 'OWNER-BOARD');
@@ -411,8 +430,8 @@ test('reinstall re-renders a seeded seq-42 board through the renderer at seq 43'
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('reinstall stamps the page with the installed generation and an older generation leaves index.html alone', () => {
-  const agent = makeAgentDir();
+test('reinstall stamps the page with the installed generation and an older generation leaves index.html alone', (t) => {
+  const agent = makeAgentDir(t);
   assert.equal(run(['--agent-dir', agent]).status, 0);
   const state = join(agent, 'briefing', 'state');
   seedBoard(state, 42, 'OWNER-BOARD');
@@ -438,8 +457,8 @@ test('reinstall stamps the page with the installed generation and an older gener
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('reinstall never publishes a lower seq than a board without published.json', () => {
-  const agent = makeAgentDir();
+test('reinstall never publishes a lower seq than a board without published.json', (t) => {
+  const agent = makeAgentDir(t);
   assert.equal(run(['--agent-dir', agent]).status, 0);
   const state = join(agent, 'briefing', 'state');
   seedBoard(state, 42, 'OWNER-BOARD');
@@ -450,8 +469,8 @@ test('reinstall never publishes a lower seq than a board without published.json'
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('installer skips the re-render with a reason while a live-owner render.lock is held', () => {
-  const agent = makeAgentDir();
+test('installer skips the re-render with a reason while a live-owner render.lock is held', (t) => {
+  const agent = makeAgentDir(t);
   assert.equal(run(['--agent-dir', agent]).status, 0);
   const state = join(agent, 'briefing', 'state');
   seedBoard(state, 43, 'OWNER-BOARD');
@@ -468,8 +487,8 @@ test('installer skips the re-render with a reason while a live-owner render.lock
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('stale-lock reclaim link failure surfaces manual-check error and writes no page', () => {
-  const agent = makeAgentDir();
+test('stale-lock reclaim link failure surfaces manual-check error and writes no page', (t) => {
+  const agent = makeAgentDir(t);
   const state = join(agent, 'briefing', 'state');
   mkdirSync(state, { recursive: true });
   const deadPid = 2147483647;
@@ -490,8 +509,8 @@ test('stale-lock reclaim link failure surfaces manual-check error and writes no 
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('stale-lock reclaim link failure on an existing board exits non-zero and keeps the board', () => {
-  const agent = makeAgentDir();
+test('stale-lock reclaim link failure on an existing board exits non-zero and keeps the board', (t) => {
+  const agent = makeAgentDir(t);
   const state = join(agent, 'briefing', 'state');
   seedBoard(state, 42, 'OWNER-BOARD');
   const lock = JSON.stringify({ pid: 2147483647, at: 'fixture', nonce: randomBytes(8).toString('hex') });
@@ -511,8 +530,8 @@ test('stale-lock reclaim link failure on an existing board exits non-zero and ke
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('fresh install with a stale render.lock reclaims it and writes the empty page', () => {
-  const agent = makeAgentDir();
+test('fresh install with a stale render.lock reclaims it and writes the empty page', (t) => {
+  const agent = makeAgentDir(t);
   const state = join(agent, 'briefing', 'state');
   mkdirSync(state, { recursive: true });
   const deadPid = 2147483647;
@@ -526,8 +545,8 @@ test('fresh install with a stale render.lock reclaims it and writes the empty pa
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('reinstall of a STATE with conversation records but no publication files renders them, never an empty board', () => {
-  const agent = makeAgentDir();
+test('reinstall of a STATE with conversation records but no publication files renders them, never an empty board', (t) => {
+  const agent = makeAgentDir(t);
   const state = join(agent, 'briefing', 'state');
   seedBoard(state, 42, 'OWNER-BOARD');
   for (const n of ['index.html', 'data.js', 'published.json']) rmSync(join(state, n));
@@ -548,8 +567,8 @@ test('reinstall of a STATE with conversation records but no publication files re
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('--dry-run on a STATE with records but no publication files lists the re-render', () => {
-  const agent = makeAgentDir();
+test('--dry-run on a STATE with records but no publication files lists the re-render', (t) => {
+  const agent = makeAgentDir(t);
   const state = join(agent, 'briefing', 'state');
   seedBoard(state, 42, 'OWNER-BOARD');
   for (const n of ['index.html', 'data.js', 'published.json']) rmSync(join(state, n));
@@ -561,8 +580,8 @@ test('--dry-run on a STATE with records but no publication files lists the re-re
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('reinstall never publishes below the data.js seq when published.json is older', () => {
-  const agent = makeAgentDir();
+test('reinstall never publishes below the data.js seq when published.json is older', (t) => {
+  const agent = makeAgentDir(t);
   assert.equal(run(['--agent-dir', agent]).status, 0);
   const state = join(agent, 'briefing', 'state');
   seedBoard(state, 87, 'OWNER-BOARD');
@@ -574,8 +593,8 @@ test('reinstall never publishes below the data.js seq when published.json is old
   rmSync(agent, { recursive: true, force: true });
 });
 
-test('reinstall with a dead-owner render.lock reclaims it and re-renders the board', () => {
-  const agent = makeAgentDir();
+test('reinstall with a dead-owner render.lock reclaims it and re-renders the board', (t) => {
+  const agent = makeAgentDir(t);
   assert.equal(run(['--agent-dir', agent]).status, 0);
   const state = join(agent, 'briefing', 'state');
   seedBoard(state, 42, 'OWNER-BOARD');

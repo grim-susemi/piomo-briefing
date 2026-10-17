@@ -12,6 +12,7 @@ import { createPlanTool, planChips } from '../src/plan-tool.mjs';
 import { planIdOf, rootAndSlugOf } from '../src/plan-schema.mjs';
 import { createBriefingExtension } from '../extension.mjs';
 import { makeFakePi, makeCtx } from './helpers/fake-pi.mjs';
+import { tempDir } from './helpers/temp.mjs';
 
 const STORE_URL = pathToFileURL(fileURLToPath(new URL('../src/store.mjs', import.meta.url))).href;
 const TOOL_URL = pathToFileURL(fileURLToPath(new URL('../src/plan-tool.mjs', import.meta.url))).href;
@@ -392,8 +393,7 @@ test('decisionId must be this session\'s open decision; an own one is kept', asy
 // ------------------------------------------------------------------ pause
 
 function briefExtension(t) {
-  const dir = realFs.mkdtempSync(join(tmpdir(), 'omo-plantool-ext-'));
-  t.after(() => realFs.rmSync(dir, { recursive: true, force: true }));
+  const { dir, onDispose } = tempDir(t, 'omo-plantool-ext-');
   const stateDir = join(dir, 'state');
   const host = makeFakePi({});
   let clock = T0;
@@ -401,6 +401,7 @@ function briefExtension(t) {
     stateDir, now: () => (clock += 1000), env: { PATH: process.env.PATH }, openPage: () => ({}), renderOpts: { sleep: () => {} },
   })(host.pi);
   const { ctx } = makeCtx({ sid: 'sess-A' });
+  onDispose(() => host.emit('session_shutdown', {}, ctx));
   return { host, ctx };
 }
 

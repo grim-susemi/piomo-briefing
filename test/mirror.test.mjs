@@ -1,14 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fork } from 'node:child_process';
+import { once as childEvent } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { createMirror } from '../src/mirror.mjs';
 import { openStore } from '../src/store.mjs';
 import { createBriefingExtension } from '../extension.mjs';
 import { makeFakePi, makeCtx } from './helpers/fake-pi.mjs';
+import { tempDir } from './helpers/temp.mjs';
 
 const FIX = JSON.parse(readFileSync(new URL('./fixtures/mirror/ask-user-events.json', import.meta.url), 'utf8'));
 const CHILD = fileURLToPath(new URL('./helpers/mirror-child.mjs', import.meta.url));
@@ -44,8 +45,7 @@ const request = (over = {}) => ({ ...clone(FIX.asked.request), ...over });
 const q = (label, options, extra = {}) => ({ id: 'q', header: 'h', question: label, multiSelect: false, options: options.map((o) => (typeof o === 'string' ? { label: o } : o)), ...extra });
 
 function setup(t, { sid = 'sess-A', env = { HERDR_PANE_ID: 'pane-7' }, bus = makeBus(), events = bus, stateDir } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'omo-mirror-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { dir, onDispose } = tempDir(t, 'omo-mirror-');
   const root = stateDir ?? join(dir, 'state');
   const store = openStore(root);
   let clock = 1_700_000_000_000;
@@ -67,7 +67,7 @@ function setup(t, { sid = 'sess-A', env = { HERDR_PANE_ID: 'pane-7' }, bus = mak
   };
   const { ctx, notes } = makeCtx({ sid, file: `C:/sessions/${sid}.jsonl` });
   const mirror = createMirror(opts);
-  t.after(() => mirror.dispose());
+  onDispose(() => mirror.dispose());
   const decisions = () => {
     const d = join(root, 'decisions');
     return existsSync(d) ? readdirSync(d).sort().map((n) => JSON.parse(readFileSync(join(d, n), 'utf8'))) : [];
@@ -75,7 +75,7 @@ function setup(t, { sid = 'sess-A', env = { HERDR_PANE_ID: 'pane-7' }, bus = mak
   const mirrorFile = (s = sid) => join(root, 'mirror', `${s}.json`);
   const readMirror = (s = sid) => JSON.parse(readFileSync(mirrorFile(s), 'utf8'));
   const ls = (sub) => { const d = join(root, sub); return existsSync(d) ? readdirSync(d).sort() : []; };
-  return { dir, root, store, meta, bus, opts, ctx, notes, mirror, refreshes, decisions, mirrorFile, readMirror, ls, now };
+  return { dir, onDispose, root, store, meta, bus, opts, ctx, notes, mirror, refreshes, decisions, mirrorFile, readMirror, ls, now };
 }
 
 // ---------------------------------------------------------------- subscription + open question
@@ -224,7 +224,7 @@ test('a second mirror instance in the same store does not duplicate a decision f
   const s = setup(t);
   const bus2 = makeBus();
   const m2 = createMirror({ ...s.opts, pi: { events: bus2 } });
-  t.after(() => m2.dispose());
+  s.onDispose(() => m2.dispose());
   await s.mirror.attach(s.ctx);
   await m2.attach(s.ctx);
   s.bus.emit(ASKED, askedPayload(s.ctx));
@@ -258,8 +258,7 @@ test('a question with fewer than two options cannot be a card: no decision, no t
 });
 
 test('decision cards from the mirror are accepted by /decide and answered like brief decisions', async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'omo-mirror-ext-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { dir, onDispose } = tempDir(t, 'omo-mirror-ext-');
   const stateDir = join(dir, 'state');
   const bus = makeBus();
   const host = makeFakePi();
@@ -271,6 +270,7 @@ test('decision cards from the mirror are accepted by /decide and answered like b
     createDeliverer: () => ({ wake() {}, pendingIds: () => [], dispose() {} }),
   })(host.pi);
   const { ctx } = makeCtx({ sid: 'sess-X', file: 'C:/sessions/sess-X.jsonl' });
+  onDispose(() => host.emit('session_shutdown', {}, ctx));
   await host.emit('session_start', { reason: 'startup' }, ctx);
   bus.emit(ASKED, askedPayload(ctx));
   bus.emit(CLOSED, clone(FIX.closed.timedOut));
@@ -296,8 +296,7 @@ const walk = (v, pred, out = []) => {
 };
 
 test('page: an open question appears under 나를 기다림 as read-only; after a timeout it is a decision card instead', async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'omo-mirror-page-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { dir, onDispose } = tempDir(t, 'omo-mirror-page-');
   const stateDir = join(dir, 'state');
   const bus = makeBus();
   const host = makeFakePi();
@@ -309,6 +308,7 @@ test('page: an open question appears under 나를 기다림 as read-only; after 
     createDeliverer: () => ({ wake() {}, pendingIds: () => [], dispose() {} }),
   })(host.pi);
   const { ctx } = makeCtx({ sid: 'sess-X', file: 'C:/sessions/sess-X.jsonl' });
+  onDispose(() => host.emit('session_shutdown', {}, ctx));
   await host.emit('session_start', { reason: 'startup' }, ctx);
   bus.emit(ASKED, askedPayload(ctx));
   let cards = walk(pageData(stateDir), (o) => o.openQuestion && typeof o.openQuestion.text === 'string');
@@ -329,8 +329,7 @@ test('page: an open question appears under 나를 기다림 as read-only; after 
 // ---------------------------------------------------------------- no event bus
 
 test('no pi.events: records meta.mirrorUnavailable, shows the chip, never throws, rest keeps working', async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'omo-mirror-nobus-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { dir, onDispose } = tempDir(t, 'omo-mirror-nobus-');
   const stateDir = join(dir, 'state');
   const host = makeFakePi(); // fake pi has no `events`
   assert.equal(host.pi.events, undefined);
@@ -340,6 +339,7 @@ test('no pi.events: records meta.mirrorUnavailable, shows the chip, never throws
     createDeliverer: () => ({ wake() {}, pendingIds: () => [], dispose() {} }),
   })(host.pi);
   const { ctx } = makeCtx({ sid: 'sess-N', file: 'C:/sessions/sess-N.jsonl' });
+  onDispose(() => host.emit('session_shutdown', {}, ctx));
   await host.emit('session_start', { reason: 'startup' }, ctx);
   const meta = JSON.parse(readFileSync(join(stateDir, 'sessions', 'sess-N', 'meta.json'), 'utf8'));
   assert.equal(meta.mirrorUnavailable, true);
@@ -465,7 +465,7 @@ test('dispose unsubscribes and hides the open question; a reload in the same pro
 
   const bus2 = makeBus();
   const m2 = createMirror({ ...s.opts, pi: { events: bus2 } });
-  t.after(() => m2.dispose());
+  s.onDispose(() => m2.dispose());
   await m2.attach(s.ctx);
   assert.equal(s.readMirror().open, true);
   bus2.emit(CLOSED, clone(FIX.closed.timedOut));
@@ -498,10 +498,17 @@ test('a failing store write is recorded in meta.lastError and never thrown into 
 // ---------------------------------------------------------------- cross-process
 
 test('two processes closing questions at once get distinct, gap-free decision ids in the shared store', async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'omo-mirror-mp-'));
+  const { dir, onDispose } = tempDir(t, 'omo-mirror-mp-');
   const stateDir = join(dir, 'state');
   const kids = [];
-  t.after(() => { for (const k of kids) k.kill(); rmSync(dir, { recursive: true, force: true }); });
+  onDispose(async () => {
+    for (const child of kids) {
+      if (child.exitCode !== null || child.signalCode !== null) continue;
+      const exited = childEvent(child, 'exit', { signal: AbortSignal.timeout(5000) });
+      child.kill();
+      await exited;
+    }
+  });
   const once = (child, pred, label) => new Promise((res, rej) => {
     const timer = setTimeout(() => rej(new Error(`timeout waiting for ${label}`)), 20_000);
     child.on('message', function onMsg(m) { if (pred(m)) { clearTimeout(timer); child.off('message', onMsg); res(m); } });
@@ -559,7 +566,7 @@ test('recommend survives a same-process reload restore of a long-label entry', a
   s.bus.emit(ASKED, askedPayload(s.ctx, { request: request({ questions: [q('질문?', ['ordinary A', '나'.repeat(210) + ' (Recommended)'])] }) }));
   const bus2 = makeBus();
   const m2 = createMirror({ ...s.opts, pi: { events: bus2 } });
-  t.after(() => m2.dispose());
+  s.onDispose(() => m2.dispose());
   await s.mirror.dispose();
   await m2.attach(s.ctx);
   bus2.emit(CLOSED, clone(FIX.closed.timedOut));
@@ -570,7 +577,7 @@ test('createMirror opts.notify receives each new blocking card once; ctx.ui.noti
   const s = setup(t);
   const calls = [];
   const m = createMirror({ ...s.opts, notify: (ctx, d) => calls.push([ctx, d]) });
-  t.after(() => m.dispose());
+  s.onDispose(() => m.dispose());
   await m.attach(s.ctx);
   s.bus.emit(ASKED, askedPayload(s.ctx, { request: request({ requestId: 'req', required: true }) }));
   s.bus.emit(CLOSED, { requestId: 'req', status: 'timed_out' });
@@ -584,8 +591,7 @@ test('createMirror opts.notify receives each new blocking card once; ctx.ui.noti
 });
 
 function extHost(t, extra = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'omo-mirror-notify-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { dir, onDispose } = tempDir(t, 'omo-mirror-notify-');
   const bus = makeBus();
   const host = makeFakePi();
   host.pi.events = bus;
@@ -596,6 +602,7 @@ function extHost(t, extra = {}) {
     ...extra,
   })(host.pi);
   const { ctx, notes } = makeCtx({ sid: 'sess-X', file: 'C:/sessions/sess-X.jsonl' });
+  onDispose(() => host.emit('session_shutdown', {}, ctx));
   return { bus, host, ctx, notes };
 }
 

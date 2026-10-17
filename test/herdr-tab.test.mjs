@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { tempDir } from './helpers/temp.mjs';
 import { join } from 'node:path';
 import { readTab, herdrBin } from '../src/herdr-tab.mjs';
 import { createBriefingExtension } from '../extension.mjs';
@@ -69,8 +69,7 @@ test('herdr binary: HERDR_BIN_PATH, else herdr.exe on win32 and herdr elsewhere'
 // ---------------------------------------------------------------- extension meta
 
 function lead(t, { replies, prior } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'omo-tab-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { dir, onDispose } = tempDir(t, 'omo-tab-');
   const stateDir = join(dir, 'state');
   if (prior) {
     mkdirSync(join(stateDir, 'sessions', 'sess-A'), { recursive: true });
@@ -89,6 +88,7 @@ function lead(t, { replies, prior } = {}) {
     renderOpts: { sleep: () => {} },
   })(host.pi);
   const { ctx } = makeCtx({ sid: 'sess-A' });
+  onDispose(() => host.emit('session_shutdown', {}, ctx));
   return {
     calls: f.calls,
     start: () => host.emit('session_start', { reason: 'startup' }, ctx),

@@ -30,6 +30,60 @@ export function isPidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
 
+function listProfilePids(profileDir) {
+  if (process.platform !== 'win32') return [];
+  const profile = profileDir.replace(/'/g, "''").replace(/[[\]`*?]/g, '`$&');
+  const query = `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object CommandLine -like '*${profile}*' | Select-Object -ExpandProperty ProcessId`;
+  const result = spawnSync('powershell', ['-NoProfile', '-Command', query], {
+    windowsHide: true, encoding: 'utf8', timeout: 5000,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`could not list Chrome processes for ${profileDir}: ${result.stderr}`);
+  return result.stdout.trim().split(/\s+/).filter(Boolean).map(Number);
+}
+
+export async function closeChromeProcess({ proc, profileDir, deps = {} }) {
+  const kill = deps.killProcessTree ?? killProcessTree;
+  const list = deps.listProfilePids ?? listProfilePids;
+  const rm = deps.rm ?? fs.promises.rm;
+  const errors = [];
+  if (proc?.pid && proc.exitCode === null && proc.signalCode === null) {
+    let onExit;
+    const exited = new Promise((resolve) => { onExit = resolve; proc.once('exit', onExit); });
+    try {
+      await kill(proc.pid);
+      if (process.platform !== 'win32') proc.kill('SIGKILL');
+      proc.stderr?.destroy();
+      await withTimeout(exited, EXIT_TIMEOUT_MS, 'Chrome exit');
+    } catch (e) {
+      errors.push(e);
+    } finally {
+      proc.stderr?.destroy();
+      proc.removeListener('exit', onExit);
+    }
+  } else {
+    proc?.stderr?.destroy();
+  }
+  let pids = [];
+  try {
+    pids = await list(profileDir);
+    for (const pid of pids) await kill(pid);
+  } catch (e) {
+    errors.push(e);
+  }
+  for (const pid of new Set([proc?.pid, ...pids].filter(Boolean))) {
+    if (isPidAlive(pid)) errors.push(new Error(`Chrome pid ${pid} still alive for ${profileDir}`));
+  }
+  try {
+    await rm(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    if (fs.existsSync(profileDir)) throw new Error(`temp profile still exists: ${profileDir}`);
+  } catch (e) {
+    errors.push(new Error(`could not remove temp profile: ${profileDir}`, { cause: e }));
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length) throw new AggregateError(errors, `Chrome cleanup failed for ${profileDir}: ${errors.map((e) => e.message).join('; ')}`);
+}
+
 async function connect(url) {
   const ws = new WebSocket(url);
   let opened, failed, closed;
@@ -102,25 +156,9 @@ export async function launch({ width = 1440, height = 900, extraArgs = [], chrom
     `--window-size=${width},${height}`, '--no-first-run', '--no-default-browser-check',
     '--disable-extensions', '--disable-background-networking', ...extraArgs, 'about:blank',
   ];
-  let proc, processClosed, browserWs, pageWs;
-  let didClose = false;
-  const cleanupProfile = () => {
-    try { fs.rmSync(profileDir, { recursive: true, force: true }); } catch (e) {
-      throw new Error(`could not remove temp profile: ${profileDir}`, { cause: e });
-    }
-    if (fs.existsSync(profileDir)) throw new Error(`temp profile still exists: ${profileDir}`);
-  };
-  const stopChrome = async () => {
-    if (!proc || didClose) return;
-    if (proc.pid) {
-      killProcessTree(proc.pid);
-      try { proc.kill('SIGKILL'); } catch (e) { if (e.code !== 'ESRCH') throw e; }
-    }
-    await withTimeout(processClosed, EXIT_TIMEOUT_MS, 'Chrome close');
-  };
+  let proc, browserWs, pageWs;
   try {
     proc = spawn(chrome, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
-    processClosed = new Promise((resolve) => proc.once('close', (code, signal) => { didClose = true; resolve({ code, signal }); }));
     // Chrome publishes the browser endpoint on stderr. Subscribe before it can emit; no file polling.
     const lines = createInterface({ input: proc.stderr });
     let onLine, onError, onClose;
@@ -184,9 +222,7 @@ export async function launch({ width = 1440, height = 900, extraArgs = [], chrom
       async close() {
         if (closed) return;
         pageWs.close();
-        await stopChrome();
-        cleanupProfile();
-        if (isPidAlive(proc.pid)) throw new Error(`Chrome pid ${proc.pid} still alive after close`);
+        await closeChromeProcess({ proc, profileDir });
         closed = true;
       },
     };
@@ -195,9 +231,7 @@ export async function launch({ width = 1440, height = 900, extraArgs = [], chrom
     pageWs?.close();
     browserWs?.close();
     try {
-      await stopChrome();
-      cleanupProfile();
-      if (proc?.pid && isPidAlive(proc.pid)) throw new Error(`Chrome pid ${proc.pid} still alive after launch failure`);
+      await closeChromeProcess({ proc, profileDir });
     } catch (cleanupError) {
       throw new AggregateError([e, cleanupError], 'Chrome launch and cleanup failed');
     }

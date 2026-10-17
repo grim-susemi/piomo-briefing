@@ -1,26 +1,27 @@
 // omo-briefing src/server-host.mjs - which lead conversation runs the board server, and hand-over between them.
 //
-// createServerHost({stateDir, sessionId, generation, isEnabled, buildViewModel, readSnapshot, getPage, reclaimStale,
-//                   onError, onRecover, env, now, timers, onChange?, answer?, focus?, fs?, isAlive?, probeHealth?, createBoardServer?})
-//   -> {ensure(): Promise<{url}|null>, status(), onPaused(): Promise<void>, release(): Promise<void>, notifyPublished()}
-//
-// Single owner per STATE across all pi processes (the argument, not just the mechanism):
-// - Ownership = holding STATE/server.lock. It is created with 'wx' only AFTER this process's server is listening, with
-//   content {pid, at, nonce, sessionId, port, generation}; the owner then replace-writes STATE/server.json (same fields).
-//   A process that loses the 'wx' race closes its just-started server before anyone learns its port.
-// - A lock is removed only (a) by its creator after re-reading it and finding exactly its own content, or (b) by the
-//   injected store.reclaimStale, which only takes a lock whose pid is dead and whose pid/at/nonce still match.
-//   An unreadable lock counts as held. So a live owner's lock is never taken, and at most one process owns a STATE.
-// - Every other active lead session checks the owner every 5s (and on ensure): GET /health with a 1s limit, which must
-//   report the lock's pid. Health failure + dead owner pid -> reclaim and become the owner, trying the dead owner's port
-//   first so open pages reconnect. A closed terminal (no session_shutdown) takes this dead-pid path. Health refused 3
-//   times in a row while the pid looks alive (Windows reuses pids) -> 'server:lock' error and no hand-over.
-//   Clients read the port and pid from server.lock (the record reclaimStale needs); server.json carries the same fields.
-// - In one process: globalThis[Symbol.for('omo.briefing.server')] keeps one server per STATE and every ensure/release/
-//   pause of that STATE runs one at a time, so /reload, new, resume and fork share one server; the newest host drives it.
-//   A lock whose removal failed keeps its exact content there until a later removal is confirmed.
-// - Pause is global (settings.json, read only through isEnabled): no lock while paused; the owner sends `event: paused`,
-//   closes, and removes only its own lock and server.json; non-owners stop checking and never take over while paused.
+// createServerHost(options) -> {ensure, status, onPaused, release(reason), notifyPublished}.
+// All ownership operations, including installedGeneration(), run under serial(STATE).
+// R1: unknown installed generation, or own < installed (null sorts lowest), forbids create/reclaim.
+// R1-owner: a known newer install without a fresh higher want closes the owner and releases its lock in place.
+// R2: a live, <=2s-old higher-generation server.want also forbids create/reclaim.
+// R3: an entry's driver accessor never accepts a lower generation, even from an unfixed module copy.
+// A client of a lower healthy owner replace-writes server.want, heartbeats at 500ms, and watches the lock
+// with a 250ms fallback. The nonce survives module reload in the process registry.
+// Handover drains writes (<=2s), sends closing, closes the listener, then rename-replaces server.lock.
+// A live HELD lock is replaced only by its named pid. The target pid adopts after reading its issued nonce.
+// A failed swap keeps the old lock byte-identical, with a non-serving entry retrying each owner tick.
+// Enabled closes never unlink: after closing, rename to HELD(successor) or RELEASED(real pid, generation, port, reason).
+// RELEASED/dead records are taken through an exclusive hard-link claim at the legacy reclaim tombstone name,
+// then an exact-text and eligibility check, listen, and atomic replacement. Dead fixed claims are traversed
+// through nonce-derived, bounded-length slots; live claims and unfixed tombstones are never removed or bypassed.
+// Only pause unlinks an exact owned lock. Absent locks are created with wx. Fixed enabled transitions have no gap.
+// Unfixed owners cannot be displaced: wait for their lock to disappear or pid to die. Unfixed clients cannot
+// reclaim RELEASED while its real pid lives; an unfixed reclaimer's pre-existing crash tombstone still blocks.
+// Reload/new/resume/fork retain the listener with writes BUSY for 15s, until a same/newer host adopts.
+// A changed generation rebuilds the board and rewrites its own lock/server.json without unlinking.
+// Quit (including a missing reason), stale step-down and grace expiry close then release or hand over.
+// Paused clients keep one settings-only 5s check; paused owners send paused and remove their own files.
 // - Change detection only while a browser is connected: published.json is stat'ed every 500ms; a change, or this
 //   process's notifyPublished(), rebuilds the view model with readSnapshot + buildViewModel (this generation's code) and
 //   broadcasts it. A data.js written by any generation is never forwarded.
@@ -33,6 +34,7 @@
 // Error keys: 'server:listen' (bind, NO_PORT), 'server:lock' (lock, server.json, owner health), 'server:sse' (view model,
 // change detection, streams). A later success of the same key calls onRecover(key).
 import * as nodeFsp from 'node:fs/promises';
+import { watch } from 'node:fs';
 import http from 'node:http';
 import { join, resolve as resolvePath } from 'node:path';
 import { randomUUID, randomBytes } from 'node:crypto';
@@ -41,6 +43,7 @@ import { isPidAlive } from './store.mjs';
 
 export const SERVER_LOCK = 'server.lock';
 export const SERVER_JSON = 'server.json';
+export const SERVER_WANT = 'server.want';
 export const DEFAULT_PORT_BASE = 47317;
 export const PORT_COUNT = 10;
 export const CHECK_EVERY_MS = 5000;
@@ -55,6 +58,25 @@ const MAX_RECORD_CHARS = 4096;
 const LOST = Symbol('lost the wx race');
 const PAUSED_REPLY = { status: 503, json: { ok: false, code: 'PAUSED' } };
 const NOT_SUPPORTED_REPLY = { status: 501, json: { ok: false, code: 'NOT_SUPPORTED' } };
+const BUSY_REPLY = { status: 429, json: { ok: false, code: 'BUSY' } };
+const rank = (g) => Number.isInteger(g) ? g : -1;
+
+export async function readInstalledGeneration(file, fsp = nodeFsp, timers = { setTimeout }) {
+  for (let i = 0; ; i++) {
+    try {
+      const text = await fsp.readFile(file, 'utf8');
+      if (Buffer.byteLength(text) > 64 * 1024) return 'unknown';
+      let rec;
+      try { rec = JSON.parse(text); } catch { return 'unknown'; }
+      const match = /^generation-(\d{6})$/.exec(rec?.generation);
+      return match ? Number(match[1]) : 'unknown';
+    } catch (err) {
+      if (err.code === 'ENOENT') return null;
+      if (!RETRY_CODES.has(err.code) || i >= RETRY_DELAYS_MS.length) return 'unknown';
+      await new Promise((resolve) => timers.setTimeout(resolve, RETRY_DELAYS_MS[i]));
+    }
+  }
+}
 
 export const urlOf = (port) => `http://127.0.0.1:${port}/`;
 
@@ -65,7 +87,9 @@ const unref = (h) => {
 
 function registry() {
   // One slot per process; module copies loaded by /reload share it through Symbol.for.
-  return (globalThis[REGISTRY] ??= { version: 1, servers: new Map(), stranded: new Map(), chains: new Map() });
+  const reg = (globalThis[REGISTRY] ??= { version: 1, servers: new Map(), stranded: new Map(), chains: new Map() });
+  reg.wants ??= new Map();
+  return reg;
 }
 
 function stateKey(dir) {
@@ -147,6 +171,7 @@ export function createServerHost(options) {
     stateDir,
     sessionId,
     generation = null,
+    installedGeneration = async () => null,
     isEnabled,
     buildViewModel,
     readSnapshot,
@@ -170,6 +195,7 @@ export function createServerHost(options) {
   const lockPath = join(stateDir, SERVER_LOCK);
   const jsonPath = join(stateDir, SERVER_JSON);
   const publishedPath = join(stateDir, 'published.json');
+  const wantPath = join(stateDir, SERVER_WANT);
   const portBase = portBaseOf(env);
 
   let role = 'idle'; // idle | client | unavailable | paused (owner is derived from the process registry)
@@ -178,6 +204,18 @@ export function createServerHost(options) {
   let checkTimer = null;
   let pending = null;
   let lastSig = '';
+  let installed = null;
+  let want = null;
+  let wantTimer = null;
+  let fastTimer = null;
+  let watcher = null;
+  const staleNow = () => installed === 'unknown' || (Number.isInteger(installed) && rank(generation) < installed);
+
+  async function readInstalled() {
+    installed = await installedGeneration();
+    if (installed === 'unknown') report('server:lock', new Error('installed generation unknown'));
+    return installed;
+  }
 
   // A host callback that throws must never take the lead conversation down.
   function safe(fn, ...args) {
@@ -258,8 +296,8 @@ export function createServerHost(options) {
 
   function status() {
     const e = entry();
-    if (e) return { role: 'owner', url: e.url, port: e.port, pid: process.pid, clients: e.clients, refused: 0 };
-    return { role, url: role === 'client' && owner ? urlOf(owner.port) : null, port: owner ? owner.port : null, pid: owner ? owner.pid : null, clients: 0, refused };
+    if (e && e.serving) return { role: 'owner', url: e.url, port: e.port, pid: process.pid, clients: e.clients, refused: 0, stale: staleNow(), wanting: Boolean(want) };
+    return { role, url: role === 'client' && owner ? urlOf(owner.port) : null, port: owner ? owner.port : null, pid: owner ? owner.pid : null, clients: 0, refused, stale: role === 'stale' || staleNow(), wanting: Boolean(want) };
   }
 
   function changed() {
@@ -286,7 +324,7 @@ export function createServerHost(options) {
   }
 
   function markPaused() {
-    stopCheck();
+    startCheck();
     owner = null;
     refused = 0;
     role = 'paused';
@@ -304,10 +342,74 @@ export function createServerHost(options) {
     recover,
     isEnabled: enabledNow,
     markPaused,
+    readInstalled,
+    markStale(recheck = true) { owner = null; role = 'stale'; if (recheck) startCheck(); changed(); },
     // board write hooks (POST /answer, POST /focus): paused = 503 and the hook is never called
     answer: typeof answer === 'function' ? (body) => (enabledNow() ? answer(body) : PAUSED_REPLY) : undefined,
     focus: typeof focus === 'function' ? (body) => (enabledNow() ? focus(body) : PAUSED_REPLY) : undefined,
   };
+
+  async function replaceFile(path, text) {
+    const tmp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+    try {
+      await fs.writeFile(tmp, text);
+      await withRetry(() => fs.rename(tmp, path));
+    } finally {
+      try { await fs.unlink(tmp); } catch (err) { if (err.code !== 'ENOENT') report('server:lock', err); }
+    }
+  }
+
+  async function freshWant() {
+    try {
+      const text = await readSmall(wantPath);
+      const rec = parseRecord(text);
+      const stat = await fs.stat(wantPath);
+      return rec && rec.nonce && now() - stat.mtimeMs <= 2000 && isAlive(rec.pid) ? { rec, text } : null;
+    } catch (err) {
+      if (err.code !== 'ENOENT') report('server:lock', err);
+      return null;
+    }
+  }
+
+  async function stopWant(forget = false) {
+    if (wantTimer) timers.clearInterval(wantTimer);
+    if (fastTimer) timers.clearInterval(fastTimer);
+    wantTimer = fastTimer = null;
+    watcher?.close();
+    watcher = null;
+    if (!want) return;
+    const nonce = want.nonce;
+    want = null;
+    // The owner may already have passed its final check. Keep proof of this process's issued nonce
+    // until a transferred lock is consumed or removed, including across a wanting instance's reload.
+    if (forget) registry().wants.delete(nonce);
+    try {
+      if (parseRecord(await readSmall(wantPath))?.nonce === nonce) await withRetry(() => fs.unlink(wantPath));
+    } catch (err) { if (err.code !== 'ENOENT') report('server:lock', err); }
+  }
+
+  async function startWant() {
+    const other = await freshWant();
+    if (other && other.rec.nonce !== want?.nonce && rank(other.rec.generation) >= rank(generation)) return;
+    if (!want) {
+      want = { pid: process.pid, at: now(), nonce: randomUUID(), sessionId, generation };
+      await replaceFile(wantPath, JSON.stringify(want));
+      registry().wants.set(want.nonce, { key, rec: want });
+    }
+    if (!wantTimer) wantTimer = unref(timers.setInterval(() => serial(key, async () => {
+      if (!want) return; // an adoption may have cancelled a heartbeat already queued behind its serial operation
+      const current = await freshWant();
+      if (current?.rec.nonce !== want?.nonce) { await stopWant(); return; }
+      const at = new Date(now());
+      await withRetry(() => fs.utimes(wantPath, at, at));
+    }).catch((err) => report('server:lock', err)), 500));
+    if (!fastTimer) fastTimer = unref(timers.setInterval(() => ensure(), 250));
+    if (!watcher) {
+      watcher = watch(stateDir, (_, name) => { if (String(name) === SERVER_LOCK) ensure(); });
+      watcher.on('error', (err) => report('server:lock', err));
+      watcher.unref();
+    }
+  }
 
   // ---- the server this process owns ----
 
@@ -465,8 +567,30 @@ export function createServerHost(options) {
     }
   }
 
-  // Runs inside serial(key).
-  async function closeEntry(e, paused) {
+  async function retireLock(e, reason, installedValue) {
+    const lock = await readLock();
+    if (lock.state === 'unreadable') throw lock.err;
+    if (lock.text !== e.text) {
+      await removeOwnJson(e, e.driver);
+      return 'gone';
+    }
+    const wanted = await freshWant();
+    if (wanted && rank(wanted.rec.generation) > rank(e.driver.generation)) {
+      await replaceFile(lockPath, JSON.stringify({ ...wanted.rec, port: e.port }));
+      owner = { pid: wanted.rec.pid, port: e.port };
+      notServing({ url: urlOf(e.port) });
+      return 'handed';
+    }
+    await removeOwnJson(e, e.driver);
+    await replaceFile(lockPath, JSON.stringify({
+      ...e.rec, pid: process.pid, at: now(), nonce: randomUUID(), released: reason,
+      installed: Number.isInteger(installedValue) ? installedValue : null,
+    }));
+    return 'released';
+  }
+
+  // Runs inside serial(key). Failed enabled closes retain a driven entry that can never serve again.
+  async function closeEntry(e, paused, reason = 'quit', installedValue = null) {
     const reg = registry();
     if (reg.servers.get(key) !== e) return;
     reg.servers.delete(key);
@@ -474,17 +598,45 @@ export function createServerHost(options) {
     if (e.pollTimer) e.timers.clearInterval(e.pollTimer);
     e.ownerTimer = null;
     e.pollTimer = null;
+    if (e.graceTimer) e.timers.clearTimeout(e.graceTimer);
+    e.graceTimer = null;
     const d = e.driver;
-    if (paused) {
-      e.board.sendPaused();
+    if (!paused) {
+      e.handingOver = true;
+      await drain(e);
+    }
+    if (e.serving) {
+      if (paused) e.board.sendPaused();
+      else e.board.broadcastClosing({ reason, installed: Number.isInteger(installedValue) ? installedValue : null, own: d.generation });
       // http responses cork their writes until the next tick; closeAllConnections() right away would drop the frame.
       // setImmediate runs after that uncork, so the paused frame is handed to the socket before it is closed.
       await new Promise((r) => setImmediate(r));
     }
-    await e.board.close(); // closeAllConnections + close, bounded at 500ms by the board server
-    const lockGone = await removeOwnLock(e.text, d);
-    const jsonGone = await removeOwnJson(e, d);
-    if (lockGone && jsonGone) d.recover('server:lock');
+    await e.board?.close(); // a transferred lock can be ours before any listener exists
+    e.serving = false;
+    e.jsonPending = false;
+    if (paused) {
+      const lockGone = await removeOwnLock(e.text, d);
+      const jsonGone = await removeOwnJson(e, d);
+      if (lockGone) reg.wants.delete(e.rec.nonce);
+      if (lockGone && jsonGone) d.recover('server:lock');
+      return 'removed';
+    }
+    try {
+      const result = await retireLock(e, reason, installedValue);
+      reg.wants.delete(e.rec.nonce);
+      d.recover('server:lock');
+      return result;
+    } catch (err) {
+      e.retiring = reason;
+      reg.servers.set(key, e);
+      e.ownerTimer = unref(e.timers.setInterval(() => serial(key, () => ownerTick(e)), CHECK_EVERY_MS));
+      owner = null;
+      role = 'unavailable';
+      d.report('server:lock', new Error(`server.lock release failed: ${err.code || err.message}`));
+      changed();
+      return 'kept';
+    }
   }
 
   // Runs inside serial(key): the owner's 5s check - a pause made anywhere closes the server; a failed server.json is retried.
@@ -497,7 +649,37 @@ export function createServerHost(options) {
         d.markPaused();
         return;
       }
+      const current = await d.readInstalled();
+      if (e.retiring) {
+        const result = await closeEntry(e, false, e.retiring, current);
+        if (result === 'released' || result === 'gone') d.markStale(e.retiring === 'stale');
+        return;
+      }
       if (e.jsonPending && (await writeServerJson(e))) d.recover('server:lock');
+      const wanted = await freshWant();
+      if (wanted && rank(wanted.rec.generation) > rank(d.generation)) {
+        await handover(e, wanted, current);
+        return;
+      }
+      if ((Number.isInteger(current) && current > rank(d.generation)) || (!e.serving && current === 'unknown')) {
+        const result = await closeEntry(e, false, 'stale', current);
+        if (result === 'released' || result === 'gone') d.markStale();
+        return;
+      }
+      if (!e.serving) {
+        const lock = await readLock();
+        if (lock.text !== e.text) return;
+        if (await listen(e, e.port)) {
+          if (e.port !== e.rec.port) {
+            e.rec.port = e.port;
+            e.text = JSON.stringify(e.rec);
+            await replaceFile(lockPath, e.text);
+          }
+          e.handingOver = false;
+          await writeServerJson(e);
+          changed();
+        }
+      }
     } catch (err) {
       d.report('server:lock', err);
     }
@@ -505,14 +687,60 @@ export function createServerHost(options) {
 
   // The newest host of this process drives the one server; a host that has no such hook (an older generation) answers 501.
   function writeVia(e, name, body) {
+    if (e.handingOver || e.graceTimer) return BUSY_REPLY;
     const hook = e.driver[name];
     return typeof hook === 'function' ? hook(body) : NOT_SUPPORTED_REPLY;
   }
 
   // Runs inside serial(key). Returns {url}, null (could not serve) or LOST (another process created the lock first).
-  async function becomeOwner(preferPort) {
+  async function drain(e) {
+    if (!e.serving) return true;
+    let timer;
+    return await Promise.race([
+      e.board.idle().then(() => true),
+      new Promise((resolve) => { timer = unref(timers.setTimeout(() => resolve(false), 2000)); }),
+    ]).finally(() => timers.clearTimeout(timer));
+  }
+
+  async function handover(e, wanted, current) {
+    e.handingOver = true;
+    if (!(await drain(e))) { e.handingOver = false; return; }
+    const lock = await readLock();
+    const latest = await freshWant();
+    if (!e.driver.isEnabled() || lock.text !== e.text || latest?.text !== wanted.text) {
+      e.handingOver = false;
+      return;
+    }
+    if (e.serving) {
+      e.board.broadcastClosing({ reason: 'handover', installed: Number.isInteger(current) ? current : null, own: e.driver.generation });
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    registry().servers.delete(key);
+    e.timers.clearInterval(e.ownerTimer);
+    if (e.pollTimer) e.timers.clearInterval(e.pollTimer);
+    e.pollTimer = null;
+    if (e.graceTimer) e.timers.clearTimeout(e.graceTimer);
+    e.graceTimer = null;
+    await e.board?.close();
+    e.serving = false;
+    try {
+      await replaceFile(lockPath, JSON.stringify({ ...wanted.rec, port: e.port }));
+    } catch (err) {
+      // Retain the live owner's lock but NEVER serve the older board after a failed swap.
+      registry().servers.set(key, e);
+      e.ownerTimer = unref(e.timers.setInterval(() => serial(key, () => ownerTick(e)), CHECK_EVERY_MS));
+      role = 'unavailable';
+      e.driver.report('server:lock', new Error(`server.lock swap failed: ${err.code || err.message}`));
+      changed();
+      return;
+    }
+    owner = { pid: wanted.rec.pid, port: e.port };
+    registry().wants.delete(e.rec.nonce);
+    notServing({ url: urlOf(e.port) });
+  }
+
+  function newEntry() {
     const e = {
-      driver: self,
       timers,
       board: null,
       port: 0,
@@ -528,17 +756,30 @@ export function createServerHost(options) {
       dirty: false,
       jsonPending: false,
       listenReported: false,
+      serving: false,
+      handingOver: false,
+      graceTimer: null,
       // the write token of THIS serving start: it lives in memory only (never in the lock, server.json, a log or a model)
       // and is handed to the page through getPage; a hand-over to another process starts a new one
-      token: randomBytes(32).toString('base64url'),
+      token: null,
     };
+    let driver = self;
+    Object.defineProperty(e, 'driver', {
+      get: () => driver,
+      set: (next) => { if (rank(next.generation) >= rank(driver.generation)) driver = next; },
+    });
+    return e;
+  }
+
+  async function listen(e, preferPort) {
+    e.token = randomBytes(32).toString('base64url');
     const board = createBoardServer({
       getPage: async () => e.driver.getPage(await buildVm(e), e.token),
       getViewModel: () => buildVm(e),
       token: e.token,
       onAnswer: (body) => writeVia(e, 'answer', body),
       onFocus: (body) => writeVia(e, 'focus', body),
-      generation,
+      generation: e.driver.generation,
       portBase,
       portCount: PORT_COUNT,
       preferPort: Number.isInteger(preferPort) ? preferPort : undefined,
@@ -554,15 +795,27 @@ export function createServerHost(options) {
       // start() reports its listen failures (NO_PORT included) through onError itself; anything else is reported here
       if (!e.listenReported) report('server:listen', err);
       await board.close();
-      return null;
+      return false;
     }
-    const rec = { pid: process.pid, at: now(), nonce: randomUUID(), sessionId, port, generation };
+    Object.assign(e, { port, url: urlOf(port), serving: true });
+    return true;
+  }
+
+  async function becomeOwner(preferPort, adopted, replaces = false) {
+    const e = newEntry();
+    if (!(await listen(e, preferPort))) return null;
+    const port = e.port;
+    const rec = adopted ? { ...adopted, port, generation, sessionId } : { pid: process.pid, at: now(), nonce: randomUUID(), sessionId, port, generation };
     const text = JSON.stringify(rec);
     try {
       await fs.mkdir(stateDir, { recursive: true });
-      await fs.writeFile(lockPath, text, { flag: 'wx' });
+      if (adopted) {
+        if (JSON.stringify(adopted) !== (await readLock()).text) { await e.board.close(); return LOST; }
+        if (text !== JSON.stringify(adopted)) await replaceFile(lockPath, text);
+      } else if (replaces) await replaceFile(lockPath, text);
+      else await fs.writeFile(lockPath, text, { flag: 'wx' });
     } catch (err) {
-      await board.close();
+      await e.board.close();
       if (err && err.code === 'EEXIST') return LOST;
       report('server:lock', new Error(`server.lock을 만들지 못함: ${err.code || err.message}`));
       return null;
@@ -571,6 +824,7 @@ export function createServerHost(options) {
     registry().servers.set(key, e);
     e.ownerTimer = unref(timers.setInterval(() => serial(key, () => ownerTick(e)), CHECK_EVERY_MS));
     if (await writeServerJson(e)) recover('server:lock');
+    await stopWant(true);
     stopCheck();
     owner = null;
     refused = 0;
@@ -578,24 +832,106 @@ export function createServerHost(options) {
     return { url: e.url };
   }
 
+  async function claim(target) {
+    if (!target) return null;
+    const text = JSON.stringify({ pid: process.pid, at: now(), nonce: randomUUID(), sessionId, generation, claims: target });
+    const tmp = `${lockPath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+    const base = `${lockPath}.stale-${target}`;
+    let name = base;
+    try {
+      await fs.writeFile(tmp, text);
+      for (;;) {
+        try {
+          await withRetry(() => fs.link(tmp, name));
+          return { name, text };
+        } catch (err) {
+          if (err.code !== 'EEXIST') throw err;
+        }
+        let other;
+        try { other = parseRecord(await readSmall(name)); }
+        catch (err) { if (err.code === 'ENOENT') continue; throw err; }
+        if (!other || other.claims !== target || !other.nonce || isAlive(other.pid)) return null;
+        // Ancestors are immutable and remain in place. Every contender follows the same dead nonces.
+        // Reuse the base, not the previous path, so repeated interruptions never exhaust filename length.
+        name = `${base}.${other.nonce}`;
+      }
+    } finally {
+      try { await fs.unlink(tmp); } catch (err) { if (err.code !== 'ENOENT') report('server:lock', err); }
+    }
+  }
+
+  async function dropClaim(c) {
+    try {
+      if (await readSmall(c.name) === c.text) await withRetry(() => fs.unlink(c.name));
+    } catch (err) { if (err.code !== 'ENOENT') report('server:lock', err); }
+  }
+
+  async function takeOver(lock) {
+    const c = await claim(lock.rec.nonce);
+    if (!c) return notServing(null);
+    try {
+      if ((await readLock()).text !== lock.text) return LOST;
+      await readInstalled();
+      if (staleNow()) { self.markStale(); return null; }
+      if (!enabledNow()) { markPaused(); return null; }
+      const wanted = await freshWant();
+      if (wanted && rank(wanted.rec.generation) > rank(generation)) return notServing(null);
+      const got = await becomeOwner(lock.rec.port, undefined, true);
+      return got === LOST ? LOST : got ?? notServing(null);
+    } finally {
+      await dropClaim(c);
+    }
+  }
+
   // ---- ensure: own, reuse, or watch ----
 
   async function ensureNow() {
     try {
       if (!enabledNow()) {
+        await stopWant();
         const e = entry();
         if (e) await closeEntry(e, true);
         markPaused();
         return null;
       }
+      await readInstalled();
+      if (staleNow()) await stopWant();
       const mine = entry();
       if (mine) {
-        mine.driver = self; // the newest host of this process drives the one server
+        if (mine.retiring) { await ownerTick(mine); return null; }
+        if (!staleNow() && rank(generation) >= rank(mine.driver.generation) && (mine.graceTimer || mine.rec.generation !== generation)) {
+          mine.handingOver = true;
+          if (!(await drain(mine))) { mine.handingOver = false; return { url: mine.url }; }
+          const lock = await readLock();
+          if (lock.text !== mine.text) return notServing(null);
+          mine.timers.clearTimeout(mine.graceTimer);
+          mine.timers.clearInterval(mine.ownerTimer);
+          if (mine.pollTimer) mine.timers.clearInterval(mine.pollTimer);
+          if (!mine.graceTimer) {
+            mine.board.broadcastClosing({ reason: 'handover', installed: Number.isInteger(installed) ? installed : null, own: mine.rec.generation });
+          }
+          await new Promise((resolve) => setImmediate(resolve));
+          await mine.board.close();
+          registry().servers.delete(key);
+          const adopted = { ...mine.rec, nonce: randomUUID(), sessionId, generation };
+          // Retain an adoptable nonce even if the rebuild's rename or listen fails.
+          registry().wants.set(mine.rec.nonce, { key, rec: mine.rec });
+          want = mine.rec;
+          try { await replaceFile(lockPath, JSON.stringify(adopted)); }
+          catch (err) { report('server:lock', err); return notServing(null); }
+          registry().wants.delete(mine.rec.nonce);
+          registry().wants.set(adopted.nonce, { key, rec: adopted });
+          want = adopted;
+          return (await becomeOwner(mine.port, adopted)) ?? notServing(null);
+        }
+        if (!staleNow()) mine.driver = self;
+        if (mine.driver === self) await ownerTick(mine);
+        if (!entry()) return null;
         stopCheck();
         owner = null;
         refused = 0;
         changed();
-        return { url: mine.url };
+        return mine.serving ? { url: mine.url } : null;
       }
       for (let attempt = 0; attempt < 3; attempt++) {
         const lock = await readLock();
@@ -606,20 +942,47 @@ export function createServerHost(options) {
         }
         if (lock.state === 'held') {
           if (registry().stranded.get(key) === lock.text) {
-            // this process's own lock whose removal failed earlier, content-verified: remove it now
-            if (!(await removeOwnLock(lock.text, self))) return notServing(null);
+            // Pause cleanup failed. Once enabled again, release the verified closed lock without a gap.
+            await replaceFile(lockPath, JSON.stringify({
+              ...lock.rec, pid: process.pid, at: now(), nonce: randomUUID(), released: 'quit', installed,
+            }));
+            registry().stranded.delete(key);
             recover('server:lock');
             continue;
           }
           const rec = lock.rec;
           owner = { pid: rec.pid, port: rec.port };
+          if (rec.released) {
+            if (staleNow()) { self.markStale(); return null; }
+            const wanted = await freshWant();
+            if (wanted && rank(wanted.rec.generation) > rank(generation)) return notServing(null);
+            const got = await takeOver(lock);
+            if (got === LOST) continue;
+            return got;
+          }
+          if (rec.pid === process.pid && registry().wants.get(rec.nonce)?.key === key) {
+            want ??= registry().wants.get(rec.nonce).rec;
+            if (staleNow()) {
+              const e = newEntry();
+              Object.assign(e, { rec, text: lock.text, port: rec.port, url: urlOf(rec.port) });
+              registry().servers.set(key, e);
+              e.ownerTimer = unref(timers.setInterval(() => serial(key, () => ownerTick(e)), CHECK_EVERY_MS));
+              await stopWant();
+              await ownerTick(e);
+              return e.serving ? { url: e.url } : null;
+            }
+            return (await becomeOwner(rec.port, rec)) ?? notServing(null);
+          }
           const health = await checkHealth(rec);
           if (health.ok) {
             refused = 0;
             recover('server:lock');
+            if (!staleNow() && rank(rec.generation) < rank(generation)) await startWant();
+            else await stopWant();
             return notServing({ url: urlOf(rec.port) });
           }
           if (isAlive(rec.pid)) {
+            if (staleNow()) { self.markStale(); return null; }
             // a live pid that does not answer: never take over (Windows can hand a dead owner's pid to another program)
             refused = health.code === 'ECONNREFUSED' ? refused + 1 : 0;
             if (refused >= REFUSED_LIMIT) {
@@ -628,24 +991,25 @@ export function createServerHost(options) {
             return notServing(null);
           }
           refused = 0;
-          let reclaimed;
-          try {
-            reclaimed = reclaimStale(SERVER_LOCK, rec);
-          } catch (err) {
-            report('server:lock', err);
-            return notServing(null);
+          if (staleNow()) {
+            await stopWant();
+            self.markStale();
+            return null;
           }
-          if (!reclaimed) {
-            const again = await readLock();
-            if (again.state === 'held' && again.text === lock.text) {
-              report('server:lock', new Error(`죽은 주인(pid ${rec.pid})의 server.lock을 회수하지 못함 - 수동 확인 필요`));
-              return notServing(null);
-            }
-            continue; // another session reclaimed or replaced it first: look again
-          }
-          preferPort = rec.port;
+          const wanted = await freshWant();
+          if (wanted && rank(wanted.rec.generation) > rank(generation)) return notServing(null);
+          const got = await takeOver(lock);
+          if (got === LOST) continue;
+          return got;
         } else {
-          preferPort = await previousPort();
+          if (staleNow()) {
+            await stopWant();
+            self.markStale();
+            return null;
+          }
+          const wanted = await freshWant();
+          if (wanted && rank(wanted.rec.generation) > rank(generation)) return notServing(null);
+          preferPort = owner?.port ?? await previousPort();
         }
         const got = await becomeOwner(preferPort);
         if (got === LOST) continue;
@@ -669,6 +1033,7 @@ export function createServerHost(options) {
 
   function onPaused() {
     return serial(key, async () => {
+      await stopWant();
       try {
         const e = entry();
         if (e) await closeEntry(e, true);
@@ -679,18 +1044,32 @@ export function createServerHost(options) {
     });
   }
 
-  function release() {
+  function release(reason) {
     return serial(key, async () => {
       stopCheck();
       try {
         const e = entry();
-        if (e && e.driver === self) await closeEntry(e, false);
+        if (e && e.driver === self) {
+          if (['reload', 'new', 'resume', 'fork'].includes(reason)) {
+            if (!e.graceTimer) e.graceTimer = unref(e.timers.setTimeout(() => serial(key, async () => {
+              if (entry() !== e || !e.graceTimer) return;
+              const current = await e.driver.readInstalled();
+              const result = await closeEntry(e, false, 'quit', current);
+              if (result === 'released' || result === 'gone') e.driver.markStale(false);
+            }), 15000));
+            return;
+          }
+          await readInstalled();
+          const result = await closeEntry(e, false, e.retiring ?? 'quit', installed);
+          if (result === 'handed' || result === 'kept') return;
+        }
+        await stopWant();
       } catch (err) {
         report('server:lock', err);
       }
       owner = null;
       refused = 0;
-      role = 'idle';
+      role = 'stale';
       changed();
     });
   }

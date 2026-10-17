@@ -13,13 +13,12 @@
 // it would run the real herdr on this machine.
 import { fork } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, statSync, copyFileSync, watch } from 'node:fs';
-import { rm } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { launch, isPidAlive, killProcessTree } from './cdp.mjs';
+import { launch, isPidAlive } from './cdp.mjs';
 import { openStore } from '../src/store.mjs';
 import { answersSnapshot, snapshotDiff, attackScript, formHtml, evilPageHtml } from './qa-answer-lib.mjs';
 
@@ -105,7 +104,7 @@ function spawnLead() {
     pending.set(id, { resolve: (v) => { clearTimeout(timer); resolve(v); }, reject: (e) => { clearTimeout(timer); reject(e); } });
     child.send({ id, cmd, ...extra });
   });
-  const closed = new Promise((resolve) => child.once('close', resolve));
+  const closed = new Promise((resolve) => child.once('close', (code, signal) => resolve({ code, signal })));
   return { child, ready, call, closed, pid: child.pid };
 }
 
@@ -412,22 +411,29 @@ for (const p of owned.pages) {
   try {
     await p.close();
   } catch (err) {
-    // On this host cdp.mjs close() can time out waiting for Chrome's 'close' event (a child still holds stderr) and then
-    // leaves the profile behind (scripts/qa-cdp-smoke.mjs shows the same; taskkill /F took ~12 s to end the browser here). Kill
-    // the tree again, remove the profile with fs.promises.rm's built-in EBUSY/EPERM retry (linear back-off, bounded at ~55 s), and judge the outcome below;
-    // the timeout itself is reported, not hidden.
     cleanup.closeWarnings = [...(cleanup.closeWarnings ?? []), `chrome ${p.pid}: ${err.message}`];
-    killProcessTree(p.pid);
-    try { await rm(p.profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 1000 }); } catch (e) { cleanup.errors.push(`rm ${p.profileDir}: ${e.message}`); }
   }
   cleanup[`chrome ${p.pid}`] = isPidAlive(p.pid) ? 'ALIVE' : 'gone';
   cleanup[`profile ${p.profileDir}`] = existsSync(p.profileDir) ? 'EXISTS' : 'removed';
 }
 for (const s of owned.servers) await new Promise((resolve) => s.close(() => resolve()));
 if (lead) {
-  try { await lead.call('shutdown'); } catch (err) { cleanup.errors.push(`lead shutdown: ${err.message}`); }
-  lead.child.disconnect();
-  await Promise.race([lead.closed, new Promise((resolve) => setTimeout(resolve, 10_000))]);
+  try { await lead.call('shutdown', { disconnectAfterReply: true }); } catch (err) {
+    cleanup.errors.push(`lead shutdown: ${err.message}`);
+    try { if (lead.child.connected) lead.child.disconnect(); } catch (err) { cleanup.errors.push(`lead disconnect: ${err.message}`); }
+  }
+  let timer;
+  try {
+    const { code, signal } = await Promise.race([lead.closed, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('lead close: no original close in 10s')), 10_000);
+    })]);
+    assert.equal(code, 0, 'lead close code');
+    assert.equal(signal, null, 'lead close signal');
+  } catch (err) {
+    cleanup.errors.push(`lead close: ${err.message}`);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 for (const pid of owned.pids) cleanup[`lead ${pid}`] = isPidAlive(pid) ? 'ALIVE' : 'gone';
 try { rmSync(TMP, { recursive: true, force: true }); } catch (err) { cleanup.errors.push(`rm ${TMP}: ${err.message}`); }

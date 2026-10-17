@@ -340,7 +340,7 @@ test('SSE pause survives connection errors and clears only on a resumed open or 
   assert.match(e.status.textContent, /실시간 연결 끊김/, 'ordinary errors work after resume');
   es.handlers.paused({});
   es.onerror();
-  es.handlers.data({ data: JSON.stringify(data(7)) });
+  es.handlers.data({ data: JSON.stringify(data(7, { gen: 0 })) });
   assert.equal(e.status.hidden, true, 'data clears the banner');
   assert.equal(e.page.state.seq, 7);
   es.onerror();

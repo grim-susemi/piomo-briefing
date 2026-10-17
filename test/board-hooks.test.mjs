@@ -89,7 +89,8 @@ const decision = () => ({
   blocks: false,
 });
 const fail = (status, code) => ({ status, json: { ok: false, code } });
-const OK = { status: 200, json: { ok: true } };
+const OK = { status: 200, json: { ok: true } }; // /focus (and the error shapes below carry no id)
+const answerOk = (id) => ({ status: 200, json: { ok: true, id } }); // /answer success names the decision it answered
 
 test('the extension hands the server host its answer and focus hooks, and the page template the token only in server mode', async (t) => {
   const s = lead(t);
@@ -113,7 +114,7 @@ test('answer: every applyBoardAnswer code maps to its HTTP status; only the firs
   await s.brief(goodBrief({ close_decisions: [{ id: 3, reason: 'superseded' }] }));
   const { answer } = s.hooks();
   const seqBefore = s.seq();
-  assert.deepEqual(await answer({ id: 1, sessionId: 'sess-A', option: 'B' }), OK);
+  assert.deepEqual(await answer({ id: 1, sessionId: 'sess-A', option: 'B' }), answerOk(1));
   assert.deepEqual(s.readAnswer(1), { id: 1, option: 'B', at: s.readAnswer(1).at, fromSessionId: 'board' });
   assert.ok(s.seq() > seqBefore, 'a written answer is published, so open pages see its state');
 
@@ -146,7 +147,7 @@ test('answer: free text needs the owning conversation to advertise answerKinds t
   }
   assert.deepEqual(s.answerFiles(), []);
 
-  assert.deepEqual(await answer({ id: 1, sessionId: 'sess-A', text: '  설치해 줘  ' }), OK);
+  assert.deepEqual(await answer({ id: 1, sessionId: 'sess-A', text: '  설치해 줘  ' }), answerOk(1));
   const saved = s.readAnswer(1);
   assert.equal(saved.text, '설치해 줘');
   assert.equal(saved.option, undefined);
@@ -189,7 +190,7 @@ test('answer: a store fault is a 500 with the bare code; the diagnostic is recor
   assert.equal(s.meta().errors.answer.at, at, 'the same failure again is not recorded twice');
 
   ctl.deny = false;
-  assert.deepEqual(await s.hooks().answer({ id: 1, sessionId: 'sess-A', option: 'A' }), OK, 'the fault was transient');
+  assert.deepEqual(await s.hooks().answer({ id: 1, sessionId: 'sess-A', option: 'A' }), answerOk(1), 'the fault was transient');
   assert.equal(s.meta().errors.answer, undefined, 'the source succeeded: its entry is gone');
   assert.ok(!readFileSync(join(s.stateDir, 'data.js'), 'utf8').includes(CHIP), 'and so is the chip');
 });

@@ -17,12 +17,13 @@ const VIEW_SRC = fs.readFileSync(path.join(ROOT, 'src/page/view.js'), 'utf8');
 const PLAN_SRC = fs.readFileSync(path.join(ROOT, 'src/page/plan-view.js'), 'utf8');
 
 // http: + token = the page the board server serves (src/render.mjs pageHtml, server mode); file: = the file page.
-function makeEnv({ protocol = 'http:', token = 'tok-1', sessionStorage = null, abort = false } = {}) {
+function makeEnv({ protocol = 'http:', token = 'tok-1', sessionStorage = null, abort = false, generation = null } = {}) {
   const byId = {};
   const timers = [];
   const fetches = [];
   const errors = [];
   const reloads = [];
+  const selection = { isCollapsed: true, toString: () => '' };
   let clock = 1000;
   function el(tag) {
     let html = '';
@@ -56,17 +57,29 @@ function makeEnv({ protocol = 'http:', token = 'tok-1', sessionStorage = null, a
   head.appendChild = (c) => c; // the file page's data.js polling is not exercised here
   const document = {
     readyState: 'complete', visibilityState: 'visible', body, head, documentElement: { scrollHeight: 0 }, activeElement: null,
-    getElementById: (id) => byId[id] || null, createElement: el, addEventListener() {},
-    querySelector: (sel) => (token && sel === 'meta[name="omo-board-token"]' ? { getAttribute: (k) => (k === 'content' ? token : null) } : null),
+    listeners: {},
+    getElementById: (id) => byId[id] || null, createElement: el,
+    addEventListener(type, fn) { this.listeners[type] = fn; },
+    querySelector: (sel) => {
+      const value = sel === 'meta[name="omo-board-token"]' ? token : sel === 'meta[name="omo-briefing-generation"]' ? generation : null;
+      return value === null ? null : { getAttribute: (k) => k === 'content' ? String(value) : null };
+    },
   };
-  class FakeEventSource { constructor(url) { this.url = url; } addEventListener() {} }
+  class FakeEventSource {
+    constructor(url) { this.url = url; this.listeners = {}; }
+    addEventListener(type, fn) { this.listeners[type] = fn; }
+    emit(type, data) {
+      const fn = this.listeners[type] || this['on' + type];
+      if (fn) fn({ data: JSON.stringify(data) });
+    }
+  }
   const ctx = {
     document, scrollY: 0, innerHeight: 900, scrollTo() {},
     setInterval() { return 0; },
     setTimeout(fn, ms) { const t = { fn, at: clock + ms }; timers.push(t); return t; },
     clearTimeout(t) { const i = timers.indexOf(t); if (i !== -1) timers.splice(i, 1); },
     addEventListener() {},
-    getSelection: () => ({ isCollapsed: true, toString: () => '' }),
+    getSelection: () => selection,
     console: { error: (...a) => errors.push(a) },
     location: { protocol, reload() { reloads.push(clock); } },
   };
@@ -86,7 +99,7 @@ function makeEnv({ protocol = 'http:', token = 'tok-1', sessionStorage = null, a
   const page = ctx.BriefPage;
   page.state.now = () => clock;
   return {
-    page, fetches, errors, reloads, app: byId.app,
+    page, fetches, errors, reloads, app: byId.app, document, selection, status: byId['live-status'],
     advance(ms) {
       const until = clock + ms;
       for (;;) {
@@ -100,6 +113,127 @@ function makeEnv({ protocol = 'http:', token = 'tok-1', sessionStorage = null, a
     },
   };
 }
+
+const generationModel = (seq, gen, serverGen) => ({ ...answerModel(seq), gen, server: { generation: serverGen } });
+const closedNotice = e => !e.status.hidden && e.status.attrs['data-state'] === 'closed';
+
+test('generation notice: stale closing is immediate and survives opens, dropped streams and repeated errors', () => {
+  const e = makeEnv({ generation: 8 });
+  e.page.receive(generationModel(1, 8));
+  e.page.state.es.emit('closing', { reason: 'stale', installed: 9, own: 8 });
+  assert.equal(closedNotice(e), true, 'stale closing immediately shows the dedicated notice');
+  const notice = e.status.textContent;
+  e.page.state.es.emit('paused');
+  assert.equal(e.status.textContent, notice, 'a pause cannot replace a remembered stale notice');
+  e.page.state.es.emit('open');
+  for (let i = 0; i < 6; i++) e.page.state.es.emit('error');
+  assert.equal(closedNotice(e), true);
+  assert.ok(e.app.innerHTML.includes('data-decision="12"'), 'board remains visible');
+});
+
+for (const reason of ['quit', 'handover', null]) {
+  test(`generation notice: five consecutive reconnect failures after ${reason ?? 'crash without closing'} show and retain the notice`, () => {
+    const e = makeEnv({ generation: 8 });
+    e.page.receive(generationModel(1, 8));
+    if (reason) e.page.state.es.emit('closing', { reason, installed: 8 });
+    for (let i = 0; i < 4; i++) e.page.state.es.emit('error');
+    assert.equal(closedNotice(e), false, 'four reconnect errors keep the ordinary reconnect state');
+    e.page.state.es.emit('error');
+    assert.equal(closedNotice(e), true, 'the fifth error shows the notice even without a closing frame');
+    for (let i = 0; i < 5; i++) e.page.state.es.emit('error');
+    assert.equal(closedNotice(e), true);
+  });
+}
+
+test('generation notice: only healthy data at the remembered generation floor clears it and allows reload', () => {
+  const e = makeEnv({ generation: 8, sessionStorage: memoryStorage() });
+  e.page.receive(generationModel(1, 8));
+  e.page.state.es.emit('closing', { reason: 'stale', installed: 10 });
+  for (const gen of [9, null, undefined, '10', 9.5, -1]) {
+    e.page.state.es.emit('data', generationModel(2, gen, 12));
+    assert.equal(closedNotice(e), true, 'lower or unknown data never clears the notice');
+    assert.equal(e.reloads.length, 0, 'unhealthy data cannot reload through a server generation');
+  }
+  e.page.state.es.emit('data', generationModel(3, 10));
+  assert.equal(closedNotice(e), false, 'healthy data at installed generation clears the notice');
+  assert.equal(e.reloads.length, 1);
+  e.page.state.es.emit('data', generationModel(4, 9, 11));
+  assert.equal(closedNotice(e), true, 'highest seen vm.gen remains the floor');
+  assert.equal(e.reloads.length, 1);
+});
+
+test('generation notice: older reclaimed data shows notice without reloading; healthy data resets consecutive errors', () => {
+  const e = makeEnv({ generation: 9, sessionStorage: memoryStorage() });
+  e.page.state.es.emit('data', generationModel(1, 8, 10));
+  assert.equal(closedNotice(e), true);
+  assert.equal(e.reloads.length, 0);
+  e.page.state.es.emit('data', generationModel(2, 9));
+  assert.equal(closedNotice(e), false);
+  for (let i = 0; i < 4; i++) e.page.state.es.emit('error');
+  e.page.state.es.emit('data', generationModel(3, 9));
+  for (let i = 0; i < 4; i++) e.page.state.es.emit('error');
+  assert.equal(closedNotice(e), false, 'a data frame resets the consecutive failure count');
+});
+
+test('generation reload: vm or server generation reloads once per generation, keeps drafts, and never reloads unstamped pages', () => {
+  for (const serverOnly of [false, true]) {
+    const storage = memoryStorage();
+    const e = makeEnv({ generation: 8, sessionStorage: storage });
+    e.page.receive(generationModel(1, 8));
+    press(e, 'ans-reply', 13);
+    type(e, 13, '세대 전환 중 보존할 답글');
+    e.page.receive(generationModel(2, serverOnly ? 8 : 9, serverOnly ? 9 : 8));
+    assert.equal(e.reloads.length, 1);
+    assert.equal(storage.getItem('omo-reloaded-for-9'), '1');
+    const again = makeEnv({ generation: 8, sessionStorage: storage });
+    again.page.receive(generationModel(3, serverOnly ? 8 : 9, serverOnly ? 9 : 8));
+    assert.equal(again.reloads.length, 0, 'the same tab does not loop on an old cached page');
+    assert.equal(again.page.state.ui.answers['13'].draft, '세대 전환 중 보존할 답글');
+    assert.ok(decHtml(again, 13).includes('>세대 전환 중 보존할 답글</textarea>'));
+  }
+  const bare = makeEnv({ sessionStorage: memoryStorage() });
+  bare.page.receive(generationModel(1, 9, 10));
+  assert.equal(bare.reloads.length, 0);
+});
+
+test('generation reload: input and selection holds defer reload and preserve draft edits made during the hold', () => {
+  for (const hold of ['input', 'selection']) {
+    const storage = memoryStorage();
+    const e = makeEnv({ generation: 8, sessionStorage: storage });
+    e.page.receive(generationModel(1, 8));
+    press(e, 'ans-reply', 13);
+    type(e, 13, '첫 답글');
+    if (hold === 'input') e.document.activeElement = { tagName: 'TEXTAREA' };
+    else { e.selection.isCollapsed = false; e.selection.toString = () => '선택한 내용'; }
+    const previous = e.app.innerHTML;
+    e.page.receive(generationModel(2, 9));
+    assert.equal(e.reloads.length, 0);
+    assert.equal(e.app.innerHTML, previous, 'held content is not replaced');
+    type(e, 13, '보류 중 더 쓴 답글');
+    e.document.activeElement = null;
+    e.selection.isCollapsed = true;
+    e.document.listeners[hold === 'input' ? 'focusout' : 'selectionchange']();
+    e.advance(100);
+    assert.equal(e.reloads.length, 1);
+    const again = makeEnv({ generation: 9, sessionStorage: storage });
+    again.page.receive(generationModel(3, 9));
+    assert.equal(again.page.state.ui.answers['13'].draft, '보류 중 더 쓴 답글');
+  }
+});
+
+test('generation chip: hydrated stale state uses its own wrapping chip and tooltip, without the generic error chip', () => {
+  const e = makeEnv();
+  const genericErrors = count(e.app.innerHTML, /class="chip x-err"/g);
+  const model = answerModel(1);
+  model.sessions[0].chips = ['이 대화는 예전 세대라 실시간 상황판을 맡지 않음 · 대화를 재시작하면 최신 상황판이 열림'];
+  e.page.receive(model);
+  assert.match(e.app.innerHTML, /class="chip x-stale x-server-stale"[^>]*white-space:normal[^>]*title="[^"]+"/);
+  assert.equal(count(e.app.innerHTML, /class="chip x-err"/g), genericErrors, 'the fixed legend is unchanged; stale state adds no error chip');
+  model.sessions[0].chips = [];
+  e.page.receive({ ...model, seq: 2 });
+  e.advance(500);
+  assert.equal(count(e.app.innerHTML, /class="chip x-stale x-server-stale"/g), 0);
+});
 
 const count = (s, re) => (s.match(re) || []).length;
 const opt = (text) => ({ text, consequence: text + ' 결과' });

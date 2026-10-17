@@ -1,8 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as nodeFs from 'node:fs';
-import { mkdtempSync, readFileSync, readdirSync, existsSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +11,7 @@ import { applyDecide } from '../src/decide.mjs';
 import { createBriefingExtension } from '../extension.mjs';
 import { makeFakeSession, deliveryEntry } from './helpers/fake-session.mjs';
 import { makeFakePi, makeCtx, assistant, lines } from './helpers/fake-pi.mjs';
+import { tempDir } from './helpers/temp.mjs';
 
 const DECIDE_CHILD = fileURLToPath(new URL('./helpers/decide-child.mjs', import.meta.url));
 const pad6 = (n) => String(n).padStart(6, '0');
@@ -20,7 +20,7 @@ const hhmm = (t) => { const d = new Date(t); return `${String(d.getHours()).padS
 const OPTIONS = { A: { text: '가', consequence: '빠름' }, B: { text: '나', consequence: '안전' } };
 
 function rig(t, o = {}) {
-  const dir = o.dir ?? mkdtempSync(join(tmpdir(), 'omo-deliver-'));
+  const { dir, onDispose } = o.dir ? o : tempDir(t, 'omo-deliver-');
   const store = o.store ?? openStore(dir);
   const session = o.noSession ? undefined : (o.session ?? makeFakeSession({ script: o.script }));
   const sent = [];
@@ -47,13 +47,10 @@ function rig(t, o = {}) {
     watch: o.watch ?? false,
     ...(o.fs ? { fs: o.fs } : {}),
   });
-  t.after(async () => {
-    await d.dispose();
-    if (!o.dir) rmSync(dir, { recursive: true, force: true });
-  });
+  onDispose(() => d.dispose());
   const wake = (reason) => d.wake(ctx, reason);
   const receipts = () => readReceipts(dir);
-  return { dir, store, session, sent, pi, state, ctx, sid, meta, counters, d, wake, receipts };
+  return { dir, onDispose, store, session, sent, pi, state, ctx, sid, meta, counters, d, wake, receipts };
 }
 
 function readReceipts(dir) {
@@ -204,7 +201,7 @@ test('scanning the same answer twice admits once; a second deliverer gets alread
   await r1.wake('input');
   assert.equal(r1.session.calls.length, 1, 'an answer awaiting proof is not admitted again');
 
-  const r2 = rig(t, { dir: r1.dir, store: r1.store, session: r1.session });
+  const r2 = rig(t, { dir: r1.dir, onDispose: r1.onDispose, store: r1.store, session: r1.session });
   await r2.wake('session_start');
   assert.equal(r1.session.calls.length, 2);
   assert.deepEqual(r2.d.pendingIds(), [id]);
@@ -565,8 +562,7 @@ test('the watcher is armed on STATE/answers only (created when missing), never o
 // ---------------------------------------------------------------- two processes, full extension
 
 function twoProcessRig(t) {
-  const dir = mkdtempSync(join(tmpdir(), 'omo-deliver-2p-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { dir, onDispose } = tempDir(t, 'omo-deliver-2p-');
   const stateDir = join(dir, 'state');
   const host = makeFakePi();
   const session = makeFakeSession();
@@ -574,6 +570,7 @@ function twoProcessRig(t) {
   let clock = Date.now();
   createBriefingExtension({ stateDir, now: () => (clock += 1000), env: { PATH: process.env.PATH, HERDR_BIN_PATH: '' }, renderOpts: { sleep: () => {} } })(host.pi);
   const { ctx } = makeCtx({ sid: 'sess-A', file: 'C:/sessions/sess-A.jsonl' });
+  onDispose(() => host.emit('session_shutdown', {}, ctx));
   return { dir, stateDir, host, session, ctx };
 }
 const briefWithDecision = {
@@ -801,7 +798,7 @@ test('a record that is still partial at the first read and complete at the re-re
   const base = rig(t);
   let stale = true; // readRecord keeps answering null: the first look found the file half written
   const store = { ...base.store, readRecord: (rel, ...rest) => (stale && rel.startsWith('answers/') ? null : base.store.readRecord(rel, ...rest)) };
-  const r = rig(t, { dir: base.dir, store });
+  const r = rig(t, { dir: base.dir, onDispose: base.onDispose, store });
   const id = seedDecision(base.store);
   seedBoardAnswer(base.store, id, { text: '완성된 답' }); // on disk it is already a complete answer object
   await r.wake('input');
@@ -828,7 +825,7 @@ test('an answer file that cannot be read (I/O error) is reported through the del
     readRecord: (rel, ...rest) => { if (rel.startsWith('answers/')) throw eio(); return base.store.readRecord(rel, ...rest); },
     readText: (rel, ...rest) => { if (rel.startsWith('answers/')) throw eio(); return base.store.readText(rel, ...rest); },
   };
-  const r = rig(t, { dir: base.dir, store });
+  const r = rig(t, { dir: base.dir, onDispose: base.onDispose, store });
   await r.wake('input');
   const first = diskMeta(r);
   assert.match(first.errors?.deliver?.message ?? '', new RegExp(`^deliver: #${id} .*실패: EIO`), 'the read failure reaches the deliver slot');

@@ -1,25 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import * as nodeFs from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fork } from 'node:child_process';
+import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { createBriefingExtension, isChildSessionFile, defaultStateDir } from '../extension.mjs';
 import { RULE_MARKER, RULE_TEXT, replyOverBudget } from '../src/rule.mjs';
 import { makeFakePi, makeCtx, assistant, toolCall, lines } from './helpers/fake-pi.mjs';
+import { tempDir } from './helpers/temp.mjs';
 
 const CHILD = fileURLToPath(new URL('./helpers/ext-child.mjs', import.meta.url));
 
 function lead(t, extra = {}, sessionOpts = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'omo-ext-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { dir, onDispose } = tempDir(t, 'omo-ext-');
   const stateDir = extra.stateDir ?? join(dir, 'state');
-  return { dir, stateDir, ...session(t, stateDir, extra, sessionOpts) };
+  return { dir, stateDir, ...session(t, stateDir, extra, sessionOpts, onDispose) };
 }
 
-function session(t, stateDir, extra = {}, { sid = 'sess-A', hasUI = true, file, sessionKind = 'interactive' } = {}) {
+function session(t, stateDir, extra = {}, { sid = 'sess-A', hasUI = true, file, sessionKind = 'interactive' } = {}, onDispose) {
   let clock = 1_700_000_000_000;
   const now = () => (clock += 1000);
   const reads = [];
@@ -36,6 +36,7 @@ function session(t, stateDir, extra = {}, { sid = 'sess-A', hasUI = true, file, 
     ...extra,
   })(host.pi);
   const { ctx, notes } = makeCtx({ sid, hasUI, file: file ?? `C:/sessions/${sid}.jsonl` });
+  onDispose(() => host.emit('session_shutdown', {}, ctx));
   const pagePath = resolve(stateDir, 'index.html').replace(/\\/g, '/');
   const start = () => host.emit('session_start', { reason: 'startup' }, ctx);
   const meta = () => JSON.parse(readFileSync(join(stateDir, 'sessions', sid, 'meta.json'), 'utf8'));
@@ -132,15 +133,14 @@ test('session_start writes meta and the first page; shutdown clears running', as
 });
 
 test('stale_state: a crashed previous run (running:true, dead pid) is cleared on session_start', async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'omo-ext-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { dir, onDispose } = tempDir(t, 'omo-ext-');
   const stateDir = join(dir, 'state');
   mkdirSync(join(stateDir, 'sessions', 'sess-A'), { recursive: true });
   writeFileSync(join(stateDir, 'sessions', 'sess-A', 'meta.json'), JSON.stringify({
     sessionId: 'sess-A', running: true, pid: 99999999, turnDidWork: true, turnBriefed: false, noReport: true,
     workerIds: ['st_old1'], workers: [{ id: 'st_old1', status: 'running' }], lastActivityAt: 1_699_999_000_000,
   }));
-  const s = session(t, stateDir);
+  const s = session(t, stateDir, {}, {}, onDispose);
   await s.start();
   const m = s.meta();
   assert.equal(m.running, false);
@@ -494,11 +494,10 @@ test('brief: malformed tool input is rejected without stored files', async (t) =
 });
 
 test('brief: ids of unknown or foreign decisions are rejected', async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'omo-ext-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { dir, onDispose } = tempDir(t, 'omo-ext-');
   const stateDir = join(dir, 'state');
-  const a = session(t, stateDir, {}, { sid: 'sess-A' });
-  const b = session(t, stateDir, {}, { sid: 'sess-B' });
+  const a = session(t, stateDir, {}, { sid: 'sess-A' }, onDispose);
+  const b = session(t, stateDir, {}, { sid: 'sess-B' }, onDispose);
   await a.start();
   await b.start();
   await a.brief(goodBrief({ decisions: [decision()] }));
@@ -855,12 +854,16 @@ test('IS-4: a fresh activity resets the trim flag and only trims once tools are 
 // ---------------------------------------------------------------- concurrency
 
 test('concurrency: two processes publishing through the extension at the same time lose nothing', async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'omo-ext-'));
+  const { dir, onDispose } = tempDir(t, 'omo-ext-');
   const stateDir = join(dir, 'state');
   const children = [];
-  t.after(() => {
-    for (const c of children) c.kill();
-    rmSync(dir, { recursive: true, force: true });
+  onDispose(async () => {
+    for (const child of children) {
+      if (child.exitCode !== null || child.signalCode !== null) continue;
+      const exited = once(child, 'exit', { signal: AbortSignal.timeout(5000) });
+      child.kill();
+      await exited;
+    }
   });
   const spawn = (sid) => {
     const child = fork(CHILD, [stateDir, sid, '8'], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
@@ -893,8 +896,7 @@ test('concurrency: two processes publishing through the extension at the same ti
 });
 
 test('IS8-PAUSE: an unreadable settings file keeps reporting off (enabled:false stays paused) and surfaces the error', async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'omo-ext-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { dir, onDispose } = tempDir(t, 'omo-ext-');
   const stateDir = join(dir, 'state');
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(join(stateDir, 'settings.json'), JSON.stringify({ enabled: false }));
@@ -902,11 +904,212 @@ test('IS8-PAUSE: an unreadable settings file keeps reporting off (enabled:false 
     if (String(p).replace(/\\/g, '/').endsWith('/settings.json')) throw Object.assign(new Error('EACCES: injected'), { code: 'EACCES' });
     return nodeFs.readFileSync(p, ...a);
   } };
-  const s = session(t, stateDir, { fs: denied });
+  const s = session(t, stateDir, { fs: denied }, {}, onDispose);
   await s.start();
   assert.deepEqual(await s.host.emit('before_agent_start', { systemPrompt: 'base', prompt: 'x', trigger: 'prompt' }, s.ctx), []);
   assert.match(s.meta().lastError.message, /settings/);
   assert.match(s.meta().lastError.message, /EACCES/);
   assert.ok(textOfResult(await s.brief(goodBrief())).includes('꺼져 있습니다'));
   assert.equal(existsSync(join(stateDir, 'sessions', 'sess-A', 'briefs')), false);
+});
+
+// Generation wiring uses real extension children and the approved RELEASED-lock protocol.
+async function generationPair(t, installed = 9) {
+  const { dir, onDispose } = tempDir(t, 'omo-ext-');
+  const stateDir = join(dir, 'state');
+  const installedFile = join(dir, 'current.json');
+  const setInstalled = generation => writeFileSync(installedFile, JSON.stringify({ generation: `generation-${String(generation).padStart(6, '0')}` }));
+  setInstalled(installed);
+  const children = [];
+  let nextId = 0;
+  const command = (child, command, args = {}) => new Promise((resolve, reject) => {
+    const id = ++nextId;
+    const timer = setTimeout(() => done(new Error(`IPC ${command} timed out for ${child.pid}`)), 15000);
+    function message(m) { if (m?.id === id) done(m.error ? new Error(m.error) : null, m); }
+    function exited(code, signal) { done(new Error(`IPC ${command}: child exited ${code}/${signal}`)); }
+    function done(err, m) {
+      clearTimeout(timer); child.off('message', message); child.off('exit', exited);
+      err ? reject(err) : resolve(m);
+    }
+    child.on('message', message); child.once('exit', exited);
+    child.send({ id, command, ...args });
+  });
+  onDispose(async () => {
+    for (const child of children) {
+      if (child.exitCode !== null || child.signalCode !== null) continue;
+      const exited = once(child, 'exit', { signal: AbortSignal.timeout(15000) });
+      child.send({ command: 'exit' });
+      await exited;
+    }
+    for (const child of children) t.diagnostic(JSON.stringify({ pid: child.pid, code: child.exitCode, signal: child.signalCode, exited: child.exitCode !== null || child.signalCode !== null }));
+  });
+  async function start(generation, identityEnv = {}) {
+    const child = fork(CHILD, [stateDir, `gen-${generation}`, '0'], {
+      execArgv: [],
+      stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+      env: { ...process.env, HERDR_TAB_ID: '', HERDR_PANE_ID: '', HERDR_BIN_PATH: '', ...identityEnv, OMO_TEST_EXT: JSON.stringify({ server: true, generation, installedFile, portBase: 48720 }) },
+    });
+    children.push(child);
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => done(new Error('generation child ready timeout')), 15000);
+      function message(m) { if (m?.ready) done(); }
+      function exited(code) { done(new Error(`generation child exited ${code}`)); }
+      function done(err) { clearTimeout(timer); child.off('message', message); child.off('exit', exited); err ? reject(err) : resolve(); }
+      child.on('message', message); child.once('exit', exited);
+    });
+    return child;
+  }
+  return { stateDir, setInstalled, start, command, lock: () => readFileSync(join(stateDir, 'server.lock'), 'utf8') };
+}
+
+test('generation fixture isolation: inherited Herdr identity is cleared before startup or brief without any external invocation', async (t) => {
+  const p = await generationPair(t);
+  const child = await p.start(9, {
+    HERDR_TAB_ID: 'fixture-not-a-live-tab',
+    HERDR_PANE_ID: 'fixture-not-a-live-pane',
+    HERDR_BIN_PATH: 'fixture-not-an-executable',
+  });
+  const result = await p.command(child, 'status');
+  t.diagnostic(JSON.stringify({ fixtureIdentity: result.fixture.identity, fakeExecCalls: result.fixture.execCalls }));
+  assert.deepEqual(result.fixture.identity, {
+    HERDR_TAB_ID: { present: true, empty: true },
+    HERDR_PANE_ID: { present: true, empty: true },
+    HERDR_BIN_PATH: { present: true, empty: true },
+  }, 'server fixture clears inherited Herdr identity before startup');
+  assert.deepEqual(result.fixture.execCalls, [], 'startup makes no external invocation, including the Herdr fallback');
+  assert.equal(result.meta.tabId, '');
+  assert.equal(result.meta.paneId, '');
+  const briefed = await p.command(child, 'brief');
+  assert.deepEqual(briefed.fixture.execCalls, [], 'explicit brief makes no external invocation');
+});
+
+test('generation wiring (a): quit leaves gen9 RELEASED bytes intact and gen8 stale with its own chip', async (t) => {
+  const p = await generationPair(t);
+  const newer = await p.start(9), older = await p.start(8);
+  const owner = await p.command(newer, 'status');
+  assert.equal(owner.status.role, 'owner');
+  const health = await (await fetch(owner.status.url + 'health')).json();
+  assert.equal(health.generation, 9);
+  t.diagnostic(JSON.stringify({ health, role: owner.status.role }));
+  assert.match(await (await fetch(owner.status.url)).text(), /name="omo-briefing-generation" content="9"/);
+  await p.command(newer, 'shutdown', { reason: 'quit' });
+  const released = p.lock();
+  assert.equal(JSON.parse(released).released, 'quit');
+  assert.equal(JSON.parse(released).pid, newer.pid);
+  for (let i = 0; i < 3; i++) {
+    const result = await p.command(older, 'tick');
+    assert.equal(p.lock(), released);
+    assert.equal(result.status.role, 'stale');
+    assert.equal(result.meta.serverStale, true, 'stale role is saved in metadata');
+    assert.equal(result.meta.errors?.['server:stale'], undefined);
+    t.diagnostic(JSON.stringify({ tick: i, role: result.status.role, serverStale: result.meta.serverStale }));
+    await assert.rejects(fetch(owner.status.url + 'health'));
+  }
+  await p.command(older, 'brief');
+  assert.match(readFileSync(join(p.stateDir, 'index.html'), 'utf8'), /name="omo-briefing-generation" content="9"/);
+});
+
+test('generation wiring (b): reload preserves the gen9 listener and byte-identical lock', async (t) => {
+  const p = await generationPair(t);
+  const child = await p.start(9);
+  const owner = await p.command(child, 'status'), before = p.lock();
+  await p.command(child, 'shutdown', { reason: 'reload' });
+  let response;
+  await assert.doesNotReject(async () => { response = await fetch(owner.status.url + 'health'); }, 'reload keeps the listener alive');
+  assert.equal(response.status, 200, 'reload keeps the listener alive');
+  const health = await response.json();
+  assert.equal(health.pid, child.pid);
+  assert.equal(health.generation, 9);
+  assert.equal(p.lock(), before, 'reload does not release or replace the lock');
+  t.diagnostic(JSON.stringify({ health, role: owner.status.role }));
+});
+
+test('generation wiring (c): a crash cannot make the older client own the installed generation', async (t) => {
+  const p = await generationPair(t, 8);
+  const newer = await p.start(9);
+  const { spawnSync } = await import('node:child_process');
+  const identity = () => {
+    assert.equal(newer.exitCode, null, 'an observed original exit permanently retires its identity');
+    assert.equal(newer.signalCode, null);
+    const result = spawnSync('powershell', ['-NoProfile', '-Command',
+      `Get-CimInstance Win32_Process -Filter "ProcessId=${newer.pid}" | Select-Object ProcessId,ParentProcessId,CreationDate,ExecutablePath,CommandLine | ConvertTo-Json -Compress`,
+    ], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+    t.diagnostic(JSON.stringify({ identityQueryPid: result.pid, code: result.status, signal: result.signal }));
+    assert.equal(result.status, 0);
+    const value = JSON.parse(result.stdout);
+    assert.equal(value.ProcessId, newer.pid);
+    assert.equal(value.ParentProcessId, process.pid);
+    assert.equal(value.ExecutablePath.toLowerCase(), process.execPath.toLowerCase());
+    assert.ok(value.CreationDate);
+    assert.ok(value.CommandLine.replace(/\\/g, '/').includes(p.stateDir.replace(/\\/g, '/')));
+    assert.ok(value.CommandLine.replace(/\\/g, '/').includes(CHILD.replace(/\\/g, '/')));
+    return value;
+  };
+  const originalIdentity = identity();
+  const older = await p.start(8);
+  const owner = await p.command(newer, 'status');
+  assert.equal((await p.command(older, 'status')).status.role, 'client');
+  p.setInstalled(9);
+  const exited = once(newer, 'exit', { signal: AbortSignal.timeout(10000) });
+  assert.deepEqual(identity(), originalIdentity, 'creation time, parent chain, executable and complete private-state argv still identify the original child');
+  newer.kill('SIGKILL'); // the retained original process handle, never a historical numeric PID
+  await exited;
+  const deadLock = p.lock();
+  for (let i = 0; i < 3; i++) {
+    const result = await p.command(older, 'tick');
+    assert.equal(p.lock(), deadLock);
+    assert.equal(JSON.parse(p.lock()).pid, newer.pid);
+    assert.equal(result.status.role, 'stale');
+    assert.equal(result.meta.serverStale, true);
+    await assert.rejects(fetch(owner.status.url + 'health'));
+    t.diagnostic(JSON.stringify({ tick: i, role: result.status.role, deadPid: newer.pid }));
+  }
+});
+
+test('generation wiring: stale metadata adds only its dedicated rendered and hydrated chip, then clears on recovery', async (t) => {
+  const { buildViewModel, pageHtml } = await import('../src/render.mjs');
+  let options;
+  const s = lead(t, { server: true, createServerHost: o => {
+    options = o;
+    return { ensure: async () => null, status: () => ({ role: 'idle' }), release: async () => {}, notifyPublished() {} };
+  } });
+  await s.start();
+  const chip = '이 대화는 예전 세대라 실시간 상황판을 맡지 않음 · 대화를 재시작하면 최신 상황판이 열림';
+  const snapshot = () => ({ sessions: [{ sid: s.sid, meta: s.meta(), briefs: [] }], plans: [] });
+  assert.equal(buildViewModel(snapshot(), s.now()).sessions[0].chips.includes(chip), false);
+  options.onChange({ role: 'stale' });
+  assert.equal(s.meta().serverStale, true);
+  const model = buildViewModel(snapshot(), s.now());
+  assert.ok(model.sessions[0].chips.includes(chip));
+  assert.equal(model.sessions[0].chips.includes('오류 있음'), false);
+  assert.ok(pageHtml(model, 8).includes(chip));
+  for (const role of ['client', 'owner']) {
+    options.onChange({ role });
+    assert.equal(s.meta().serverStale, undefined);
+    assert.equal(buildViewModel(snapshot(), s.now()).sessions[0].chips.includes(chip), false);
+    options.onChange({ role: 'stale' });
+  }
+});
+
+test('generation wiring: checkout reader is async null, installedFile fails closed on malformed generations, and missing shutdown reason stays undefined', async (t) => {
+  let options, reason = 'not called';
+  const createServerHost = o => {
+    options = o;
+    return { ensure: async () => null, status: () => ({ role: 'idle' }), release: async r => { reason = r; }, notifyPublished() {} };
+  };
+  const checkout = lead(t, { server: true, generation: 9, createServerHost });
+  await checkout.start();
+  const result = options.installedGeneration();
+  assert.ok(result instanceof Promise);
+  assert.equal(await result, null, 'a checkout never reads an unrelated installed current.json');
+  await checkout.host.emit('session_shutdown', {}, checkout.ctx);
+  assert.equal(reason, undefined, 'an absent shutdown reason is passed through unchanged');
+  const { dir } = tempDir(t, 'omo-ext-');
+  const installedFile = join(dir, 'current.json');
+  writeFileSync(installedFile, JSON.stringify({ generation: 'generation-broken' }));
+  const malformed = lead(t, { server: true, generation: 9, installedFile, createServerHost });
+  await malformed.start();
+  assert.equal(await options.installedGeneration(), 'unknown');
+  writeFileSync(installedFile, JSON.stringify({ generation: 'generation-000010' }));
+  assert.equal(await options.installedGeneration(), 10);
 });

@@ -39,7 +39,7 @@ try { await page?.close(); } catch (e) { failure ||= e; }
 fs.rmSync(dir, { recursive: true, force: true });
 if (pid !== undefined) {
   const alive = isPidAlive(pid); const prof = fs.existsSync(profile);
-  console.log(`chrome pid ${pid} alive=${alive}; profile exists=${prof}`);
+  console.log(`chrome pid ${pid} alive=${alive}; profile ${profile} exists=${prof}`);
   if (alive || prof) failure ||= new Error('cleanup assertion failed');
 }
 if (failure) { console.error('FAIL', failure); process.exit(1); }

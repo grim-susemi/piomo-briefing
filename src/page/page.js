@@ -20,6 +20,19 @@
   var RELEASE_MS = 100;
   var GLOW_MS = 900;
   var EMPTY = { seq: -1, generatedAt: null, sessions: [] };
+  var stampEl = doc.querySelector && doc.querySelector('meta[name="omo-briefing' + '-generation"]');
+  var stamp = stampEl && stampEl.getAttribute('content');
+  var ownGeneration = typeof stamp === 'string' && /^\d+$/.test(stamp) ? generationOf(Number(stamp)) : null;
+  var generationFloor = ownGeneration;
+  var pendingGeneration = null;
+  var reconnectErrors = 0;
+  var closedNotice = false;
+
+  function generationOf(v) { return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null; }
+  function rememberGeneration(v) {
+    var n = generationOf(v);
+    if (n !== null && (generationFloor === null || n > generationFloor)) generationFloor = n;
+  }
 
   var state = {
     model: null,
@@ -121,7 +134,7 @@
   }
 
   function scheduleRelease() {
-    if (!state.pending || releaseTimer) return;
+    if ((!state.pending && pendingGeneration === null) || releaseTimer) return;
     releaseTimer = g.setTimeout(function () {
       releaseTimer = null;
       // A busy-held update has a 300 ms release deadline, even inside the normal 500 ms window.
@@ -225,6 +238,24 @@
 
   function receive(d) {
     if (!d || typeof d !== 'object' || Array.isArray(d)) return;
+    var gen = generationOf(d.gen);
+    rememberGeneration(gen);
+    var healthy = gen !== null && gen >= generationFloor;
+    if (gen !== null && gen < generationFloor) {
+      closedNotice = true;
+      updateConnectionStatus();
+      return; // an older owner must not replace the visible board or trigger a reload
+    }
+    if (healthy) {
+      closedNotice = false;
+      updateConnectionStatus();
+      var serverGen = generationOf(d.server && d.server.generation);
+      var newer = serverGen !== null ? Math.max(gen, serverGen) : gen;
+      if (ownGeneration !== null && newer > ownGeneration) {
+        pendingGeneration = pendingGeneration === null ? newer : Math.max(pendingGeneration, newer);
+        reloadGeneration();
+      }
+    }
     var s = seqOf(d);
     if (!state.real) {
       state.real = true;
@@ -239,6 +270,7 @@
 
   // Normal streaming applies at most once per APPLY_MIN_MS; busy release takes precedence.
   function consider() {
+    reloadGeneration();
     if (!state.pending) { badge.hidden = true; return; }
     if (busy()) { heldForBusy = true; badge.hidden = false; return; }
     if (heldForBusy) { scheduleRelease(); return; }
@@ -251,6 +283,7 @@
   }
 
   function apply() {
+    reloadGeneration();
     if (!state.pending) { badge.hidden = true; return; }
     if (applyTimer) { g.clearTimeout(applyTimer); applyTimer = null; }
     if (releaseTimer) { g.clearTimeout(releaseTimer); releaseTimer = null; }
@@ -280,6 +313,27 @@
     statusEl.textContent = text || '';
   }
 
+  function updateConnectionStatus() {
+    if (!statusEl) return;
+    statusEl.setAttribute('data-state', closedNotice ? 'closed' : '');
+    if (closedNotice) setStatus('실시간 상황판이 닫힘 · 최신 세대 대화를 하나 재시작하면 다시 열림');
+    else setStatus('');
+  }
+
+  function reloadGeneration() {
+    if (pendingGeneration === null || busy()) return;
+    var gen = pendingGeneration;
+    pendingGeneration = null;
+    if (gen < generationFloor || closedNotice) return;
+    var key = 'omo-reloaded-for-' + gen;
+    try {
+      if (g.sessionStorage.getItem(key) !== null) return;
+      if (!rememberForReload()) return;
+      g.sessionStorage.setItem(key, '1');
+      g.location.reload();
+    } catch (e) { warn('generation reload flag', e); }
+  }
+
   function connectLive() {
     initAnswers(); // the board server's page: its write token, and what a 403 reload carried over
     var loc = g.location;
@@ -290,10 +344,30 @@
     }).then(guard('data.json', receive)).catch(function (e) { fail('data.json', e); });
     var es = new g.EventSource('/events');
     state.es = es;
-    es.addEventListener('data', guard('sse data', function (ev) { paused = false; setStatus(''); receive(JSON.parse(ev.data)); }));
-    es.addEventListener('paused', guard('sse paused', function () { paused = true; setStatus('브리핑 꺼짐 - /brief on 으로 켜기'); }));
-    es.onopen = guard('sse open', function () { paused = false; setStatus(''); });
-    es.onerror = guard('sse error', function () { if (!paused) setStatus('실시간 연결 끊김 - 다시 연결 중'); });
+    es.addEventListener('data', guard('sse data', function (ev) {
+      var model = JSON.parse(ev.data);
+      reconnectErrors = 0;
+      paused = false;
+      receive(model);
+      updateConnectionStatus();
+    }));
+    es.addEventListener('closing', guard('sse closing', function (ev) {
+      var info = JSON.parse(ev.data);
+      rememberGeneration(info.installed);
+      if (info.reason === 'stale') closedNotice = true;
+      updateConnectionStatus();
+    }));
+    es.addEventListener('paused', guard('sse paused', function () {
+      paused = true;
+      if (closedNotice) updateConnectionStatus();
+      else setStatus('브리핑 꺼짐 - /brief on 으로 켜기');
+    }));
+    es.onopen = guard('sse open', function () { paused = false; updateConnectionStatus(); });
+    es.onerror = guard('sse error', function () {
+      if (++reconnectErrors >= 5) closedNotice = true;
+      if (closedNotice) updateConnectionStatus();
+      else if (!paused) setStatus('실시간 연결 끊김 - 다시 연결 중');
+    });
     return loc;
   }
 

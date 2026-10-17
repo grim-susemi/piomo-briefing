@@ -5,7 +5,9 @@
 //
 // - Copies built REPO/dist/ to <dir>/briefing/integration/generation-NNNNNN/
 //   (never modifies an existing generation; the next number is always new).
-// - Writes <dir>/briefing/current.json ({generation, installedAt, sha256}) by replace-write.
+// - Rollback = reinstall (a new, higher generation number); never repoint the shim at an older
+//   generation dir: pages and servers of a newer generation would then be overruled.
+// - Writes the managed shim first, then <dir>/briefing/current.json ({generation, installedAt, sha256}) by replace-write.
 // - Writes the managed shim <dir>/extensions/omo-briefing.js (managed marker +
 //   re-export). A same-named non-managed file refuses the install (exit 1,
 //   nothing written).
@@ -285,11 +287,13 @@ async function main(argv) {
   cpSync(DIST, genDir, { recursive: true });
   const sha256 = {};
   for (const f of listFiles(genDir)) sha256[relative(genDir, f)] = sha256Bytes(readFileSync(f));
+  // The shim goes first: a crash between the two writes leaves the new shim pointing at a complete generation dir,
+  // never a current.json that names a generation no shim loads.
+  mkdirSync(extDir, { recursive: true });
+  replaceWrite(shimFile, shimText);
   replaceWrite(currentFile, JSON.stringify({
     generation, installedAt: new Date().toISOString(), sha256,
   }, null, 2) + '\n');
-  mkdirSync(extDir, { recursive: true });
-  replaceWrite(shimFile, shimText);
   if (stateHasBoard) {
     // Plan todo 17: re-draw the existing board through the renderer
     // (renderPage: render.lock, seq = published.json seq + 1, republication). A
@@ -342,6 +346,7 @@ async function main(argv) {
     }
   }
   if (existsSync(readmeSrc)) replaceWrite(join(agentDir, 'briefing', 'README.ko.md'), readFileSync(readmeSrc, 'utf8'));
+  console.log('이미 열린 대화는 다시 시작하기 전까지 이전 세대로 계속 동작합니다');
   console.log(await liveBoardLine(stateDir));
 }
 

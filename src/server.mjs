@@ -86,6 +86,17 @@ export function createBoardServer(options) {
   if (tokenBytes && typeof onAnswer === 'function') writeHandlers.set('/answer', onAnswer);
   if (tokenBytes && typeof onFocus === 'function') writeHandlers.set('/focus', onFocus);
   let writeInFlight = false;
+  const idleWaiters = new Set();
+
+  function releaseWrite() {
+    writeInFlight = false;
+    for (const resolve of idleWaiters) resolve();
+    idleWaiters.clear();
+  }
+
+  function idle() {
+    return writeInFlight ? new Promise((resolve) => idleWaiters.add(resolve)) : Promise.resolve();
+  }
 
   // A host callback that throws must never take the lead conversation down.
   function safe(fn, ...args) {
@@ -267,9 +278,9 @@ export function createBoardServer(options) {
       timer.unref();
     });
     call.then(
-      () => { writeInFlight = false; },
+      () => { releaseWrite(); },
       (err) => {
-        writeInFlight = false;
+        releaseWrite();
         if (timedOut) report('server:sse', err);
       },
     );
@@ -325,7 +336,7 @@ export function createBoardServer(options) {
       json(res, result.status, result.json);
       recoverSse();
     } finally {
-      if (!slotHandedToCallback) writeInFlight = false;
+      if (!slotHandedToCallback) releaseWrite();
     }
   }
 
@@ -510,9 +521,17 @@ export function createBoardServer(options) {
   }
 
   function sendPaused() {
+    sendEvent('paused', { paused: true });
+  }
+
+  function broadcastClosing(info) {
+    sendEvent('closing', info);
+  }
+
+  function sendEvent(name, info) {
     for (const c of [...clients]) {
       try {
-        writeClient(c, 'event: paused\ndata: {"paused":true}\n\n');
+        writeClient(c, `event: ${name}\ndata: ${JSON.stringify(info)}\n\n`);
       } catch (err) {
         report('server:sse', err);
         c.res.destroy();
@@ -552,6 +571,8 @@ export function createBoardServer(options) {
     start,
     broadcast,
     sendPaused,
+    broadcastClosing,
+    idle,
     close,
     clientCount: () => clients.size,
     address: () => (server ? server.address() : null),

@@ -432,6 +432,7 @@ export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
     // any per-source error in meta.errors (decide, mirror, deliver, settings, render, ...) -> chip; the detail stays out of the page.
     // A record without meta.errors (older format) falls back to its lastError.
     if (isObj(meta.errors) ? hasErrors(meta) : isObj(meta.lastError)) chipList.push('오류 있음');
+    if (meta.serverStale === true) chipList.push('이 대화는 예전 세대라 실시간 상황판을 맡지 않음 · 대화를 재시작하면 최신 상황판이 열림');
     if (running) chipList.unshift(runningAlive ? '작업 중' : '응답 없음');
 
     // the plan this conversation summarised (newest revision), or the chips/skeleton of a plan file without a summary
@@ -638,13 +639,14 @@ function makeRenderer(store, now, opts) {
   const canPublish = typeof opts.canPublish === 'function' ? opts.canPublish : () => true;
   const pausedOut = () => ({ ok: false, paused: true, seqs, error: PAUSED_ERROR });
 
-  // True when index.html on disk was written by a newer generation than ours: only data.js is updated then.
+  // True when index.html on disk was written by a newer generation than ours - or by any generation when we have none
+  // (a checkout publisher): only data.js is updated then. An unstamped or missing page is still written.
   // readText returns null only when there is no page yet; an exhausted read error throws: the caller must not downgrade blindly.
   function pageIsNewer() {
-    if (!Number.isInteger(generation)) return false;
     const text = store.readText('index.html');
     const m = text === null ? null : STAMP_RE.exec(text);
-    return m !== null && Number(m[1]) > generation;
+    if (m === null) return false;
+    return !Number.isInteger(generation) || Number(m[1]) > generation;
   }
 
   function readLock() {
