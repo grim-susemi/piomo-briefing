@@ -4,11 +4,9 @@
 
 /* room for the sticky band: page.css owns these rules, the band only adds its own height to their values */
 html:root { scroll-padding-top: calc(12px + var(--alarm-h)); } /* page.css html: 12px */
-body .toc { top: var(--alarm-h); }
+body .sh-rail, body .sh-side { padding-top: var(--alarm-h); }
+body .sh-tabs { scroll-margin-top: var(--alarm-h); }
 body .new-badge { top: calc(10px + var(--alarm-h)); } /* page.css .new-badge: 10px */
-@media (min-width: 600px) {
-  body .toc { height: calc(100vh - var(--alarm-h)); }
-}
 
 .alarm-band {
   --alarm-bg: var(--red); --alarm-fg: var(--panel);
@@ -19,7 +17,7 @@ body .new-badge { top: calc(10px + var(--alarm-h)); } /* page.css .new-badge: 10
 .alarm-band[hidden] { display: none; }
 .alarm-row { display: flex; align-items: center; gap: 8px; min-height: 24px; margin: 0; border-radius: 4px; }
 .alarm-row + .alarm-row { border-top: 1px solid color-mix(in srgb, var(--alarm-fg) 25%, transparent); }
-.alarm-text { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.alarm-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; } /* wraps, never cut: the band grows (alarm.js follows its height) */
 .alarm-who { font-weight: 700; }
 .alarm-act { flex: none; display: flex; align-items: center; gap: 6px; }
 .alarm-tag {

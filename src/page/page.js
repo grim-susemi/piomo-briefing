@@ -1,5 +1,5 @@
 /* omo-briefing page controller, classic script (file:// safe, no modules).
- * Load order in index.html: view.js, page.js (data.js is pulled in by this file on file://).
+ * Load order: view, plan-view, workers-view, convo-view, shell, alarm, annotate, page.
  * Transport:
  *  - http(s) origin (live board server): one fetch of /data.json + EventSource('/events').
  *    No polling. A dropped stream shows a banner; the browser reconnects by itself.
@@ -44,11 +44,13 @@
     transport: 'file',
     pointerDown: false,
     now: function () { return Date.now(); },
-    ui: { tab: null, expanded: Object.create(null), tocOpen: false, legendOpen: false, doneOpen: false, live: false, focus: Object.create(null) }
+    ui: { expanded: Object.create(null), live: false, focus: Object.create(null) }
   };
   var hooks = { beforeApply: [], afterApply: [] };
   var root, badge, statusEl, linkEl, errEl, applyTimer = null, releaseTimer = null, sessionJson = {}, glowTimers = {};
   var heldForBusy = false;
+  var shell, main, sideList, rail, tabs, trimEl;
+  var regionHtml = Object.create(null), scrollMemory = Object.create(null), renderedKey = null;
 
   function esc(v) { return g.BriefView && g.BriefView.escapeHtml ? g.BriefView.escapeHtml(v) : String(v); }
   function seqOf(d) { return d && typeof d.seq === 'number' && isFinite(d.seq) ? d.seq : 0; }
@@ -73,6 +75,15 @@
   function ensureRoot() {
     root = doc.getElementById('app');
     if (!root) { root = doc.createElement('div'); root.id = 'app'; doc.body.appendChild(root); }
+    var prefs = g.BriefShell.reduce(null, { type: 'load', json: g.BriefShell.restore() });
+    for (var key in state.ui) prefs[key] = state.ui[key];
+    state.ui = prefs;
+    root.innerHTML = g.BriefShell.skeleton(state.ui);
+    shell = root.querySelector('[data-shell]');
+    main = doc.getElementById('main');
+    rail = doc.getElementById('rail');
+    tabs = doc.getElementById('tabs');
+    sideList = shell.querySelector('[data-sh-part="list"]');
     badge = doc.getElementById('new-badge');
     if (!badge) {
       badge = doc.createElement('button');
@@ -103,11 +114,23 @@
       if (doc.body.insertBefore) doc.body.insertBefore(linkEl, root);
       else doc.body.appendChild(linkEl);
     }
+    // These nodes are persistent, above the tabs, never part of a refreshed region.
+    var wrap = shell.querySelector('.sh-wrap');
+    wrap.insertBefore(statusEl, tabs);
+    wrap.insertBefore(linkEl, tabs);
+    trimEl = doc.createElement('p');
+    trimEl.className = 'trimmed-note';
+    trimEl.hidden = true;
+    wrap.insertBefore(trimEl, tabs);
     badge.addEventListener('click', guard('badge', apply));
     root.addEventListener('click', guard('click', onClick));
     root.addEventListener('input', guard('input', onInput));
-    g.addEventListener('scroll', guard('scroll', spy), { passive: true });
-    g.addEventListener('resize', guard('resize', spy));
+    root.addEventListener('toggle', guard('details toggle', function (ev) {
+      var t = ev.target, k = t && t.getAttribute && t.getAttribute('data-open-key');
+      if (k) state.ui.expanded[k] = t.open === true;
+    }), true);
+    g.BriefShell.bind(shell, { dispatch: dispatch, now: function () { return state.now(); } });
+    g.BriefAnnotate.mount(main, { context: annotationContext, send: sendAnnotation, idle: scheduleRelease });
     // "busy" release triggers
     doc.addEventListener('selectionchange', guard('selectionchange', scheduleRelease));
     doc.addEventListener('focusout', guard('focusout', scheduleRelease));
@@ -124,9 +147,10 @@
   function busy() {
     if (state.pointerDown) return true;
     var sel = g.getSelection && g.getSelection();
-    if (sel && !sel.isCollapsed && String(sel).length > 0 && (!sel.anchorNode || root.contains(sel.anchorNode))) return true;
+    if (g.BriefAnnotate.busy()) return true;
+    if (sel && !sel.isCollapsed && String(sel).length > 0 && (!sel.anchorNode || main.contains(sel.anchorNode))) return true;
     var a = doc.activeElement;
-    if (a && root.contains(a)) {
+    if (a && main.contains(a)) {
       var tag = String(a.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea' || a.isContentEditable) return true;
     }
@@ -143,43 +167,103 @@
     }, RELEASE_MS);
   }
 
-  // ---- scroll anchor: first [data-card] visible at the top of the screen ------------------------
+  // ---- region scroll: first stable block visible inside #main, never DOM position --------------
   function captureAnchor() {
-    if (!root) return null;
-    var cards = root.querySelectorAll('[data-card]');
+    if (!main) return null;
+    var top = main.getBoundingClientRect().top;
+    var cards = main.querySelectorAll('[data-block]');
     for (var i = 0; i < cards.length; i++) {
       var r = cards[i].getBoundingClientRect();
-      if (r.bottom === undefined || r.bottom > 0) {
-        return { id: cards[i].getAttribute('data-card'), top: r.top };
+      if (r.bottom === undefined || r.bottom > top) {
+        return { id: cards[i].getAttribute('data-block'), top: r.top - top };
       }
     }
     return null;
   }
   function restoreAnchor(a, y) {
-    if (!a) { g.scrollTo(0, y); return; }
-    var cards = root.querySelectorAll('[data-card]');
+    main.scrollTop = y;
+    if (!a) return;
+    var cards = main.querySelectorAll('[data-block]');
     for (var i = 0; i < cards.length; i++) {
-      if (cards[i].getAttribute('data-card') === a.id) {
-        g.scrollTo(0, y + (cards[i].getBoundingClientRect().top - a.top));
+      if (cards[i].getAttribute('data-block') === a.id) {
+        main.scrollTop += cards[i].getBoundingClientRect().top - main.getBoundingClientRect().top - a.top;
         return;
       }
     }
-    g.scrollTo(0, y);
   }
 
+  function currentSession() {
+    var sessions = state.model && Array.isArray(state.model.sessions) ? state.model.sessions : [];
+    for (var i = 0; i < sessions.length; i++) if (sessions[i] && sessions[i].id === state.ui.active) return sessions[i];
+    return null;
+  }
+  function mainKey() { return state.ui.active ? state.ui.active + '/' + (state.ui.sub[state.ui.active] || 'ov') : 'overview'; }
+  function saveScroll() {
+    if (renderedKey !== null) scrollMemory[renderedKey] = { y: main.scrollTop, anchor: captureAnchor() };
+  }
+  function seedPlan() {
+    var s = currentSession();
+    if (!s || state.ui.sub[s.id] !== 'plan' || !s.plan) return;
+    var id = s.plan.planId;
+    if (typeof id !== 'string' && typeof id !== 'number') return;
+    ['plan:', 'plan-tasks:'].forEach(function (p) {
+      var k = p + id;
+      if (!Object.prototype.hasOwnProperty.call(state.ui.expanded, k)) state.ui.expanded[k] = true;
+    });
+  }
+  function dispatch(action) {
+    state.ui = g.BriefShell.reduce(state.ui, action);
+    g.BriefShell.persist(undefined, state.ui);
+    render();
+  }
+  function open(sid, sub) { dispatch({ type: 'open', sid: sid, sub: sub, now: state.now() }); }
+  function region(name, el, html) {
+    if (regionHtml[name] === html) return false;
+    el.innerHTML = html;
+    regionHtml[name] = html;
+    return true;
+  }
   function render() {
-    var y = g.scrollY || 0;
-    var anchor = captureAnchor();
+    saveScroll();
+    var key = mainKey(), sideY = sideList.scrollTop;
     try {
-      root.innerHTML = g.BriefView.renderApp(state.model || EMPTY, state.ui);
+      var model = state.model || EMPTY;
+      (Array.isArray(model.sessions) ? model.sessions : []).forEach(function (session) {
+        var key = annotationSent[session.id];
+        if (!key || !Array.isArray(session.notes)) return;
+        if (session.notes.some(function (note) { return note.key === key && typeof note.delivery === 'string' && note.delivery.indexOf('전달됨') === 0; })) {
+          delete annotationSent[session.id];
+          g.BriefAnnotate.status(session.id, null);
+        }
+      });
+      seedPlan();
+      // one clock per applied model: worker rows draw their pulse phase and elapsed time from the wall clock of the apply,
+      // so a render that changes nothing in #main (a rail click, the sidebar) writes the same HTML and region() keeps it
+      state.ui.wallNow = state.appliedAt;
+      g.BriefShell.sync(shell, state.ui);
+      region('rail', rail, g.BriefShell.rail(model, state.ui));
+      region('side', sideList, g.BriefShell.side(model, state.ui));
+      region('tabs', tabs, g.BriefShell.tabs(model, state.ui));
+      var s = currentSession();
+      var html = s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision })
+        : state.ui.active ? '<p class="empty">(지금 안 보임)</p>' : g.BriefView.renderOverview(model, state.ui);
+      if (region('main', main, html)) {
+        g.BriefAnnotate.decorate();
+        // a #main drawn later than the apply shows the current elapsed times at once, not the apply's (the 1 s ticker goes on)
+        if (g.BriefWorkersView) g.BriefWorkersView.tick(main, state.now());
+      }
+      var trimmed = model.trimmed;
+      var n = trimmed && trimmed.cards;
+      trimEl.hidden = !(Number.isInteger(n) && n > 0);
+      trimEl.textContent = trimEl.hidden ? '' : '오래된 대화 ' + n + '개는 자세한 정보를 줄였어요';
     } catch (e) {
       fail('render', e);
-      root.innerHTML = '<p class="fatal">화면을 그리지 못했습니다: ' + esc(e && e.message) + '</p>';
+      main.innerHTML = '<p class="fatal">화면을 그리지 못했습니다: ' + esc(e && e.message) + '</p>';
     }
-    // ui.tab stays null until the owner picks a tab, so the view keeps choosing a
-    // sensible default (e.g. after the first real data replaces the empty screen).
-    restoreAnchor(anchor, y);
-    spy();
+    sideList.scrollTop = sideY;
+    var memory = scrollMemory[key];
+    if (memory) restoreAnchor(memory.anchor, memory.y); else main.scrollTop = 0;
+    renderedKey = key;
   }
 
   function runHooks(list, arg) {
@@ -205,6 +289,10 @@
   }
 
   function setFlash(id, on) {
+    if (state.ui.active === id) {
+      var blocks = main.querySelectorAll('[data-block]');
+      for (var b = 0; b < blocks.length; b++) blocks[b].classList[on ? 'add' : 'remove']('flash');
+    }
     var cards = root.querySelectorAll('[data-card]');
     for (var k = 0; k < cards.length; k++) {
       var el = cards[k];
@@ -229,6 +317,9 @@
 
   function show(model) {
     state.model = model; state.seq = seqOf(model); state.appliedAt = state.now();
+    state.ui = g.BriefShell.reduce(state.ui, { type: 'known',
+      ids: (Array.isArray(model.sessions) ? model.sessions : []).filter(function (s) { return s && typeof s.id === 'string'; }).map(function (s) { return s.id; }), now: state.now() });
+    g.BriefShell.persist(undefined, state.ui);
     runHooks(hooks.beforeApply, model);
     render();
     glow(model);
@@ -288,8 +379,6 @@
     if (applyTimer) { g.clearTimeout(applyTimer); applyTimer = null; }
     if (releaseTimer) { g.clearTimeout(releaseTimer); releaseTimer = null; }
     heldForBusy = false;
-    // keep the tab the owner is looking at, even one the view picked by default
-    state.ui.tab = shownTab() || state.ui.tab;
     var m = state.pending;
     state.pending = null;
     badge.hidden = true;
@@ -391,20 +480,12 @@
     } else legacy();
   }
 
-  function shownTab() {
-    var app = root.querySelector('.app');
-    return app ? app.getAttribute('data-tab') : null;
-  }
-
-  function goTo(id, tab) {
-    if (tab && tab !== shownTab()) { releaseHeld(); state.ui.tab = tab; render(); }
+  function goTo(id) {
     var el = doc.getElementById(id);
     if (!el) return;
-    if (state.ui.tocOpen) { state.ui.tocOpen = false; render(); el = doc.getElementById(id); }
     el.scrollIntoView({ block: 'start' });
     el.classList.add('flash');
     g.setTimeout(function () { el.classList.remove('flash'); }, 900);
-    mark(id);
   }
 
   // The write token of the page the board server serves: the meta tag only that page carries. The name is split on
@@ -430,56 +511,23 @@
     var t = ev.target.closest('[data-copy],[data-act],[data-goto]');
     if (!t || !root.contains(t)) return;
     if (t.hasAttribute('data-copy')) { copy(t.getAttribute('data-copy'), t); return; }
-    if (t.hasAttribute('data-goto')) { ev.preventDefault(); goTo(t.getAttribute('data-goto'), t.getAttribute('data-tab')); return; }
+    if (t.hasAttribute('data-goto')) { ev.preventDefault(); goTo(t.getAttribute('data-goto')); return; }
     var act = t.getAttribute('data-act');
     if (act && act.indexOf('ans-') === 0) { answerClick(act, t); return; }
-    if (act === 'tab') {
-      var tab = t.getAttribute('data-tab');
-      if (tab === 'done') state.ui.doneOpen = true;
-      var changed = tab !== shownTab();
-      if (changed) releaseHeld();
-      state.ui.tab = tab;
-      render();
-      if (changed) g.scrollTo(0, 0);
+    if (act === 'sub') {
+      open(t.getAttribute('data-sid') || state.ui.active, t.getAttribute('data-sub'));
+    } else if (act === 'ann-new') {
+      var sid = t.getAttribute('data-sid');
+      clearAnnotationRequest(sid);
+      g.BriefAnnotate.status(sid, null);
+      g.BriefAnnotate.decorate();
     } else if (act === 'exp') {
       var k = t.getAttribute('data-key');
       state.ui.expanded[k] = !state.ui.expanded[k];
       render();
     } else if (act === 'focus') {
       focusTab(t.getAttribute('data-session'));
-    } else if (act === 'toc') {
-      state.ui.tocOpen = !state.ui.tocOpen; render();
-    } else if (act === 'legend') {
-      state.ui.legendOpen = !state.ui.legendOpen; render();
     }
-  }
-
-  function mark(id) {
-    var links = root.querySelectorAll('.toclink');
-    for (var i = 0; i < links.length; i++) {
-      var on = links[i].getAttribute('data-goto') === id;
-      links[i].classList.toggle('spy', on);
-      if (on) links[i].setAttribute('aria-current', 'true'); else links[i].removeAttribute('aria-current');
-    }
-  }
-
-  // Always derived from the scroll position (runs on every scroll/resize/render), so a TOC
-  // click never leaves a sticky highlight: the current section is the last card whose top
-  // has passed the line 45% down the viewport; always the first card at the top of the tab
-  // and the last at the page end (where it can never climb that high).
-  function spy() {
-    if (!root) return;
-    var cards = root.querySelectorAll('article.card');
-    if (!cards.length) return;
-    var atEnd = (g.scrollY || 0) > 0 && g.innerHeight + g.scrollY >= doc.documentElement.scrollHeight - 4;
-    var cur = atEnd ? cards[cards.length - 1] : cards[0];
-    if (!atEnd && (g.scrollY || 0) > 0) {
-      var line = g.innerHeight * 0.45;
-      for (var i = 1; i < cards.length; i++) {
-        if (cards[i].getBoundingClientRect().top <= line) cur = cards[i];
-      }
-    }
-    mark(cur.id);
   }
 
   // ---- block modules (workers-view.js, alarm.js): FLIP motion around every apply, 1 s elapsed ticker, waiting alarm ----
@@ -504,13 +552,16 @@
   // model never do). With it the decision cards get A/B/C buttons and a reply box (view.js, ui.live) and every send is one
   // same-origin POST /answer {id, sessionId, option|text} with the token header. Per-decision state, kept across the full
   // re-render: state.ui.answers[id] = {open, draft, confirm: {option}|{text}|null, phase: ''|'sending'|'sent'|'closed', error,
-  // tab}; tab = the tab that showed the conversation's card at 보내기 (view.js keeps the card there until the owner changes tabs).
+  // sentOption: the option of the send, '' for a reply}. A report's 이걸로 고르기 (data-dec) uses the same state and confirm row,
+  // in place on the report (convo-view.js).
+  // Conversation and sub-tab identity live in state.ui.active/sub, independently of decision classification.
   // A 200 only means the answer is stored: 전달됨 comes from the next view model (render.mjs delivery text), never from here.
   var REPLY_MAX = 500; // = view.js maxlength; <= 500 UTF-16 units is always within the server's 500 code points
   var POST_TIMEOUT_MS = 15000; // over the server's own bounds (2 s body read, 10 s write: it answers 408/504 first)
   var RELOAD_KEY = 'omo-briefing.answer403'; // sessionStorage: one automatic reload per 403, plus the reply drafts it carries
   var ANSWER_TEXT = {
     closed: '이미 답했거나 닫힌 결정',
+    held: '보류한 결정이에요 - 다시 열기를 누른 뒤 답하세요',
     noText: '이 대화는 답글을 못 받아요 - 선택지로 답하세요',
     reopen: '상황판을 다시 열어 주세요',
     paused: '상황판이 꺼져 있어요',
@@ -539,7 +590,7 @@
 
   function answerState(key) {
     var all = state.ui.answers || (state.ui.answers = Object.create(null));
-    if (!Object.prototype.hasOwnProperty.call(all, key)) all[key] = { open: false, draft: '', confirm: null, phase: '', error: '', tab: '' };
+    if (!Object.prototype.hasOwnProperty.call(all, key)) all[key] = { open: false, draft: '', confirm: null, phase: '', error: '' };
     return all[key];
   }
 
@@ -548,29 +599,47 @@
     for (var i = 0; i < list.length; i++) {
       var s = list[i], ds = s && Array.isArray(s.decisions) ? s.decisions : [];
       for (var j = 0; j < ds.length; j++) {
-        if (ds[j] && ds[j].id === id) return { d: ds[j], sessionId: typeof ds[j].sessionId === 'string' && ds[j].sessionId ? ds[j].sessionId : String(s.id), card: String(s.id) };
+        if (ds[j] && ds[j].id === id) return { d: ds[j], owner: s, sessionId: typeof ds[j].sessionId === 'string' && ds[j].sessionId ? ds[j].sessionId : String(s.id), card: String(s.id) };
       }
     }
     return null;
   }
 
-  // the conversation's card is on the screen, i.e. in the tab being looked at
-  function cardShown(id) {
-    var cards = root.querySelectorAll('[data-card]');
-    for (var i = 0; i < cards.length; i++) if (cards[i].getAttribute('data-card') === id) return true;
-    return false;
-  }
-
-  // The owner changes tabs: cards held where their answers were sent go to the tabs their models give them (view.js).
-  function releaseHeld() {
-    var all = state.ui.answers;
-    for (var k in all) if (Object.prototype.hasOwnProperty.call(all, k) && all[k]) all[k].tab = '';
-  }
-
   function answerClick(act, t) {
-    var key = t.getAttribute('data-id');
+    var key = t.getAttribute('data-id') || t.getAttribute('data-dec');
     if (!answerToken || !validKey(key)) return;
     var a = answerState(key);
+    // 보류 asks first everywhere (the same confirm row as an answer, C-HOLD 5); 보류 in the row and 다시 열기 post at once
+    if (act === 'ans-hold' && a.phase === '') {
+      a.confirm = { hold: true };
+      a.open = false;
+      a.error = '';
+      render();
+      return;
+    }
+    if (act === 'ans-send' && a.phase === '' && a.confirm && a.confirm.hold === true) act = 'ans-hold-go';
+    if (act === 'ans-hold-go' || act === 'ans-reopen') {
+      if (a.phase === 'sending') return;
+      var found = findDecision(Number(key));
+      if (!found) return;
+      var action = act === 'ans-hold-go' ? 'hold' : 'reopen';
+      a.phase = 'sending';
+      a.error = '';
+      render();
+      postJson('/answer', { id: Number(key), sessionId: found.sessionId, action: action }).then(guard('decision action', function (res) {
+        a.phase = '';
+        if (res.status === 200 && res.json && res.json.ok) {
+          found.d.held = action === 'hold' ? { at: state.now() } : null;
+          found.d.closed = action === 'hold';
+          a.confirm = null;
+        } else {
+          a.error = answerFailure(res.status, res.json && res.json.code).text;
+          a.confirm = null;
+        }
+        render();
+      }));
+      return;
+    }
     if (a.phase === 'sending' || a.phase === 'sent' || a.phase === 'closed') return; // one send per decision, never a second POST
     if (act === 'ans-pick') {
       var opt = t.getAttribute('data-opt');
@@ -628,9 +697,9 @@
     }
     var body = { id: Number(key), sessionId: found.sessionId };
     if (typeof c.option === 'string') body.option = c.option; else body.text = c.text;
+    a.sentOption = typeof c.option === 'string' ? c.option : '';
     a.phase = 'sending';
     a.error = '';
-    a.tab = cardShown(found.card) ? shownTab() || '' : ''; // that card stays on this screen while its answer is on the way
     render();
     postJson('/answer', body).then(guard('answer reply', function (res) { answerReply(key, res); }));
   }
@@ -690,13 +759,84 @@
   // retry = the confirm row stays, so one more press sends again.
   function answerFailure(status, code) {
     if (status === 409 && (code === 'ANSWERED' || code === 'CLOSED')) return { phase: 'closed', text: ANSWER_TEXT.closed };
+    if (status === 409 && code === 'HELD') return { text: ANSWER_TEXT.held };
     if (status === 409 && code === 'NO_TEXT_SUPPORT') return { text: ANSWER_TEXT.noText };
     if (status === 404 || (status === 409 && code === 'SESSION_MISMATCH')) return { phase: 'closed', text: ANSWER_TEXT.gone };
     if (status === 503) return { text: ANSWER_TEXT.paused, retry: true };
     if (status === 429) return { text: ANSWER_TEXT.busy, retry: true };
     if (status === 408 || status === 504) return { text: ANSWER_TEXT.slow, retry: true };
     if (status === 0) return { text: ANSWER_TEXT.network, retry: true };
+    if (status === 413) return { text: '너무 길어요 - 주석을 나눠 보내세요', retry: true };
     return { text: ANSWER_TEXT.failed + ' (' + status + (code ? ' ' + code : '') + ') - 다시 눌러 주세요', retry: true };
+  }
+
+  // An annotation request is immutable until stored successfully or explicitly replaced. Retrying uses the same
+  // canonical text and UUID, including after a token/generation reload; never resend on startup.
+  var annotationRequests = Object.create(null), annotationUnsupported = Object.create(null), annotationSent = Object.create(null);
+  var ANN_REQUEST_KEY = 'omo-briefing.annotation.';
+  function annotationContext() {
+    var s = currentSession();
+    if (!s) return null;
+    return { session: s, sub: state.ui.sub[s.id] || 'ov', expanded: state.ui.expanded,
+      mode: state.ui.live && !annotationUnsupported[s.id] && Array.isArray(s.answerKinds) && s.answerKinds.indexOf('annotation') >= 0 ? 'live' : 'file' };
+  }
+  function annotationRequest(sid) {
+    if (Object.prototype.hasOwnProperty.call(annotationRequests, sid)) return annotationRequests[sid];
+    var r = null;
+    try {
+      var raw = g.sessionStorage && g.sessionStorage.getItem(ANN_REQUEST_KEY + sid);
+      if (raw) {
+        var saved = JSON.parse(raw);
+        if (saved && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(saved.requestId) && typeof saved.text === 'string') r = saved;
+      }
+    } catch (e) { warn('annotation reload request', e); }
+    annotationRequests[sid] = r;
+    return r;
+  }
+  function clearAnnotationRequest(sid) {
+    annotationRequests[sid] = null;
+    try { if (g.sessionStorage) g.sessionStorage.removeItem(ANN_REQUEST_KEY + sid); }
+    catch (e) { warn('annotation reload request', e); }
+  }
+  function sendAnnotation(s, text) {
+    var sid = s.id, A = g.BriefAnnotate;
+    if (!state.ui.live || !Array.isArray(s.answerKinds) || s.answerKinds.indexOf('annotation') < 0) return;
+    if (A.sending(sid)) return;
+    var r = annotationRequest(sid);
+    var conflict = '같은 묶음이 이미 다른 내용으로 보내졌어요 - 새로 보내기';
+    if (r && r.text !== text) { A.status(sid, { text: conflict, conflict: true }); return; }
+    if (!r) {
+      r = { requestId: g.crypto.randomUUID(), text: text };
+      annotationRequests[sid] = r;
+    }
+    try { if (g.sessionStorage) g.sessionStorage.setItem(ANN_REQUEST_KEY + sid, JSON.stringify(r)); }
+    catch (e) { warn('annotation reload request', e); }
+    delete annotationSent[sid];
+    A.status(sid, { text: '보내는 중…', sending: true });
+    postJson('/answer', { kind: 'annotation', sessionId: sid, requestId: r.requestId, text: r.text }).then(guard('annotation reply', function (res) {
+      var code = res.json && res.json.code;
+      if (res.status === 200 && res.json && res.json.ok === true) {
+        reloadedFor403 = false;
+        A.status(sid, null);
+        A.clear(sid);
+        clearAnnotationRequest(sid);
+        annotationSent[sid] = res.json.key;
+        A.status(sid, { text: '보냄 · 전달 상태 기다리는 중…', ok: true });
+        state.ui.expanded['cv:' + sid + ':notes'] = true;
+        if (state.ui.active === sid) open(sid, 'ov');
+      } else if (res.status === 403 && !reloadedFor403 && rememberForReload()) {
+        A.status(sid, null);
+        reloadedFor403 = true;
+        g.location.reload();
+      } else if (res.status === 409 && code === 'NO_ANNOTATION_SUPPORT') {
+        annotationUnsupported[sid] = true;
+        A.status(sid, { text: '이 대화는 아직 주석을 못 받아요 - Markdown 복사로 붙여넣기', copy: true });
+      } else if (res.status === 409 && code === 'REQUEST_ID_CONFLICT') {
+        A.status(sid, { text: conflict, conflict: true });
+      } else {
+        A.status(sid, { text: res.status === 403 ? ANSWER_TEXT.reopen : answerFailure(res.status, code).text });
+      }
+    }));
   }
 
   // The reload flag and every unsent reply draft ride over the reload in sessionStorage. Without storage there is no
@@ -741,7 +881,7 @@
 
   g.__briefData = receive;
   g.BriefPage = {
-    receive: receive, apply: apply, render: render, state: state, hooks: hooks,
+    receive: receive, apply: apply, render: render, open: open, state: state, hooks: hooks,
     busy: busy, transport: function () { return state.transport; },
     captureAnchor: captureAnchor, restoreAnchor: restoreAnchor
   };

@@ -694,3 +694,59 @@ test('row 19 store: a file that grew between fstat and read is a torn read: retr
     assert.equal(sleeps.length, 1);
   } finally { cleanup(root); }
 });
+
+test('annotation snapshot: 300 delivered answers older than 30 days are counted by name and none is read or parsed', () => {
+  const root = tmpRoot();
+  try {
+    const now = Date.UTC(2026, 9, 17);
+    const day = 24 * 3600 * 1000;
+    const base = openStore(root);
+    const key = (n) => `a-${String(n).padStart(8, '0')}-0000-4000-8000-000000000000`;
+    for (let i = 0; i < 300; i++) {
+      base.writeNew(`answers/${key(i)}.json`, { key: key(i), kind: 'annotation', sessionId: 's1', text: 'old', at: now - 31 * day });
+      base.writeNew(`receipts/${key(i)}.json`, { key: key(i), sessionId: 's1', proven: true });
+      const old = new Date(now - 31 * day);
+      realFs.utimesSync(join(root, `answers/${key(i)}.json`), old, old);
+    }
+    // Old pending, recent delivered, and exactly-30-day delivered exercise each side of the boundary.
+    for (const [n, age, delivered] of [[300, 31 * day, false], [301, 30 * day - 1, true], [302, 30 * day, true]]) {
+      base.writeNew(`answers/${key(n)}.json`, { key: key(n), kind: 'annotation', sessionId: 's1', text: String(n), at: now - age });
+      if (delivered) base.writeNew(`receipts/${key(n)}.json`, { key: key(n), sessionId: 's1', proven: true });
+      const time = new Date(now - age);
+      realFs.utimesSync(join(root, `answers/${key(n)}.json`), time, time);
+    }
+    base.writeNew(`claims/${key(300)}.json`, { key: key(300), pid: process.pid, nonce: 'note' });
+    base.writeNew('answers/000001.json', { id: 1, option: 'A' });
+    const reads = [];
+    const store = openStore(root, { fs: { ...realFs, readFileSync(file, ...args) {
+      const rel = String(file).replace(/\\/g, '/').split('/answers/')[1];
+      if (rel?.startsWith('a-')) reads.push(rel);
+      return realFs.readFileSync(file, ...args);
+    } } });
+    const snap = store.readSnapshot(now);
+    assert.deepEqual(reads.sort(), [`${key(300)}.json`, `${key(301)}.json`]);
+    assert.equal(snap.archivedAnnotations, 301);
+    assert.deepEqual(snap.answers.map((a) => a.key ?? a.id), [1, key(300), key(301)]);
+    assert.equal(snap.claims[0].key, key(300));
+    assert.equal(snap.receipts.length, 302);
+    assert.deepEqual(snap.readErrors, []);
+  } finally { cleanup(root); }
+});
+
+test('annotation snapshot: broken recent records are reported, while invalid names and tombstones are ignored', () => {
+  const root = tmpRoot();
+  try {
+    const store = openStore(root);
+    const key = 'a-01234567-89ab-4cde-8fab-0123456789ab';
+    for (const dir of ['answers', 'claims', 'receipts']) {
+      store.writeNew(`${dir}/${key}.json`, '{broken');
+      store.writeNew(`${dir}/${key}.json.stale-old`, '{ignored');
+      store.writeNew(`${dir}/a-not-a-uuid.json`, '{ignored');
+    }
+    const snap = store.readSnapshot();
+    assert.deepEqual(snap.readErrors.map((e) => e.rel).sort(), ['answers', 'claims', 'receipts'].map((dir) => `${dir}/${key}.json`));
+    assert.deepEqual(snap.answers, []);
+    assert.deepEqual(snap.claims, []);
+    assert.deepEqual(snap.receipts, []);
+  } finally { cleanup(root); }
+});

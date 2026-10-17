@@ -266,6 +266,18 @@ export function createMirror(o) {
       if (!entry) return;
       pending.set(entry.requestId, entry);
       writeMirror(sid);
+      // The prompt is now the only place to answer questions from this owner turn.
+      const snap = store.readSnapshot();
+      const lastInput = getMeta()?.lastOwnerInputAt ?? 0;
+      const unavailable = new Set([...snap.answers, ...snap.closures, ...snap.claims].map((r) => r.id));
+      for (const d of snap.decisions) {
+        if (d.sessionId !== sid || !(d.createdAt > lastInput) || unavailable.has(d.id)) continue;
+        try {
+          store.writeNew(`decision-closures/${String(d.id).padStart(6, '0')}.json`, {
+            id: d.id, reason: 'superseded', questionPrompt: true, at: now(),
+          });
+        } catch (err) { if (err.code !== 'EEXIST') throw err; }
+      }
       settleOk(before);
       repaint();
     } catch (err) { recordError('mirror asked', err); repaint(); }

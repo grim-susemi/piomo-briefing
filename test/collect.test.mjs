@@ -467,3 +467,26 @@ test('T1-STATUS-RANK: 문자열 아닌 status는 완료로 보지 않는다', ()
   const out = collectAuto({ cwd: 'C:/w', sessionId: 'sess-A', branchEntries: [], workerIds: [], readFile, now: NOW, cache: {} });
   assert.equal(out.work?.name, 'bad-status-plan');
 });
+
+test('C-VM todoItems: a 45-item native todo keeps 40 items {text, status} and more:5 beside the counts', () => {
+  const tasks = Array.from({ length: 45 }, (_, i) => ({ content: `일 ${i}`, status: i === 0 ? 'in_progress' : 'pending' }));
+  const out = collectAuto({ cwd: 'C:/p', sessionId: 's', branchEntries: [{ type: 'custom', customType: 'senpi.todo-state', data: { schema: 'v2', phases: [{ name: 'T', tasks }] } }] });
+  assert.deepEqual(out.todo, { current: '일 0', next: '일 1', done: 0, total: 45 });
+  assert.equal(out.todoItems.items.length, 40);
+  assert.equal(out.todoItems.more, 5);
+  assert.deepEqual(out.todoItems.items[0], { text: '일 0', status: 'in_progress' });
+  assert.deepEqual(out.todoItems.items[39], { text: '일 39', status: 'pending' });
+  // a corrupt newest entry omits both keys (no partial list)
+  const bad = collectAuto({ cwd: 'C:/p', sessionId: 's', branchEntries: [{ customType: 'senpi.todo-state', phases: [{ name: 'T', tasks: [...tasks, null] }] }] });
+  assert.ok(!('todo' in bad) && !('todoItems' in bad));
+});
+
+test('C-VM ledgerPath: the picked work ledger, relative joined to cwd, absolute kept, absent omitted', () => {
+  const read = (works) => () => JSON.stringify({ works });
+  const rel = collectAuto({ cwd: 'C:\\w\\proj\\', sessionId: 's', readFile: read({ a: { session_ids: ['senpi:s'], ledger: './.omo/ledger.jsonl' } }) });
+  assert.equal(rel.ledgerPath, 'C:/w/proj/.omo/ledger.jsonl');
+  const abs = collectAuto({ cwd: 'C:/w/proj', sessionId: 's', readFile: read({ a: { session_ids: ['s'], ledger: 'D:/x/l.jsonl' } }) });
+  assert.equal(abs.ledgerPath, 'D:/x/l.jsonl');
+  const none = collectAuto({ cwd: 'C:/w/proj', sessionId: 's', readFile: read({ a: { session_ids: ['s'], ledger: 7 } }) });
+  assert.ok(!('ledgerPath' in none) && 'work' in none);
+});

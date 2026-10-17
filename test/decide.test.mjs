@@ -7,13 +7,14 @@ import { fork } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import { openStore } from '../src/store.mjs';
-import { parseDecide, applyDecide, applyBoardAnswer, formatDecideResult } from '../src/decide.mjs';
+import { parseDecide, applyDecide, applyBoardAnswer, applyAskAnswer, applyBoardAnnotation, formatDecideResult } from '../src/decide.mjs';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const CHILD = join(HERE, 'helpers', 'decide-child.mjs');
 const PAUSED_B = join(HERE, 'helpers', 'decide-paused-b.mjs');
 const BOARD_CHILD = join(HERE, 'helpers', 'board-answer-child.mjs');
 const DEAD_PID = 2147480000;
+const NOTE_ID = '01234567-89ab-4cde-8fab-0123456789ab';
 
 const tmpRoot = () => fs.mkdtempSync(join(tmpdir(), 'omo-decide-test-'));
 const cleanup = (root) => fs.rmSync(root, { recursive: true, force: true });
@@ -46,6 +47,124 @@ test('parse: 12A 13b, bare number, comma separated', () => {
   assert.equal(parseDecide('12D').items.length, 0);
   assert.equal(parseDecide('12D').invalid.length, 1);
   assert.equal(parseDecide('x').invalid.length, 1);
+});
+
+test('ask answer allows only the asking owner and returns the stored winner after a lost claim', (t) => {
+  const root = tmpRoot();
+  t.after(() => cleanup(root));
+  const store = openStore(root);
+  const id = store.allocDecisionId({
+    sessionId: 's1', source: 'ask', question: 'q', recommend: 'A',
+    options: { A: { text: 'a', consequence: 'ca' }, B: { text: 'b', consequence: 'cb' } },
+  });
+  assert.equal(applyAskAnswer(store, { id, sessionId: 'other', option: 'A' }).code, 'SESSION_MISMATCH');
+  assert.equal(applyAskAnswer(store, { id, sessionId: 's1', option: 'C' }).code, 'BAD_OPTION');
+  const result = applyAskAnswer(store, { id, sessionId: 's1', option: 'A' }, 1000, {
+    hooks: { beforeClaim: () => assert.equal(applyBoardAnswer(store, { id, sessionId: 's1', option: 'B' }, 999).ok, true) },
+  });
+  assert.equal(result.code, 'ANSWERED');
+  assert.equal(result.answer.option, 'B');
+  assert.equal(result.answer.fromSessionId, 'board');
+  assert.deepEqual(ls(root, 'answers'), ['000001.json']);
+});
+
+test('a hold injected between ask validation and claim acquisition excludes the terminal answer', (t) => {
+  const root = tmpRoot();
+  t.after(() => cleanup(root));
+  const store = openStore(root);
+  const id = store.allocDecisionId({ sessionId: 's1', source: 'ask', options: { A: { text: 'a' }, B: { text: 'b' } } });
+  const result = applyAskAnswer(store, { id, sessionId: 's1', option: 'A' }, 1000, {
+    hooks: { beforeClaim: () => assert.equal(applyBoardAnswer(store, { id, sessionId: 's1', action: 'hold' }, 999).ok, true) },
+  });
+  assert.equal(result.code, 'HELD');
+  assert.deepEqual(ls(root, 'answers'), []);
+  assert.deepEqual(ls(root, 'claims'), []);
+});
+
+// ---- C-HOLD (todo 12): hold, reopen, HELD ----
+const askDecision = (store, sessionId = 's1') => store.allocDecisionId({ sessionId, source: 'ask', question: 'q', recommend: 'A', options: { A: { text: 'a' }, B: { text: 'b' } } });
+const heldClosure = (root, id) => ls(root, 'decision-closures').includes(`${pad6(id)}.json`);
+
+for (const order of ['hold-first', 'terminal-first']) {
+  test(`C-HOLD race (${order}): a terminal board_question answer and a board hold for one id end with exactly one of answers/<id> or holds`, (t) => {
+    const root = tmpRoot();
+    t.after(() => cleanup(root));
+    const store = openStore(root);
+    const id = askDecision(store);
+    let hold;
+    // forced ordering through the writer's own injection point: the hold runs after the terminal's validation
+    // (hold-first: before its claim) or after the terminal's write finished (terminal-first); never timing
+    const terminal = applyAskAnswer(store, { id, sessionId: 's1', option: 'A' }, 1000, order === 'hold-first'
+      ? { hooks: { beforeClaim: () => { hold = applyBoardAnswer(store, { id, sessionId: 's1', action: 'hold' }, 999); } } } : {});
+    if (order === 'terminal-first') hold = applyBoardAnswer(store, { id, sessionId: 's1', action: 'hold' }, 1001);
+    const answered = ls(root, 'answers').includes(`${pad6(id)}.json`);
+    assert.equal(answered !== heldClosure(root, id), true, `exactly one record (answer ${answered}, hold ${heldClosure(root, id)})`);
+    if (order === 'hold-first') {
+      assert.deepEqual([hold.ok, terminal.code, answered], [true, 'HELD', false]);
+    } else {
+      assert.deepEqual([terminal.ok, hold.code, answered], [true, 'ANSWERED', true]);
+    }
+    // a hold's claim is temporary; an answer keeps its claim for good
+    assert.deepEqual(ls(root, 'claims'), answered ? [`${pad6(id)}.json`] : [], 'the hold released its temporary claim');
+  });
+}
+
+test('C-HOLD reopen renames the held record per cycle, the id is answerable again, and only a held closure reopens', (t) => {
+  const root = tmpRoot();
+  t.after(() => cleanup(root));
+  const store = seed(root, [{ id: 21 }, { id: 22, answered: 'A' }]);
+  const act = (id, action) => applyBoardAnswer(store, { id, sessionId: 's1', action }, 2000);
+  assert.deepEqual(act(21, 'reopen'), { ok: false, code: 'CLOSED' }, 'nothing to reopen');
+  assert.deepEqual(act(21, 'hold'), { ok: true, id: 21 });
+  const held = read(root, 'decision-closures/000021.json');
+  assert.match(held.notice, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(held, { id: 21, reason: 'held', at: 2000, notice: held.notice });
+  assert.deepEqual(read(root, `hold-notices/${held.notice}.json`), { id: 21, sessionId: 's1', at: 2000 });
+  assert.equal(act(21, 'hold').code, 'CLOSED', 'a second hold is refused');
+  assert.deepEqual(act(21, 'reopen'), { ok: true, id: 21 });
+  assert.deepEqual(ls(root, 'decision-closures'), ['000021.1.released.json']);
+  assert.deepEqual(read(root, 'decision-closures/000021.1.released.json'), held, 'renamed, not rewritten');
+  assert.equal(store.readSnapshot().closures.length, 0, 'a released record is not a closure');
+  assert.deepEqual(act(21, 'hold'), { ok: true, id: 21 });
+  assert.deepEqual(act(21, 'reopen'), { ok: true, id: 21 });
+  assert.deepEqual(ls(root, 'decision-closures').sort(), ['000021.1.released.json', '000021.2.released.json'], 'each cycle keeps its own record');
+  assert.deepEqual(applyBoardAnswer(store, { id: 21, sessionId: 's1', option: 'B' }, 2001), { ok: true, id: 21 }, 'answerable again after reopen');
+  assert.equal(act(21, 'hold').code, 'ANSWERED');
+  assert.equal(act(22, 'hold').code, 'ANSWERED', 'holding an answered decision returns ANSWERED');
+  assert.equal(heldClosure(root, 22), false);
+  assert.deepEqual(ls(root, 'claims'), ['000021.json'], 'only the answer keeps a claim; every hold/reopen claim was released');
+});
+
+test('failure: answering a held decision is refused with HELD (terminal and board) and writes no answer', (t) => {
+  const root = tmpRoot();
+  t.after(() => cleanup(root));
+  const store = openStore(root);
+  const id = askDecision(store);
+  assert.equal(applyBoardAnswer(store, { id, sessionId: 's1', action: 'hold' }, 1000).ok, true);
+  const terminal = applyAskAnswer(store, { id, sessionId: 's1', option: 'A' }, 1001);
+  assert.equal(terminal.code, 'HELD');
+  const board = applyBoardAnswer(store, { id, sessionId: 's1', text: '그래도 답할게' }, 1002);
+  assert.equal(board.code, 'HELD');
+  assert.deepEqual(ls(root, 'answers'), []);
+  console.log(`failure: answer-while-held -> terminal ${JSON.stringify(terminal)}, board ${JSON.stringify(board)}, answers ${JSON.stringify(ls(root, 'answers'))}`);
+  assert.deepEqual(applyBoardAnswer(store, { id, sessionId: 's1', action: 'reopen' }, 1003), { ok: true, id });
+  assert.equal(applyAskAnswer(store, { id, sessionId: 's1', option: 'A' }, 1004).ok, true, 'reopened: the terminal answer goes through');
+});
+
+test('C-HOLD malformed: hold and reopen together, a choice with an action, an unknown id and a foreign session are refused without writes', (t) => {
+  const root = tmpRoot();
+  t.after(() => cleanup(root));
+  const store = seed(root, [{ id: 31 }]);
+  for (const [body, code] of [
+    [{ id: 31, sessionId: 's1', action: ['hold', 'reopen'] }, 'BAD_REQUEST'],
+    [{ id: 31, sessionId: 's1', action: 'hold', option: 'A' }, 'BAD_REQUEST'],
+    [{ id: 31, sessionId: 's1', action: 'hold', text: 'x' }, 'BAD_REQUEST'],
+    [{ id: 31, sessionId: 's1', action: 'release' }, 'BAD_REQUEST'],
+    [{ id: 999, sessionId: 's1', action: 'hold' }, 'NOT_FOUND'],
+    [{ id: 31, sessionId: 'other', action: 'hold' }, 'SESSION_MISMATCH'],
+  ]) assert.equal(applyBoardAnswer(store, body, 1000).code, code, JSON.stringify(body));
+  assert.deepEqual(ls(root, 'decision-closures'), []);
+  assert.deepEqual(ls(root, 'claims'), []);
 });
 
 test('happy: explicit options and bare number uses recommend', () => {
@@ -778,5 +897,98 @@ test('board: a failed answer write after the claim is IO_ERROR with the cause; a
     assert.equal(r2.code, 'IO_ERROR');
     assert.match(r2.detail, /수동 확인 필요/);
     assert.deepEqual(ls(root, 'answers'), []);
+  } finally { cleanup(root); }
+});
+
+test('annotation: 9 KB Markdown is byte-identical, shares string-key claims, and retries are canonical and write-once', () => {
+  const root = tmpRoot();
+  try {
+    const store = openStore(root);
+    const key = `a-${NOTE_ID}`;
+    const text = ' \n## [owner]\n- [ ] follow up\t' + 'x\n'.repeat(4608) + '\n ';
+    const request = { sessionId: 's1', requestId: NOTE_ID, text };
+    assert.ok(Buffer.byteLength(text) >= 9 * 1024);
+    assert.deepEqual(applyBoardAnnotation(store, request, 1000), { ok: true, key });
+    const saved = store.readRecord(`answers/${key}.json`);
+    assert.deepEqual(saved, { key, kind: 'annotation', ...request, at: 1000, fromSessionId: 'board' });
+    assert.deepEqual(Buffer.from(saved.text), Buffer.from(text));
+    assert.equal(store.readRecord(`claims/${key}.json`).key, key);
+    const before = fs.readFileSync(join(root, `answers/${key}.json`), 'utf8');
+    assert.deepEqual(applyBoardAnnotation(store, request, 2000), { ok: true, key, duplicate: true });
+    assert.deepEqual(applyBoardAnnotation(store, { ...request, requestId: NOTE_ID.toUpperCase() }, 2000), { ok: true, key, duplicate: true });
+    for (const changed of [{ text: text.trim() }, { sessionId: 's2' }]) {
+      assert.deepEqual(applyBoardAnnotation(store, { ...request, ...changed }, 2000), { ok: false, code: 'REQUEST_ID_CONFLICT' });
+    }
+    assert.equal(fs.readFileSync(join(root, `answers/${key}.json`), 'utf8'), before);
+    assert.deepEqual(ls(root, 'answers'), [`${key}.json`]);
+  } finally { cleanup(root); }
+});
+
+test('annotation: text bounds count code points and UTF-8 bytes, reject bad UUIDs, and never trim accepted text', () => {
+  const root = tmpRoot();
+  try {
+    const store = openStore(root);
+    for (const text of ['', ' \n\t ', null, 5, 'x'.repeat(12001), '😀'.repeat(12001), '😀'.repeat(12289)]) {
+      assert.equal(applyBoardAnnotation(store, { sessionId: 's1', requestId: NOTE_ID, text }, 1000).code, 'BAD_TEXT');
+    }
+    for (const requestId of ['../escape', NOTE_ID.replace('-4cde-', '-1cde-'), NOTE_ID.replace('-8fab-', '-7fab-'), 'not-a-uuid']) {
+      assert.equal(applyBoardAnnotation(store, { sessionId: 's1', requestId, text: 'ok' }, 1000).code, 'BAD_REQUEST');
+    }
+    assert.equal(applyBoardAnnotation(store, null, 1000).code, 'BAD_REQUEST');
+    assert.deepEqual(ls(root, 'claims'), []);
+    const text = '😀'.repeat(12000);
+    assert.equal(Buffer.byteLength(text), 48000);
+    assert.equal(applyBoardAnnotation(store, { sessionId: 's1', requestId: NOTE_ID, text }, 1000).ok, true);
+    assert.equal(store.readRecord(`answers/a-${NOTE_ID}.json`).text, text);
+  } finally { cleanup(root); }
+});
+
+test('annotation: crash after claim before answer recovers with the same requestId; a live claim fails closed', () => {
+  const root = tmpRoot();
+  try {
+    const key = `a-${NOTE_ID}`;
+    const request = { sessionId: 's1', requestId: NOTE_ID, text: 'retry\n[unchanged]' };
+    const failing = { ...fs, writeFileSync(file, ...args) {
+      if (norm(file).endsWith(`answers/${key}.json`)) throw injectErr('ENOSPC');
+      return fs.writeFileSync(file, ...args);
+    } };
+    assert.equal(applyBoardAnnotation(openStore(root, { fs: failing }), request, 1000, { pid: DEAD_PID }).code, 'IO_ERROR');
+    assert.deepEqual(ls(root, 'answers'), []);
+    const store = openStore(root);
+    assert.deepEqual(applyBoardAnnotation(store, request, 2000), { ok: true, key });
+    assert.deepEqual(applyBoardAnnotation(store, request, 3000), { ok: true, key, duplicate: true });
+    assert.equal(ls(root, 'answers').length, 1);
+    assert.equal(ls(root, 'claims').filter((n) => n.includes('.stale-')).length, 1);
+    const liveId = NOTE_ID.replace('01234567-', '11234567-');
+    store.writeNew(`claims/a-${liveId}.json`, { key: `a-${liveId}`, pid: process.pid, at: 1, nonce: 'live' });
+    assert.equal(applyBoardAnnotation(store, { ...request, requestId: liveId }, 4000).code, 'IO_ERROR');
+    assert.equal(ls(root, 'answers').length, 1);
+  } finally { cleanup(root); }
+});
+
+test('annotation: a competing commit during stale-claim recovery is duplicate or conflict, never a second answer', () => {
+  for (const same of [true, false]) {
+    const root = tmpRoot();
+    try {
+      const store = openStore(root);
+      const key = `a-${NOTE_ID}`;
+      const request = { sessionId: 's1', requestId: NOTE_ID, text: 'mine' };
+      store.writeNew(`claims/${key}.json`, { key, pid: DEAD_PID, at: 1, nonce: 'stale' });
+      const result = applyBoardAnnotation(store, request, 2000, { hooks: { beforeReclaim() {
+        assert.equal(applyBoardAnnotation(store, { ...request, text: same ? 'mine' : 'winner' }, 1000).ok, true);
+      } } });
+      assert.deepEqual(result, same ? { ok: true, key, duplicate: true } : { ok: false, code: 'REQUEST_ID_CONFLICT' });
+      assert.equal(ls(root, 'answers').length, 1);
+      assert.equal(store.readRecord(`answers/${key}.json`).at, 1000);
+    } finally { cleanup(root); }
+  }
+});
+
+test('annotation: unreadable answers fail closed as IO_ERROR without creating a claim', () => {
+  const root = tmpRoot();
+  try {
+    const store = openStore(root, { fs: denyReads(`answers/a-${NOTE_ID}.json`, 'EIO') });
+    assert.equal(applyBoardAnnotation(store, { sessionId: 's1', requestId: NOTE_ID, text: 'hi' }, 1000).code, 'IO_ERROR');
+    assert.deepEqual(ls(root, 'claims'), []);
   } finally { cleanup(root); }
 });

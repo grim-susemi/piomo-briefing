@@ -16,8 +16,18 @@
 //
 // Brief records (sessions/<sid>/briefs/<seq>.json) are {at, brief:{...validated input}}; a record
 // without `brief` is read as the brief itself.
+// Reports (C-REPORT): withReports(store, snap) adds sessions[].reports from sessions/<sid>/reports.json (an unreadable
+// file is a readError of that session); buildViewModel turns them into sessions[].reports[] with relative
+// assets/<sha>.<ext> image URLs (no image bytes in the model).
+// C-VM (per session): alive (meta.hostPid live, else/or the running check), briefSeq/briefPath (latest brief record;
+// briefPath needs opts.stateDir), sessionFile, todo {items<=40, more}, attachments [{label, path}] and blockSources
+// {<blockId>: {paths}} (C-BLOCK). Attachment and block paths are project files only: absolute, deduplicated, never cut,
+// never under opts.stateDir. A path is compared by its canonical identity (dot segments resolved, case-folded on drive
+// paths, and its realpath - or its folder's - when that exists), so an alias or a junction into STATE is excluded too;
+// the value kept is the original string. They are data copied from records, never interpreted here (the only probes are
+// realpath of listed paths and a stat of the exact task record <cwd>/.omo/senpi-task/tasks/<workerId>.json of a live row).
 import * as nodeFs from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename, win32, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { isPidAlive, TOO_BIG_CODE } from './store.mjs';
@@ -37,6 +47,10 @@ export const MAX_VM_BYTES = 600 * 1024;
 const PAUSED = Symbol('paused'); // thrown inside the publish when opts.canPublish() turned false: nothing was written
 const PAUSED_ERROR = '브리핑이 꺼져 있어 게시하지 않았습니다';
 export const OMITTED_CHIP = '용량 때문에 일부 생략';
+// C-CAP2 bookkeeping on the model objects (symbols are never serialized)
+const CAP_TOUCHED = Symbol('capTouched');
+const CAP_NO_COUNTER = Symbol('capNoCounter');
+const CAP_KEYS = ['briefPath', 'sessionFile', 'todo', 'attachments', 'blockSources'];
 // render.lock files this process created but could not verify/remove at release (nonce by lock path): a live pid is never
 // reclaimed by the stale rule, so the owner itself removes a nonce-verified leftover of its own.
 const stranded = new Map();
@@ -62,6 +76,156 @@ const has = (o, k) => isObj(o) && Object.prototype.hasOwnProperty.call(o, k);
 const pad2 = (n) => String(n).padStart(2, '0');
 const clipCp = (s, n) => [...str(s)].slice(0, n).join('');
 const bareSid = (id) => str(id).replace(/^senpi:/, '');
+const pad6 = (n) => String(n).padStart(6, '0');
+const ASSET_RE = /^([0-9a-f]{64})\.(png|jpg|webp)$/;
+const TODO_MAX = 40;
+const ABS_PATH_RE = /^(?:[A-Za-z]:[\\/]|\/(?!\/))/; // drive or POSIX root; UNC and relative paths are not project files
+const WORKER_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+const REPORT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+// lexical identity: dot segments resolved, one slash style, drive paths case-folded (win32 compares names that way)
+const pathKey = (p) => (/^[A-Za-z]:[\\/]/.test(p)
+  ? win32.resolve(p).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  : posix.resolve(p).replace(/\/+$/, ''));
+// the identity on disk: realpath of the path, else of its folder (a file that does not exist yet), else null
+function realKey(p, fs, cache) {
+  if (cache.has(p)) return cache.get(p);
+  let key = null;
+  if (fs && typeof fs.realpathSync === 'function') {
+    const real = (q) => (typeof fs.realpathSync.native === 'function' ? fs.realpathSync.native(q) : fs.realpathSync(q));
+    try { key = pathKey(real(p)); } catch {
+      try { key = pathKey(join(real(dirname(p)), basename(p))); } catch { key = null; }
+    }
+  }
+  cache.set(p, key);
+  return key;
+}
+
+// C-VM todo: the newest native todo entry kept by src/collect.mjs (meta.auto.todoItems), re-checked and capped here.
+function todoView(auto) {
+  const raw = isObj(auto) && isObj(auto.todoItems) ? auto.todoItems : null;
+  const list = raw ? arr(raw.items).filter((t) => isObj(t) && typeof t.text === 'string') : [];
+  const more = (raw && Number.isInteger(raw.more) && raw.more > 0 ? raw.more : 0) + Math.max(0, list.length - TODO_MAX);
+  return { items: list.slice(0, TODO_MAX).map((t) => ({ text: t.text, status: str(t.status) })), more };
+}
+
+// C-VM attachments + C-BLOCK blockSources of one finished session view. `ctx` = {sid, meta, briefSeq, stateKey, fs}.
+function sourcesOf(view, ctx) {
+  const { meta, briefSeq, stateKeys, fs, realCache } = ctx;
+  const inState = (k) => k !== null && stateKeys.some((s) => k === s || k.startsWith(`${s}/`));
+  const isProjectPath = (p) => typeof p === 'string' && ABS_PATH_RE.test(p)
+    && !inState(pathKey(p)) && !(stateKeys.length && inState(realKey(p, fs, realCache)));
+  const uniq = (paths) => {
+    const seen = new Set();
+    const out = [];
+    for (const p of paths) {
+      if (!isProjectPath(p) || seen.has(pathKey(p))) continue;
+      seen.add(pathKey(p));
+      out.push(p);
+    }
+    return out;
+  };
+  const sessionFile = str(meta.sessionFile);
+  const src = isObj(view.plan) && isObj(view.plan.source) ? view.plan.source : {};
+  const planPath = str(src.planPath) || str(src.draftPath);
+  const evidence = [...view.changes, ...view.done].map((c) => c.evidence);
+  const images = view.reports.flatMap((r) => r.images.map((i) => i.path));
+  const auto = isObj(meta.auto) ? meta.auto : {};
+  const ledger = str(auto.ledgerPath);
+
+  const attachments = [{ label: '대화 id', path: view.id }];
+  const seen = new Set();
+  const attach = (label, paths) => {
+    for (const p of uniq(paths)) {
+      if (seen.has(pathKey(p))) continue;
+      seen.add(pathKey(p));
+      attachments.push({ label, path: p });
+    }
+  };
+  attach('세션 파일', [sessionFile]);
+  attach('계획 파일', [planPath]);
+  attach('증거', evidence);
+  attach('보고서 그림', images);
+  attach('실행 기록', [ledger]);
+
+  const blockSources = {};
+  const put = (id, paths) => {
+    const list = uniq(paths);
+    if (list.length) blockSources[id] = { paths: list };
+  };
+  put('head', [sessionFile]);
+  if (Number.isInteger(briefSeq)) {
+    view.changes.forEach((c, i) => put(`change/${briefSeq}/${i}`, [c.evidence]));
+    view.done.forEach((c, i) => put(`done/${briefSeq}/${i}`, [c.evidence]));
+  }
+  if (!view.plan) {
+    // the fallback plan table: the plan file this conversation registered, else the boulder of its project
+    const files = Object.values(isObj(meta.planFiles) ? meta.planFiles : {}).filter(isObj);
+    const filePath = files.map((f) => str(f.planPath) || str(f.draftPath)).find(Boolean) ?? '';
+    const cwd = str(meta.cwd).replace(/[\\/]+$/, '');
+    const sep = cwd.includes('\\') ? '\\' : '/';
+    const boulder = isObj(auto.work) && cwd ? `${cwd}${sep}.omo${sep}boulder.json` : '';
+    view.todo.items.forEach((_, i) => put(`plan/todo/${i}`, [filePath || boulder]));
+  }
+  const cwd = str(meta.cwd).replace(/[\\/]+$/, '');
+  if (cwd && view.live) {
+    const sep = cwd.includes('\\') ? '\\' : '/';
+    for (const w of view.live.workers) {
+      const wid = str(w.id);
+      if (!WORKER_ID_RE.test(wid) || has(blockSources, `wk/${wid}`)) continue;
+      const rec = `${cwd}${sep}.omo${sep}senpi-task${sep}tasks${sep}${wid}.json`;
+      let present = false;
+      try { present = isProjectPath(rec) && fs.statSync(rec).isFile(); } catch { present = false; }
+      if (present) put(`wk/${wid}`, [rec]);
+    }
+  }
+  for (const r of view.reports) {
+    if (!REPORT_ID_RE.test(r.id)) continue;
+    put(`rep/${r.id}`, r.images.map((i) => i.path));
+    r.images.forEach((img, n) => put(`rep/${r.id}/img/${n}`, [img.path]));
+  }
+  attachments.forEach((a, n) => put(`att/${n}`, [a.path]));
+  return { attachments, blockSources };
+}
+
+/** Adds `reports` (the stored array, or absent) to each snapshot session. Mutates and returns snap. */
+export function withReports(store, snap) {
+  for (const s of arr(snap && snap.sessions)) {
+    if (!isObj(s) || typeof s.sid !== 'string') continue;
+    const rel = `sessions/${s.sid}/reports.json`;
+    try {
+      const rec = JSON.parse(store.readText(rel) ?? 'null');
+      if (Array.isArray(rec)) s.reports = rec;
+    } catch (err) {
+      if (Array.isArray(snap.readErrors)) snap.readErrors.push({ rel, message: String(err && err.message || err) });
+    }
+  }
+  return snap;
+}
+
+function reportsView(list, decisions) {
+  const byId = new Map(decisions.map((d) => [d.id, d]));
+  return arr(list).filter((r) => isObj(r) && typeof r.id === 'string').slice(0, 3).map((r) => {
+    const d = Number.isInteger(r.decisionId) ? byId.get(r.decisionId) : undefined;
+    const status = !d ? '참고' : d.answered ? '답함' : d.closed ? '참고' : '결정 기다림';
+    const images = arr(r.images).filter((i) => isObj(i) && ASSET_RE.test(`${i.sha}.${i.ext}`)).slice(0, 6).map((i) => ({
+      src: `assets/${i.sha}.${i.ext}`,
+      alt: clipCp(i.alt, 200),
+      option: ['A', 'B', 'C'].includes(i.option) && d && isObj(d.options) && d.options[i.option] !== undefined ? i.option : null,
+      w: Number.isInteger(i.w) ? i.w : null,
+      h: Number.isInteger(i.h) ? i.h : null,
+      path: str(i.path),
+    }));
+    return {
+      id: r.id,
+      title: clipCp(r.title, 80),
+      summary: clipCp(r.summary, 1000),
+      at: isNum(r.at) ? r.at : null,
+      decisionId: d ? d.id : null,
+      status,
+      images,
+    };
+  });
+}
 
 function hhmm(ms) {
   if (!isNum(ms)) return '--:--';
@@ -249,25 +413,118 @@ function skeletonPlan(planId, files, status, ownerMeta) {
   };
 }
 
-// Keeps the written bytes under MAX_VM_BYTES: finished conversations lose their live/plan details first, oldest first.
-// Measured on the escaped data.js text (every '<' is six bytes there), which is never smaller than /data.json.
+// Keeps the written bytes under MAX_VM_BYTES (C-CAP2). Passes in order, each over finished conversations first, then
+// oldest first, stopping as soon as the model fits:
+// 1. blockSources of finished conversations -> {} (parent rule, no chip);
+// 2. the existing drops: live/plan details, then reports (with their rep/* sources), each marked by OMITTED_CHIP - a drop is
+//    applied to a card only when it saves more bytes than the chip it adds, so no pass ever makes a card bigger;
+// 3. todo.items -> [] (count added to todo.more; their plan/todo/* sources go too); 4. remaining blockSources -> {};
+// 5. attachments -> only the 대화 id row; 6. delete the keys briefPath, sessionFile, todo, attachments, blockSources;
+// 7. last resort: delete alive and briefSeq, then omit vm.trimmed if its own bytes still prevent fitting.
+// 8. delete askLive and builtin question flags; this loses only the optional page notes, never live-call state.
+// 9. held decisions (todo 12): delete heldCount and shorten every held {at} to {} - a card then spends no more on holds
+//    than the accepted renderer's held:true/false; the page loses only the hold time (and recounts held ones itself).
+// Passes 3-9 add no per-card bytes: vm.trimmed = {cards: n} counts the distinct cards they touched (each once).
+// Every pass only shrinks the model, and with every todo-3 key, question flag and counter gone what is left is the pre-todo-3 model
+// minus some of its legacy details: it fits whenever the accepted renderer's output fits.
+// Paths are dropped whole, never cut. Every pass tracks the size exactly (value and key bytes); every stop is confirmed
+// on the real text. Measured on the escaped data.js text (every '<' is six bytes there), never smaller than /data.json.
 function capSize(vm) {
   const exact = () => Buffer.byteLength(dataJsText(vm));
   let size = exact();
   if (size <= MAX_VM_BYTES) return;
-  const order = vm.sessions
-    .filter((s) => s.live !== undefined || s.plan !== undefined)
-    .sort((a, b) => ((a.tab === '끝남' ? 0 : 1) - (b.tab === '끝남' ? 0 : 1)) || (a.lastActivityAt - b.lastActivityAt));
-  for (const s of order) {
-    if (size <= MAX_VM_BYTES) break;
-    size -= Buffer.byteLength(scriptJson({ live: s.live, plan: s.plan }));
-    delete s.live;
-    delete s.plan;
-    if (!s.chips.includes(OMITTED_CHIP)) {
-      s.chips.push(OMITTED_CHIP);
-      size += Buffer.byteLength(scriptJson(OMITTED_CHIP)) + 1;
+  const byAge = (a, b) => ((a.tab === '끝남' ? 0 : 1) - (b.tab === '끝남' ? 0 : 1)) || (a.lastActivityAt - b.lastActivityAt);
+  const srcKeys = (s, prefix) => Object.keys(isObj(s.blockSources) ? s.blockSources : {}).filter((k) => k.startsWith(prefix));
+  const repKeys = (s) => srcKeys(s, 'rep/');
+  const nonEmptySources = (s) => isObj(s.blockSources) && Object.keys(s.blockSources).length > 0;
+  const fit = () => {
+    if (size <= MAX_VM_BYTES) size = exact(); // estimates are confirmed on the real text before stopping
+    return size <= MAX_VM_BYTES;
+  };
+  const bytes = (v) => Buffer.byteLength(scriptJson(v));
+  const keyBytes = (s, k) => (has(s, k) && s[k] !== undefined ? bytes(k) + 1 + bytes(s[k]) + 1 : 0); // "key":value plus its comma
+  const replace = (s, key, value) => { size += bytes(value) - bytes(s[key]); s[key] = value; };
+  const del = (s, key) => {
+    if (!has(s, key)) return;
+    size -= keyBytes(s, key); // deleted keys have a preceding field: session/decision id or question text remains
+    delete s[key];
+  };
+  const withoutRep = (s) => Object.fromEntries(Object.entries(s.blockSources).filter(([k]) => !k.startsWith('rep/')));
+
+  // pass 1: finished conversations' blockSources (only annotation paths are lost, so no chip)
+  for (const s of vm.sessions.filter((x) => x.tab === '끝남' && nonEmptySources(x)).sort(byAge)) {
+    if (fit()) return;
+    replace(s, 'blockSources', {});
+  }
+  // pass 2: the existing drops with their chip. A drop is applied to a card only when it saves more bytes than the chip
+  // it adds (a tiny live row is smaller than the chip): no drop ever makes a card bigger.
+  const chipCost = (s) => (s.chips.includes(OMITTED_CHIP) ? 0 : bytes(OMITTED_CHIP) + (s.chips.length ? 1 : 0));
+  const legacy = [
+    [(s) => s.live !== undefined || s.plan !== undefined, (s) => keyBytes(s, 'live') + keyBytes(s, 'plan'), (s) => { delete s.live; delete s.plan; }],
+    [(s) => Array.isArray(s.reports) && s.reports.length > 0,
+      (s) => bytes(s.reports) - bytes([]) + (repKeys(s).length ? bytes(s.blockSources) - bytes(withoutRep(s)) : 0),
+      (s) => { s.reports = []; if (repKeys(s).length) s.blockSources = withoutRep(s); }],
+  ];
+  // Two rounds: a drop skipped in round 1 because of its chip is free in round 2 once a later drop gave the card the chip.
+  for (let round = 0; round < 2; round++) {
+    for (const [need, saving, drop] of legacy) {
+      for (const s of vm.sessions.filter(need).sort(byAge)) {
+        if (fit()) return;
+        const cost = chipCost(s);
+        const saved = saving(s);
+        if (saved <= cost) continue;
+        drop(s);
+        if (cost) s.chips.push(OMITTED_CHIP);
+        size -= saved - cost;
+      }
     }
-    if (size <= MAX_VM_BYTES) size = exact(); // the running estimate ignores key overhead: confirm on the real text
+  }
+
+  let n = vm.sessions.filter((s) => s[CAP_TOUCHED]).length; // a second call (final seq) continues the same count
+  const counterBytes = (k) => (k > 0 && !vm[CAP_NO_COUNTER] ? bytes('trimmed') + 1 + bytes({ cards: k }) + 1 : 0);
+  const touch = (s) => {
+    if (s[CAP_TOUCHED]) return;
+    s[CAP_TOUCHED] = true; // a symbol: never serialized
+    size += counterBytes(n + 1) - counterBytes(n);
+    n += 1;
+    if (!vm[CAP_NO_COUNTER]) vm.trimmed = { cards: n };
+  };
+  const passes = [
+    [(s) => isObj(s.todo) && s.todo.items.length > 0, (s) => {
+      replace(s, 'todo', { items: [], more: s.todo.more + s.todo.items.length });
+      const keep = srcKeys(s, 'plan/todo/');
+      if (keep.length) replace(s, 'blockSources', Object.fromEntries(Object.entries(s.blockSources).filter(([k]) => !keep.includes(k))));
+    }],
+    [nonEmptySources, (s) => replace(s, 'blockSources', {})],
+    [(s) => Array.isArray(s.attachments) && s.attachments.length > 1, (s) => replace(s, 'attachments', s.attachments.slice(0, 1))],
+    [(s) => CAP_KEYS.some((k) => has(s, k)), (s) => { for (const k of CAP_KEYS) del(s, k); }],
+    [(s) => has(s, 'alive') || has(s, 'briefSeq'), (s) => { del(s, 'alive'); del(s, 'briefSeq'); }],
+  ];
+  for (const [need, apply] of passes) {
+    for (const s of vm.sessions.filter(need).sort(byAge)) {
+      if (fit()) return;
+      touch(s);
+      apply(s);
+    }
+  }
+  if (fit()) return;
+  if (!vm[CAP_NO_COUNTER] && has(vm, 'trimmed')) {
+    delete vm.trimmed; // pass 7 last resort: the counter's own bytes prevent fitting
+    vm[CAP_NO_COUNTER] = true;
+    size = exact();
+  }
+  // Pass 8 also runs on the final-seq call when pass 7 already omitted the counter.
+  for (const s of vm.sessions.filter((s) => s.decisions.some((d) => has(d, 'askLive')) || has(s.openQuestion, 'builtin')).sort(byAge)) {
+    if (fit()) return;
+    touch(s);
+    for (const d of s.decisions) del(d, 'askLive');
+    del(s.openQuestion, 'builtin');
+  }
+  for (const s of vm.sessions.filter((x) => has(x, 'heldCount')).sort(byAge)) {
+    if (fit()) return;
+    touch(s);
+    del(s, 'heldCount');
+    for (const d of s.decisions) if (isObj(d.held) && has(d.held, 'at')) replace(d, 'held', {});
   }
 }
 
@@ -301,7 +558,12 @@ export function serverInfoOf(store, isAlive = isPidAlive) {
  */
 export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
   const isAlive = opts.isAlive ?? isPidAlive;
-  const check = evidenceChecker(opts.fs ?? nodeFs);
+  const evidenceFs = opts.fs ?? nodeFs;
+  const check = evidenceChecker(evidenceFs);
+  const stateDir = typeof opts.stateDir === 'string' && opts.stateDir ? opts.stateDir : null;
+  const realCache = new Map();
+  const stateKeys = stateDir ? [...new Set([pathKey(stateDir), realKey(stateDir, evidenceFs, realCache)].filter(Boolean))] : [];
+  const sourceCtx = new Map();
   const snap = isObj(snapshot) ? snapshot : {};
   const readErrors = arr(snap.readErrors);
   const errSids = new Set();
@@ -332,6 +594,13 @@ export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
   };
   const answers = byIdMap(snap.answers);
   const receipts = byIdMap(snap.receipts);
+  const noteReceipts = new Map(arr(snap.receipts).filter((r) => isObj(r) && typeof r.key === 'string').map((r) => [r.key, r]));
+  const notesBySid = new Map();
+  for (const a of arr(snap.answers)) {
+    if (!isObj(a) || a.kind !== 'annotation' || typeof a.key !== 'string' || typeof a.sessionId !== 'string' || typeof a.text !== 'string') continue;
+    if (!notesBySid.has(a.sessionId)) notesBySid.set(a.sessionId, []);
+    notesBySid.get(a.sessionId).push(a);
+  }
   const closures = byIdMap(snap.closures);
   const mirrors = new Map(arr(snap.mirror).filter((m) => isObj(m) && isObj(m.data)).map((m) => [m.sid, m.data]));
   const decisionsBySid = new Map();
@@ -372,7 +641,16 @@ export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
 
     const running = meta.running === true;
     const runningAlive = running && isAlive(meta.pid);
+    // open = the hosting pi process (meta.hostPid, written at session_start, removed at shutdown) is alive; metas of older
+    // generations have no hostPid and fall back to the running check. A reused pid of a crashed host reads as alive.
+    const hostAlive = Number.isInteger(meta.hostPid) && meta.hostPid > 0 && isAlive(meta.hostPid);
+    const briefSeq = Number.isInteger(latest.seq) ? latest.seq : null;
     const admitted = new Set([...pending, ...arr(meta.pendingDeliveries)]);
+    const deliveryOf = (key, rc) => rc && rc.proven !== false ? `전달됨 ⏱${hhmm(rc.deliveredAt)}`
+      : (rc || admitted.has(key)) ? '전달 중'
+      : (runningAlive ? '대기: 작업이 끝나면 전달' : '대기: 그 대화가 다시 열리면 전달');
+    const notes = (notesBySid.get(sid) ?? []).slice().sort((a, b) => (b.at - a.at) || a.key.localeCompare(b.key)).slice(0, 20)
+      .map((a) => ({ key: a.key, at: isNum(a.at) ? a.at : null, preview: clipCp(a.text, 80), delivery: deliveryOf(a.key, noteReceipts.get(a.key)) }));
 
     const inputAt = isNum(meta.lastOwnerInputAt) ? meta.lastOwnerInputAt : null;
     const newer = inputAt === null ? [] : briefs.filter((b) => isNum(b.at) && b.at > inputAt);
@@ -396,17 +674,23 @@ export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
         blocks: d.blocks === true,
         createdAt: isNum(d.createdAt) ? d.createdAt : null,
         source: str(d.source) || 'brief',
-        answered: Boolean(ans),
+        answered: Boolean(ans) || closures.get(d.id)?.reason === 'answered',
         closed: closures.has(d.id),
+        questionPrompt: closures.get(d.id)?.questionPrompt === true,
         answer: ans ? { option: str(ans.option), text: str(ans.text), at: isNum(ans.at) ? ans.at : null } : null, // text = a board reply
         receipt: rc && rc.proven !== false ? { kind: str(rc.kind), mode: str(rc.mode), deliveredAt: isNum(rc.deliveredAt) ? rc.deliveredAt : null, proven: true } : null, // unproven (admitted, not yet confirmed) is not shown as a delivery proof
       };
+      // C-HOLD 4: held = {at}, emitted only for a held decision (absent = null), so open decisions spend no bytes on it
+      if (closures.get(d.id)?.reason === 'held') out.held = { at: isNum(closures.get(d.id).at) ? closures.get(d.id).at : null };
+      if (d.source === 'ask' && hostAlive && arr(meta.askLive).includes(d.id) && !ans && !closures.has(d.id)) out.askLive = true;
+      if (!ans && closures.get(d.id)?.reason === 'answered') {
+        out.answer = { text: str(closures.get(d.id).answer), at: closures.get(d.id).at };
+        out.delivery = '질문창에서 답 받음';
+      }
       if (ans) {
         // 전달됨 only for a real receipt; 전달 중 = admitted, not yet confirmed (pending list, or the
         // proven:false receipt of the no-pi.session fallback); otherwise waiting.
-        out.delivery = rc && rc.proven !== false ? `전달됨 ⏱${hhmm(rc.deliveredAt)}`
-          : (rc || admitted.has(d.id)) ? '전달 중'
-          : (runningAlive ? '대기: 작업이 끝나면 전달' : '대기: 그 대화가 다시 열리면 전달');
+        out.delivery = deliveryOf(d.id, rc);
       }
       return out;
     });
@@ -414,7 +698,7 @@ export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
     const mirror = mirrors.get(sid);
     const qText = mirror && mirror.open !== false ? str(mirror.question) || str(mirror.text) : '';
     const openQuestion = qText
-      ? { text: qText, at: isNum(mirror.at) ? mirror.at : null, paneId: str(mirror.paneId) || null }
+      ? { text: qText, at: isNum(mirror.at) ? mirror.at : null, paneId: str(mirror.paneId) || null, builtin: true }
       : undefined;
 
     const status = STATUSES.has(brief.status) ? brief.status : 'in_progress';
@@ -465,7 +749,7 @@ export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
       tabLabel: str(meta.tabLabel),
       tabNumber: Number.isInteger(meta.tabNumber) ? meta.tabNumber : null,
       // what this conversation's deliverer takes: the board offers the reply box only when 'text' is here
-      answerKinds: [...new Set(arr(meta.answerKinds).filter((k) => k === 'option' || k === 'text'))],
+      answerKinds: [...new Set(arr(meta.answerKinds).filter((k) => k === 'option' || k === 'text' || k === 'annotation'))],
       workName: str(isObj(meta.auto) && isObj(meta.auto.work) ? meta.auto.work.name : '') || str(meta.workName),
       status,
       statusKey: cardStatus(truthView, now),
@@ -479,8 +763,18 @@ export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
       done,
       next: str(brief.next),
       decisions,
+      notes,
       flow: arr(brief.flow).filter(isObj),
+      reports: reportsView(entry.reports, decisions),
+      alive: hostAlive || runningAlive,
+      briefSeq,
+      briefPath: briefSeq !== null && stateDir ? join(stateDir, 'sessions', sid, 'briefs', `${pad6(briefSeq)}.json`) : null,
+      sessionFile: str(meta.sessionFile) || null,
+      todo: todoView(meta.auto),
     };
+    sourceCtx.set(view, { meta, briefSeq });
+    const heldCount = decisions.filter((d) => d.held).length;
+    if (heldCount) view.heldCount = heldCount; // C-HOLD 4, emitted only when > 0
     if (openQuestion) view.openQuestion = openQuestion;
     if (auto) view.auto = auto;
     const live = liveInfo(meta.auto);
@@ -515,6 +809,13 @@ export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
       if (view === holder) continue;
       view.planLink = { planId: m.planId, ownerId: target, source: { slug: str(m.source.slug) }, stage: m.stage, goal: str(m.goal) };
     }
+  }
+
+  // attachments + blockSources once every plan (own or carried for a runner) is placed
+  for (const view of sessions) {
+    const { attachments, blockSources } = sourcesOf(view, { ...sourceCtx.get(view), stateKeys, fs: evidenceFs, realCache });
+    view.attachments = attachments;
+    view.blockSources = blockSources;
   }
 
   const openOf = (s) => s.decisions.filter((d) => !d.answered && !d.closed);
@@ -587,9 +888,9 @@ function dataJsText(vm) {
 
 const attrEscape = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-const PAGE_CSS = ['page.css', 'plan-view.css', 'workers-view.css', 'alarm.css'];
+const PAGE_CSS = ['page.css', 'plan-view.css', 'workers-view.css', 'alarm.css', 'shell.css', 'convo.css', 'annotate.css'];
 // view.js first, then the block renderers it calls into, then alarm.js, then page.js which wires them together.
-const PAGE_JS = ['view.js', 'plan-view.js', 'workers-view.js', 'alarm.js', 'page.js'];
+const PAGE_JS = ['view.js', 'plan-view.js', 'workers-view.js', 'convo-view.js', 'shell.js', 'alarm.js', 'annotate.js', 'page.js'];
 
 /**
  * The whole board page (all scripts and styles inline, first paint from `vm`). mode 'file' = STATE/index.html,
@@ -743,12 +1044,12 @@ function makeRenderer(store, now, opts) {
     let paused = false;
     let stampError;
     try {
-      const snap = store.readSnapshot();
+      const snap = withReports(store, store.readSnapshot());
       readMtime = snap.maxMtime;
       const info = serverInfoOf(store, isAlive);
       if (typeof opts.onServerInfo === 'function') opts.onServerInfo(info); // the caller notes a failed record read after the publish
       const vm = buildViewModel(snap, now, {
-        isAlive, fs, pendingDeliveries: opts.pendingDeliveries, generation, server: info.server, serverError: info.error,
+        isAlive, fs, pendingDeliveries: opts.pendingDeliveries, generation, server: info.server, serverError: info.error, stateDir: store.root,
       });
       vm.seq = lastPublishedSeq(store, snap) + 1;
       capSize(vm); // the seq text is part of data.js: confirm the cap on the final text

@@ -30,7 +30,8 @@ export function isPidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
 
-function listProfilePids(profileDir) {
+// Every chrome.exe whose command line names this profile: the browser and its renderer/GPU/utility children.
+export function listProfilePids(profileDir) {
   if (process.platform !== 'win32') return [];
   const profile = profileDir.replace(/'/g, "''").replace(/[[\]`*?]/g, '`$&');
   const query = `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object CommandLine -like '*${profile}*' | Select-Object -ExpandProperty ProcessId`;

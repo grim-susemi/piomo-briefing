@@ -26,6 +26,7 @@ const MAX_RETRIES = 8; // 2ms부터 두 배씩: 최악 약 0.5초 뒤 깔끔하�
 const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const TOKEN_RE = /^(\d+)([ABCabc])?$/;
 const pad6 = (n) => String(n).padStart(6, '0');
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function parseDecide(text) {
   const tokens = String(text ?? '').split(/[\s,]+/).filter((t) => t.length > 0);
@@ -163,7 +164,7 @@ export function applyDecide(store, text, fromSessionId, now = Date.now(), opts =
 /**
  * 공용 몸통: 선점(claims/<id>.json, wx) → 전부 얻은 뒤 재확인 → answers/<id>.json(wx) 기록. 전부 아니면 전무.
  * 검증(결정 존재·마감·이미 답함·선택지)은 호출측 몫. 같은 번호가 두 번 들어오면 안 된다.
- * @param {{id:number, fields:{option:string}|{text:string}}[]} items 기록할 답. 파일은 { id, ...fields, at, fromSessionId }
+ * @param {{id:number|string, fields:object}[]} items Numeric decisions keep {id}; annotations use {key}.
  * @returns {{applied:object[], errors:object[], alreadyAnswered:number[], permissionError?:number[]}} applyDecide 결과와 같은 모양
  */
 function commitAnswers(store, items, fromSessionId, now, opts = {}) {
@@ -175,7 +176,9 @@ function commitAnswers(store, items, fromSessionId, now, opts = {}) {
   const at = now;
 
   // 선점 단계: 번호 오름차순
-  const ordered = [...items].sort((a, b) => a.id - b.id);
+  const ordered = [...items].sort((a, b) => typeof a.id === 'number' && typeof b.id === 'number'
+    ? a.id - b.id : String(a.id).localeCompare(String(b.id)));
+  const identity = (id) => typeof id === 'number' ? { id } : { key: id };
   const mine = [];
   const rollback = () => {
     for (const id of mine) {
@@ -196,7 +199,7 @@ function commitAnswers(store, items, fromSessionId, now, opts = {}) {
     let delay = FIRST_DELAY_MS;
     for (let attempt = 0; ; attempt++) {
       try {
-        store.writeNew(claimRel(id), { id, pid, at, nonce: makeNonce() });
+        store.writeNew(claimRel(id), { ...identity(id), pid, at, nonce: makeNonce() });
         return 'created';
       } catch (err) {
         if (err?.code === 'EEXIST') return 'exists';
@@ -249,6 +252,7 @@ function commitAnswers(store, items, fromSessionId, now, opts = {}) {
   for (const it of ordered) {
     let outcome;
     try {
+      hooks.beforeClaim?.(it.id);
       outcome = acquire(it.id);
     } catch (err) {
       rollback();
@@ -271,12 +275,23 @@ function commitAnswers(store, items, fromSessionId, now, opts = {}) {
     rollback();
     return { applied: [], errors: [], alreadyAnswered: answeredNow };
   }
+  // A hold can win after the caller's validation but before its claim acquisition.
+  // Recheck under our claim so a terminal answer never writes through that closure.
+  for (const it of ordered) {
+    if (typeof it.id !== 'number') continue;
+    let closed;
+    try { closed = store.readRecord(closureRel(it.id)); } catch (err) { rollback(); throw err; }
+    if (closed) {
+      rollback();
+      return { applied: [], errors: [{ token: String(it.id), reason: closed.reason === 'held' ? 'HELD' : 'CLOSED' }], alreadyAnswered: [] };
+    }
+  }
 
   // 답 단계: 위 재확인 뒤에는 선점한 프로세스만 쓰므로 EEXIST는 생기지 않음
   const applied = [];
   try {
     for (const it of ordered) {
-      store.writeNew(answerRel(it.id), { id: it.id, ...it.fields, at, fromSessionId });
+      store.writeNew(answerRel(it.id), { ...identity(it.id), ...it.fields, at, fromSessionId });
       applied.push({ id: it.id, ...it.fields });
     }
   } catch (err) {
@@ -290,9 +305,35 @@ const BOARD_SENDER = 'board';
 const BOARD_TEXT_MAX = 500; // 코드포인트
 const boardFail = (code, detail) => (detail === undefined ? { ok: false, code } : { ok: false, code, detail });
 
+/** Owner Markdown is stored verbatim; the shared writer alone creates claims and answers. */
+export function applyBoardAnnotation(store, request, now = Date.now(), opts = {}) {
+  let { sessionId, requestId, text } = request ?? {};
+  if (typeof sessionId !== 'string' || !sessionId || typeof requestId !== 'string' || !UUID_V4.test(requestId)) {
+    return boardFail('BAD_REQUEST');
+  }
+  if (typeof text !== 'string' || !text.trim() || text.length > 24000
+    || [...text].length > 12000 || Buffer.byteLength(text, 'utf8') > 48 * 1024) return boardFail('BAD_TEXT');
+  requestId = requestId.toLowerCase();
+  const key = `a-${requestId}`;
+  const duplicate = (answer) => answer.kind === 'annotation' && answer.sessionId === sessionId && answer.text === text
+    ? { ok: true, key, duplicate: true } : boardFail('REQUEST_ID_CONFLICT');
+  try {
+    const existing = store.readRecord(answerRel(key));
+    if (existing) return duplicate(existing);
+    const result = commitAnswers(store, [{ id: key, fields: { kind: 'annotation', sessionId, text, requestId } }], BOARD_SENDER, now, opts);
+    if (result.applied.length) return { ok: true, key };
+    // A competitor may have committed between our first read and claim acquisition.
+    const winner = store.readRecord(answerRel(key));
+    if (winner) return duplicate(winner);
+    return boardFail('IO_ERROR', result.errors[0]?.reason ?? 'annotation claim not acquired');
+  } catch (err) {
+    return boardFail('IO_ERROR', String(err?.message ?? err));
+  }
+}
+
 /**
  * 상황판 답 한 건(옵션 하나 또는 글 하나). 던지지 않는다.
- * 코드: BAD_REQUEST(번호·세션·option/text 모양) BAD_TEXT BAD_OPTION NOT_FOUND SESSION_MISMATCH CLOSED ANSWERED
+ * 코드: BAD_REQUEST(번호·세션·option/text 모양) BAD_TEXT BAD_OPTION NOT_FOUND SESSION_MISMATCH CLOSED HELD ANSWERED
  *       IO_ERROR(읽기·선점·쓰기 장애: 아무것도 쓰지 않았거나 못 씀. detail은 로그용이며 화면에 내보내지 않는다)
  * 읽기 검사는 쓰기 전에 모두 끝나고, 못 읽으면 닫힌/이미 답한 결정일 수 있으므로 fail-closed(IO_ERROR).
  * @param {object} store openStore() 결과
@@ -301,6 +342,27 @@ const boardFail = (code, detail) => (detail === undefined ? { ok: false, code } 
  * @param {{fs?, pid?, nonce?, hooks?, sleep?}} [opts] 테스트용 주입(commitAnswers에 그대로 전달)
  */
 export function applyBoardAnswer(store, request, now = Date.now(), opts = {}) {
+  if (request?.action !== undefined) return applyBoardAction(store, request, now, opts);
+  return applyDecisionAnswer(store, request, BOARD_SENDER, now, opts);
+}
+
+/** The asking session uses the same validation and claim writer as the board. */
+export function applyAskAnswer(store, request, now = Date.now(), opts = {}) {
+  try {
+    const rec = store.readRecord(decisionRel(request?.id));
+    if (!rec) return boardFail('NOT_FOUND');
+    if (rec.source !== 'ask' || rec.sessionId !== request?.sessionId) return boardFail('SESSION_MISMATCH');
+    const result = applyDecisionAnswer(store, request, rec.sessionId, now, opts);
+    const answer = store.readRecord(answerRel(rec.id));
+    if (answer) return { ...result, answer };
+    if (store.readRecord(closureRel(rec.id))?.reason === 'held') return boardFail('HELD');
+    return result;
+  } catch (err) {
+    return boardFail('IO_ERROR', String(err?.message ?? err));
+  }
+}
+
+function applyDecisionAnswer(store, request, sender, now, opts) {
   const { id, sessionId, option, text } = request !== null && typeof request === 'object' ? request : {};
   const hasOption = option !== undefined;
   const hasText = text !== undefined;
@@ -320,7 +382,8 @@ export function applyBoardAnswer(store, request, now = Date.now(), opts = {}) {
     rec = store.readRecord(decisionRel(id));
     if (!rec) return boardFail('NOT_FOUND');
     if (rec.sessionId !== sessionId) return boardFail('SESSION_MISMATCH');
-    if (store.readRecord(closureRel(id))) return boardFail('CLOSED');
+    const closure = store.readRecord(closureRel(id));
+    if (closure) return boardFail(closure.reason === 'held' ? 'HELD' : 'CLOSED'); // C-HOLD 1: held until reopened
     if (store.readRecord(answerRel(id))) return boardFail('ANSWERED');
   } catch (err) {
     return boardFail('IO_ERROR', String(err?.message ?? err));
@@ -335,16 +398,56 @@ export function applyBoardAnswer(store, request, now = Date.now(), opts = {}) {
 
   let result;
   try {
-    result = commitAnswers(store, [{ id, fields }], BOARD_SENDER, now, opts);
+    result = commitAnswers(store, [{ id, fields }], sender, now, opts);
   } catch (err) {
     return boardFail('IO_ERROR', String(err?.message ?? err));
   }
   if (result.applied.length > 0) return { ok: true, id };
   if (result.permissionError?.length > 0) return boardFail('IO_ERROR', '파일 권한 오류');
   if (result.alreadyAnswered.length > 0) return boardFail('ANSWERED');
+  if (['HELD', 'CLOSED'].includes(result.errors[0]?.reason)) return boardFail(result.errors[0].reason);
   // 기록 단계에서 쓰기가 실패함: 그 사이 답이 생겼으면 ANSWERED, 아니면 장애
   if ((opts.fs ?? nodeFs).existsSync(join(store.root, ...answerRel(id).split('/')))) return boardFail('ANSWERED');
   return boardFail('IO_ERROR', result.errors[0]?.reason);
+}
+
+// Hold/reopen use the same exclusive claim as answers. A held closure is not an answer. Reopen renames that
+// closure to decision-closures/<id>.<n>.released.json (write-once records are never mutated in place, and the
+// snapshot reads only <id>.json), so the question is open again without a fabricated reply or a message.
+function applyBoardAction(store, { id, sessionId, action, option, text }, at, opts) {
+  if (!Number.isSafeInteger(id) || id <= 0 || typeof sessionId !== 'string' || !sessionId
+    || !['hold', 'reopen'].includes(action) || option !== undefined || text !== undefined) return boardFail('BAD_REQUEST');
+  const fs = opts.fs ?? nodeFs;
+  let claimed = false;
+  try {
+    const rec = store.readRecord(decisionRel(id));
+    if (!rec) return boardFail('NOT_FOUND');
+    if (rec.sessionId !== sessionId) return boardFail('SESSION_MISMATCH');
+    if (store.readRecord(answerRel(id))) return boardFail('ANSWERED');
+    try {
+      store.writeNew(claimRel(id), { id, pid: process.pid, at, nonce: randomUUID() });
+      claimed = true;
+    } catch (err) { if (err.code === 'EEXIST') return boardFail('CLOSED'); throw err; }
+    if (store.readRecord(answerRel(id))) return boardFail('ANSWERED');
+    const closed = store.readRecord(closureRel(id));
+    if (action === 'reopen') {
+      if (closed?.reason !== 'held') return boardFail('CLOSED');
+      // Under our claim no other writer touches this id, so the first free cycle number is ours.
+      let n = 1;
+      while (fs.existsSync(join(store.root, 'decision-closures', `${pad6(id)}.${n}.released.json`))) n++;
+      fs.renameSync(join(store.root, ...closureRel(id).split('/')), join(store.root, 'decision-closures', `${pad6(id)}.${n}.released.json`));
+    } else {
+      if (closed) return boardFail('CLOSED');
+      const notice = randomUUID();
+      store.writeNew(closureRel(id), { id, reason: 'held', at, notice });
+      store.writeNew(`hold-notices/${notice}.json`, { id, sessionId, at });
+    }
+    return { ok: true, id };
+  } catch (err) {
+    return boardFail('IO_ERROR', String(err?.message ?? err));
+  } finally {
+    if (claimed) fs.unlinkSync(join(store.root, ...claimRel(id).split('/')));
+  }
 }
 
 export { isPidAlive };

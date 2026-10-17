@@ -1056,8 +1056,291 @@ test('a callback that fails after its 504 is reported once, and only then is the
   });
 });
 
+test('C-HOLD HTTP: hold and reopen pass only in their own shape; a forged Origin, a missing token or a mixed body never reaches the writer', async () => {
+  await withWriteServer({}, async ({ port, calls }) => {
+    const hold = { id: 7, sessionId: 's1', action: 'hold' };
+    const reopen = { id: 7, sessionId: 's1', action: 'reopen' };
+    for (const body of [hold, reopen]) {
+      for (const [over, code] of [[{ Origin: 'http://evil.example' }, 'FORBIDDEN_ORIGIN'], [{ 'X-Board-Token': null }, 'FORBIDDEN_TOKEN']]) {
+        const r = await postWrite(port, '/answer', body, over);
+        assert.equal(r.status, 403, `${body.action} ${code}`);
+        assert.equal(JSON.parse(r.body).code, code);
+      }
+    }
+    assert.equal(calls.answer.length, 0, 'no forged hold/reopen reaches the writer');
+    for (const bad of [
+      { ...hold, option: 'A' }, { ...hold, text: 'x' }, { ...hold, action: ['hold', 'reopen'] }, { ...hold, action: 'hold,reopen' },
+      { id: 7, sessionId: 's1', hold: true }, { id: 7, sessionId: 's1', hold: true, reopen: true }, { ...hold, id: '7' },
+    ]) {
+      const r = await postWrite(port, '/answer', bad);
+      assert.equal(r.status, 400, JSON.stringify(bad));
+    }
+    assert.equal(calls.answer.length, 0, 'malformed hold/reopen bodies never reach the writer');
+    assert.equal((await postWrite(port, '/answer', hold)).status, 200);
+    assert.equal((await postWrite(port, '/answer', reopen)).status, 200);
+    assert.deepEqual(calls.answer, [hold, reopen]);
+  });
+});
+
 test('no response anywhere in this file carried Access-Control-*', () => {
   const offenders = seenHeaders.filter((h) => Object.keys(h).some((k) => k.toLowerCase().startsWith('access-control-')));
   assert.deepEqual(offenders, []);
   assert.deepEqual(seenRaw.filter((text) => /^access-control-/im.test(text)), []);
+});
+
+const NOTE = { kind: 'annotation', sessionId: 's1', requestId: '01234567-89ab-4cde-8fab-0123456789ab', text: '## [note]\n' + 'x\n'.repeat(4608) };
+
+test('annotation HTTP: 9 KB multiline shape passes verbatim; exact keys, UUID v4 and every existing header guard apply', async () => {
+  await withWriteServer({}, async ({ port, calls }) => {
+    assert.equal((await postWrite(port, '/answer', NOTE)).status, 200);
+    assert.deepEqual(calls.answer, [NOTE]);
+    for (const over of [
+      { id: 1 }, { option: 'A' }, { action: 'hold' }, { extra: true }, { kind: 'text', text: 'short invalid kind' },
+      { requestId: 'no' }, { requestId: NOTE.requestId.replace('-4cde-', '-1cde-') }, { text: null }, { requestId: null },
+    ]) {
+      const r = await postWrite(port, '/answer', { ...NOTE, ...over });
+      assert.equal(r.status, 400, JSON.stringify(over));
+      assert.equal(JSON.parse(r.body).code, 'BAD_REQUEST');
+    }
+    const missing = { ...NOTE };
+    delete missing.requestId;
+    assert.equal((await postWrite(port, '/answer', missing)).status, 400);
+    for (const [over, code] of [
+      [{ Origin: 'http://evil.example' }, 'FORBIDDEN_ORIGIN'],
+      [{ 'X-Board-Token': null }, 'FORBIDDEN_TOKEN'],
+      [{ 'Sec-Fetch-Site': 'cross-site' }, 'FORBIDDEN_SITE'],
+      [{ 'Content-Type': 'text/plain' }, 'UNSUPPORTED_TYPE'],
+    ]) {
+      const r = await postWrite(port, '/answer', NOTE, over);
+      assert.equal(r.status, code === 'UNSUPPORTED_TYPE' ? 415 : 403);
+      assert.equal(JSON.parse(r.body).code, code);
+    }
+    assert.equal((await postWrite(port, '/answer', NOTE, { Host: 'evil.example' })).status, 403);
+    assert.equal(calls.answer.length, 1, 'no refused request calls the writer');
+  });
+});
+
+test('annotation HTTP: answer cap is 65536 declared or chunked, focus and parsed legacy keep 4096', async () => {
+  await withWriteServer({}, async ({ port, calls }) => {
+    const body = JSON.stringify(NOTE);
+    const padded = body + ' '.repeat(65536 - Buffer.byteLength(body));
+    assert.equal((await postWrite(port, '/answer', padded)).status, 200);
+    assert.equal((await postWrite(port, '/answer', [padded.slice(0, 32000), padded.slice(32000)])).status, 200);
+    for (const huge of [padded + ' ', [padded, ' ']]) {
+      const r = await postWrite(port, '/answer', huge);
+      assert.equal(r.status, 413);
+      assert.equal(JSON.parse(r.body).code, 'TOO_LARGE');
+    }
+    const legacy = JSON.stringify({ id: 12, sessionId: 's1', text: 'x'.repeat(4100) });
+    assert.equal((await postWrite(port, '/answer', legacy)).status, 413);
+    assert.equal((await postWrite(port, '/focus', JSON.stringify(FOCUS) + ' '.repeat(4096))).status, 413);
+    assert.equal(calls.answer.length, 2);
+    assert.equal(calls.focus.length, 0);
+  });
+});
+
+test('annotation HTTP: the same write slot excludes legacy replies and focus until the annotation callback settles', async () => {
+  const entered = Promise.withResolvers();
+  const gate = Promise.withResolvers();
+  await withWriteServer({ onAnswer: () => { entered.resolve(); return gate.promise; } }, async ({ port }) => {
+    const first = postWrite(port, '/answer', NOTE);
+    try {
+      await entered.promise;
+      assert.equal((await postWrite(port, '/answer', ANSWER)).status, 429);
+      assert.equal((await postWrite(port, '/focus', FOCUS)).status, 429);
+    } finally { gate.resolve({ status: 200, json: { ok: true } }); }
+    assert.equal((await first).status, 200);
+    assert.equal((await postWrite(port, '/focus', FOCUS)).status, 200);
+  });
+});
+
+// ---------------------------------------------------------------- /assets (C-REPORT 4)
+// A 2x2 PNG (signature + IHDR) followed by `tail`; served assets are content-addressed, so tests use real hashes.
+function png2x2(tail = '') {
+  const ihdr = Buffer.alloc(25);
+  ihdr.writeUInt32BE(13, 0); ihdr.write('IHDR', 4, 'latin1'); ihdr.writeUInt32BE(2, 8); ihdr.writeUInt32BE(2, 12); ihdr[16] = 8; ihdr[17] = 2;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), ihdr, Buffer.from(tail, 'latin1')]);
+}
+test('assets: a referenced hash is 200 with nosniff + immutable cache; unreferenced, malformed and cross-site are refused', async (t) => {
+  const { mkdtempSync, writeFileSync, mkdirSync, rmSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { createHash } = await import('node:crypto');
+  const dir = mkdtempSync(join(os.tmpdir(), 'omo-assets-srv-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const bytes = png2x2('pixels');
+  const sha = createHash('sha256').update(bytes).digest('hex');
+  const other = 'b'.repeat(64);
+  writeFileSync(join(dir, `${sha}.png`), bytes);
+  writeFileSync(join(dir, `${other}.png`), bytes); // on disk, but not in the model
+  mkdirSync(join(dir, `${'c'.repeat(64)}.png`)); // a directory under a referenced name
+  const refs = new Set([`${sha}.png`, `${'c'.repeat(64)}.png`, `${'d'.repeat(64)}.webp`]);
+  const asked = [];
+  await withServer({ assetsDir: dir, assetAllowed: (name) => { asked.push(name); return refs.has(name); } }, async ({ port }) => {
+    const ok = await new Promise((resolve, reject) => {
+      http.get({ host: '127.0.0.1', port, path: `/assets/${sha}.png`, agent: false }, (res) => {
+        const parts = [];
+        res.on('data', (c) => parts.push(c));
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(parts) }));
+      }).on('error', reject);
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.headers['x-content-type-options'], 'nosniff');
+    assert.equal(ok.headers['content-type'], 'image/png');
+    assert.equal(ok.headers['cache-control'], 'max-age=31536000, immutable');
+    assert.ok(ok.body.equals(bytes));
+    assert.equal((await request({ port, path: `/assets/${sha}.png?x=1`, headers: { 'Sec-Fetch-Site': 'same-origin' } })).status, 200);
+    assert.equal((await request({ port, path: `/assets/${other}.png` })).status, 404, 'unreferenced');
+    assert.equal((await request({ port, path: `/assets/${'c'.repeat(64)}.png` })).status, 404, 'a directory is not served');
+    assert.equal((await request({ port, path: `/assets/${'d'.repeat(64)}.webp` })).status, 404, 'referenced but missing');
+    for (const path of [`/assets/${sha.toUpperCase()}.png`, `/assets/${sha}.gif`, `/assets/${sha}.svg`, `/assets/${sha}.png/x`,
+      '/assets/../server.json', '/assets/%2e%2e/server.json', `/assets/x/${sha}.png`, '/assets/', `/assets/${sha}`]) {
+      assert.equal((await request({ port, path })).status, 404, path);
+    }
+    const cross = await request({ port, path: `/assets/${sha}.png`, headers: { 'Sec-Fetch-Site': 'cross-site' } });
+    assert.equal(cross.status, 403);
+    assert.equal((await request({ port, path: `/assets/${sha}.png`, headers: { 'Sec-Fetch-Site': 'same-site' } })).status, 403);
+    assert.equal((await request({ port, path: `/assets/${sha}.png`, headers: { Host: `evil.example:${port}` } })).status, 403, 'Host gate');
+    assert.equal((await request({ port, path: `/assets/${sha}.png`, method: 'POST' })).status, 405);
+    refs.delete(`${sha}.png`); // the hash left the model
+    assert.equal((await request({ port, path: `/assets/${sha}.png` })).status, 404, 'stale: 404 once the model no longer references it');
+  });
+  assert.ok(!asked.includes(`${sha}.gif`), 'malformed names never reach the reference check');
+});
+
+test('assets: only a file really inside assetsDir is served (junctioned dir, swap around lstat or open -> 404)', async (t) => {
+  const fs = await import('node:fs');
+  const fsp = (await import('node:fs/promises')).default; // the mutable object behind the named exports
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { join } = await import('node:path');
+  const root = fs.mkdtempSync(join(os.tmpdir(), 'omo-assets-escape-'));
+  const assets = join(root, 'state', 'assets');
+  const outside = join(root, 'outside');
+  const { createHash } = await import('node:crypto');
+  const insideBytes = png2x2('INSIDE');
+  const name = `${createHash('sha256').update(insideBytes).digest('hex')}.png`;
+  fs.mkdirSync(assets, { recursive: true });
+  fs.mkdirSync(outside);
+  fs.writeFileSync(join(assets, name), insideBytes);
+  fs.writeFileSync(join(outside, name), png2x2('OUTSIDE_SENTINEL'));
+  const toJunction = () => { fs.renameSync(assets, assets + '-real'); fs.symlinkSync(outside, assets, 'junction'); };
+  const toReal = () => { fs.unlinkSync(assets); fs.renameSync(assets + '-real', assets); };
+  const original = { open: fsp.open, lstat: fsp.lstat };
+  const restore = () => { fsp.open = original.open; fsp.lstat = original.lstat; syncBuiltinESMExports(); };
+  t.after(() => { restore(); fs.rmSync(root, { recursive: true, force: true }); });
+  const isTarget = (p) => String(p).toLowerCase().endsWith(name);
+  await withServer({ assetsDir: assets, assetAllowed: (n) => n === name }, async ({ port }) => {
+    const get = () => request({ port, path: `/assets/${name}` });
+    const isInside = (r) => r.status === 200 && r.body.endsWith('INSIDE');
+    let r = await get();
+    assert.ok(isInside(r), 'the real asset is served');
+
+    toJunction(); // STATE/assets itself is a junction to a directory outside
+    r = await get();
+    assert.equal(r.status, 404, `junctioned assets dir served ${r.body}`);
+    toReal();
+
+    // swap right after the real lstat of the file ran and leave it swapped. Windows refuses to rename a directory while a
+    // file in it is open, so the swap may not happen; either way the outside bytes must never come back.
+    let flips = 0;
+    let swapped = false;
+    fsp.lstat = async (p, ...a) => {
+      const st = await original.lstat(p, ...a);
+      if (isTarget(p) && !flips++) { try { toJunction(); swapped = true; } catch { /* directory busy: not swapped */ } }
+      return st;
+    };
+    syncBuiltinESMExports();
+    r = await get();
+    restore();
+    if (swapped) toReal();
+    assert.ok(flips > 0, 'the lstat hook ran');
+    assert.ok(r.status === 404 || isInside(r), `lstat swap served ${r.status} ${r.body}`);
+
+    let swaps = 0; // swap only for the open itself, then put the real directory back
+    fsp.open = async (p, ...a) => {
+      if (!isTarget(p) || swaps++) return original.open(p, ...a);
+      toJunction();
+      try { return await original.open(p, ...a); } finally { toReal(); }
+    };
+    syncBuiltinESMExports();
+    r = await get();
+    restore();
+    assert.equal(swaps > 0, true, 'the open hook ran');
+    assert.equal(r.status, 404, `open-time swap served ${r.body}`);
+
+    r = await get();
+    assert.ok(isInside(r), 'served again once the directory is real');
+  });
+});
+
+test('assets: content-addressed - any substituted file (combined junction swaps, injected outside handle, wrong bytes or type) is 404', async (t) => {
+  const fs = await import('node:fs');
+  const fsp = (await import('node:fs/promises')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { join } = await import('node:path');
+  const { createHash } = await import('node:crypto');
+  const hash = (b) => createHash('sha256').update(b).digest('hex');
+  const root = fs.mkdtempSync(join(os.tmpdir(), 'omo-assets-content-'));
+  const assets = join(root, 'state', 'assets');
+  const outside = join(root, 'outside');
+  const insideBytes = png2x2('INSIDE');
+  const name = `${hash(insideBytes)}.png`;
+  fs.mkdirSync(assets, { recursive: true });
+  fs.mkdirSync(outside);
+  fs.writeFileSync(join(assets, name), insideBytes);
+  const outsideFile = join(outside, name);
+  fs.writeFileSync(outsideFile, png2x2('OUTSIDE_SENTINEL')); // a valid PNG header: only the hash tells it apart
+  const planted = `${'e'.repeat(64)}.png`; // inside, but its bytes do not hash to its name
+  fs.writeFileSync(join(assets, planted), png2x2('PLANTED'));
+  const asWebp = `${hash(insideBytes)}.webp`; // right hash, PNG bytes under a .webp name
+  fs.writeFileSync(join(assets, asWebp), insideBytes);
+  const toJunction = () => { fs.renameSync(assets, assets + '-real'); fs.symlinkSync(outside, assets, 'junction'); };
+  const toReal = () => { fs.unlinkSync(assets); fs.renameSync(assets + '-real', assets); };
+  const original = { open: fsp.open, lstat: fsp.lstat };
+  const restore = () => { fsp.open = original.open; fsp.lstat = original.lstat; syncBuiltinESMExports(); };
+  t.after(() => { restore(); fs.rmSync(root, { recursive: true, force: true }); });
+  const isTarget = (p) => String(p).toLowerCase().endsWith(name);
+  const refs = new Set([name, planted, asWebp]);
+  await withServer({ assetsDir: assets, assetAllowed: (n) => refs.has(n) }, async ({ port }) => {
+    const get = (n = name) => request({ port, path: `/assets/${n}` });
+    const noOutside = (r, label) => {
+      assert.equal(r.status, 404, `${label}: ${r.status}`);
+      assert.ok(!r.body.includes('OUTSIDE_SENTINEL') && !r.body.includes('PLANTED'), `${label} leaked bytes`);
+    };
+
+    // the reviewer's combined native substitution: a junction to the outside folder for the open AND for the leaf lstat,
+    // the real folder put back in between, so the directory identity checks see the real folder both times
+    const swaps = { open: 0, lstat: 0 };
+    const swapAround = (kind, fn) => async (p, ...a) => {
+      if (!isTarget(p)) return fn(p, ...a);
+      swaps[kind]++;
+      toJunction();
+      try { return await fn(p, ...a); } finally { toReal(); }
+    };
+    fsp.open = swapAround('open', original.open);
+    fsp.lstat = swapAround('lstat', original.lstat);
+    syncBuiltinESMExports();
+    let r = await get();
+    restore();
+    assert.ok(swaps.open > 0, 'the open swap ran');
+    noOutside(r, 'combined junction swap');
+
+    // the same through an injected seam: the open and the leaf lstat both land on the outside file
+    fsp.open = async (p, ...a) => original.open(isTarget(p) ? outsideFile : p, ...a);
+    fsp.lstat = async (p, ...a) => original.lstat(isTarget(p) ? outsideFile : p, ...a);
+    syncBuiltinESMExports();
+    r = await get();
+    restore();
+    noOutside(r, 'injected outside handle');
+
+    noOutside(await get(planted), 'bytes that do not hash to the name');
+    noOutside(await get(asWebp), 'PNG bytes under a .webp name');
+    r = await get();
+    assert.ok(r.status === 200 && r.body.endsWith('INSIDE'), 'the real asset is still served');
+  });
+});
+
+test('assets: without assetsDir/assetAllowed every /assets path is 404', async () => {
+  await withServer({}, async ({ port }) => {
+    assert.equal((await request({ port, path: `/assets/${'a'.repeat(64)}.png` })).status, 404);
+  });
 });

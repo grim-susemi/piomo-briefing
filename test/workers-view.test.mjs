@@ -515,3 +515,15 @@ test('css: tokens only, 1200 ms pulse, reduced-motion switches every animation o
   assert.match(text, /\.w-stale\s*>\s*\.w-dot\s*\{[^}]*var\(--yellow\)/);
   assert.match(text, /@media\s*\(max-width:\s*599px\)/);
 });
+
+test('css: worker tags wrap instead of clipping: no nowrap, hidden overflow, ellipsis or zero-basis squeeze on .w-tags', () => {
+  const rules = [...css().matchAll(/([^{}]+)\{([^}]*)\}/g)].filter((m) => m[1].trim() === '.w-tags').map((m) => m[2]);
+  assert.equal(rules.length, 2, 'the base rule and the phone rule');
+  for (const body of rules) {
+    assert.doesNotMatch(body, /white-space:\s*nowrap|overflow:\s*hidden|text-overflow/);
+    assert.doesNotMatch(body, /flex:\s*\d+\s+\d+\s+0(px)?\s*(;|$)/, 'a zero flex-basis squeezes the tags beside the step');
+  }
+  assert.match(rules[0], /overflow-wrap:\s*anywhere/);
+  assert.ok(render(LIVE1, NOW).includes('<span class="w-tags"><span class="w-tag">[visual-engineering]</span><span class="w-tag w-model">[Opus 5.5]</span></span>'),
+    'the rule dresses both tags of a row');
+});

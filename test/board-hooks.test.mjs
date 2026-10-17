@@ -279,3 +279,50 @@ test('focus: a fault reading the target\'s meta is 500 IO_ERROR and recorded as 
   assert.match(s.meta().errors.focus.message, /EIO: i\/o error, open '.*sessions\/sess-B\/meta\.json'/);
   assert.deepEqual(exec.calls, []);
 });
+
+test('annotation hook: capability refusal is 409; 9 KB Markdown, duplicate and conflict keep one immutable answer', async (t) => {
+  const s = lead(t);
+  await s.start();
+  const requestId = '01234567-89ab-4cde-8fab-0123456789ab';
+  const key = `a-${requestId}`;
+  const text = ' \n## [owner]\n' + 'x\n'.repeat(4608) + '\tend\n ';
+  const request = { kind: 'annotation', sessionId: 'sess-A', requestId, text };
+  assert.deepEqual(await s.hooks().answer({ id: 1, sessionId: 'sess-A', text: 'x'.repeat(501) }), fail(400, 'BAD_TEXT'));
+  s.writeMeta('old', { answerKinds: ['option', 'text'] });
+  s.writeMeta('annotation-only', { answerKinds: ['annotation'] });
+  for (const sessionId of ['old', 'missing', '../sess-A']) {
+    assert.deepEqual(await s.hooks().answer({ ...request, sessionId }), fail(409, 'NO_ANNOTATION_SUPPORT'));
+  }
+  assert.deepEqual(s.answerFiles(), []);
+  const seq = s.seq();
+  assert.deepEqual(await s.hooks().answer(request), { status: 200, json: { ok: true, key } });
+  const path = join(s.stateDir, 'answers', `${key}.json`);
+  const before = readFileSync(path, 'utf8');
+  assert.deepEqual(Buffer.from(JSON.parse(before).text), Buffer.from(text));
+  assert.ok(s.seq() > seq, 'the note state is published');
+  assert.deepEqual(await s.hooks().answer(request), { status: 200, json: { ok: true, key, duplicate: true } });
+  assert.deepEqual(await s.hooks().answer({ ...request, text: text + 'changed' }), fail(409, 'REQUEST_ID_CONFLICT'));
+  assert.equal(readFileSync(path, 'utf8'), before);
+  assert.deepEqual(s.answerFiles(), [`${key}.json`]);
+  for (const text of ['', 'x'.repeat(12001), '😀'.repeat(12289)]) {
+    assert.deepEqual(await s.hooks().answer({ ...request, text }), fail(400, 'BAD_TEXT'));
+  }
+  assert.deepEqual(s.meta().errors, {}, 'validation and conflicts are refusals, not store faults');
+  const supported = { ...request, sessionId: 'annotation-only', requestId: requestId.replace('01234567-', '11234567-') };
+  assert.equal((await s.hooks().answer(supported)).status, 200, 'annotation does not require legacy text capability');
+});
+
+test('annotation hook: a meta read fault is bare IO_ERROR, and a later successful annotation clears its diagnostic', async (t) => {
+  const ctl = { deny: false };
+  const s = lead(t, { fs: faultyFs(ctl, /\/sessions\/note-owner\/meta\.json$/) });
+  await s.start();
+  s.writeMeta('note-owner', { answerKinds: ['annotation'] });
+  const request = { kind: 'annotation', sessionId: 'note-owner', requestId: '01234567-89ab-4cde-8fab-0123456789ab', text: 'note' };
+  ctl.deny = true;
+  assert.deepEqual(await s.hooks().answer(request), fail(500, 'IO_ERROR'));
+  assert.match(s.meta().errors.answer.message, /a-01234567/);
+  assert.deepEqual(s.answerFiles(), []);
+  ctl.deny = false;
+  assert.equal((await s.hooks().answer(request)).status, 200);
+  assert.equal(s.meta().errors.answer, undefined);
+});

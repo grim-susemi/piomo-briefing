@@ -33,7 +33,6 @@
   var TONE_S = 0.12;
   var FADE_S = 0.01;
   var TONES = [880, 1320];
-  var TABS = ['wait', 'run', 'done'];
   var LIVE_URL = /^http:\/\/(127\.0\.0\.1|localhost):\d+\//;
   var TITLE_PREFIX = /^\(\d+\) /;
   var BLOCKED_TEXT = '소리를 켜려면 화면을 한 번 누르세요';
@@ -312,7 +311,15 @@
     el.setAttribute('aria-label', '답 기다림 알람');
     el.setAttribute('aria-live', 'polite');
     el.addEventListener('click', guard('band click', onBandClick));
-    // after page.js's live status, before its live link and the board
+    // the row text wraps (alarm.css), so the band's height follows its column's width, which the sidebar changes without a
+    // window resize: republish it whenever the band's box changes
+    if (typeof g.ResizeObserver === 'function') new g.ResizeObserver(guard('band resize', function () { publishHeight(d, el); })).observe(el);
+    var tabs = d.getElementById('tabs');
+    if (tabs && tabs.parentNode) {
+      tabs.parentNode.insertBefore(el, tabs.parentNode.firstChild);
+      return el;
+    }
+    // Standalone alarm harnesses have no shell.
     var ref = d.getElementById('live-link') || d.getElementById('app') || d.body.firstChild || null;
     if (ref && ref.parentNode && ref.parentNode !== d.body) ref = null;
     d.body.insertBefore(el, ref);
@@ -374,21 +381,13 @@
     return null;
   }
 
-  // [보기]: scroll to the conversation card; when it is not on screen, let page.js show the tab that has it.
+  // [보기] opens this conversation's decisions, independent of its current grouping.
   function goTo(sid) {
     var d = env.doc;
     if (!d || !sid) return false;
-    var el = findCard(d, sid);
     var page = g.BriefPage;
-    if (!el && page && page.state && page.state.ui && typeof page.render === 'function') {
-      var before = page.state.ui.tab;
-      for (var i = 0; i < TABS.length && !el; i++) {
-        page.state.ui.tab = TABS[i];
-        page.render();
-        el = findCard(d, sid);
-      }
-      if (!el) { page.state.ui.tab = before; page.render(); }
-    }
+    if (page && typeof page.open === 'function') { page.open(sid, 'dec'); return true; }
+    var el = findCard(d, sid);
     if (!el) return false;
     el.scrollIntoView({ block: 'start' });
     if (el.classList && typeof g.setTimeout === 'function') {

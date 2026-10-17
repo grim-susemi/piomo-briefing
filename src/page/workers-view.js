@@ -8,9 +8,10 @@
  *    where they were, a card that left the shown tab fades and folds for 400 ms in its old spot, a worker
  *    that just ended and a todo that just turned ✔ pop their mark. Returns {moved, left, entered, done}.
  *  tick(root, now) -> rewrites only the text of [data-since] elements (1 s ticker, never a redraw).
- * `now` is the wall clock at render time (Date.now()), not vm.generatedAt: the running pulse is the
- * 1200 ms w-pulse animation in workers-view.css started at -(now % 1200) ms, so a full redraw keeps the
- * beat instead of restarting it. Model strings are untrusted and always go through esc().
+ * `now` is a wall clock, not vm.generatedAt: page.js passes the one of the model's apply (ui.wallNow; Date.now()
+ * when absent). The running pulse is the 1200 ms w-pulse animation in workers-view.css started at
+ * -(now % 1200) ms, so the redraw of an apply keeps the beat instead of restarting it, and every render of
+ * the same model writes the same HTML. Model strings are untrusted and always go through esc().
  * Expansion key worker:<taskId> rides the existing data-act="exp" channel. */
 (function (g) {
   'use strict';
@@ -221,15 +222,17 @@
     var r = el.getBoundingClientRect();
     return { top: r.top, left: r.left, width: r.width, height: r.height, bottom: r.top + r.height };
   }
-  function cardOf(el) { var c = el.closest('[data-card]'); return c ? attr(c, 'data-card') : ''; }
-  function rowKey(el) { return cardOf(el) + '\n' + attr(el, 'data-worker'); }
+  function cardOf(el) { var c = el.closest('[data-card]') || el.closest('[data-sid]'); return c ? attr(c, 'data-card') || attr(c, 'data-sid') : ''; }
+  function rowKey(el) { return cardOf(el) + '\n' + (attr(el, 'data-block') || 'wk/' + attr(el, 'data-worker')); }
   function onScreen(r, vh) { return r.height > 0 && r.bottom > 0 && r.top < vh; }
 
   function measure(root) {
     var snap = { cards: Object.create(null), rows: Object.create(null), todos: Object.create(null), cardCount: 0 };
     if (!root || typeof root.querySelectorAll !== 'function') return snap;
-    each(root.querySelectorAll('[data-card]'), function (el) {
-      var k = attr(el, 'data-card');
+    var cards = Array.prototype.slice.call(root.querySelectorAll('[data-card]'));
+    each(root.querySelectorAll('[data-block]'), function (el) { if (attr(el, 'data-block') === 'head') cards.push(el); });
+    each(cards, function (el) {
+      var k = attr(el, 'data-card') || cardOf(el);
       if (snap.cards[k]) return;
       snap.cards[k] = { el: el, rect: box(el) };
       snap.cardCount++;

@@ -2,7 +2,10 @@
 //
 // collectAuto({cwd, sessionId, branchEntries, workerIds, metaWorkers,
 //   readTaskRecords, readFile, now, cache})
-//   -> {work?, todo?, workers?}
+//   -> {work?, todo?, todoItems?, ledgerPath?, workers?}
+//   todoItems = {items:[{text, status}] (at most TODO_ITEMS_MAX, newest todo entry, in order), more} - kept beside the
+//   counts of `todo` (same strict validation: no todo -> no todoItems). ledgerPath = the boulder work's execution ledger
+//   (absolute as written, else resolved against cwd), only when the work names one.
 //
 // Read-only: only exact file paths via the injected readFile, never directory
 // listings, never fs.watch. `.omo/senpi-task/tasks/<id>.json` is read only when
@@ -10,6 +13,7 @@
 // (cwd, sessionId, readTaskRecords) for 60s in the caller-owned `cache` object.
 
 const CACHE_MS = 60_000;
+export const TODO_ITEMS_MAX = 40;
 const TERMINAL = new Set(['completed', 'abandoned', 'cancelled']);
 
 function normPath(p) {
@@ -69,7 +73,15 @@ function betterWork(cand, candIdx, best, bestIdx) {
   return bestIdx - candIdx;
 }
 
-function pickWork(boulder, sessionId) {
+// The ledger of the picked work: an absolute path is kept as written, a relative one is joined to the project root (cwd).
+function ledgerPathOf(work, base) {
+  const l = work && typeof work.ledger === 'string' ? work.ledger : '';
+  if (!l) return undefined;
+  if (/^(?:[A-Za-z]:[\\/]|\/)/.test(l)) return l;
+  return base ? `${base}/${normPath(l).replace(/^\.\//, '')}` : undefined;
+}
+
+function pickWorkRecord(boulder, sessionId) {
   if (!boulder || typeof boulder !== 'object' || !boulder.works || typeof boulder.works !== 'object') return undefined;
   const want = normSessionId(sessionId);
   if (want === '') return undefined;
@@ -88,6 +100,10 @@ function pickWork(boulder, sessionId) {
       bestIdx = i;
     }
   }
+  return best;
+}
+
+function pickWork(best) {
   if (best === undefined) return undefined;
   const done = Array.isArray(best.completed_tasks) ? best.completed_tasks.length
     : (typeof best.completed_tasks === 'number' ? best.completed_tasks : undefined);
@@ -200,7 +216,8 @@ function pickTodo(branchEntries) {
     const todo = { current: current ? taskText(current) : undefined, next: next ? taskText(next) : undefined, done, total: tasks.length };
     if (todo.current === undefined) delete todo.current;
     if (todo.next === undefined) delete todo.next;
-    return todo;
+    const items = tasks.slice(0, TODO_ITEMS_MAX).map((t) => ({ text: taskText(t), status: taskStatus(t) }));
+    return { todo, items: { items, more: Math.max(0, tasks.length - TODO_ITEMS_MAX) } };
   } catch {
     return undefined; // malformed input omits only the todo key
   }
@@ -248,11 +265,17 @@ export function collectAuto(opts = {}) {
   const base = normPath(cwd ?? '').replace(/\/$/, '');
 
   const boulder = tryReadJson(readFile, `${base}/.omo/boulder.json`);
-  const work = pickWork(boulder, sessionId);
+  const record = pickWorkRecord(boulder, sessionId);
+  const work = pickWork(record);
   if (work) out.work = work;
+  const ledgerPath = ledgerPathOf(record, base);
+  if (ledgerPath) out.ledgerPath = ledgerPath;
 
-  const todo = pickTodo(branchEntries);
-  if (todo) out.todo = todo;
+  const picked = pickTodo(branchEntries);
+  if (picked) {
+    out.todo = picked.todo;
+    out.todoItems = picked.items;
+  }
 
   const ids = workerIdList(workerIds);
   if (readTaskRecords === true && ids.length > 0) {

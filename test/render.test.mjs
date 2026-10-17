@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { fork, spawnSync } from 'node:child_process';
 import vm from 'node:vm';
 import { openStore } from '../src/store.mjs';
-import { buildViewModel, renderPage } from '../src/render.mjs';
+import { buildViewModel, renderPage, withReports, MAX_VM_BYTES, OMITTED_CHIP } from '../src/render.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CHILD = join(HERE, 'helpers', 'render-child.mjs');
@@ -78,6 +78,68 @@ function fixtureStore(root) {
 }
 
 const byId = (model) => Object.fromEntries(model.sessions.map((s) => [s.id, s]));
+
+test('question flags are present only when true; live board calls and built-in mirrors stay distinguishable', (t) => {
+  const store = openStore(tempRoot(t));
+  meta(store, 'owner', { lastActivityAt: NOW, hostPid: process.pid, askLive: [1, 2, 3, 4] });
+  for (const id of [1, 2, 3, 4]) decision(store, { id, sessionId: 'owner', source: id === 2 ? 'brief' : 'ask', question: 'q', createdAt: NOW });
+  store.writeNew('answers/000003.json', { id: 3, option: 'A', at: NOW, fromSessionId: 'board' });
+  store.writeNew('decision-closures/000004.json', { id: 4, reason: 'held', at: NOW });
+  store.replace('mirror/owner.json', { open: true, question: 'Built-in', at: NOW });
+  let card = buildViewModel(store.readSnapshot(), NOW, { isAlive: () => true }).sessions[0];
+  assert.equal(card.decisions[0].askLive, true);
+  assert.ok(card.decisions.slice(1).every((d) => !('askLive' in d)), 'non-live decisions have no flag bytes');
+  assert.equal(card.openQuestion.builtin, true);
+  card = buildViewModel(store.readSnapshot(), NOW, { isAlive: () => false }).sessions[0];
+  assert.ok(card.decisions.every((d) => !('askLive' in d)), 'dead hosts cannot retain live prompts');
+  store.replace('mirror/owner.json', { open: false, question: 'Built-in', at: NOW });
+  card = buildViewModel(store.readSnapshot(), NOW).sessions[0];
+  assert.equal('openQuestion' in card, false, 'closed mirrors have no question or builtin flag bytes');
+});
+
+test('C-HOLD view model: held = {at} only on held decisions, heldCount only when > 0; held ones leave waiting and the open count', (t) => {
+  const store = openStore(tempRoot(t));
+  meta(store, 'owner', { lastActivityAt: NOW, title: '주인' });
+  meta(store, 'calm', { lastActivityAt: NOW - MIN, title: '조용' });
+  for (const id of [41, 42, 43]) decision(store, { id, sessionId: 'owner', question: `q${id}`, createdAt: NOW - 100 + id });
+  decision(store, { id: 44, sessionId: 'calm', question: 'q44', createdAt: NOW });
+  const before = buildViewModel(store.readSnapshot(), NOW);
+  store.writeNew('decision-closures/000042.json', { id: 42, reason: 'held', at: NOW - 5 });
+  store.writeNew('decision-closures/000043.json', { id: 43, reason: 'held', at: NOW - 4 });
+  const model = buildViewModel(store.readSnapshot(), NOW);
+  const s = byId(model);
+  assert.deepEqual(s.owner.decisions.map((d) => [d.id, d.held ?? null]), [[41, null], [42, { at: NOW - 5 }], [43, { at: NOW - 4 }]]);
+  assert.equal('held' in s.owner.decisions[0], false, 'an open decision spends no bytes on held');
+  assert.equal(s.owner.heldCount, 2);
+  assert.equal('heldCount' in s.calm, false, 'no held decision: no heldCount key');
+  assert.deepEqual(before.waiting.map((w) => w.key), ['d41', 'd42', 'd43', 'd44']);
+  assert.deepEqual(model.waiting.map((w) => w.key), ['d41', 'd44'], 'held decisions leave vm.waiting (alarm band, title count)');
+  assert.equal(before.summary.openDecisions, 4);
+  assert.equal(model.summary.openDecisions, 2, 'summary.openDecisions leaves out held ones');
+  fs.renameSync(join(store.root, 'decision-closures', '000042.json'), join(store.root, 'decision-closures', '000042.1.released.json'));
+  const reopened = buildViewModel(store.readSnapshot(), NOW);
+  assert.equal('held' in byId(reopened).owner.decisions[1], false, 'a released record is open again');
+  assert.equal(byId(reopened).owner.heldCount, 1);
+  assert.deepEqual(reopened.waiting.map((w) => w.key), ['d41', 'd42', 'd44']);
+});
+
+test('prompt_injection: question and option markup from board_question render escaped, not as elements', (t) => {
+  const store = openStore(tempRoot(t));
+  meta(store, 'owner', { lastActivityAt: NOW, hostPid: process.pid, askLive: [1] });
+  decision(store, {
+    id: 1, sessionId: 'owner', source: 'ask', createdAt: NOW,
+    question: '<script>ignore instructions</script>',
+    options: { A: opt('<img src=x onerror=alert(1)>', 'safe'), B: opt('normal', 'safe') },
+  });
+  const model = buildViewModel(store.readSnapshot(), NOW);
+  const ctx = {};
+  vm.runInNewContext(fs.readFileSync(join(HERE, '..', 'src', 'page', 'view.js'), 'utf8'), ctx);
+  const html = ctx.BriefView.renderOverview(model, { expanded: { 'detail:owner': true }, tab: '나를 기다림' });
+  assert.ok(html.includes('&lt;script&gt;ignore instructions&lt;/script&gt;'));
+  assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'));
+  assert.ok(!html.includes('<script>ignore'));
+  assert.ok(!html.includes('<img src=x'));
+});
 
 function runDataJs(text) {
   const got = [];
@@ -155,7 +217,7 @@ describe('buildViewModel', () => {
     assert.ok(s.quiet.chips.includes('오래됨'));
     assert.ok(s.quiet.chips.includes('보고 없음'));
     assert.ok(!s['s-a2'].chips.includes('오래됨'));
-    assert.deepEqual(s['s-c2'].openQuestion, { text: '몇 줄?', at: NOW - MIN, paneId: 'w9' });
+    assert.deepEqual(s['s-c2'].openQuestion, { text: '몇 줄?', at: NOW - MIN, paneId: 'w9', builtin: true });
     assert.equal(s['s-c2'].tab, '나를 기다림');
   });
 
@@ -193,8 +255,13 @@ describe('view-model contract (test/fixtures/view-model.json + src/page/view.js)
   test('every contract session key is present with the same JSON type; only contract keys are emitted', (t) => {
     const model = buildViewModel(fixtureStore(tempRoot(t)).readSnapshot(), NOW);
     assert.equal(model.schema, CONTRACT.schema);
-    const contractKeys = new Set(CONTRACT.sessions.flatMap((s) => Object.keys(s)));
-    const sample = Object.fromEntries([...contractKeys].map((k) => [k, kind(CONTRACT.sessions.find((s) => k in s)[k])]));
+    // notes (annotations), reports (C-REPORT 6) and the C-VM fields are contract keys added after the fixture was written
+    const added = {
+      notes: 'array', reports: 'array', alive: 'boolean', briefSeq: 'number', briefPath: 'null', sessionFile: 'null',
+      todo: 'object', attachments: 'array', blockSources: 'object',
+    };
+    const contractKeys = new Set([...CONTRACT.sessions.flatMap((s) => Object.keys(s)), ...Object.keys(added)]);
+    const sample = { ...Object.fromEntries([...contractKeys].filter((k) => !(k in added)).map((k) => [k, kind(CONTRACT.sessions.find((s) => k in s)[k])])), ...added };
     for (const s of model.sessions) {
       for (const k of contractKeys) {
         if (OPTIONAL.has(k) && !(k in s)) continue;
@@ -224,12 +291,40 @@ describe('view-model contract (test/fixtures/view-model.json + src/page/view.js)
     vm.runInNewContext(fs.readFileSync(join(HERE, '..', 'src', 'page', 'view.js'), 'utf8'), ctx);
     const expanded = {};
     for (const s of model.sessions) { expanded['detail:' + s.id] = true; expanded['more-dc:' + s.id] = true; expanded['more-ch:' + s.id] = true; }
-    const html = ctx.BriefView.renderApp(model, { expanded, tab: '나를 기다림' });
+    const html = ctx.BriefView.renderOverview(model, { expanded, tab: '나를 기다림' });
     for (const s of model.sessions) assert.ok(html.includes(`data-card="${s.id}"`) || s.tab !== '나를 기다림', `${s.id} card rendered`);
     const idle = model.sessions.find((s) => s.id === 'idle').decisions[0];
     assert.equal(idle.delivery, '전달 중');
     assert.equal(idle.receipt, null, 'unproven receipt is not exposed as a delivery proof');
   });
+});
+
+test('annotation notes: newest 20, 80-code-point previews, capability passthrough and all decision delivery states', (t) => {
+  const store = openStore(tempRoot(t));
+  const key = (n) => `a-${String(n).padStart(8, '0')}-0000-4000-8000-000000000000`;
+  meta(store, 'owner', { cwd: 'C:/work', lastActivityAt: NOW, running: true, pid: process.pid,
+    answerKinds: ['option', 'text', 'annotation', 'annotation', 'bogus'], pendingDeliveries: [key(23)] });
+  meta(store, 'idle', { cwd: 'C:/work', lastActivityAt: NOW });
+  for (let n = 0; n < 25; n++) {
+    store.writeNew(`answers/${key(n)}.json`, { key: key(n), kind: 'annotation', sessionId: 'owner', text: '😀'.repeat(85) + '\n[body]', at: NOW - (25 - n) * MIN });
+  }
+  store.writeNew(`receipts/${key(24)}.json`, { key: key(24), sessionId: 'owner', proven: true, deliveredAt: NOW });
+  store.writeNew(`receipts/${key(22)}.json`, { key: key(22), sessionId: 'owner', proven: false, deliveredAt: NOW });
+  store.writeNew(`answers/${key(25)}.json`, { key: key(25), kind: 'annotation', sessionId: 'idle', text: '[idle]', at: NOW });
+  const model = byId(buildViewModel(store.readSnapshot(), NOW, { pendingDeliveries: [key(21)] }));
+  const notes = model.owner.notes;
+  assert.deepEqual(model.owner.answerKinds, ['option', 'text', 'annotation']);
+  assert.equal(notes.length, 20);
+  assert.deepEqual(notes.map((n) => n.key), Array.from({ length: 20 }, (_, i) => key(24 - i)));
+  assert.deepEqual(Object.keys(notes[0]).sort(), ['at', 'delivery', 'key', 'preview']);
+  assert.equal(notes[0].at, NOW - MIN);
+  assert.equal(notes[0].preview, '😀'.repeat(80));
+  const d = new Date(NOW);
+  assert.equal(notes[0].delivery, `전달됨 ⏱${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+  for (const n of [1, 2, 3]) assert.equal(notes[n].delivery, '전달 중');
+  assert.equal(notes[4].delivery, '대기: 작업이 끝나면 전달');
+  assert.equal(model.idle.notes[0].delivery, '대기: 그 대화가 다시 열리면 전달');
+  assert.deepEqual(model.owner.decisions, [], 'annotations never fabricate decisions');
 });
 
 describe('gate repros: delivery rows, replyTrimmed chip, owned read failure', () => {
@@ -238,7 +333,7 @@ describe('gate repros: delivery rows, replyTrimmed chip, owned read failure', ()
     vm.runInNewContext(fs.readFileSync(join(HERE, '..', 'src', 'page', 'view.js'), 'utf8'), ctx);
     const expanded = {};
     for (const s of model.sessions) expanded['detail:' + s.id] = true;
-    return ctx.BriefView.renderApp(model, { expanded, tab: '나를 기다림' }); // every card is in the HTML; the tab only hides
+    return ctx.BriefView.renderOverview(model, { expanded, tab: '나를 기다림' }); // every card is in the HTML; the tab only hides
   };
   const rows = (html) => [...html.matchAll(/<p class="kv"><span class="sym">✅<\/span>([^<]*)<\/p>/g)].map((m) => m[1]);
 
@@ -635,5 +730,100 @@ describe('renderPage', () => {
     assert.equal(heads['race-a'], `race-a-${N}`);
     assert.equal(heads['race-b'], `race-b-${N}`);
     assert.equal(fs.existsSync(join(root, 'render.lock')), false);
+  });
+});
+
+// ---------------------------------------------------------------- reports (C-REPORT 6)
+describe('sessions[].reports', () => {
+  const H = (c) => c.repeat(64);
+  const img = (over = {}) => ({ sha: H('a'), ext: 'png', mime: 'image/png', bytes: 70, w: 2, h: 2, path: 'C:/shots/a.png', alt: '안 A', option: null, ...over });
+  function seeded(t) {
+    const store = openStore(join(tempRoot(t), 'state'));
+    meta(store, 'r', { cwd: 'C:/w/r', lastActivityAt: NOW - MIN });
+    brief(store, 'r', 1, NOW - MIN, { title: 'r', headline: 'h' });
+    decision(store, { id: 3, sessionId: 'r', question: '열린', createdAt: NOW - 2 * MIN });
+    decision(store, { id: 4, sessionId: 'r', question: '답한', createdAt: NOW - 2 * MIN });
+    decision(store, { id: 5, sessionId: 'r', question: '철회', createdAt: NOW - 2 * MIN });
+    decision(store, { id: 6, sessionId: 'other', question: '남의 결정', createdAt: NOW - 2 * MIN });
+    store.writeNew('answers/000004.json', { id: 4, option: 'A', at: NOW - MIN });
+    store.writeNew('decision-closures/000005.json', { id: 5, reason: 'withdrawn', at: NOW - MIN });
+    return store;
+  }
+
+  test('shape, status per linked decision, relative asset URLs and no image bytes', (t) => {
+    const store = seeded(t);
+    store.replace('sessions/r/reports.json', [
+      { id: 'open', title: '열린 결정 보고', summary: '요약', decisionId: 3, at: NOW - MIN, images: [img({ option: 'B' }), img({ sha: H('b'), ext: 'webp', option: 'C' })] },
+      { id: 'answered', title: '답함', summary: '', decisionId: 4, at: NOW - MIN, images: [] },
+      { id: 'note', title: '참고 <script>alert(1)</script>', summary: '', decisionId: null, at: NOW - MIN, images: [img({ sha: '../../x', ext: 'png' }), img({ ext: 'svg' }), img({ option: 'A' })] },
+      { id: 'withdrawn', title: '철회', decisionId: 5, at: NOW - MIN, images: [] },
+    ]);
+    const s = buildViewModel(withReports(store, store.readSnapshot()), NOW).sessions[0];
+    assert.deepEqual(s.reports[0], {
+      id: 'open', title: '열린 결정 보고', summary: '요약', at: NOW - MIN, decisionId: 3, status: '결정 기다림',
+      images: [
+        { src: `assets/${H('a')}.png`, alt: '안 A', option: 'B', w: 2, h: 2, path: 'C:/shots/a.png' },
+        { src: `assets/${H('b')}.webp`, alt: '안 A', option: null, w: 2, h: 2, path: 'C:/shots/a.png' }, // C is not an option of #3
+      ],
+    });
+    assert.equal(s.reports.length, 3, 'at most 3 reports');
+    assert.deepEqual(s.reports.map((r) => r.status), ['결정 기다림', '답함', '참고']);
+    assert.deepEqual(s.reports[2].images.map((i) => i.src), [`assets/${H('a')}.png`], 'only <64 hex>.<png|jpg|webp> sources');
+    assert.equal(s.reports[2].images[0].option, null, 'no decision linked: no option label');
+    assert.ok(!JSON.stringify(s.reports).includes('base64') && !('bytes' in s.reports[0].images[0]));
+  });
+
+  test('a decision of another session or a withdrawn decision makes the report 참고; no reports.json = []', (t) => {
+    const store = seeded(t);
+    let s = buildViewModel(withReports(store, store.readSnapshot()), NOW).sessions[0];
+    assert.deepEqual(s.reports, []);
+    store.replace('sessions/r/reports.json', [
+      { id: 'x', title: 'x', decisionId: 6, at: NOW, images: [img({ option: 'A' })] },
+      { id: 'y', title: 'y', decisionId: 5, at: NOW, images: [] },
+    ]);
+    s = buildViewModel(withReports(store, store.readSnapshot()), NOW).sessions[0];
+    assert.deepEqual(s.reports.map((r) => [r.status, r.decisionId, r.images.map((i) => i.option)]), [['참고', null, [null]], ['참고', 5, []]]);
+  });
+
+  test('a corrupt reports.json is a read error of that card, not a crash', (t) => {
+    const store = seeded(t);
+    fs.writeFileSync(join(store.root, 'sessions', 'r', 'reports.json'), '{nope');
+    const vm = buildViewModel(withReports(store, store.readSnapshot()), NOW);
+    assert.deepEqual(vm.sessions[0].reports, []);
+    assert.ok(vm.sessions[0].chips.includes('기록 읽기 실패'));
+  });
+
+  test('renderPage publishes reports in data.js', (t) => {
+    const store = seeded(t);
+    store.replace('sessions/r/reports.json', [{ id: 'p', title: '게시', decisionId: 3, at: NOW, images: [img()] }]);
+    const res = renderPage(store, NOW, { sleep: () => {}, isAlive: () => false });
+    assert.equal(res.ok, true);
+    assert.ok(fs.readFileSync(join(store.root, 'data.js'), 'utf8').includes(`assets/${H('a')}.png`));
+  });
+
+  test('reports stay inside the 600 KB cap: finished, then oldest cards lose their reports first, marked by the chip', (t) => {
+    const store = openStore(join(tempRoot(t), 'state'));
+    const full = (n) => Array.from({ length: 3 }, (_, k) => ({
+      id: `r${k}`, title: '가'.repeat(80), summary: '<'.repeat(1000), decisionId: null, at: NOW - n * MIN,
+      images: Array.from({ length: 6 }, () => img({ alt: '<'.repeat(200), path: `C:/${'p'.repeat(1017)}.png` })),
+    }));
+    for (let n = 0; n < 30; n++) {
+      const sid = `s${String(n).padStart(2, '0')}`;
+      meta(store, sid, { cwd: 'C:/w/cap', lastActivityAt: NOW - (n + 1) * MIN });
+      brief(store, sid, 1, NOW - (n + 1) * MIN, { title: sid, headline: 'h', status: n % 2 ? 'done' : 'in_progress' });
+      store.replace(`sessions/${sid}/reports.json`, full(n));
+    }
+    const vm = buildViewModel(withReports(store, store.readSnapshot()), NOW, { isAlive: () => false });
+    assert.ok(Buffer.byteLength(JSON.stringify(vm)) <= MAX_VM_BYTES, 'model over the cap');
+    const cut = vm.sessions.filter((s) => s.chips.includes(OMITTED_CHIP));
+    assert.ok(cut.length > 0 && cut.every((s) => Array.isArray(s.reports) && s.reports.length === 0));
+    const kept = vm.sessions.filter((s) => s.reports.length > 0);
+    assert.ok(kept.length > 0, 'not everything is dropped');
+    const finished = (s) => s.tab === '끝남';
+    if (cut.some((s) => !finished(s))) assert.ok(kept.every((s) => !finished(s)), 'an active card lost reports while a finished one kept them');
+    for (const k of kept) for (const c of cut) if (finished(k) === finished(c)) assert.ok(c.lastActivityAt <= k.lastActivityAt, 'newer card cut before an older one');
+    const res = renderPage(store, NOW, { sleep: () => {}, isAlive: () => false });
+    assert.equal(res.ok, true);
+    assert.ok(fs.statSync(join(store.root, 'data.js')).size <= MAX_VM_BYTES, 'published data.js over the cap');
   });
 });

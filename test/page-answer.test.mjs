@@ -4,116 +4,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
-import vm from 'node:vm';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { makeController } from './fixtures/controller-dom.mjs';
 import { openStore } from '../src/store.mjs';
 import { applyBoardAnswer } from '../src/decide.mjs';
-import { buildViewModel } from '../src/render.mjs';
-
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PAGE_SRC = fs.readFileSync(path.join(ROOT, 'src/page/page.js'), 'utf8');
-const VIEW_SRC = fs.readFileSync(path.join(ROOT, 'src/page/view.js'), 'utf8');
-const PLAN_SRC = fs.readFileSync(path.join(ROOT, 'src/page/plan-view.js'), 'utf8');
+import { buildViewModel, withReports } from '../src/render.mjs';
 
 // http: + token = the page the board server serves (src/render.mjs pageHtml, server mode); file: = the file page.
-function makeEnv({ protocol = 'http:', token = 'tok-1', sessionStorage = null, abort = false, generation = null } = {}) {
-  const byId = {};
-  const timers = [];
-  const fetches = [];
-  const errors = [];
-  const reloads = [];
-  const selection = { isCollapsed: true, toString: () => '' };
-  let clock = 1000;
-  function el(tag) {
-    let html = '';
-    const e = {
-      tagName: tag, id: '', hidden: false, textContent: '', listeners: {}, attrs: {}, children: [], classes: new Set(),
-      classList: { add: (c) => e.classes.add(c), remove: (c) => e.classes.delete(c), toggle() {} },
-      addEventListener(t, f) { e.listeners[t] = f; },
-      get firstChild() { return e.children[0] || null; },
-      appendChild(c) { if (c.id) byId[c.id] = c; e.children.push(c); return c; },
-      insertBefore(c, before) { if (c.id) byId[c.id] = c; e.children.splice(Math.max(0, e.children.indexOf(before)), 0, c); return c; },
-      setAttribute(k, v) { e.attrs[k] = v; },
-      getAttribute(k) { return e.attrs[k] ?? null; },
-      getBoundingClientRect() { return { top: 0, bottom: 100 }; },
-      querySelector(sel) {
-        if (sel !== '.app') return null;
-        const m = /data-tab="([^"]*)"/.exec(e.innerHTML);
-        return m ? { getAttribute: () => m[1] } : null;
-      },
-      // the board's cards: page.js looks a conversation's card up by its data-card
-      querySelectorAll(sel) {
-        if (sel !== '[data-card]') return [];
-        return [...html.matchAll(/<article [^>]*\bdata-card="([^"]*)"/g)].map((m) => ({ getAttribute: (k) => (k === 'data-card' ? m[1] : null), getBoundingClientRect: () => ({ top: 0, bottom: 100 }) }));
-      },
-      contains() { return true; }, remove() {},
-    };
-    Object.defineProperty(e, 'innerHTML', { get: () => html, set(v) { html = v; } });
-    return e;
-  }
-  const body = el('body');
-  const head = el('head');
-  head.appendChild = (c) => c; // the file page's data.js polling is not exercised here
-  const document = {
-    readyState: 'complete', visibilityState: 'visible', body, head, documentElement: { scrollHeight: 0 }, activeElement: null,
-    listeners: {},
-    getElementById: (id) => byId[id] || null, createElement: el,
-    addEventListener(type, fn) { this.listeners[type] = fn; },
-    querySelector: (sel) => {
-      const value = sel === 'meta[name="omo-board-token"]' ? token : sel === 'meta[name="omo-briefing-generation"]' ? generation : null;
-      return value === null ? null : { getAttribute: (k) => k === 'content' ? String(value) : null };
-    },
-  };
-  class FakeEventSource {
-    constructor(url) { this.url = url; this.listeners = {}; }
-    addEventListener(type, fn) { this.listeners[type] = fn; }
-    emit(type, data) {
-      const fn = this.listeners[type] || this['on' + type];
-      if (fn) fn({ data: JSON.stringify(data) });
-    }
-  }
-  const ctx = {
-    document, scrollY: 0, innerHeight: 900, scrollTo() {},
-    setInterval() { return 0; },
-    setTimeout(fn, ms) { const t = { fn, at: clock + ms }; timers.push(t); return t; },
-    clearTimeout(t) { const i = timers.indexOf(t); if (i !== -1) timers.splice(i, 1); },
-    addEventListener() {},
-    getSelection: () => selection,
-    console: { error: (...a) => errors.push(a) },
-    location: { protocol, reload() { reloads.push(clock); } },
-  };
-  if (sessionStorage) ctx.sessionStorage = sessionStorage;
-  if (abort) ctx.AbortController = AbortController;
-  if (protocol.startsWith('http')) {
-    // pending until the test settles it; an aborted signal rejects it like a browser fetch
-    ctx.fetch = (url, opts) => new Promise((resolve, reject) => {
-      fetches.push({ url, opts, resolve, reject });
-      if (opts && opts.signal) opts.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
-    });
-    ctx.EventSource = FakeEventSource;
-  }
-  vm.runInNewContext(VIEW_SRC, ctx, { filename: 'view.js' });
-  vm.runInNewContext(PLAN_SRC, ctx, { filename: 'plan-view.js' });
-  vm.runInNewContext(PAGE_SRC, ctx, { filename: 'page.js' });
-  const page = ctx.BriefPage;
-  page.state.now = () => clock;
-  return {
-    page, fetches, errors, reloads, app: byId.app, document, selection, status: byId['live-status'],
-    advance(ms) {
-      const until = clock + ms;
-      for (;;) {
-        timers.sort((a, b) => a.at - b.at);
-        if (!timers.length || timers[0].at > until) break;
-        const t = timers.shift();
-        clock = t.at;
-        t.fn();
-      }
-      clock = until;
-    },
-  };
+function makeEnv(options = {}) {
+  return makeController({ sessionStorage: null, ...options });
 }
-
 const generationModel = (seq, gen, serverGen) => ({ ...answerModel(seq), gen, server: { generation: serverGen } });
 const closedNotice = e => !e.status.hidden && e.status.attrs['data-state'] === 'closed';
 
@@ -182,6 +82,7 @@ test('generation reload: vm or server generation reloads once per generation, ke
     e.page.receive(generationModel(1, 8));
     press(e, 'ans-reply', 13);
     type(e, 13, '세대 전환 중 보존할 답글');
+    e.document.activeElement = null;
     e.page.receive(generationModel(2, serverOnly ? 8 : 9, serverOnly ? 9 : 8));
     assert.equal(e.reloads.length, 1);
     assert.equal(storage.getItem('omo-reloaded-for-9'), '1');
@@ -203,7 +104,10 @@ test('generation reload: input and selection holds defer reload and preserve dra
     e.page.receive(generationModel(1, 8));
     press(e, 'ans-reply', 13);
     type(e, 13, '첫 답글');
-    if (hold === 'input') e.document.activeElement = { tagName: 'TEXTAREA' };
+    if (hold === 'input') {
+      const input = e.document.createElement('textarea');
+      e.byId.main.appendChild(input); input.focus();
+    }
     else { e.selection.isCollapsed = false; e.selection.toString = () => '선택한 내용'; }
     const previous = e.app.innerHTML;
     e.page.receive(generationModel(2, 9));
@@ -263,13 +167,19 @@ function target(e, act, id, extra = {}) {
   const attrs = Object.fromEntries([...tags[0].matchAll(/([\w-]+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
   return { hasAttribute: (n) => n in attrs, getAttribute: (n) => attrs[n] ?? null };
 }
-const click = (e, t) => e.app.listeners.click({ target: { closest: () => t }, preventDefault() {} });
+const click = (e, t) => {
+  const button = e.document.createElement('button');
+  for (const name of ['data-act', 'data-id', 'data-opt', 'data-where', 'data-goto', 'data-tab']) {
+    const value = t.getAttribute(name);
+    if (value !== null) button.setAttribute(name, value);
+  }
+  e.byId.main.appendChild(button);
+  e.app.listeners.click({ target: button, preventDefault() {} });
+  button.remove();
+};
 const press = (e, act, id, extra) => click(e, target(e, act, id, extra));
 // a tab button the real view rendered
-function clickTab(e, tab) {
-  assert.ok(e.app.innerHTML.includes(`data-act="tab" data-tab="${tab}"`), `tab ${tab} is on the page`);
-  click(e, { hasAttribute: () => false, getAttribute: (n) => ({ 'data-act': 'tab', 'data-tab': tab })[n] ?? null });
-}
+function clickTab(e, sid, sub = 'ov') { e.page.open(sid, sub); }
 function type(e, id, value) {
   const counter = { textContent: '' };
   e.app.listeners.input({ target: { value, getAttribute: (n) => (n === 'data-draft' ? String(id) : null), closest: () => ({ querySelector: () => counter }) } });
@@ -284,6 +194,27 @@ function memoryStorage() {
   const m = new Map();
   return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, removeItem: (k) => { m.delete(k); }, size: () => m.size };
 }
+
+test('hold and reopen use the existing token-bearing answer transport without sending a choice', async () => {
+  const e = makeEnv();
+  e.page.receive(answerModel(1));
+  press(e, 'ans-hold', 12);
+  press(e, 'ans-send', 12); // todo 12: the overview's 보류 confirms first, like every other 보류
+  assert.equal(posts(e).length, 1);
+  assert.deepEqual(JSON.parse(posts(e)[0].opts.body), { id: 12, sessionId: 's-a1', action: 'hold' });
+  assert.equal(posts(e)[0].opts.headers['X-Board-Token'], 'tok-1');
+  posts(e)[0].resolve(reply(200, { ok: true }));
+  await settle();
+  assert.equal(decHtml(e, 12), '');
+  assert.match(e.app.innerHTML, /data-act="ans-reopen" data-id="12"/);
+  press(e, 'ans-reopen', 12);
+  assert.equal(posts(e).length, 2);
+  assert.deepEqual(JSON.parse(posts(e)[1].opts.body), { id: 12, sessionId: 's-a1', action: 'reopen' });
+  posts(e)[1].resolve(reply(200, { ok: true }));
+  await settle();
+  assert.match(decHtml(e, 12), /data-act="ans-hold"/);
+  assert.equal(e.errors.length, 0);
+});
 
 test('B -> the confirm survives a re-render -> 보내기 sends one POST with the exact body and headers; 전달됨 only from the model', async () => {
   const e = makeEnv();
@@ -327,6 +258,7 @@ test('a reply keeps its draft across a re-render, counts in place, and goes out 
   press(e, 'ans-reply', 13);
   assert.match(decHtml(e, 13), /<textarea class="ans-text" data-draft="13"/);
   assert.equal(type(e, 13, '  설치해 줘  ').textContent, '9/500');
+  e.document.activeElement = null;
   e.advance(600);
   e.page.receive(answerModel(2));
   assert.ok(decHtml(e, 13).includes('>  설치해 줘  </textarea>'), 'the draft survived the re-render');
@@ -491,7 +423,7 @@ test('malformed clicks and replies never send or claim success; a broken reload 
   assert.match(r.app.innerHTML, /data-act="ans-pick"/, 'the board still answers');
 });
 
-test('answering the last open decision keeps its card on the tab it was answered on: 보내는 중 -> 대기 -> 전달됨 from the real view model, until the owner changes tabs', async (t) => {
+test('answering the last open decision keeps the active conversation and sub-tab: 보내는 중 -> 대기 -> 전달됨 from the real view model', async (t) => {
   // the HTTP answer before the first new model (as usual), or after both of them (the SSE stream can be faster)
   for (const replyFirst of [true, false]) {
     const label = replyFirst ? '200 first' : 'models first';
@@ -510,14 +442,16 @@ test('answering the last open decision keeps its card on the tab it was answered
     const e = makeEnv();
     const seen = (m, chipClass) => {
       const html = e.app.innerHTML;
-      const line = (/<p class="dsent">([^]*?)<\/p>/.exec(html) || [])[1] || '';
-      assert.equal(/<div class="app" data-tab="(\w+)"/.exec(html)[1], 'wait', `${label}: the tab the owner is on`);
-      assert.ok(html.includes('data-card="owner"'), `${label}: the card is still on the screen`);
-      assert.ok(line.includes(ownerOf(m).decisions[0].delivery) && line.includes(`chip ${chipClass}`), `${label}: ${line}`);
+      const line = e.byId.main.querySelector('.dsent');
+      assert.equal(e.page.state.ui.active, 'owner', `${label}: active conversation persists`);
+      assert.equal(e.page.state.ui.sub.owner, 'ov', `${label}: sub-tab persists`);
+      assert.ok(html.includes('data-sid="owner"'), `${label}: the page is still on the screen`);
+      assert.ok(line && line.textContent.includes(ownerOf(m).decisions[0].delivery) && line.querySelector('.chip.' + chipClass), `${label}: ${line?.textContent}`);
     };
     const first = model();
     assert.equal(ownerOf(first).tab, '나를 기다림');
     e.page.receive(first);
+    e.page.open('owner', 'ov');
     press(e, 'ans-pick', id, { 'data-opt': 'B' });
     press(e, 'ans-send', id);
     assert.match(decHtml(e, id), /class="ans-state"/);
@@ -536,16 +470,12 @@ test('answering the last open decision keeps its card on the tab it was answered
     e.page.receive(delivered);
     seen(delivered, 's-done');
     if (!replyFirst) { await answerHttp(); seen(delivered, 's-done'); }
-    // the owner moves on, by the tab bar or by a contents link into 진행 중: the card goes where its model files it
-    if (replyFirst) clickTab(e, 'run');
-    else {
-      const link = /<a class="toclink" href="#[^"]*" data-goto="([^"]*)" data-tab="run">/.exec(e.app.innerHTML);
-      assert.ok(link, 'a contents link into 진행 중');
-      click(e, { hasAttribute: (n) => n === 'data-goto', getAttribute: (n) => ({ 'data-goto': link[1], 'data-tab': 'run' })[n] ?? null });
-    }
-    assert.ok(e.app.innerHTML.includes('data-card="owner"'), `${label}: in 진행 중`);
-    clickTab(e, 'wait');
-    assert.ok(!e.app.innerHTML.includes('data-card="owner"'), `${label}: no longer held`);
+    clickTab(e, 'other');
+    assert.equal(e.page.state.ui.active, 'other');
+    assert.ok(!e.byId.main.innerHTML.includes('data-sid="owner"'), `${label}: moved to another page`);
+    clickTab(e, 'owner');
+    assert.equal(e.page.state.ui.active, 'owner');
+    assert.match(e.byId.main.textContent, /전달됨/);
     assert.equal(posts(e).length, 1);
     assert.deepEqual(e.errors, []);
   }
@@ -558,8 +488,8 @@ test('an answer sent from the plan row of another card never pulls the asking co
     plan: { planId: 'pl', rev: 1, at: 0, stage: 'running', goal: 'g', source: { slug: 's' }, questions: [{ id: 'Q1', text: 'q', state: 'open', decisionId: 12, recommend: 'A' }] } });
   e.page.state.ui.expanded['plan:pl'] = true;
   e.page.receive(m);
-  clickTab(e, 'run');
-  const pulled = () => e.app.innerHTML.includes('data-card="s-a1"');
+  clickTab(e, 'p', 'plan');
+  const pulled = () => e.byId.main.innerHTML.includes('data-sid="s-a1"');
   press(e, 'ans-pick', 12, { 'data-where': 'plan', 'data-opt': 'B' });
   press(e, 'ans-send', 12, { 'data-where': 'plan' });
   assert.equal(posts(e).length, 1);
@@ -567,7 +497,193 @@ test('an answer sent from the plan row of another card never pulls the asking co
   posts(e)[0].resolve(reply(200, { ok: true, id: 12 }));
   await settle();
   assert.ok(!pulled(), 'sent: still not pulled in');
-  clickTab(e, 'wait');
+  clickTab(e, 's-a1');
   assert.ok(pulled(), 'its card is where it was');
   assert.deepEqual(e.errors, []);
+});
+
+// ---- 보고서: 이걸로 고르기 answers the report's linked decision through the same confirm row and POST ------------------------------
+const SHA = (c) => c.repeat(64);
+// answerModel plus a report r1 whose three images carry the options of decision #12
+function reportModel(seq, patch12 = {}) {
+  const m = answerModel(seq, { 12: patch12 });
+  m.sessions[0].reports = [{ id: 'r1', title: '세 시안', summary: '', at: 0, decisionId: 12,
+    status: patch12.answered === true ? '답함' : patch12.closed === true ? '참고' : '결정 기다림',
+    images: ['A', 'B', 'C'].map((k, n) => ({ src: 'assets/' + SHA(String(n + 1)) + '.png', alt: '시안 ' + k, option: k, w: 200, h: 125, path: 'C:/w/shots/' + k + '.png' })) }];
+  return m;
+}
+const cellOf = (e, n) => e.byId.main.querySelector('[data-block="rep/r1/img/' + n + '"]');
+// per option cell: its 이걸로 고르기 is disabled (true), works (false), or gave way to the confirm row or send state (null)
+const pickOff = (e) => [0, 1, 2].map((n) => { const b = cellOf(e, n).querySelector('[data-act="ans-pick"]'); return b ? b.hasAttribute('disabled') : null; });
+// a press on 이걸로 고르기 of one option: on the button the real view drew while it is there, else on a copy of it (the second
+// press of a double click lands after the first one re-rendered the report). The fake DOM delivers presses to disabled
+// buttons as well, so the page's own guard is what these presses test.
+function pressPick(e, id, opt) {
+  let b = e.byId.main.querySelector(`[data-act="ans-pick"][data-dec="${id}"][data-opt="${opt}"]`);
+  const copy = !b;
+  if (copy) {
+    b = e.document.createElement('button');
+    for (const [k, v] of [['data-act', 'ans-pick'], ['data-dec', String(id)], ['data-opt', opt]]) b.setAttribute(k, v);
+    e.byId.main.appendChild(b);
+  }
+  e.fire(b, 'click');
+  if (copy) b.remove();
+}
+
+test('report: 이걸로 고르기 on B opens the answer box\'s confirm row in place and posts {id, sessionId, option:"B"} once after 보내기; 답함 and the highlight come only from the real model', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-page-report-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const store = openStore(dir);
+  const at = Date.UTC(2026, 9, 17, 3, 0);
+  store.replace('sessions/owner/meta.json', { sessionId: 'owner', cwd: 'C:/w', title: '시안 고르기', tabLabel: '수리', tabNumber: 181, answerKinds: ['option', 'text'], lastActivityAt: at, lastBriefAt: at });
+  store.writeNew('sessions/owner/briefs/000001.json', { at, brief: { title: '시안 고르기', status: 'in_progress', headline: 'h', changes: [], done: [], next: '', decisions: [] } });
+  const id = store.allocDecisionId({ sessionId: 'owner', question: '어느 시안?', options: { A: opt('가'), B: opt('나'), C: opt('다') }, recommend: 'A', reason: 'r', blocks: true, createdAt: at, source: 'brief' });
+  const image = (n, k) => ({ sha: SHA(String(n)), ext: 'png', mime: 'image/png', bytes: 100, w: 200, h: 125, path: 'C:/w/shots/' + k + '.png', alt: '시안 ' + k, option: k });
+  store.replace('sessions/owner/reports.json', [{ id: 'r1', title: '세 시안', summary: '', decisionId: id, at, images: [image(1, 'A'), image(2, 'B'), image(3, 'C')] }]);
+  let seq = 0;
+  const model = () => ({ ...buildViewModel(withReports(store, store.readSnapshot()), at + 5, { isAlive: () => false, stateDir: dir }), seq: ++seq });
+  const e = makeEnv();
+  e.page.receive(model());
+  e.page.open('owner', 'rep');
+  const report = () => e.byId.main.querySelector('[data-block="rep/r1"]');
+  const status = () => report().querySelector('.rep-t .chip').textContent;
+  assert.equal(status(), '결정 기다림');
+  assert.deepEqual(pickOff(e), [false, false, false]);
+  pressPick(e, id, 'B');
+  pressPick(e, id, 'B'); // a double click
+  assert.equal(posts(e).length, 0, 'nothing leaves before the confirm');
+  assert.deepEqual([e.page.state.ui.active, e.page.state.ui.sub.owner], ['owner', 'rep'], 'the confirm opens in place, on the report');
+  assert.equal(cellOf(e, 1).querySelector('.ans-confirm').textContent, '🗂 수리 #181 대화에 B를 보낼까요?보내기취소');
+  assert.deepEqual(pickOff(e), [false, null, false]);
+  // the 결정 sub-tab shows the same pending choice on the decision card: one answer state per decision
+  e.page.open('owner', 'dec');
+  assert.equal(e.byId.main.querySelector('[data-decision="' + id + '"] .ans-confirm').textContent, '🗂 수리 #181 대화에 B를 보낼까요?보내기취소');
+  e.page.open('owner', 'rep');
+  const send = target(e, 'ans-send', id);
+  assert.equal(send.getAttribute('data-where'), 'rep');
+  click(e, send);
+  click(e, send); // a double click on 보내기
+  assert.equal(posts(e).length, 1, 'one POST');
+  const post = posts(e)[0];
+  assert.deepEqual(JSON.parse(post.opts.body), { id, sessionId: 'owner', option: 'B' });
+  assert.deepEqual({ ...post.opts.headers }, { 'Content-Type': 'application/json', 'X-Board-Token': 'tok-1' });
+  assert.equal(cellOf(e, 1).querySelector('.ans-state').textContent, '보내는 중…');
+  assert.deepEqual(pickOff(e), [true, null, true]);
+  assert.equal(applyBoardAnswer(store, JSON.parse(post.opts.body), at + 1).ok, true, 'stored by the real writer');
+  post.resolve(reply(200, { ok: true, id }));
+  await settle();
+  assert.equal(cellOf(e, 1).querySelector('.ans-state').textContent, '보냄 · 전달 상태 기다리는 중…');
+  assert.equal(status(), '결정 기다림', 'a 200 is no 답함: that comes from the model');
+  assert.equal(report().querySelector('.chosen'), null);
+  e.advance(600);
+  e.page.receive(model());
+  assert.equal(status(), '답함');
+  assert.deepEqual([0, 1, 2].map((n) => cellOf(e, n).classList.contains('chosen')), [false, true, false]);
+  assert.equal(cellOf(e, 1).querySelector('.cv-chosen').textContent, '✔ 고른 안');
+  assert.deepEqual(pickOff(e), [true, true, true]);
+  assert.equal(report().querySelector('.rep-closed').textContent, '이미 답했거나 닫힌 결정');
+  assert.equal(e.byId.main.querySelector('.ans-confirm'), null);
+  assert.equal(posts(e).length, 1);
+  assert.deepEqual(e.errors, []);
+});
+
+test('failure: the server answers ANSWERED (answered elsewhere while the report was open): 이미 답했거나 닫힌 결정 on the report and no second POST', async () => {
+  const e = makeEnv();
+  e.page.receive(reportModel(1));
+  e.page.open('s-a1', 'rep');
+  pressPick(e, 12, 'B');
+  const send = target(e, 'ans-send', 12);
+  click(e, send);
+  assert.equal(posts(e).length, 1);
+  posts(e)[0].resolve(reply(409, { ok: false, code: 'ANSWERED' }));
+  await settle();
+  assert.equal(cellOf(e, 1).querySelector('.ans-err').textContent, '이미 답했거나 닫힌 결정');
+  assert.deepEqual(pickOff(e), [true, null, true]);
+  for (const k of ['A', 'B', 'C']) pressPick(e, 12, k);
+  click(e, send); // and the old 보내기 once more
+  assert.equal(posts(e).length, 1, 'no second POST');
+  assert.equal(cellOf(e, 1).querySelector('.ans-err').textContent, '이미 답했거나 닫힌 결정');
+  // the next model shows the answer given elsewhere (A): the report follows it
+  e.advance(600);
+  e.page.receive(reportModel(2, { answered: true, answer: { option: 'A', text: '', at: 1 } }));
+  assert.equal(e.byId.main.querySelector('[data-block="rep/r1"] .rep-closed').textContent, '이미 답했거나 닫힌 결정');
+  assert.deepEqual([0, 1, 2].map((n) => cellOf(e, n).classList.contains('chosen')), [true, false, false]);
+  assert.deepEqual(pickOff(e), [true, true, true]);
+  assert.equal(posts(e).length, 1);
+  assert.deepEqual(e.errors, []);
+});
+
+test('stale report: the decision is answered elsewhere while B waits in the confirm row: the row goes, every button is off, the stale 보내기 sends nothing', () => {
+  const e = makeEnv();
+  e.page.receive(reportModel(1));
+  e.page.open('s-a1', 'rep');
+  pressPick(e, 12, 'B');
+  const send = target(e, 'ans-send', 12);
+  e.advance(600);
+  e.page.receive(reportModel(2, { answered: true, answer: { option: 'C', text: '', at: 1 }, delivery: '전달 중' }));
+  assert.equal(e.byId.main.querySelector('.ans-confirm'), null, 'no confirm row for an answered decision');
+  assert.deepEqual(pickOff(e), [true, true, true]);
+  assert.equal(e.byId.main.querySelector('[data-block="rep/r1"] .rep-closed').textContent, '이미 답했거나 닫힌 결정');
+  assert.ok(cellOf(e, 2).classList.contains('chosen'));
+  click(e, send);
+  assert.equal(posts(e).length, 0, 'the model already says answered: no POST');
+  assert.equal(e.page.state.ui.answers['12'].phase, 'closed');
+  assert.deepEqual(e.errors, []);
+});
+
+test('C-HOLD on a conversation page: 보류 asks in the confirm row first, 취소 posts nothing, 보류 posts once; 다시 열기 posts reopen; HELD is explained in Korean', async () => {
+  const e = makeEnv();
+  e.page.receive(answerModel(1));
+  clickTab(e, 's-a1', 'dec');
+  const Q = '🗂 수리 #181 대화의 #12를 보류할까요? 대화는 다시 묻지 않아요';
+  press(e, 'ans-hold', 12);
+  assert.equal(posts(e).length, 0, 'the first press only asks');
+  assert.ok(e.app.innerHTML.includes(Q));
+  press(e, 'ans-cancel', 12);
+  assert.ok(!e.app.innerHTML.includes(Q));
+  assert.equal(posts(e).length, 0);
+  press(e, 'ans-hold', 12);
+  press(e, 'ans-send', 12, { 'data-where': 'dc' });
+  assert.equal(posts(e).length, 1);
+  assert.deepEqual(JSON.parse(posts(e)[0].opts.body), { id: 12, sessionId: 's-a1', action: 'hold' });
+  posts(e)[0].resolve(reply(200, { ok: true }));
+  await settle();
+  assert.ok(!e.app.innerHTML.includes('data-act="ans-hold" data-id="12"'), 'held: no longer an open card');
+  assert.match(e.app.innerHTML, /data-act="ans-reopen" data-id="12"/);
+  press(e, 'ans-reopen', 12);
+  assert.equal(posts(e).length, 2, '다시 열기 posts at once');
+  assert.deepEqual(JSON.parse(posts(e)[1].opts.body), { id: 12, sessionId: 's-a1', action: 'reopen' });
+  posts(e)[1].resolve(reply(200, { ok: true }));
+  await settle();
+  assert.match(e.app.innerHTML, /data-act="ans-hold" data-id="12"/, 'reopened: answerable again');
+  press(e, 'ans-pick', 13, { 'data-opt': 'B' });
+  press(e, 'ans-send', 13);
+  posts(e)[2].resolve(reply(409, { ok: false, code: 'HELD' }));
+  await settle();
+  assert.ok(e.app.innerHTML.includes('보류한 결정이에요 - 다시 열기를 누른 뒤 답하세요'));
+  assert.equal(e.errors.length, 0);
+});
+
+test('C-HOLD on the all-conversations overview: 보류 shows the same confirm row; 취소 posts nothing; 보류 in the row posts once', async () => {
+  const e = makeEnv();
+  e.page.receive(answerModel(1)); // no conversation tab open: view.js renderOverview draws the cards
+  const Q = '🗂 수리 #181 대화의 #12를 보류할까요? 대화는 다시 묻지 않아요';
+  press(e, 'ans-hold', 12);
+  assert.equal(posts(e).length, 0, 'the first press only asks');
+  const row = decHtml(e, 12);
+  assert.ok(row.includes(Q), 'the hold confirm row under the card');
+  assert.ok(row.includes('data-act="ans-send" data-id="12" data-where="dc">보류</button>'));
+  assert.ok(row.includes('data-act="ans-cancel" data-id="12" data-where="dc">취소</button>'));
+  assert.ok(!/를 보낼까요\?/.test(row) && !row.includes('undefined'), 'not the answer-only confirm row');
+  press(e, 'ans-cancel', 12);
+  assert.ok(!e.app.innerHTML.includes(Q));
+  assert.equal(posts(e).length, 0);
+  press(e, 'ans-hold', 12);
+  press(e, 'ans-send', 12, { 'data-where': 'dc' });
+  assert.equal(posts(e).length, 1);
+  assert.deepEqual(JSON.parse(posts(e)[0].opts.body), { id: 12, sessionId: 's-a1', action: 'hold' });
+  posts(e)[0].resolve(reply(200, { ok: true }));
+  await settle();
+  assert.equal(decHtml(e, 12), '', 'held: no longer an open card');
+  assert.equal(e.errors.length, 0);
 });

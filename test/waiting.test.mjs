@@ -259,7 +259,8 @@ test('real mirror: a conversion that could not be written yet (unconverted) and 
   s.ask({ ...clone(FIX.asked.request), requestId: 'toolu_next' }); // any mirror activity retries what is owed
   const after = s.store.readSnapshot();
   assert.equal(after.decisions.length, 1, 'retry wrote the card');
-  assert.deepEqual(keys(waitingItems(after)).sort(), ['qsess-A:toolu_next', 'qsess-A:toolu_owed']);
+  assert.deepEqual(after.closures.map((c) => [c.id, c.reason, c.questionPrompt]), [[after.decisions[0].id, 'superseded', true]]);
+  assert.deepEqual(keys(waitingItems(after)), ['qsess-A:toolu_next'], 'new prompt supersedes every open decision from this owner turn');
 });
 
 const PLAN_TEXT = ['# plan', '- [ ] 1. 첫째', '  Parallelization: Wave 1 | Blocked by: 없음 | Blocks: 없음', ''].join('\n');
@@ -311,4 +312,18 @@ test('real plan_brief: an open plan question is p<planId>:<qid> and keeps that k
 
   await b.execute(s.plan([{ id: 'Q1', text: '질문 Q1?', state: 'answered', answer: 'A안', by: 'owner' }]));
   assert.deepEqual(s.items(), [], 'answered in the plan: closed and gone');
+});
+
+test('C-HOLD: a held decision leaves the waiting list; a released (reopened) record does not count as a closure', () => {
+  const snap = (closures) => ({ sessions: [sess('s1')], mirror: [], answers: [], decisions: [dec(51, 's1'), dec(52, 's1')], closures });
+  assert.deepEqual(waitingItems(snap([])).map((w) => w.key), ['d51', 'd52']);
+  assert.deepEqual(waitingItems(snap([{ id: 52, reason: 'held', at: T0 }])).map((w) => w.key), ['d51']);
+  const dir = realFs.mkdtempSync(join(tmpdir(), 'omo-waiting-hold-'));
+  try {
+    const store = openStore(dir);
+    store.replace('sessions/s1/meta.json', { sessionId: 's1', lastActivityAt: T0 });
+    for (const id of [51, 52]) store.writeNew(`decisions/${pad6(id)}.json`, dec(id, 's1'));
+    store.writeNew('decision-closures/000052.1.released.json', { id: 52, reason: 'held', at: T0 });
+    assert.deepEqual(waitingItems(store.readSnapshot()).map((w) => w.key), ['d51', 'd52'], 'reopened: waiting again');
+  } finally { realFs.rmSync(dir, { recursive: true, force: true }); }
 });

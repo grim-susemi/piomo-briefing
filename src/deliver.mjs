@@ -29,10 +29,13 @@
 import * as nodeFs from 'node:fs';
 import { join } from 'node:path';
 import { setError, clearError } from './errors.mjs';
+import { holdText } from './ask-bridge.mjs';
 
 export const DELIVERY_TYPE = 'session_control_delivery';
 const pad6 = (n) => String(n).padStart(6, '0');
 const NUMBERED = /^(\d+)\.json$/;
+const ANNOTATION_FILE = /^a-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/;
+const deliveryId = (id) => typeof id === 'string' ? id : `d${id}`;
 const OPTION_KEYS = new Set(['A', 'B', 'C']);
 const RETRY_FIRST_MS = 20;
 const RETRY_MAX = 8;
@@ -64,6 +67,12 @@ export function replyText({ id, text, at }) {
   return `[상황판 답글] #${id} (소유자가 상황판에서 직접 씁, ${hhmm(at)}): ${cleanInline(text, 500)}`;
 }
 
+/** The fixed first line identifies the annotation; everything after it is untrusted owner Markdown. */
+export function annotationText({ requestId, text, at }) {
+  return `[상황판 피드백] a-${requestId.slice(0, 8)} (소유자가 상황판에서 직접 씀, ${hhmm(at)})\n`
+    + text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '');
+}
+
 export function createDeliverer(deps) {
   const { pi, store, getSessionId, getMeta, saveMeta, refresh, enabled } = deps;
   const now = deps.now ?? Date.now;
@@ -77,6 +86,7 @@ export function createDeliverer(deps) {
   const waited = new Map(); // id -> timer retries an unparsable answer file has survived
   let lastCtx = null;
   let watcher = null;
+  let holdWatcher = null;
   let watchOff = false;
   let unsubActivity = null;
   let retryTimer = null;
@@ -84,6 +94,7 @@ export function createDeliverer(deps) {
   let retryCount = 0;
   let disposed = false;
   let hasHold = false;
+  const admittedHolds = new Set();
 
   const receiptPath = (id) => join(store.root, 'receipts', `${pad6(id)}.json`);
   const safeRead = (rel) => { try { return store.readRecord(rel); } catch { return null; } };
@@ -127,7 +138,7 @@ export function createDeliverer(deps) {
 
   function writeReceipt(id, sid, kind, mode, proven, errors) {
     try {
-      store.writeNew(`receipts/${pad6(id)}.json`, { id, sessionId: sid, deliveredAt: now(), kind, mode, proven });
+      store.writeNew(`receipts/${pad6(id)}.json`, { ...(typeof id === 'string' ? { key: id } : { id }), sessionId: sid, deliveredAt: now(), kind, mode, proven });
     } catch (err) {
       if (err && err.code !== 'EEXIST') {
         errors.push(`receipt #${id}: ${messageOf(err)}`);
@@ -144,7 +155,7 @@ export function createDeliverer(deps) {
     const view = proofView(ctx);
     let changed = false;
     for (const [id, item] of [...awaiting]) {
-      const did = `d${id}`;
+      const did = deliveryId(id);
       if (view.proven(did)) {
         if (writeReceipt(id, sid, item.kind, item.mode, true, errors)) { awaiting.delete(id); changed = true; }
       } else if (view.known && view.failed(did)) {
@@ -188,20 +199,24 @@ export function createDeliverer(deps) {
     let unreadable = false;
     const ids = [];
     for (const name of names) {
+      if (ANNOTATION_FILE.test(name)) { ids.push(name.slice(0, -5)); continue; }
       const m = NUMBERED.exec(name);
       if (!m) continue;
       const n = Number(m[1]);
       if (name !== `${pad6(n)}.json`) continue;
       ids.push(n);
     }
-    ids.sort((a, b) => a - b);
+    ids.sort((a, b) => typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b)));
     for (const n of ids) {
       if (done.has(n) || foreign.has(n) || invalid.has(n) || awaiting.has(n)) continue;
       if (fsImpl.existsSync(receiptPath(n))) { done.add(n); continue; }
-      const decision = safeRead(`decisions/${pad6(n)}.json`);
-      if (!decision) continue; // missing or unreadable decision: nothing to deliver
-      if (decision.sessionId !== sid) { foreign.add(n); continue; }
-      if (fsImpl.existsSync(join(store.root, 'decision-closures', `${pad6(n)}.json`))) continue;
+      const annotation = typeof n === 'string';
+      const decision = annotation ? null : safeRead(`decisions/${pad6(n)}.json`);
+      if (!annotation) {
+        if (!decision) continue; // missing or unreadable decision: nothing to deliver
+        if (decision.sessionId !== sid) { foreign.add(n); continue; }
+        if (fsImpl.existsSync(join(store.root, 'decision-closures', `${pad6(n)}.json`))) continue;
+      }
       let ans = null;
       let answerReadError = null;
       try { ans = store.readRecord(`answers/${pad6(n)}.json`); } catch (err) { answerReadError = err; }
@@ -223,6 +238,16 @@ export function createDeliverer(deps) {
           waited.set(n, age);
         }
         unreadable = true; // maybe still being written
+        continue;
+      }
+      if (annotation) {
+        if (typeof ans.sessionId === 'string' && ans.sessionId !== sid) { foreign.add(n); continue; }
+        if (ans.key !== n || ans.kind !== 'annotation' || ans.sessionId !== sid || ans.requestId !== n.slice(2)
+          || ans.fromSessionId !== 'board' || ans.option !== undefined || typeof ans.text !== 'string'
+          || !ans.text.trim()) {
+          invalid.add(n); bad.push(n); continue;
+        }
+        out.push({ id: n, kind: 'annotation', text: ans.text, ans });
         continue;
       }
       if (ans.text !== undefined && ans.option === undefined) {
@@ -247,6 +272,66 @@ export function createDeliverer(deps) {
     return from;
   }
 
+  // Hold notices are separate from answers: they never imply a choice or survive as an
+  // answer after reopen. Each hold gets its own admission id, including later hold cycles.
+  function deliverHolds(ctx, sid, idle, errors) {
+    const dir = join(store.root, 'hold-notices');
+    let names;
+    try { names = fsImpl.readdirSync(dir); } catch (err) { if (err.code === 'ENOENT') return false; throw err; }
+    let waiting = false;
+    const proof = proofView(ctx);
+    const notices = [];
+    for (const name of names) {
+      if (!/^[0-9a-f-]{36}\.json$/.test(name)) continue;
+      const rel = `hold-notices/${name}`;
+      const notice = store.readRecord(rel);
+      if (notice?.sessionId !== sid || notice.delivered || notice.superseded) continue;
+      // Reopen sends nothing (C-HOLD 3): a notice whose hold was reopened before it was admitted is never delivered.
+      // The closure is written before its notice; an unreadable one is retried on the next wake, never read as reopened.
+      let closure;
+      try { closure = store.readRecord(`decision-closures/${pad6(notice.id)}.json`); } catch (err) {
+        waiting = true;
+        errors.push(`#${notice.id} 보류: ${messageOf(err)}`);
+        continue;
+      }
+      if (!(notice.admitted || admittedHolds.has(name)) && (closure?.reason !== 'held' || closure.notice !== name.slice(0, -5))) {
+        store.replace(rel, { ...notice, superseded: true });
+        continue;
+      }
+      const decision = safeRead(`decisions/${pad6(notice.id)}.json`);
+      if (decision?.source === 'ask' && deps.askBridge?.settleHold(notice.id)) {
+        store.replace(rel, { ...notice, delivered: true, proven: true, mode: 'tool_result', deliveredAt: now() });
+        refresh();
+        continue;
+      }
+      notices.push({ name, rel, notice });
+    }
+    // Settle every live hold before any normal hold admission consults idleness.
+    for (const { name, rel, notice } of notices) {
+      const delivery_id = `hold-${name.slice(0, -5)}`;
+      if (proof.proven(delivery_id)) {
+        store.replace(rel, { ...notice, delivered: true });
+        continue;
+      }
+      if ((notice.admitted || admittedHolds.has(name)) && (!proof.known || proof.pending(delivery_id))) continue;
+      if (!idle()) { waiting = true; continue; }
+      const text = holdText(notice.id);
+      try {
+        let fallback = false;
+        if (pi.session && typeof pi.session.admitExternalMessage === 'function') {
+          const res = pi.session.admitExternalMessage({ delivery_id, sender: { kind: 'command_line' }, text, deliverAs: 'followUp' });
+          if (!['started', 'queued', 'steered', 'already_admitted'].includes(res?.kind)) { waiting = true; continue; }
+        } else if (typeof pi.sendUserMessage === 'function') {
+          pi.sendUserMessage(text, { deliverAs: 'followUp' });
+          fallback = true;
+        } else throw new Error('host has neither pi.session nor pi.sendUserMessage');
+        admittedHolds.add(name);
+        store.replace(rel, { ...notice, admitted: true, ...(fallback ? { delivered: true } : {}) });
+      } catch (err) { waiting = true; errors.push(`#${notice.id} 보류: ${messageOf(err)}`); }
+    }
+    return waiting;
+  }
+
   // ---- one scan (synchronous: nothing can interleave) ----
   function run(ctx, reason) {
     if (disposed || !ctx || !enabled()) return;
@@ -259,23 +344,32 @@ export function createDeliverer(deps) {
 
     changed = checkProofs(ctx, sid, errors) || changed;
 
-    const { out: candidates, unreadable, bad, ioErrors } = listCandidates(sid, reason === 'retry');
+    const { out, unreadable, bad, ioErrors } = listCandidates(sid, reason === 'retry');
     errors.push(...ioErrors);
-    const idleNow = reason === 'agent_settled' || safeIdle(ctx);
+    const candidates = out.filter((c) => {
+      if (typeof c.id !== 'number' || safeRead(`decisions/${pad6(c.id)}.json`)?.source !== 'ask'
+        || !deps.askBridge?.settleAnswer(c.id, c.ans)) return true;
+      if (writeReceipt(c.id, sid, 'answered', 'tool_result', true, errors)) changed = true;
+      return false;
+    });
+    // Query idleness only on the normal admission path: a live question itself
+    // keeps the turn busy, and must settle before that gate is consulted.
+    const idleNow = () => reason === 'agent_settled' || safeIdle(ctx);
+    const holdsWaiting = deliverHolds(ctx, sid, idleNow, errors);
     const session = pi && pi.session && typeof pi.session.admitExternalMessage === 'function' ? pi.session : null;
     let view = null;
 
     for (const c of candidates) {
-      const did = `d${c.id}`;
+      const did = deliveryId(c.id);
       // A previous incarnation of this conversation may have delivered it already: the entry is in the branch.
       view = view ?? proofView(ctx);
       if (view.proven(did)) {
         if (writeReceipt(c.id, sid, 'already_admitted', reason === 'session_start' ? 'on-resume' : 'immediate', true, errors)) changed = true;
         continue;
       }
-      if (!idleNow) { busySeen.add(c.id); holds.set(c.id, 'busy'); continue; }
+      if (!idleNow()) { busySeen.add(c.id); holds.set(c.id, 'busy'); continue; }
       const mode = reason === 'session_start' ? 'on-resume' : busySeen.has(c.id) ? 'after-turn' : 'immediate';
-      const text = c.kind === 'text'
+      const text = c.kind === 'annotation' ? annotationText(c.ans) : c.kind === 'text'
         ? replyText({ id: c.id, text: c.text, at: c.ans.at })
         : deliveryText({ id: c.id, option: c.option, optionText: c.optionText, title: senderTitle(c.ans.fromSessionId), at: c.ans.at });
       if (session) {
@@ -302,7 +396,10 @@ export function createDeliverer(deps) {
           errors.push(`#${c.id}: ${messageOf(err)}`);
           continue;
         }
-        if (writeReceipt(c.id, sid, 'fallback', mode, false, errors)) changed = true; // cannot be proven on this host
+        if (c.kind === 'annotation') {
+          awaiting.set(c.id, { kind: 'fallback', mode }); // annotations never claim delivery without transcript proof
+          changed = true;
+        } else if (writeReceipt(c.id, sid, 'fallback', mode, false, errors)) changed = true; // legacy fallback
       } else {
         errors.push(`#${c.id}: host has neither pi.session nor pi.sendUserMessage`);
       }
@@ -326,7 +423,7 @@ export function createDeliverer(deps) {
       delete meta.deliveryHold;
       metaDirty = true;
     }
-    hasHold = holds.size > 0 || errors.length > 0; // a held or failed admission is retried on user activity
+    hasHold = holdsWaiting || holds.size > 0 || errors.length > 0; // a held or failed admission is retried on user activity
 
     // This source's own entry only: errors set -> recorded, a clean scan -> cleared. Nothing else touches it, and it is
     // saved BEFORE the one publish below so the published page matches meta.
@@ -386,6 +483,13 @@ export function createDeliverer(deps) {
       });
       w.on('error', onFail(w));
       watcher = w;
+      const holdDir = join(store.root, 'hold-notices');
+      fsImpl.mkdirSync(holdDir, { recursive: true });
+      holdWatcher = fsImpl.watch(holdDir, { persistent: false }, () => {
+        if (!fsImpl.existsSync(holdDir)) { holdWatcher?.close(); holdWatcher = null; return; }
+        safeRun(lastCtx, 'holds');
+      });
+      holdWatcher.on('error', recordFailure);
     } catch (err) {
       watchOff = true; // events (session_start/input/agent_settled) still wake us
       recordFailure(err);
@@ -399,7 +503,7 @@ export function createDeliverer(deps) {
   }
 
   function pendingIds() {
-    return [...awaiting.keys()].sort((a, b) => a - b);
+    return [...awaiting.keys()].sort((a, b) => typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b)));
   }
 
   async function wake(ctx, reason) {
@@ -418,6 +522,7 @@ export function createDeliverer(deps) {
     } catch { /* best effort */ }
     disposed = true;
     if (watcher) { try { watcher.close(); } catch { /* already closed */ } watcher = null; }
+    if (holdWatcher) { try { holdWatcher.close(); } catch { /* already closed */ } holdWatcher = null; }
     if (unsubActivity) { try { unsubActivity(); } catch { /* ignore */ } unsubActivity = null; }
     if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
     awaiting.clear(); // whatever is unproven now is re-checked (branch) or re-admitted on the next session_start

@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { makeController } from './fixtures/controller-dom.mjs';
 
 const read = (n) => readFileSync(new URL(`../src/page/${n}`, import.meta.url), 'utf8');
 const load = (names) => {
@@ -21,20 +22,21 @@ const card = (id, extra) => ({ id, project: 'p', title: id, status: 'in_progress
 const model = (sessions) => ({ schema: 1, seq: 1, generatedAt: 1_700_000_060_000, summary: {}, readErrors: [], sessions });
 const ALL = ['view.js', 'plan-view.js', 'workers-view.js', 'alarm.js'];
 
-test('a card with live workers and a plan draws both blocks under its headline; the header carries the sound button', () => {
-  const g = load(ALL);
-  const html = g.BriefView.renderApp(model([card('owner', { live, plan })]), { wallNow: 1_700_000_060_000, expanded: {} });
+test('a card with live workers and a plan draws both blocks under its headline; Settings carries the sound button', () => {
+  const g = load([...ALL, 'shell.js']);
+  const html = g.BriefView.renderOverview(model([card('owner', { live, plan })]), { wallNow: 1_700_000_060_000, expanded: {} });
   assert.ok(html.includes('data-worker="st_a"') && html.includes('data-worker="st_b"'));
   assert.ok(html.includes('data-plan="p123456789abc"'));
   assert.ok(html.indexOf('class="hl"') < html.indexOf('data-worker=') && html.indexOf('data-worker=') < html.indexOf('data-plan='), 'headline, workers, plan');
-  assert.ok(html.includes('data-alarm-sound'));
+  const st = g.BriefShell.reduce(g.BriefShell.defaults(), { type: 'view', key: 'settings' });
+  assert.ok(g.BriefShell.side(model([]), st).includes('data-alarm-sound'));
   assert.ok(html.includes('data-act="exp"') && html.includes('data-key="plan:p123456789abc"'), 'plan expansion rides the existing exp channel');
 });
 
 test('the worker block follows the wall clock given by the page, not the age of the data', () => {
   const g = load(ALL);
-  const a = g.BriefView.renderApp(model([card('c', { live })]), { wallNow: 1_700_000_060_000, expanded: {} });
-  const b = g.BriefView.renderApp(model([card('c', { live })]), { wallNow: 1_700_000_060_600, expanded: {} });
+  const a = g.BriefView.renderOverview(model([card('c', { live })]), { wallNow: 1_700_000_060_000, expanded: {} });
+  const b = g.BriefView.renderOverview(model([card('c', { live })]), { wallNow: 1_700_000_060_600, expanded: {} });
   const delay = (h) => /animation-delay:\s*(-?\d+)ms/.exec(h)[1];
   assert.notEqual(delay(a), delay(b));
 });
@@ -42,7 +44,7 @@ test('the worker block follows the wall clock given by the page, not the age of 
 test('an execution conversation shows a one-line link to the owner card (its DOM id and tab), not the plan', () => {
   const g = load(ALL);
   const link = { planId: 'p123456789abc', ownerId: 'owner', source: { slug: 'living-board' }, stage: 'running', goal: '목표' };
-  const html = g.BriefView.renderApp(model([card('owner', { plan }), card('runner', { planLink: link })]), { expanded: {} });
+  const html = g.BriefView.renderOverview(model([card('owner', { plan }), card('runner', { planLink: link })]), { expanded: {} });
   const dom = /id="(c-owner-0)"/.exec(html)[1];
   assert.ok(html.includes(`data-goto="${dom}"`));
   assert.equal((html.match(/data-plan="/g) ?? []).length, 1, 'the plan is drawn once');
@@ -51,7 +53,7 @@ test('an execution conversation shows a one-line link to the owner card (its DOM
 
 test('without the block scripts the card is drawn as before (no blocks, no button, no error)', () => {
   const g = load(['view.js']);
-  const html = g.BriefView.renderApp(model([card('owner', { live, plan, planLink: { ownerId: 'x' } })]), { expanded: {} });
+  const html = g.BriefView.renderOverview(model([card('owner', { live, plan, planLink: { ownerId: 'x' } })]), { expanded: {} });
   assert.ok(!html.includes('data-worker') && !html.includes('data-plan') && !html.includes('data-alarm-sound') && !html.includes('plan-link'));
   assert.ok(html.includes('data-card="owner"'));
 });
@@ -59,6 +61,23 @@ test('without the block scripts the card is drawn as before (no blocks, no butto
 test('hostile text in live rows and the plan stays escaped through the view', () => {
   const g = load(ALL);
   const evil = '<img src=x onerror=alert(1)>';
-  const html = g.BriefView.renderApp(model([card('o', { live: { workers: [{ ...live.workers[0], name: evil, step: evil }] }, plan: { ...plan, goal: evil } })]), { expanded: {} });
+  const html = g.BriefView.renderOverview(model([card('o', { live: { workers: [{ ...live.workers[0], name: evil, step: evil }] }, plan: { ...plan, goal: evil } })]), { expanded: {} });
   assert.ok(!html.includes('<img src=x'));
+});
+
+test('alarm [보기] opens the 결정 page and the alarm and generation notice stay above tabs', () => {
+  const e = makeController({ modules: ['view', 'plan-view', 'workers-view', 'convo-view', 'shell', 'alarm', 'annotate'] });
+  const m = model([card('owner', { alive: true })]);
+  m.waiting = [{ key: 'd1', kind: 'decision', sessionId: 'owner', text: 'Choose', at: m.generatedAt, title: 'owner' }];
+  e.page.receive(m);
+  const band = e.byId['alarm-band'], wrap = e.byId.tabs.parentNode;
+  assert.equal(band.parentNode, wrap);
+  assert.ok(wrap.children.indexOf(band) < wrap.children.indexOf(e.byId.tabs));
+  assert.equal(e.status.parentNode, wrap);
+  const button = band.querySelector('[data-alarm-goto]');
+  assert.ok(button);
+  e.fire(button, 'click');
+  assert.equal(e.page.state.ui.active, 'owner');
+  assert.equal(e.page.state.ui.sub.owner, 'dec');
+  assert.ok(e.byId.main.querySelector('.cv-page'));
 });

@@ -34,11 +34,13 @@ import { execFile as nodeExecFile, execFileSync as nodeExecFileSync } from 'node
 import { validateBrief } from './src/schema.mjs';
 import { openStore } from './src/store.mjs';
 import { collectAuto } from './src/collect.mjs';
-import { applyDecide, applyBoardAnswer, formatDecideResult } from './src/decide.mjs';
-import { renderPageMaybe, buildViewModel, pageHtml, serverInfoOf, OWN_GENERATION } from './src/render.mjs';
+import { applyDecide, applyBoardAnswer, applyBoardAnnotation, formatDecideResult } from './src/decide.mjs';
+import { renderPageMaybe, buildViewModel, pageHtml, serverInfoOf, withReports, OWN_GENERATION } from './src/render.mjs';
+import { importImage, gcAssets } from './src/assets.mjs';
 import { createServerHost, readInstalledGeneration } from './src/server-host.mjs';
 import { createWorkersLive } from './src/workers-live.mjs';
 import { createPlanTool } from './src/plan-tool.mjs';
+import { createAskBridge } from './src/ask-bridge.mjs';
 import { setError, clearError, errorsOf, normalizeErrors } from './src/errors.mjs';
 import {
   injectRule, replyOverBudget, fitReply, assistantText, hasToolCall, parseHandoff,
@@ -91,6 +93,25 @@ const optionSchema = {
   properties: { text: { type: 'string' }, consequence: { type: 'string' } },
   required: ['text', 'consequence'],
 };
+export const BOARD_QUESTION_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    question: { type: 'string', minLength: 1, maxLength: 100 },
+    options: {
+      type: 'object', additionalProperties: false, required: ['A', 'B'],
+      properties: Object.fromEntries(['A', 'B', 'C'].map((key) => [key, {
+        ...optionSchema, additionalProperties: false,
+        properties: { text: { type: 'string', minLength: 1, maxLength: 60 }, consequence: { type: 'string', minLength: 1, maxLength: 80 } },
+      }])),
+    },
+    recommend: { type: 'string', enum: ['A', 'B', 'C'] },
+    reason: { type: 'string', minLength: 1, maxLength: 100 },
+    blocks: { type: 'boolean' },
+    timeoutMinutes: { type: 'number', exclusiveMinimum: 0, maximum: 120, default: 30 },
+  },
+  required: ['question', 'options', 'recommend', 'reason', 'blocks'],
+};
 export const BRIEF_SCHEMA = {
   type: 'object',
   properties: {
@@ -106,6 +127,8 @@ export const BRIEF_SCHEMA = {
         type: 'object',
         properties: {
           id: { type: 'number' },
+          state: { type: 'string', enum: ['open', 'answered'] },
+          answer: { type: 'string' },
           question: { type: 'string' },
           options: { type: 'object', properties: { A: optionSchema, B: optionSchema, C: optionSchema } },
           recommend: { type: 'string', enum: ['A', 'B', 'C'] },
@@ -134,6 +157,28 @@ export const BRIEF_SCHEMA = {
         required: ['label', 'state'],
       },
     },
+    reports: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          title: { type: 'string' },
+          summary: { type: 'string' },
+          decision: { type: 'number' },
+          decisionIndex: { type: 'number' },
+          images: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { path: { type: 'string' }, alt: { type: 'string' }, option: { type: 'string', enum: ['A', 'B', 'C'] } },
+              required: ['path', 'alt'],
+            },
+          },
+        },
+        required: ['id', 'title', 'images'],
+      },
+    },
   },
   required: ['title', 'status', 'headline'],
 };
@@ -142,7 +187,10 @@ const BRIEF_DESCRIPTION = [
   '상황판(브라우저 페이지)을 갱신하는 보고 도구. HTML은 코드가 만든다. 도구를 쓴 턴은 마지막 답 전에 한 번 호출한다.',
   '한도(유니코드 글자 수): title 1..40, headline 1..100(목표 달성 기준 한 문장), next 0..100, changes 0..8개·done 0..12개(text 1..100),',
   'decisions 0..4개(question 1..100, options A·B(·C){text 1..60, consequence 1..80}, recommend, reason 1..100, blocks),',
+  '질문 도구에서 받은 답은 state: answered, answer: 답 내용(1..500)으로 기록한다. state 생략은 open.',
   'close_decisions {id, reason: superseded|withdrawn}, flow 0..8개(label 1..20, state).',
+  'reports 0..3개(id a-z0-9_- 1..64, title 1..80, summary 0..1000, decision(열린 결정 번호) 또는 decisionIndex(이번 decisions[] 위치 0..3) 중 하나,',
+  '  images 0..6개{path: C:/ 절대경로 PNG·JPEG·WebP ≤8MiB ≤8192px, alt 1..200, option A|B|C(연결된 결정의 선택지)}). 생략하면 이전 보고서 유지, []는 비움.',
   '각 changes/done 항목에는 truth(evidence|reported|unverified)와 applied(candidate|live|none)가 반드시 있다.',
   'truth=evidence는 C:/ 로 시작하는 절대경로 evidence가 있을 때만. 기존 열린 결정을 유지하려면 decisions[].id에 번호를 넣는다.',
   '한도를 넘으면 거절되고 필드명과 한도가 돌아오니 줄여서 다시 호출한다.',
@@ -239,6 +287,7 @@ export function createBriefingExtension(opts = {}) {
     let lastCtx = null;
     let deliverer = null;
     let mirror = null;
+    let askBridge = null;
     let run = freshRun();
     const autoCache = {};
     const recordCache = {}; // /brief task-record reads: one cache for the lifetime of this extension instance (60s TTL in collectAuto)
@@ -461,7 +510,7 @@ export function createBriefingExtension(opts = {}) {
     // success). The page token never reaches these hooks; the request body carries no secret.
     const BOARD_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
     const TAB_ID = /^w\d+:t[0-9A-Za-z]+$/;
-    const ANSWER_STATUS = { NOT_FOUND: 404, SESSION_MISMATCH: 409, CLOSED: 409, ANSWERED: 409, BAD_OPTION: 400, BAD_TEXT: 400, BAD_REQUEST: 400, IO_ERROR: 500 };
+    const ANSWER_STATUS = { NOT_FOUND: 404, SESSION_MISMATCH: 409, CLOSED: 409, HELD: 409, ANSWERED: 409, BAD_OPTION: 400, BAD_TEXT: 400, BAD_REQUEST: 400, NO_ANNOTATION_SUPPORT: 409, REQUEST_ID_CONFLICT: 409, IO_ERROR: 500 };
     const FOCUS_TIMEOUT_MS = 3000;
     const FOCUS_GUARD_MS = 4000; // the reply is sent even if execFile never calls back
     const boardReply = (status, code) => ({ status, json: code ? { ok: false, code } : { ok: true } });
@@ -470,7 +519,7 @@ export function createBriefingExtension(opts = {}) {
     const reasonOf = (err) => (err && err.killed ? 'TIMEOUT' : err && err.code !== undefined && err.code !== null ? err.code : 'ERROR');
     const messageOf = (err) => clip(err && err.message ? err.message : err);
     const answerFault = (body, detail) => {
-      hostError('answer', new Error(`상황판 답 기록 실패(#${body.id}, IO_ERROR)${detail ? `: ${clip(detail)}` : ''}`));
+      hostError('answer', new Error(`상황판 답 기록 실패(#${body.id ?? `a-${body.requestId}`}, IO_ERROR)${detail ? `: ${clip(detail)}` : ''}`));
       return boardReply(500, 'IO_ERROR');
     };
 
@@ -478,17 +527,21 @@ export function createBriefingExtension(opts = {}) {
     const metaOf = (sessionId) => (BOARD_SESSION_ID.test(sessionId) ? store.readRecord(`sessions/${sessionId}/meta.json`) : null);
 
     function boardAnswer(body) {
-      if (body.text !== undefined) {
+      const annotation = body.kind === 'annotation';
+      if (annotation || body.text !== undefined) {
         // free text only for a conversation that says it can take it (a meta from before that capability has no answerKinds)
         let target;
         try { target = metaOf(body.sessionId); } catch (err) { return answerFault(body, messageOf(err)); }
-        if (!target || !Array.isArray(target.answerKinds) || !target.answerKinds.includes('text')) return boardReply(409, 'NO_TEXT_SUPPORT');
+        const kind = annotation ? 'annotation' : 'text';
+        if (!target || !Array.isArray(target.answerKinds) || !target.answerKinds.includes(kind)) {
+          return boardReply(409, annotation ? 'NO_ANNOTATION_SUPPORT' : 'NO_TEXT_SUPPORT');
+        }
       }
-      const res = applyBoardAnswer(store, body, nowFn());
+      const res = annotation ? applyBoardAnnotation(store, body, nowFn()) : applyBoardAnswer(store, body, nowFn());
       if (res.ok) {
         hostRecover('answer');
         if (active && !shuttingDown) refreshSoon(false); // open pages see the answer state through this publish
-        return { status: 200, json: { ok: true, id: body.id } }; // the reply names the decision it answered
+        return { status: 200, json: annotation ? res : { ok: true, id: body.id } };
       }
       // `detail` (log-only, may hold a file path) goes to the recorded diagnostic, never into the reply
       if (res.code === 'IO_ERROR' || ANSWER_STATUS[res.code] === undefined) return answerFault(body, res.detail);
@@ -647,27 +700,72 @@ export function createBriefingExtension(opts = {}) {
           const rec = store.readRecord(`decisions/${pad6(id)}.json`);
           return rec && typeof rec.sessionId === 'string' ? rec.sessionId : null;
         },
+        decisionOpen: (id) => !store.readRecord(`decision-closures/${pad6(id)}.json`) && !store.readRecord(`answers/${pad6(id)}.json`),
+        decisionOptions: (id) => {
+          const o = store.readRecord(`decisions/${pad6(id)}.json`)?.options;
+          return o && typeof o === 'object' ? ['A', 'B', 'C'].filter((k) => o[k] !== undefined) : null;
+        },
         sessionId: sid,
       });
-      if (!v.ok) {
-        throw new Error(`brief 입력 거절(저장하지 않음) - 아래를 고쳐 다시 호출:\n${v.errors.map((e) => `- ${e}`).join('\n')}`);
-      }
+      const refuse = (errors) => new Error(`brief 입력 거절(저장하지 않음) - 아래를 고쳐 다시 호출:\n${errors.map((e) => `- ${e}`).join('\n')}`);
+      if (!v.ok) throw refuse(v.errors);
       const t = nowFn();
       const brief = v.normalized;
+      // Report images are read and stored before anything else is written: a refused file refuses the whole brief.
+      const imported = new Map(); // `${i}.${j}` -> importImage result
+      if (brief.reports !== undefined) {
+        const imageErrors = [];
+        brief.reports.forEach((r, i) => r.images.forEach((img, j) => {
+          const got = importImage(stateDir, img.path, { fs: fsImpl, now: () => t });
+          if (got.error) imageErrors.push(`reports[${i}].images[${j}].path: ${got.error}`);
+          else imported.set(`${i}.${j}`, got);
+        }));
+        if (imageErrors.length) throw refuse(imageErrors);
+      }
+      if (brief.decisions.some((d) => d.id === undefined && d.state !== 'answered')
+        && (store.readRecord(`mirror/${sid}.json`)?.open === true || meta.askLive.length > 0)) {
+        throw new Error('질문창이 열려 있음: 결정은 답을 받은 뒤 answered로 넣기');
+      }
       const created = [];
       for (const d of brief.decisions) {
-        if (d.id !== undefined) continue;
-        d.id = store.allocDecisionId({
-          sessionId: sid, question: d.question, options: d.options, recommend: d.recommend,
-          reason: d.reason, blocks: d.blocks, createdAt: t, source: 'brief',
-        });
-        created.push(d);
+        if (d.id === undefined) {
+          d.id = store.allocDecisionId({
+            sessionId: sid, question: d.question, options: d.options, recommend: d.recommend,
+            reason: d.reason, blocks: d.blocks, createdAt: t, source: 'brief',
+          });
+          if (d.state !== 'answered') created.push(d);
+        }
+        if (d.state === 'answered') {
+          try {
+            store.writeNew(`decision-closures/${pad6(d.id)}.json`, { id: d.id, reason: 'answered', answer: d.answer, at: t });
+          } catch (err) { if (err.code !== 'EEXIST') throw err; }
+        }
       }
       for (const c of brief.close_decisions ?? []) {
         try {
           store.writeNew(`decision-closures/${pad6(c.id)}.json`, { id: c.id, reason: c.reason, at: t });
         } catch (err) {
           if (err.code !== 'EEXIST') throw err; // already closed: nothing to add
+        }
+      }
+      let reportWarning = null;
+      if (brief.reports !== undefined) {
+        const snapshot = brief.reports.map((r, i) => ({
+          id: r.id,
+          title: r.title,
+          summary: r.summary ?? '',
+          decisionId: r.decision ?? (r.decisionIndex !== undefined ? brief.decisions[r.decisionIndex].id : null),
+          at: t,
+          images: r.images.map((img, j) => {
+            const a = imported.get(`${i}.${j}`);
+            return { sha: a.sha, ext: a.ext, mime: a.mime, bytes: a.bytes, w: a.w, h: a.h, path: img.path, alt: img.alt, option: img.option ?? null };
+          }),
+        }));
+        store.replace(`sessions/${sid}/reports.json`, snapshot);
+        try {
+          gcAssets(stateDir, t, { fs: fsImpl });
+        } catch (err) {
+          reportWarning = `그림 정리 실패(보고서는 저장됨): ${err.code || err.message}`;
         }
       }
       let seq = store.nextBriefSeq(sid);
@@ -698,6 +796,7 @@ export function createBriefingExtension(opts = {}) {
         ? `상황판 갱신됨: ${boardLink()}${newText}`
         : `보고는 저장됐지만 상황판은 갱신되지 못함${newText}: ${res.error}`];
       for (const w of v.warnings) lines.push(`경고: ${w}`);
+      if (reportWarning) lines.push(`경고: ${reportWarning}`);
       return { content: [{ type: 'text', text: lines.join('\n') }], details: { seq, newDecisionIds: created.map((d) => d.id), pagePath } };
     }
 
@@ -898,11 +997,13 @@ export function createBriefingExtension(opts = {}) {
         // the host allows 2s: every awaited step below is bounded, publishes are soft (one lock attempt)
         shuttingDown = true;
         meta.running = false;
+        delete meta.hostPid;
         delete meta.pid;
         saveMeta();
         if (rpcOff) { rpcOff(); rpcOff = null; }
         if (softTimer) { timers.clearTimeout(softTimer); softTimer = null; }
         if (workersLive) { workersLive.stop(); workersLive = null; }
+        askBridge?.dispose();
         if (deliverer && typeof deliverer.dispose === 'function') await deliverer.dispose();
         if (mirror && typeof mirror.dispose === 'function') await mirror.dispose();
         if (host) {
@@ -916,6 +1017,7 @@ export function createBriefingExtension(opts = {}) {
         deliverer = null;
         mirror = null;
         planTool = null;
+        askBridge = null;
         active = false;
       }));
     }
@@ -929,6 +1031,17 @@ export function createBriefingExtension(opts = {}) {
         promptGuidelines: ['Use brief once before the final answer of any turn that used tools; keep the final chat answer short and include the 상황판 absolute path.'],
         parameters: BRIEF_SCHEMA,
         execute: executeBrief,
+      });
+      pi.registerTool({
+        name: 'board_question',
+        label: 'Board question',
+        description: '상황판과 터미널에서 같은 결정 하나를 묻고 항상 기다린다. 어느 쪽에서 답해도 한 번만 저장하고 둘 다 닫힌다. question 1..100자, options A·B(·C) {text 1..60자, consequence 1..80자}, recommend, reason 1..100자, blocks. timeoutMinutes 기본 30, 최대 120. 질문창이 없으면 상황판 답만 기다린다. 보류는 답이나 기본값이 아니다.',
+        parameters: BOARD_QUESTION_SCHEMA,
+        execute: (id, params, signal, onUpdate, ctx) => {
+          if (!active || !askBridge) throw new Error('브리핑이 이 세션에서 준비되지 않았습니다.');
+          if (!enabled()) throw new Error('브리핑이 꺼져 있습니다(/brief on 으로 켤 수 있음).');
+          return askBridge.execute(id, params, signal, onUpdate, ctx ?? lastCtx);
+        },
       });
       pi.registerCommand('brief', { description: '상황판 열기 | on | off | path', argumentHint: '[on|off|path]', handler: briefCommand });
       pi.registerCommand('decide', { description: '결정에 답하기: /decide 12A 13B (번호만 쓰면 추천안)', argumentHint: '12A 13B', handler: decideCommand });
@@ -982,9 +1095,9 @@ export function createBriefingExtension(opts = {}) {
             const info = serverInfoOf(store);
             // a failed record read is recorded in this very operation; when that changed the errors the model is built from a fresh snapshot
             const changed = noteServerRecord(info);
-            return buildViewModel(changed ? store.readSnapshot() : snap, t, { generation, server: info.server, serverError: info.error });
+            return buildViewModel(changed ? withReports(store, store.readSnapshot()) : snap, t, { generation, server: info.server, serverError: info.error, stateDir: store.root });
           },
-          readSnapshot: () => store.readSnapshot(),
+          readSnapshot: () => withReports(store, store.readSnapshot()),
           getPage: (vm, token) => pageHtml(vm, generation, { mode: 'server', token }),
           answer: boardAnswer,
           focus: boardFocus,
@@ -1092,9 +1205,12 @@ export function createBriefingExtension(opts = {}) {
           tabId: env.HERDR_TAB_ID ?? prior.tabId ?? '',
           workerIds: Array.isArray(prior.workerIds) ? prior.workerIds : [],
           workers: Array.isArray(prior.workers) ? prior.workers : [],
-          answerKinds: ['option', 'text'], // what this generation's deliverer accepts: the board offers free text only when 'text' is here
+          answerKinds: ['option', 'text', 'annotation'], // only this generation advertises annotation delivery
           lastActivityAt: typeof prior.lastActivityAt === 'number' ? prior.lastActivityAt : t,
           running: false,
+          hostPid: process.pid, // unlike pid (current run), survives idle turns until session_shutdown
+          askLive: [], // in-process calls never survive a new session binding
+          ...(typeof file === 'string' && file ? { sessionFile: file } : {}), // the board lists it as 세션 파일 (C-VM)
           turnDidWork: false,
           turnBriefed: false,
         };
@@ -1104,6 +1220,13 @@ export function createBriefingExtension(opts = {}) {
         shuttingDown = false;
         shutdownDirty = false;
         run = freshRun();
+        askBridge?.dispose();
+        askBridge = createAskBridge({
+          store, getSessionId: () => sid, now: nowFn, timers,
+          publish: () => refresh(),
+          onLiveChange: (ids) => { meta.askLive = ids; saveMeta(); },
+          wake: (c) => deliverer?.wake(c, 'answers'),
+        });
         setupLive(ctx);
         if (!registered) {
           registered = true;
@@ -1113,7 +1236,7 @@ export function createBriefingExtension(opts = {}) {
         saveMeta();
         void refreshTab();
         if (!deliverer && typeof makeDeliverer === 'function') {
-          deliverer = makeDeliverer({ pi, store, stateDir, pagePath, getSessionId: () => sid, getMeta: () => meta, saveMeta, refresh, enabled, now: nowFn, env });
+          deliverer = makeDeliverer({ pi, store, stateDir, pagePath, getSessionId: () => sid, getMeta: () => meta, saveMeta, refresh, enabled, now: nowFn, env, get askBridge() { return askBridge; } });
         }
         if (!mirror && typeof makeMirror === 'function') {
           mirror = makeMirror({ pi, store, stateDir, pagePath, getSessionId: () => sid, getMeta: () => meta, saveMeta, refresh, enabled, now: nowFn, env, notify: (c, d) => notifyDecision(c ?? lastCtx, d) });

@@ -284,6 +284,22 @@ test('a question that times out into a decision card is the same item: no second
   assert.equal(p.d.doc.title, `(1) ${BASE_TITLE}`);
 });
 
+test('C-HOLD: a decision held before it was ever seen never rings, never shows in the band or the title count; reopening it rings', () => {
+  const sessions = [{ sid: 'S1', meta: { title: '대화 하나' }, briefs: [] }];
+  const dec = (id) => ({ id, sessionId: 'S1', question: `결정 ${id}?`, options: { A: { text: '가' } }, recommend: 'A', reason: 'r', blocks: true, createdAt: T0 + id });
+  const snap = (closures) => ({ sessions, mirror: [], answers: [], decisions: [dec(7), dec(8)], closures });
+  const p = makePage();
+  p.update([]);
+  const held = p.update(waitingItems(snap([{ id: 7, reason: 'held', at: T0 }, { id: 8, reason: 'held', at: T0 }])));
+  assert.deepEqual({ sound: held.sound, total: held.total, fresh: held.fresh }, { sound: 'none', total: 0, fresh: [] });
+  assert.equal(p.audio.chimes(), 0, 'a held decision never rings the alarm');
+  assert.deepEqual(p.rows(), []);
+  assert.equal(p.d.doc.title, BASE_TITLE, 'no title count for held decisions');
+  const reopened = p.update(waitingItems(snap([{ id: 8, reason: 'held', at: T0 }])));
+  assert.deepEqual({ sound: reopened.sound, total: reopened.total, fresh: reopened.fresh }, { sound: 'played', total: 1, fresh: ['d7'] });
+  assert.deepEqual(p.rows().map((x) => x.key), ['d7']);
+});
+
 test('🔕 silences new items but keeps the band; the choice is stored and survives a reload; 🔔 turns it back on', () => {
   const p = makePage();
   p.update([item('d1')]);
@@ -345,6 +361,33 @@ test('answered items leave the band and the title count goes down; nothing waiti
   assert.equal(p.rows().length, 0);
   assert.equal(p.d.doc.title, BASE_TITLE);
   assert.equal(p.d.docEl.style.props['--alarm-h'], undefined);
+});
+
+test('the band text wraps, so its height follows the band box: a ResizeObserver republishes --alarm-h without a window resize', () => {
+  const observers = [];
+  class FakeResizeObserver {
+    constructor(cb) { this.cb = cb; this.targets = []; observers.push(this); }
+    observe(el) { this.targets.push(el); }
+    disconnect() { this.targets = []; }
+  }
+  const p = makePage({ extraCtx: { ResizeObserver: FakeResizeObserver } });
+  p.update([item('d1'), item('d2')]);
+  assert.equal(p.d.docEl.style.props['--alarm-h'], '32px');
+  const band = p.band();
+  const ro = observers.find((o) => o.targets.includes(band));
+  assert.ok(ro, 'the band box is observed');
+  let h = 70; // the column narrowed (sidebar docked): the row text takes more lines
+  Object.defineProperty(band, 'offsetHeight', { get: () => (band.hidden ? 0 : h), configurable: true });
+  ro.cb([{ target: band }]);
+  assert.equal(p.d.docEl.style.props['--alarm-h'], '70px');
+  h = 32;
+  ro.cb([{ target: band }]);
+  assert.equal(p.d.docEl.style.props['--alarm-h'], '32px');
+  p.update([]);
+  ro.cb([{ target: band }]);
+  assert.equal(p.d.docEl.style.props['--alarm-h'], undefined, 'a hidden band publishes no height');
+  assert.equal(observers.length, 1, 'one observer for the one band');
+  assert.deepEqual(p.errors, []);
 });
 
 test('blocked audio: the band asks for one click; the click resumes the context; a sound owed long ago is not played late', async () => {
@@ -515,7 +558,7 @@ test('the chime is 880 Hz then 1320 Hz, 120 ms each, peak gain 0.15, made in Web
   assert.doesNotMatch(SOURCE, /new Audio\(|\.(mp3|wav|ogg)\b/, 'no audio file');
 });
 
-test('[보기] moves to the conversation card, switching the board to the waiting tab when the card is not shown', () => {
+test('[보기] opens the conversation 결정 sub-tab, including when its card is not shown', () => {
   const card = { scrolled: 0, classList: { add() {}, remove() {} }, getAttribute: (k) => (k === 'data-card' ? 'S2' : null), scrollIntoView() { card.scrolled++; } };
   const go = { getAttribute: (k) => (k === 'data-alarm-goto' ? 'S2' : null), hasAttribute: (k) => k === 'data-alarm-goto' };
   const p = makePage();
@@ -525,12 +568,12 @@ test('[보기] moves to the conversation card, switching the board to the waitin
   click(p);
   assert.equal(card.scrolled, 1);
 
-  const ui = { tab: 'run' };
-  const q = makePage({ extraCtx: { BriefPage: { state: { ui }, render() { q.d.setCards(ui.tab === 'wait' ? [card] : []); } } } });
+  const opened = [];
+  const q = makePage({ extraCtx: { BriefPage: { open(sid, sub) { opened.push([sid, sub]); } } } });
   q.update([item('d1', { sessionId: 'S2' })]);
   click(q);
-  assert.equal(ui.tab, 'wait');
-  assert.equal(card.scrolled, 2);
+  assert.deepEqual(opened, [['S2', 'dec']]);
+  assert.equal(card.scrolled, 1, 'opening a page does not cycle old filters or scroll a stale card');
   assert.deepEqual(q.errors, []);
 });
 
@@ -615,4 +658,15 @@ test('alarm.css uses the page tokens only and turns the flash off for reduced mo
   assert.doesNotMatch(CSS, /#[0-9a-f]{3,8}\b|rgba?\(/i, 'colors come from page.css variables');
   assert.match(CSS, /@media \(prefers-reduced-motion: reduce\)\s*\{[^}]*\.alarm-row\.is-new\s*\{[^}]*animation:\s*none/);
   assert.match(CSS, /\.alarm-band\[hidden\]\s*\{\s*display:\s*none/);
+});
+
+test('alarm.css wraps the row text instead of clipping it: no nowrap, hidden overflow or ellipsis on .alarm-text', () => {
+  const rule = /\.alarm-text\s*\{([^}]*)\}/.exec(CSS);
+  assert.ok(rule, '.alarm-text rule');
+  assert.doesNotMatch(rule[1], /white-space:\s*nowrap|overflow:\s*hidden|text-overflow/);
+  assert.match(rule[1], /min-width:\s*0/);
+  assert.match(rule[1], /overflow-wrap:\s*anywhere/);
+  const p = makePage();
+  p.update([item('d1', { title: 'W'.repeat(120) })]);
+  assert.match(p.html(), /<p class="alarm-row" data-alarm-key="d1"><span class="alarm-text" title="[^"]+">답 기다림: <b class="alarm-who">W{120}<\/b>/, 'the rule dresses the row text');
 });

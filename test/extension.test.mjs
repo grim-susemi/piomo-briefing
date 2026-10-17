@@ -10,6 +10,7 @@ import { createBriefingExtension, isChildSessionFile, defaultStateDir } from '..
 import { RULE_MARKER, RULE_TEXT, replyOverBudget } from '../src/rule.mjs';
 import { makeFakePi, makeCtx, assistant, toolCall, lines } from './helpers/fake-pi.mjs';
 import { tempDir } from './helpers/temp.mjs';
+import { openStore } from '../src/store.mjs';
 
 const CHILD = fileURLToPath(new URL('./helpers/ext-child.mjs', import.meta.url));
 
@@ -97,7 +98,7 @@ test('gate: hasUI=false (print/json) registers no tool/command', async (t) => {
 test('gate: lead registers brief tool, brief and decide commands', async (t) => {
   const s = lead(t);
   await s.start();
-  assert.deepEqual(s.host.registrations.tools, ['brief', 'plan_brief']);
+  assert.deepEqual(s.host.registrations.tools, ['brief', 'board_question', 'plan_brief']);
   assert.deepEqual([...s.host.registrations.commands].sort(), ['brief', 'decide']);
   for (const ev of ['before_agent_start', 'input', 'agent_start', 'tool_result', 'message_end', 'agent_before_settle', 'agent_settled', 'session_shutdown']) {
     assert.ok(s.host.registrations.on.includes(ev), ev);
@@ -106,8 +107,69 @@ test('gate: lead registers brief tool, brief and decide commands', async (t) => 
   assert.equal(s.host.handlers.get('before_agent_start')[0].options.previewSafe, true);
   // a second session_start does not double-register
   await s.start();
-  assert.deepEqual(s.host.registrations.tools, ['brief', 'plan_brief']);
+  assert.deepEqual(s.host.registrations.tools, ['brief', 'board_question', 'plan_brief']);
 });
+
+test('board_question: registered schema rejects non-waiting fields and terminal result uses the shared writer', { timeout: 5000 }, async (t) => {
+  const s = lead(t);
+  await s.start();
+  let request;
+  s.ctx.isIdle = () => false;
+  s.ctx.ui.question = async (r) => {
+    request = r;
+    return { status: 'answered', answers: { decision: { selected: ['B · 나'] } }, unanswered: [] };
+  };
+  const tool = s.host.tool('board_question');
+  assert.equal(tool.parameters.additionalProperties, false);
+  assert.equal(tool.parameters.properties.timeoutMinutes.maximum, 120);
+  assert.equal(tool.parameters.properties.waitForAnswer, undefined);
+  assert.deepEqual(tool.parameters.properties.options.required, ['A', 'B']);
+  const result = await tool.execute('ask-call', decision(), undefined, undefined, s.ctx);
+  const stored = readJson(join(s.stateDir, 'decisions', '000001.json'));
+  assert.equal(stored.source, 'ask');
+  assert.equal(stored.toolCallId, 'ask-call');
+  assert.equal(request.questions.length, 1);
+  assert.equal(result.details.answer.option, 'B');
+  assert.equal(readJson(join(s.stateDir, 'answers', '000001.json')).fromSessionId, s.sid);
+  assert.equal(readJson(join(s.stateDir, 'receipts', '000001.json')).mode, 'tool_result');
+  assert.deepEqual(s.meta().askLive, []);
+});
+
+for (const action of ['option', 'hold']) {
+  test(`board_question: the real ${action} watcher settles a busy tool without another event or chat admission`, { timeout: 5000 }, async (t) => {
+    const { applyBoardAnswer } = await import('../src/decide.mjs');
+    const s = lead(t);
+    await s.start();
+    const sent = [];
+    s.host.pi.sendUserMessage = (text) => sent.push(text);
+    let signal;
+    let opened;
+    const ready = new Promise((resolve) => { opened = resolve; });
+    s.ctx.isIdle = () => false;
+    s.ctx.ui.question = (_request, options) => new Promise((resolve) => {
+      signal = options.signal;
+      signal.addEventListener('abort', () => resolve({ status: 'cancelled', answers: {}, unanswered: ['decision'] }), { once: true });
+      opened();
+    });
+    const pending = s.host.tool('board_question').execute('ask-call', decision(), undefined, undefined, s.ctx);
+    await ready;
+    assert.deepEqual(s.meta().askLive, [1]);
+    await assert.rejects(s.brief(goodBrief({ decisions: [decision()] })), /질문창이 열려 있음/);
+    assert.equal(applyBoardAnswer(openStore(s.stateDir), {
+      id: 1, sessionId: s.sid, ...(action === 'option' ? { option: 'B' } : { action: 'hold' }),
+    }, s.now()).ok, true);
+    const result = await pending;
+    assert.equal(signal.aborted, true);
+    assert.equal(result.details.status, action === 'option' ? 'answered' : 'held');
+    assert.deepEqual(sent, []);
+    assert.deepEqual(s.meta().askLive, []);
+    if (action === 'option') assert.equal(readJson(join(s.stateDir, 'receipts', '000001.json')).proven, true);
+    else {
+      const closure = readJson(join(s.stateDir, 'decision-closures', '000001.json'));
+      assert.equal(readJson(join(s.stateDir, 'hold-notices', `${closure.notice}.json`)).mode, 'tool_result');
+    }
+  });
+}
 
 test('defaultStateDir honors OMO_BRIEFING_STATE_DIR', () => {
   assert.equal(defaultStateDir({ OMO_BRIEFING_STATE_DIR: 'D:/x/state' }), 'D:/x/state');
@@ -130,6 +192,23 @@ test('session_start writes meta and the first page; shutdown clears running', as
   await s.host.emit('session_shutdown', {}, s.ctx);
   assert.equal(s.meta().running, false);
   assert.equal('pid' in s.meta(), false);
+});
+
+test('annotation capability: session_start upgrades only the current conversation and publishes support to the view model', async (t) => {
+  const { buildViewModel } = await import('../src/render.mjs');
+  const s = lead(t);
+  const path = join(s.stateDir, 'sessions', 'sess-A');
+  mkdirSync(path, { recursive: true });
+  writeFileSync(join(path, 'meta.json'), JSON.stringify({ sessionId: 'sess-A', answerKinds: ['option', 'text'] }));
+  const other = join(s.stateDir, 'sessions', 'old');
+  mkdirSync(other, { recursive: true });
+  writeFileSync(join(other, 'meta.json'), JSON.stringify({ sessionId: 'old', answerKinds: ['option'], lastActivityAt: 1_700_000_000_000 }));
+  await s.start();
+  assert.deepEqual(s.meta().answerKinds, ['option', 'text', 'annotation']);
+  const { openStore } = await import('../src/store.mjs');
+  const model = buildViewModel(openStore(s.stateDir).readSnapshot(), s.now());
+  assert.deepEqual(model.sessions.find((v) => v.id === 'sess-A').answerKinds, ['option', 'text', 'annotation']);
+  assert.deepEqual(model.sessions.find((v) => v.id === 'old').answerKinds, ['option']);
 });
 
 test('stale_state: a crashed previous run (running:true, dead pid) is cleared on session_start', async (t) => {
@@ -1112,4 +1191,150 @@ test('generation wiring: checkout reader is async null, installedFile fails clos
   assert.equal(await options.installedGeneration(), 'unknown');
   writeFileSync(installedFile, JSON.stringify({ generation: 'generation-000010' }));
   assert.equal(await options.installedGeneration(), 10);
+});
+
+// ---------------------------------------------------------------- reports (C-REPORT 1-3, 5)
+function testPng(w, h) {
+  const ihdr = Buffer.alloc(25);
+  ihdr.writeUInt32BE(13, 0); ihdr.write('IHDR', 4, 'latin1'); ihdr.writeUInt32BE(w, 8); ihdr.writeUInt32BE(h, 12); ihdr[16] = 8; ihdr[17] = 2;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), ihdr]);
+}
+const listDir = (p) => (existsSync(p) ? readdirSync(p).sort() : []);
+
+test('reports: decisionIndex resolves to the allocated id; images are stored by hash; reports.json is the snapshot', async (t) => {
+  const s = lead(t);
+  await s.start();
+  const shot = join(s.dir, 'a.png');
+  writeFileSync(shot, testPng(2, 2));
+  const r = await s.brief(goodBrief({
+    decisions: [decision({ options: { A: { text: '가', consequence: '빠름' }, B: { text: '나', consequence: '안전' } } })],
+    reports: [{ id: 'cmp', title: '두 안 비교', summary: '그림 참고', decisionIndex: 0, images: [{ path: shot, alt: '안 B 화면', option: 'B' }] }],
+  }));
+  const id = r.details.newDecisionIds[0];
+  assert.ok(Number.isInteger(id));
+  const saved = readJson(join(s.stateDir, 'sessions', 'sess-A', 'reports.json'));
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].decisionId, id, '(d) decisionIndex 0 -> the id allocated in this call');
+  const [img] = saved[0].images;
+  assert.deepEqual({ ...img, sha: img.sha.length }, { sha: 64, ext: 'png', mime: 'image/png', bytes: 33, w: 2, h: 2, path: shot, alt: '안 B 화면', option: 'B' });
+  assert.deepEqual(listDir(join(s.stateDir, 'assets')), [`${img.sha}.png`]);
+  assert.ok(readFileSync(join(s.stateDir, 'assets', `${img.sha}.png`)).equals(testPng(2, 2)));
+  const { buildViewModel, withReports } = await import('../src/render.mjs');
+  const { openStore } = await import('../src/store.mjs');
+  const store = openStore(s.stateDir);
+  const view = buildViewModel(withReports(store, store.readSnapshot()), s.now()).sessions.find((v) => v.id === 'sess-A');
+  assert.deepEqual(view.reports.map((x) => [x.decisionId, x.status, x.images[0].src, x.images[0].option]), [[id, '결정 기다림', `assets/${img.sha}.png`, 'B']]);
+  assert.ok(readFileSync(join(s.stateDir, 'data.js'), 'utf8').includes(`assets/${img.sha}.png`), 'the published page carries the report');
+});
+
+test('reports: omitted keeps the snapshot, [] clears it', async (t) => {
+  const s = lead(t);
+  await s.start();
+  const shot = join(s.dir, 'a.png');
+  writeFileSync(shot, testPng(3, 1));
+  const file = join(s.stateDir, 'sessions', 'sess-A', 'reports.json');
+  await s.brief(goodBrief({ reports: [{ id: 'one', title: '하나', images: [{ path: shot, alt: '그림' }] }] }));
+  const first = readFileSync(file, 'utf8');
+  assert.equal(JSON.parse(first)[0].decisionId, null);
+  await s.brief(goodBrief({ headline: '보고서 생략' }));
+  assert.equal(readFileSync(file, 'utf8'), first, '(e) omitted: unchanged');
+  await s.brief(goodBrief({ reports: [] }));
+  assert.deepEqual(readJson(file), [], '(e) []: cleared');
+});
+
+test('reports: an SVG path or a non-image refuses the whole brief with the field error and stores nothing', async (t) => {
+  const s = lead(t);
+  await s.start();
+  const svg = join(s.dir, 'pic.svg');
+  writeFileSync(svg, '<svg xmlns="http://www.w3.org/2000/svg"/>');
+  const fake = join(s.dir, 'fake.png');
+  writeFileSync(fake, 'not an image');
+  const good = join(s.dir, 'ok.png');
+  writeFileSync(good, testPng(2, 2));
+  const briefsDir = join(s.stateDir, 'sessions', 'sess-A', 'briefs');
+  await assert.rejects(
+    s.brief(goodBrief({ reports: [{ id: 'x', title: 't', images: [{ path: svg, alt: 'a' }] }] })),
+    /reports\[0\]\.images\[0\]\.path: SVG·GIF는 받지 않음/,
+  );
+  await assert.rejects(
+    s.brief(goodBrief({ decisions: [decision()], reports: [{ id: 'x', title: 't', images: [{ path: good, alt: 'a' }, { path: fake, alt: 'b' }] }] })),
+    /reports\[0\]\.images\[1\]\.path: PNG·JPEG·WebP 그림 아님/,
+  );
+  assert.deepEqual(listDir(briefsDir), [], 'no brief record');
+  assert.deepEqual(listDir(join(s.stateDir, 'decisions')), [], 'no decision allocated');
+  assert.equal(existsSync(join(s.stateDir, 'sessions', 'sess-A', 'reports.json')), false);
+  assert.deepEqual(listDir(join(s.stateDir, 'assets')).filter((n) => !n.endsWith('.png')), [], 'no tmp file');
+});
+
+test('reports: decision must be an open decision of this session and option must exist in it', async (t) => {
+  const s = lead(t);
+  await s.start();
+  const r = await s.brief(goodBrief({ decisions: [decision()] }));
+  const id = r.details.newDecisionIds[0];
+  const shot = join(s.dir, 'a.png');
+  writeFileSync(shot, testPng(2, 2));
+  await assert.rejects(s.brief(goodBrief({ decisions: [{ ...decision(), id }], reports: [{ id: 'x', title: 't', decision: id, images: [{ path: shot, alt: 'a', option: 'C' }] }] })),
+    new RegExp(`reports\\[0\\]\\.images\\[0\\]\\.option: 연결된 결정에 없는 선택지\\(C\\)`));
+  await s.brief(goodBrief({ decisions: [{ ...decision(), id }], reports: [{ id: 'x', title: 't', decision: id, images: [{ path: shot, alt: 'a', option: 'A' }] }] }));
+  assert.equal(readJson(join(s.stateDir, 'sessions', 'sess-A', 'reports.json'))[0].decisionId, id);
+  await s.brief(goodBrief({ close_decisions: [{ id, reason: 'withdrawn' }] }));
+  await assert.rejects(s.brief(goodBrief({ reports: [{ id: 'x', title: 't', decision: id, images: [] }] })), new RegExp(`reports\\[0\\]\\.decision: 열린 결정 아님\\(${id}\\)`));
+});
+
+test('reports: decisionIndex on a re-listed existing decision checks the stored options, not a C added in this call', async (t) => {
+  const s = lead(t);
+  await s.start();
+  const id = (await s.brief(goodBrief({ decisions: [decision()] }))).details.newDecisionIds[0];
+  const shot = join(s.dir, 'a.png');
+  writeFileSync(shot, testPng(2, 2));
+  const relisted = { ...decision(), id, options: { ...decision().options, C: { text: '지어낸 안', consequence: '없음' } } };
+  const reportsFile = join(s.stateDir, 'sessions', 'sess-A', 'reports.json');
+  await assert.rejects(s.brief(goodBrief({ decisions: [relisted], reports: [{ id: 'x', title: 't', decisionIndex: 0, images: [{ path: shot, alt: 'a', option: 'C' }] }] })),
+    /reports\[0\]\.images\[0\]\.option: 연결된 결정에 없는 선택지\(C\)/);
+  assert.equal(existsSync(reportsFile), false, 'nothing stored');
+  assert.deepEqual(Object.keys(readJson(join(s.stateDir, 'decisions', `${String(id).padStart(6, '0')}.json`)).options), ['A', 'B']);
+  await s.brief(goodBrief({ decisions: [{ ...decision(), id }], reports: [{ id: 'x', title: 't', decisionIndex: 0, images: [{ path: shot, alt: 'a', option: 'B' }] }] }));
+  assert.deepEqual(readJson(reportsFile).map((r) => [r.decisionId, r.images[0].option]), [[id, 'B']]);
+});
+
+test('reports: the live board serves a referenced asset and 404s it once the current model drops it', async (t) => {
+  // real clock: the host builds its model with the wall clock, and a card older than 30 days is not on the board
+  const s = lead(t, { server: true, now: Date.now, env: { OMO_BRIEFING_PORT_BASE: process.env.OMO_BRIEFING_PORT_BASE || '48580' } });
+  await s.start();
+  const shot = join(s.dir, 'a.png');
+  writeFileSync(shot, testPng(2, 2));
+  await s.brief(goodBrief({ reports: [{ id: 'live', title: '실시간', images: [{ path: shot, alt: '그림' }] }] }));
+  const { port } = readJson(join(s.stateDir, 'server.json'));
+  const name = `${readJson(join(s.stateDir, 'sessions', 'sess-A', 'reports.json'))[0].images[0].sha}.png`;
+  const get = () => fetch(`http://127.0.0.1:${port}/assets/${name}`);
+  const ok = await get();
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get('x-content-type-options'), 'nosniff');
+  assert.ok(Buffer.from(await ok.arrayBuffer()).equals(testPng(2, 2)));
+  await s.brief(goodBrief({ reports: [] }));
+  const gone = await get();
+  assert.equal(gone.status, 404, 'no page connected: the host still rebuilds when published.json changed');
+  await gone.arrayBuffer();
+  assert.ok(existsSync(join(s.stateDir, 'assets', name)), 'the file itself stays until gc ages it out');
+});
+
+test('C-VM meta: session_start stores sessionFile and hostPid; shutdown removes hostPid only; the model carries both', async (t) => {
+  const s = lead(t);
+  await s.start();
+  assert.equal(s.meta().sessionFile, 'C:/sessions/sess-A.jsonl');
+  assert.equal(s.meta().hostPid, process.pid);
+  await s.brief(goodBrief());
+  const { buildViewModel } = await import('../src/render.mjs');
+  const { openStore } = await import('../src/store.mjs');
+  const store = openStore(s.stateDir);
+  const v = buildViewModel(store.readSnapshot(), s.now(), { stateDir: store.root }).sessions[0];
+  assert.equal(v.sessionFile, 'C:/sessions/sess-A.jsonl');
+  assert.equal(v.alive, true, 'idle but its host process lives');
+  assert.equal(v.briefSeq, 1);
+  assert.equal(v.briefPath, join(store.root, 'sessions', 'sess-A', 'briefs', '000001.json'));
+  assert.deepEqual(v.blockSources.head, { paths: ['C:/sessions/sess-A.jsonl'] });
+  await s.host.emit('session_shutdown', {}, s.ctx);
+  assert.equal('hostPid' in s.meta(), false);
+  assert.equal(s.meta().sessionFile, 'C:/sessions/sess-A.jsonl');
+  assert.equal(buildViewModel(store.readSnapshot(), s.now()).sessions[0].alive, false);
 });

@@ -257,7 +257,7 @@ test('server page: view.js gives the plan row the same controls as the decision 
   const open = FIXTURE.questions.find((q) => q.state === 'open');
   const model = { generatedAt: NOW, sessions: [{ id: 's1', title: '계획', tabLabel: '수리', tabNumber: 181, answerKinds: ['option', 'text'], status: 'needs_decision', plan: clone(FIXTURE),
     decisions: [{ id: 15, sessionId: 's1', question: open.text, options: open.options, recommend: 'A', reason: 'r', blocks: true, answered: false, closed: false }] }] };
-  const row = (ui) => context.BriefView.renderApp(model, { expanded: { ['plan:' + FIXTURE.planId]: true }, ...ui }).split('<tr class="plan-question is-open"')[1].split('</tr>')[0];
+  const row = (ui) => context.BriefView.renderOverview(model, { expanded: { ['plan:' + FIXTURE.planId]: true }, ...ui }).split('<tr class="plan-question is-open"')[1].split('</tr>')[0];
   const live = row({ live: true });
   assert.equal(count(live, /data-act="ans-pick" data-opt="[AB]" data-id="15" data-where="plan"/g), 2);
   assert.equal(count(live, /data-act="ans-reply" data-id="15" data-where="plan"/g), 1);

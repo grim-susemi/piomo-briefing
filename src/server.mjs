@@ -6,7 +6,7 @@
 // no callback runs (Host is checked first, for every route):
 //   Sec-Fetch-Site === 'same-origin' (403) -> Origin === http://<Host> (403, 'null' included)
 //   -> Content-Type application/json (415) -> X-Board-Token === token via timingSafeEqual (403)
-//   -> at most one write in flight server-wide (429) -> body <= 4096 bytes read within bodyTimeoutMs (413/408)
+//   -> at most one write in flight server-wide (429) -> bounded body read within bodyTimeoutMs (413/408)
 //   -> a JSON object with exactly the allowed keys (400) -> onAnswer(body) / onFocus(body) -> {status, json}.
 // The write slot stays taken until the callback itself settles: writeTimeoutMs only decides when the 504 is sent,
 // it never cancels the callback or frees the slot, so at most one callback runs at any time (others get 429).
@@ -14,7 +14,12 @@
 // /focus body: {sessionId: string}. Responses are JSON {ok, code?} with the SECURE headers. Without a non-empty
 // `token` and the matching callback a write route does not exist (405 like any other non-GET).
 //
-// createBoardServer({getPage, getViewModel, generation, portBase, portCount=10, preferPort?,
+// GET /assets/<64 hex>.<png|jpg|webp> (report images) has the Host and Sec-Fetch-Site gate of /data.json and is 404 unless
+// assetAllowed(name) says the current model references it; the bytes come only from `assetsDir/<name>` (a regular file of
+// <= 8 MiB whose sha256 is the name and whose magic bytes match the extension) with nosniff, a Content-Type from the
+// extension and an immutable cache. Without assetsDir it is always 404.
+//
+// createBoardServer({getPage, getViewModel, generation, portBase, portCount=10, preferPort?, assetsDir?, assetAllowed?,
 //                    onError, onRecover, pingMs?, onClientCount?, createServer?,
 //                    token?, onAnswer?, onFocus?, bodyTimeoutMs=2000, writeTimeoutMs=10000})
 //   -> {start(): Promise<{port}>, broadcast(vm), sendPaused(), close(): Promise<void>, clientCount(), address()}
@@ -25,7 +30,10 @@
 //                     throwing or returning garbage; cleared by the next successful request, write or broadcast
 // The only intentionally ignored errors are EADDRINUSE/EACCES while scanning ports.
 import http from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
+import { open as openFile, lstat } from 'node:fs/promises';
+import { join } from 'node:path';
+import { timingSafeEqual, createHash } from 'node:crypto';
+import { ASSET_NAME_RE, MIME, MAX_IMAGE_BYTES, sniffImage } from './assets.mjs';
 
 const HOST = '127.0.0.1';
 const MAX_CLIENTS = 16;
@@ -34,13 +42,18 @@ const PING_MS = 15000;
 const CLOSE_BOUND_MS = 500;
 const MAX_CLIENT_BACKLOG = 2 * 1024 * 1024; // a stalled SSE reader is dropped instead of buffering forever
 const GATED_PATHS = new Set(['/data.json', '/events', '/health']);
+const ASSET_PREFIX = '/assets/';
 const SITE_OK = new Set(['same-origin', 'none']);
 const MAX_BODY_BYTES = 4096;
+const MAX_ANSWER_BYTES = 65536;
 const BODY_TIMEOUT_MS = 2000;
 const WRITE_TIMEOUT_MS = 10000; // after this a still-running write callback is answered 504; it keeps the write slot until it settles
-const ANSWER_KEYS = new Set(['id', 'sessionId', 'option', 'text']);
+const ANSWER_KEYS = new Set(['id', 'sessionId', 'option', 'text', 'action']);
+const ANNOTATION_KEYS = new Set(['kind', 'sessionId', 'requestId', 'text']);
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ANSWER_OPTIONS = new Set(['A', 'B', 'C']);
 const WRITE_TIMED_OUT = Symbol('write timed out');
+const LEGACY_TOO_LARGE = Symbol('legacy body too large');
 const UTF8 = new TextDecoder('utf-8', { fatal: true });
 const SECURE = {
   'Cache-Control': 'no-store',
@@ -68,6 +81,8 @@ export function createBoardServer(options) {
     writeTimeoutMs = WRITE_TIMEOUT_MS,
     pingMs = PING_MS,
     createServer = (handler) => http.createServer(handler),
+    assetsDir,
+    assetAllowed,
   } = options;
 
   let server = null;
@@ -162,6 +177,62 @@ export function createBoardServer(options) {
     return true;
   }
 
+  // The bytes of a referenced asset, or null (404). Serving is content-addressed: the bytes read must hash (sha256) to the
+  // 64-hex name and sniff as the type of its extension, so whatever file a junction, link or race substitutes, only the
+  // exact bytes the model references can ever be sent. Defence in depth on the OPENED handle: assetsDir must be a real
+  // directory (no link/junction) with the same identity before and after the open, and the regular non-link file now at
+  // assetsDir/<name> must be the very file the handle has (same dev+ino).
+  const ASSET_MISSING = new Set(['ENOENT', 'ENOTDIR', 'EISDIR', 'EPERM', 'EACCES', 'ELOOP', 'EINVAL']);
+  const sameFile = (a, b) => a.dev === b.dev && a.ino === b.ino;
+  const realDir = async () => {
+    const st = await lstat(assetsDir, { bigint: true });
+    return st.isDirectory() && !st.isSymbolicLink() ? st : null;
+  };
+  async function readAsset(name, sha, ext) {
+    const file = join(assetsDir, name);
+    let fh;
+    let before;
+    try {
+      before = await realDir();
+      if (!before) return null;
+      fh = await openFile(file, 'r');
+    } catch (err) {
+      if (err && ASSET_MISSING.has(err.code)) return null;
+      throw err;
+    }
+    try {
+      const st = await fh.stat({ bigint: true });
+      if (!st.isFile() || st.size > BigInt(MAX_IMAGE_BYTES)) return null;
+      const after = await realDir();
+      if (!after || !sameFile(before, after)) return null;
+      const leaf = await lstat(file, { bigint: true });
+      if (!leaf.isFile() || leaf.isSymbolicLink() || !sameFile(leaf, st)) return null;
+      const buf = await fh.readFile();
+      if (buf.length > MAX_IMAGE_BYTES || createHash('sha256').update(buf).digest('hex') !== sha) return null;
+      return sniffImage(buf).ext === ext ? buf : null;
+    } catch (err) {
+      if (err && ASSET_MISSING.has(err.code)) return null;
+      throw err;
+    } finally {
+      await fh.close();
+    }
+  }
+
+  async function serveAsset(res, pathname) {
+    const name = pathname.slice(ASSET_PREFIX.length);
+    const m = ASSET_NAME_RE.exec(name);
+    if (!m || typeof assetsDir !== 'string' || typeof assetAllowed !== 'function' || !(await assetAllowed(name))) {
+      plain(res, 404, 'not found');
+      return;
+    }
+    const body = await readAsset(name, m[1], m[2]);
+    if (!body) {
+      plain(res, 404, 'not found');
+      return;
+    }
+    send(res, 200, MIME[m[2]], body, { 'Cache-Control': 'max-age=31536000, immutable' });
+  }
+
   async function serveEvents(req, res) {
     if (clients.size + pending >= MAX_CLIENTS) {
       plain(res, 503, 'too many live connections', { 'Retry-After': '5' });
@@ -212,9 +283,10 @@ export function createBoardServer(options) {
   }
 
   // Resolves {buf}, {status, code} (413/408) or {aborted: true} (the client went away; nothing to answer).
-  function readBody(req) {
+  function readBody(req, pathname) {
+    const maxBytes = pathname === '/answer' ? MAX_ANSWER_BYTES : MAX_BODY_BYTES;
     return new Promise((resolve) => {
-      if (Number(req.headers['content-length']) > MAX_BODY_BYTES) {
+      if (Number(req.headers['content-length']) > maxBytes) {
         resolve({ status: 413, code: 'TOO_LARGE' });
         return;
       }
@@ -231,7 +303,7 @@ export function createBoardServer(options) {
       timer.unref();
       req.on('data', (chunk) => {
         size += chunk.length;
-        if (size > MAX_BODY_BYTES) finish({ status: 413, code: 'TOO_LARGE' });
+        if (size > maxBytes) finish({ status: 413, code: 'TOO_LARGE' });
         else if (!done) chunks.push(chunk);
       });
       req.once('end', () => finish({ buf: Buffer.concat(chunks) }));
@@ -240,10 +312,17 @@ export function createBoardServer(options) {
   }
 
   function validAnswer(b) {
+    if (b.kind === 'annotation') {
+      const keys = Object.keys(b);
+      return keys.length === ANNOTATION_KEYS.size && keys.every((k) => ANNOTATION_KEYS.has(k))
+        && typeof b.sessionId === 'string' && typeof b.requestId === 'string' && UUID_V4.test(b.requestId)
+        && typeof b.text === 'string';
+    }
     if (!Object.keys(b).every((k) => ANSWER_KEYS.has(k))) return false;
     if (!Number.isSafeInteger(b.id) || b.id <= 0 || typeof b.sessionId !== 'string') return false;
     const hasOption = Object.hasOwn(b, 'option');
     const hasText = Object.hasOwn(b, 'text');
+    if (Object.hasOwn(b, 'action')) return !hasOption && !hasText && (b.action === 'hold' || b.action === 'reopen');
     if (hasOption === hasText) return false;
     return hasOption ? ANSWER_OPTIONS.has(b.option) : typeof b.text === 'string';
   }
@@ -257,8 +336,10 @@ export function createBoardServer(options) {
     try {
       value = JSON.parse(UTF8.decode(buf));
     } catch {
+      if (pathname === '/answer' && buf.length > MAX_BODY_BYTES) return LEGACY_TOO_LARGE;
       return null; // malformed JSON / UTF-8 is a 400 for the caller, not a server fault
     }
+    if (pathname === '/answer' && value?.kind !== 'annotation' && buf.length > MAX_BODY_BYTES) return LEGACY_TOO_LARGE;
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
     return (pathname === '/answer' ? validAnswer(value) : validFocus(value)) ? value : null;
   }
@@ -304,13 +385,17 @@ export function createBoardServer(options) {
     writeInFlight = true;
     let slotHandedToCallback = false; // once the callback runs it, not this function, frees the slot
     try {
-      const got = await readBody(req);
+      const got = await readBody(req, pathname);
       if (got.aborted) return;
       if (got.status) {
         json(res, got.status, { ok: false, code: got.code }, { Connection: 'close' });
         return;
       }
       const body = parseWriteBody(got.buf, pathname);
+      if (body === LEGACY_TOO_LARGE) {
+        json(res, 413, { ok: false, code: 'TOO_LARGE' });
+        return;
+      }
       if (!body) {
         json(res, 400, { ok: false, code: 'BAD_REQUEST' });
         return;
@@ -356,7 +441,7 @@ export function createBoardServer(options) {
       plain(res, 405, 'method not allowed', { Allow: writeHandler ? 'POST' : 'GET' });
       return;
     }
-    if (GATED_PATHS.has(pathname)) {
+    if (GATED_PATHS.has(pathname) || pathname.startsWith(ASSET_PREFIX)) {
       const site = req.headers['sec-fetch-site'];
       if (site !== undefined && !SITE_OK.has(site)) {
         plain(res, 403, 'forbidden origin');
@@ -384,6 +469,10 @@ export function createBoardServer(options) {
         await serveEvents(req, res);
         return;
       default:
+        if (pathname.startsWith(ASSET_PREFIX)) {
+          await serveAsset(res, pathname);
+          return;
+        }
         plain(res, 404, 'not found');
     }
   }

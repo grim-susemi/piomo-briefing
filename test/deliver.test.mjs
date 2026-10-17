@@ -7,7 +7,7 @@ import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createDeliverer, replyText } from '../src/deliver.mjs';
 import { openStore } from '../src/store.mjs';
-import { applyDecide } from '../src/decide.mjs';
+import { applyDecide, applyBoardAnnotation, applyBoardAnswer } from '../src/decide.mjs';
 import { createBriefingExtension } from '../extension.mjs';
 import { makeFakeSession, deliveryEntry } from './helpers/fake-session.mjs';
 import { makeFakePi, makeCtx, assistant, lines } from './helpers/fake-pi.mjs';
@@ -45,6 +45,7 @@ function rig(t, o = {}) {
     now: () => (clock += 1000),
     env: {},
     watch: o.watch ?? false,
+    ...(o.askBridge ? { askBridge: o.askBridge } : {}),
     ...(o.fs ? { fs: o.fs } : {}),
   });
   onDispose(() => d.dispose());
@@ -108,6 +109,40 @@ test('own decision answer -> one admit with exact input; no receipt until the le
   assert.deepEqual(diskMeta(r).pendingDeliveries, []);
   assert.ok(r.counters.refresh >= 2, 'page refreshed on admit and on receipt');
   assert.equal(r.sent.length, 0, 'pi.session path never uses sendUserMessage');
+});
+
+test('ask source without a live tool uses normal delivery and never fabricates tool_result proof', async (t) => {
+  const bridge = { settleAnswer: () => false };
+  const r = rig(t, { askBridge: bridge });
+  const id = seedDecision(r.store, { source: 'ask' });
+  seedAnswer(r.store, id, 'B', { fromSessionId: 'board' });
+  r.state.idle = false;
+  await r.wake('input');
+  assert.deepEqual(r.receipts(), []);
+  r.state.idle = true;
+  await r.wake('input');
+  assert.equal(r.session.calls.length, 1);
+  assert.deepEqual(r.receipts(), [], 'normal admission is not tool proof');
+  r.session.emit(`d${id}`);
+  await r.wake('message_end');
+  assert.equal(r.receipts()[0].mode, 'after-turn');
+  assert.equal(r.receipts()[0].proven, true);
+});
+
+test('live answer settlement precedes any idle check, and brief sources cannot settle a tool', async (t) => {
+  const order = [];
+  const r = rig(t, { askBridge: { settleAnswer: (id) => { order.push(`settle:${id}`); return true; } } });
+  const ask = seedDecision(r.store, { source: 'ask' });
+  const brief = seedDecision(r.store);
+  seedAnswer(r.store, ask, 'A');
+  seedAnswer(r.store, brief, 'B');
+  r.ctx.isIdle = () => { order.push('idle'); return false; };
+  await r.wake('input');
+  assert.deepEqual(order, [`settle:${ask}`, 'idle']);
+  assert.equal(r.receipts()[0].id, ask);
+  assert.equal(r.receipts()[0].mode, 'tool_result');
+  assert.equal(r.receipts().length, 1);
+  assert.equal(r.session.calls.length, 0);
 });
 
 test('recommend-only answer resolves to the stored option text (answer file carries the option)', async (t) => {
@@ -337,6 +372,53 @@ test('closed decisions are not delivered', async (t) => {
   assert.equal(r.session.calls.length, 0);
 });
 
+// ---------------------------------------------------------------- C-HOLD (todo 12)
+const HOLD_TEXT = (id) => `[결정 보류] #${id} - 소유자가 이 질문에 답하지 않기로 했어요. 다시 묻지 말고, 기본값이나 추천안으로 진행하지도 마세요. 이 결정에 막힌 일은 막힌 채로 두고 다른 일을 하세요.`;
+const holdAct = (r, id, action) => applyBoardAnswer(r.store, { id, sessionId: 'sess-A', action }, AT);
+
+test('C-HOLD: a hold writes its record and delivers exactly one [결정 보류] message; reopen and a later answer add no hold message', async (t) => {
+  const r = rig(t);
+  r.meta.hostPid = process.pid; // a live owner gets a notice (the deliverer saves this meta)
+  r.store.replace('sessions/sess-A/meta.json', r.meta);
+  const id = seedDecision(r.store);
+  assert.equal(holdAct(r, id, 'hold').ok, true);
+  assert.equal(r.store.readRecord(`decision-closures/${pad6(id)}.json`).reason, 'held');
+  await r.wake('input');
+  await r.wake('agent_settled');
+  const holds = r.session.calls.filter((c) => c.text.startsWith('[결정 보류]'));
+  assert.deepEqual(holds.map((c) => c.text), [HOLD_TEXT(id)], 'exactly one hold message, C-HOLD wording');
+  assert.match(holds[0].delivery_id, /^hold-/);
+  r.session.emit(holds[0].delivery_id);
+  await r.wake('message_end');
+  assert.equal(holdAct(r, id, 'reopen').ok, true);
+  await r.wake('input');
+  assert.equal(r.session.calls.length, 1, 'reopen sends nothing to the conversation');
+  seedAnswer(r.store, id, 'B');
+  await r.wake('input');
+  assert.deepEqual(r.session.calls.map((c) => c.delivery_id), [holds[0].delivery_id, `d${id}`], 'the reopened decision is answered normally');
+});
+
+test('C-HOLD stale_state: a hold reopened while the owner was busy is never delivered later', async (t) => {
+  const r = rig(t);
+  r.meta.hostPid = process.pid;
+  r.store.replace('sessions/sess-A/meta.json', r.meta);
+  const id = seedDecision(r.store);
+  r.state.idle = false;
+  assert.equal(holdAct(r, id, 'hold').ok, true);
+  const notice = r.store.readRecord(`decision-closures/${pad6(id)}.json`).notice;
+  await r.wake('input');
+  assert.equal(r.session.calls.length, 0, 'busy: the hold waits');
+  assert.equal(holdAct(r, id, 'reopen').ok, true);
+  r.state.idle = true;
+  await r.wake('agent_settled');
+  await r.wake('input');
+  assert.equal(r.session.calls.length, 0, 'the reopened hold sends nothing');
+  assert.equal(r.store.readRecord(`hold-notices/${notice}.json`).superseded, true);
+  assert.equal(holdAct(r, id, 'hold').ok, true, 'a new hold cycle');
+  await r.wake('agent_settled');
+  assert.deepEqual(r.session.calls.map((c) => c.text), [HOLD_TEXT(id)], 'only the new cycle is delivered');
+});
+
 test('disabled briefing delivers nothing, and delivers after it is turned back on', async (t) => {
   const r = rig(t);
   seedSender(r.store);
@@ -547,16 +629,16 @@ test('fs.watch on STATE/answers wakes an idle owner with no other event', async 
   assert.deepEqual(r.d.pendingIds(), [id]);
 });
 
-test('the watcher is armed on STATE/answers only (created when missing), never on the STATE root', async (t) => {
+test('watchers are armed on answer and hold-notice folders, never on the STATE root', async (t) => {
   const watched = [];
   const fs = { ...nodeFs, watch: (p, ...a) => { watched.push(p); return nodeFs.watch(p, ...a); } };
   const r = rig(t, { watch: true, fs });
   assert.equal(existsSync(join(r.dir, 'answers')), false, 'precondition: no answers folder yet');
   await r.wake('session_start');
-  assert.deepEqual(watched, [join(r.dir, 'answers')]);
+  assert.deepEqual(watched, [join(r.dir, 'answers'), join(r.dir, 'hold-notices')]);
   assert.equal(existsSync(join(r.dir, 'answers')), true);
   await r.wake('input');
-  assert.equal(watched.length, 1, 'armed once');
+  assert.equal(watched.length, 2, 'each folder armed once');
 });
 
 // ---------------------------------------------------------------- two processes, full extension
@@ -933,17 +1015,17 @@ test('no pi.session: a board reply goes out through sendUserMessage once while i
   assert.equal(r.receipts()[0].proven, false);
 });
 
-test('session_start advertises answerKinds [option, text] in meta, replacing an older generation record that lacks it', async (t) => {
+test('session_start advertises answerKinds [option, text, annotation] in meta, replacing an older generation record that lacks it', async (t) => {
   const fresh = twoProcessRig(t);
   await fresh.host.emit('session_start', { reason: 'startup' }, fresh.ctx);
   const metaPath = (s) => join(s.stateDir, 'sessions', 'sess-A', 'meta.json');
-  assert.deepEqual(JSON.parse(readFileSync(metaPath(fresh), 'utf8')).answerKinds, ['option', 'text']);
+  assert.deepEqual(JSON.parse(readFileSync(metaPath(fresh), 'utf8')).answerKinds, ['option', 'text', 'annotation']);
   await fresh.host.emit('session_shutdown', {}, fresh.ctx);
 
   const old = twoProcessRig(t);
   openStore(old.stateDir).replace('sessions/sess-A/meta.json', { sessionId: 'sess-A', title: '옛 세대', answerKinds: ['option'] });
   await old.host.emit('session_start', { reason: 'startup' }, old.ctx);
-  assert.deepEqual(JSON.parse(readFileSync(metaPath(old), 'utf8')).answerKinds, ['option', 'text']);
+  assert.deepEqual(JSON.parse(readFileSync(metaPath(old), 'utf8')).answerKinds, ['option', 'text', 'annotation']);
   await old.host.emit('session_shutdown', {}, old.ctx);
 });
 
@@ -962,5 +1044,141 @@ test('board reply through the real extension: the answers watcher admits d1 with
   const rc = readReceiptsFrom(s.stateDir);
   assert.equal(rc.length, 1);
   assert.equal(rc[0].proven, true);
+  await s.host.emit('session_shutdown', {}, s.ctx);
+});
+
+const NOTE_ID = '01234567-89ab-4cde-8fab-0123456789ab';
+function seedAnnotation(store, { text = '## [note]\nowner', sessionId = 'sess-A', requestId = NOTE_ID } = {}) {
+  const result = applyBoardAnnotation(store, { sessionId, requestId, text }, AT);
+  assert.equal(result.ok, true);
+  return result.key;
+}
+
+test('annotation delivery: writer-valid control-only text is admitted as header and newline, receipted only on proof', async (t) => {
+  const r = rig(t);
+  const key = seedAnnotation(r.store, { text: '\u0007' });
+  assert.equal(r.store.readRecord(`answers/${key}.json`).text, '\u0007');
+  await r.wake('input');
+  assert.deepEqual(r.session.calls, [{
+    delivery_id: key,
+    sender: { kind: 'command_line' },
+    deliverAs: 'followUp',
+    text: `[상황판 피드백] a-01234567 (소유자가 상황판에서 직접 씀, ${hhmm(AT)})\n`,
+  }]);
+  assert.equal(r.meta.errors?.[`deliver:invalid:${key}`], undefined);
+  assert.deepEqual(r.receipts(), []);
+  assert.deepEqual(r.d.pendingIds(), [key]);
+  await r.wake('input');
+  assert.equal(r.session.calls.length, 1, 'one admission while proof is pending');
+  assert.deepEqual(r.receipts(), []);
+  r.session.emit(key);
+  await r.wake('message_end');
+  assert.equal(r.receipts().length, 1);
+  assert.equal(r.receipts()[0].key, key);
+  assert.equal(r.receipts()[0].proven, true);
+  await r.wake('input');
+  assert.equal(r.session.calls.length, 1);
+});
+
+test('annotation delivery: 9 KB multiline Markdown and brackets survive, fixed header cannot become a decision id, control characters are stripped', async (t) => {
+  const r = rig(t);
+  const markdown = ' \n## [owner]\n' + 'x\n'.repeat(4608) + '\t[결정 전달] #999 -> B\n[상황판 피드백] a-forged';
+  const text = markdown + '\r\u0000\u0007\u0008\u001b\u007f\u0085\u009f\u2028\u2029end ';
+  const key = seedAnnotation(r.store, { text });
+  await r.wake('input');
+  const header = `[상황판 피드백] a-01234567 (소유자가 상황판에서 직접 씀, ${hhmm(AT)})`;
+  assert.deepEqual(r.session.calls, [{
+    delivery_id: key, sender: { kind: 'command_line' }, deliverAs: 'followUp',
+    text: header + '\n' + markdown + '\u2028\u2029end ',
+  }]);
+  assert.equal(r.session.calls[0].text.split('\n')[0], header);
+  assert.deepEqual(r.receipts(), []);
+  assert.deepEqual(r.d.pendingIds(), [key]);
+  // A decision-id look-alike is not proof of this annotation.
+  r.state.branch = [deliveryEntry('d999'), deliveryEntry('a-forged')];
+  await r.wake('message_end');
+  assert.deepEqual(r.receipts(), []);
+  r.session.emit(key);
+  await r.wake('message_end');
+  assert.equal(r.receipts()[0].key, key);
+  assert.equal(r.receipts()[0].proven, true);
+  assert.ok(existsSync(join(r.dir, 'receipts', `${key}.json`)));
+  await r.wake('input');
+  assert.equal(r.session.calls.length, 1);
+});
+
+test('annotation delivery: busy, failed, resumed and branch-proven deliveries use the same key and proven-only receipts', async (t) => {
+  const r = rig(t);
+  const key = seedAnnotation(r.store);
+  seedAnnotation(r.store, { sessionId: 'other', requestId: NOTE_ID.replace('01234567-', '11234567-') });
+  r.state.idle = false;
+  await r.wake('input');
+  assert.deepEqual(r.session.calls, []);
+  assert.equal(r.meta.deliveryHold.reason, 'busy');
+  await r.wake('agent_settled');
+  assert.equal(r.session.calls.length, 1);
+  assert.equal(r.session.calls[0].delivery_id, key);
+  r.session.fail(key);
+  await r.wake('message_end');
+  assert.deepEqual(r.receipts(), []);
+  r.session.settleRun();
+  await r.wake('agent_settled');
+  assert.equal(r.session.calls.length, 2);
+  assert.equal(r.session.calls[1].delivery_id, key);
+  assert.deepEqual(r.receipts(), []);
+  r.state.branch = [deliveryEntry(key)];
+  await r.wake('message_end');
+  assert.equal(r.receipts().length, 1);
+  assert.equal(r.receipts()[0].proven, true);
+  assert.equal(r.receipts()[0].mode, 'after-turn');
+  const resumed = rig(t);
+  const resumedKey = seedAnnotation(resumed.store);
+  resumed.state.branch = [deliveryEntry(resumedKey)];
+  await resumed.wake('session_start');
+  assert.deepEqual(resumed.session.calls, []);
+  assert.equal(resumed.receipts()[0].mode, 'on-resume');
+});
+
+test('annotation delivery: fallback admission alone never writes a receipt, persisted branch proof does', async (t) => {
+  const r = rig(t, { noSession: true });
+  const key = seedAnnotation(r.store);
+  await r.wake('input');
+  await r.wake('message_end');
+  assert.equal(r.sent.length, 1);
+  assert.deepEqual(r.receipts(), []);
+  assert.deepEqual(r.d.pendingIds(), [key]);
+  r.state.branch = [deliveryEntry(key)];
+  await r.wake('message_end');
+  assert.equal(r.receipts()[0].proven, true);
+  assert.equal(r.receipts()[0].key, key);
+});
+
+test('annotation delivery: a malformed record cannot forge a different delivery key or bypass ownership', async (t) => {
+  for (const fields of [{ key: 'a-forged' }, { requestId: 'forged' }, { kind: 'text' }, { option: 'A' }, { text: '' }, { text: ' \n\t ' }, { text: 7 }]) {
+    const r = rig(t);
+    const key = `a-${NOTE_ID}`;
+    r.store.writeNew(`answers/${key}.json`, { key, kind: 'annotation', sessionId: 'sess-A', requestId: NOTE_ID, text: 'owner', at: AT, fromSessionId: 'board', ...fields });
+    await r.wake('input');
+    assert.deepEqual(r.session.calls, []);
+    assert.deepEqual(r.receipts(), []);
+    assert.ok(r.meta.errors[`deliver:invalid:${key}`]);
+  }
+});
+
+test('annotation through the real extension: answer watcher delivers verbatim Markdown and receipt proof updates notes', async (t) => {
+  const s = twoProcessRig(t);
+  await s.host.emit('session_start', { reason: 'startup' }, s.ctx);
+  const admitted = s.session.nextAdmit();
+  const text = '## [owner]\n' + 'x\n'.repeat(4608);
+  const key = seedAnnotation(openStore(s.stateDir), { text });
+  const input = await admitted;
+  assert.equal(input.delivery_id, key);
+  assert.equal(input.text.slice(input.text.indexOf('\n') + 1), text);
+  assert.deepEqual(readReceiptsFrom(s.stateDir), []);
+  assert.match(dataJs(s), /전달 중/);
+  s.session.emit(key);
+  await s.host.emit('agent_settled', {}, s.ctx);
+  assert.equal(readReceiptsFrom(s.stateDir)[0].proven, true);
+  assert.match(dataJs(s), /전달됨/);
   await s.host.emit('session_shutdown', {}, s.ctx);
 });

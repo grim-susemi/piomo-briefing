@@ -1,4 +1,6 @@
 // omo-briefing src/schema.mjs — brief 입력 계약·길이 예산 검사기
+import { pathRefusal } from './assets.mjs';
+
 const ABS_RE = /^[A-Za-z]:[\\/]/;
 const len = (s) => [...s].length;
 const TRUTHS = ['evidence', 'reported', 'unverified'];
@@ -6,6 +8,9 @@ const APPLIEDS = ['candidate', 'live', 'none'];
 const STATUSES = ['in_progress', 'blocked', 'needs_decision', 'done'];
 const FLOW_STATES = ['done', 'doing', 'todo', 'blocked'];
 const CLOSE_REASONS = ['superseded', 'withdrawn'];
+const REPORT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const OPTION_KEYS = ['A', 'B', 'C'];
+const isObj = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 function strField(errors, obj, path, { min = 1, max }) {
   const v = obj?.[path.split('.').pop()];
@@ -114,7 +119,83 @@ export function checkDecision(errors, path, d, fns, sessionId) {
     checkId(errors, `${path}.id`, d.id, fns);
   }
   checkStr(errors, path + '.question', d.question, { min: 1, max: 100 });
+  if (d.state !== undefined && !['open', 'answered'].includes(d.state)) errors.push(`${path}.state: 허용 값 open|answered 필요`);
+  if (d.state === 'answered') checkStr(errors, path + '.answer', d.answer, { min: 1, max: 500 });
   checkDecisionOptions(errors, path, d);
+}
+
+// reports? 0..3 (C-REPORT 1). Only the contract keys are kept; image files are read later by importImage.
+// fns.decisionOpen(id) / fns.decisionOptions(id) (optional) say whether a linked existing decision is open and which options it has.
+function checkReports(errors, v, fns) {
+  if (v.reports === undefined) return;
+  if (!Array.isArray(v.reports)) { errors.push('reports: 배열 필요(0..3)'); return; }
+  if (v.reports.length > 3) errors.push(`reports: 3개 초과(${v.reports.length})`);
+  const ids = new Set();
+  v.reports = v.reports.map((r, i) => {
+    const p = `reports[${i}]`;
+    if (!isObj(r)) { errors.push(`${p}: 보고서 객체 필요`); return r; }
+    if (typeof r.id !== 'string' || !REPORT_ID_RE.test(r.id)) errors.push(`${p}.id: 형식 필요(a-z0-9 시작, a-z0-9_- 1..64자)`);
+    else if (ids.has(r.id)) errors.push(`${p}.id: 이 호출 안에서 중복(${r.id})`);
+    else ids.add(r.id);
+    checkStr(errors, `${p}.title`, r.title, { min: 1, max: 80 });
+    if (r.summary !== undefined) checkStr(errors, `${p}.summary`, r.summary, { min: 0, max: 1000 });
+    let optionKeys = null; // options of the linked decision; null = no decision linked (or it could not be checked)
+    const hasDecision = r.decision !== undefined;
+    const hasIndex = r.decisionIndex !== undefined;
+    if (hasDecision && hasIndex) {
+      errors.push(`${p}: decision과 decisionIndex 중 하나만`);
+    } else if (hasDecision) {
+      const before = errors.length;
+      checkId(errors, `${p}.decision`, r.decision, fns);
+      if (errors.length === before) {
+        let open = true;
+        if (typeof fns.decisionOpen === 'function') { try { open = !!fns.decisionOpen(r.decision); } catch { open = false; } }
+        if (!open) errors.push(`${p}.decision: 열린 결정 아님(${r.decision})`);
+        else if (typeof fns.decisionOptions === 'function') {
+          try { optionKeys = fns.decisionOptions(r.decision); } catch { optionKeys = null; }
+          if (!Array.isArray(optionKeys)) { errors.push(`${p}.decision: 결정의 선택지를 읽지 못함(${r.decision})`); optionKeys = null; }
+        }
+      }
+    } else if (hasIndex) {
+      const k = r.decisionIndex;
+      if (!Number.isInteger(k) || k < 0 || k > 3) errors.push(`${p}.decisionIndex: 0..3 정수 필요`);
+      else if (!Array.isArray(v.decisions) || k >= v.decisions.length) errors.push(`${p}.decisionIndex: decisions[${k}] 없음`);
+      else {
+        const d = v.decisions[k];
+        if (isObj(d) && d.id !== undefined && typeof fns.decisionOptions === 'function') {
+          // an existing decision keeps its stored options (a brief never rewrites them): check against those
+          try { optionKeys = fns.decisionOptions(d.id); } catch { optionKeys = null; }
+          if (!Array.isArray(optionKeys)) { errors.push(`${p}.decisionIndex: 결정의 선택지를 읽지 못함(${d.id})`); optionKeys = null; }
+        } else {
+          optionKeys = isObj(d) && isObj(d.options) ? OPTION_KEYS.filter((o) => d.options[o] !== undefined) : [];
+        }
+      }
+    }
+    const imgs = r.images === undefined ? [] : r.images;
+    if (!Array.isArray(imgs)) errors.push(`${p}.images: 배열 필요(0..6)`);
+    else if (imgs.length > 6) errors.push(`${p}.images: 6개 초과(${imgs.length})`);
+    const images = (Array.isArray(imgs) ? imgs : []).map((img, j) => {
+      const ip = `${p}.images[${j}]`;
+      if (!isObj(img)) { errors.push(`${ip}: 그림 객체 필요`); return img; }
+      const why = pathRefusal(img.path);
+      if (why) errors.push(`${ip}.path: ${why}`);
+      checkStr(errors, `${ip}.alt`, img.alt, { min: 1, max: 200 });
+      if (img.option !== undefined) {
+        if (!OPTION_KEYS.includes(img.option)) errors.push(`${ip}.option: 허용 값 A|B|C 필요`);
+        else if (!hasDecision && !hasIndex) errors.push(`${ip}.option: 연결된 결정 없음(decision 또는 decisionIndex 필요)`);
+        else if (optionKeys && !optionKeys.includes(img.option)) errors.push(`${ip}.option: 연결된 결정에 없는 선택지(${img.option})`);
+      }
+      const out = { path: img.path, alt: img.alt };
+      if (img.option !== undefined) out.option = img.option;
+      return out;
+    });
+    const out = { id: r.id, title: r.title };
+    if (r.summary !== undefined) out.summary = r.summary;
+    if (hasDecision) out.decision = r.decision;
+    if (hasIndex) out.decisionIndex = r.decisionIndex;
+    out.images = images;
+    return out;
+  });
 }
 
 export function validateBrief(input, fns = {}) {
@@ -166,6 +247,7 @@ export function validateBrief(input, fns = {}) {
       });
     }
   }
+  checkReports(errors, v, fns);
   const ok = errors.length === 0;
   return { ok, errors, warnings, normalized: ok ? structuredClone(v) : null };
 }

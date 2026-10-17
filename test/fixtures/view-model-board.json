@@ -1,0 +1,1034 @@
+{
+  "schema": 1,
+  "seq": 12,
+  "gen": 9,
+  "generatedAt": 1792204200000,
+  "summary": {
+    "openDecisions": 2,
+    "blocked": 0,
+    "stale": 0
+  },
+  "readErrors": [],
+  "server": null,
+  "waiting": [],
+  "sessions": [
+    {
+      "id": "01a14957-2b1c-7a00-9c33-5e1f00a1b185",
+      "project": "piomo-briefing",
+      "cwd": "C:/Users/USER/orca/projects/piomo-briefing",
+      "title": "상황판 v6 대화 페이지",
+      "paneId": "w4-p2",
+      "tabId": "w4:t185",
+      "tabLabel": "상황판제작",
+      "tabNumber": 185,
+      "answerKinds": [
+        "option",
+        "text",
+        "annotation"
+      ],
+      "workName": "briefing-board-redesign",
+      "status": "needs_decision",
+      "statusKey": "needs_decision",
+      "tab": "나를 기다림",
+      "chips": [
+        "작업 중"
+      ],
+      "headline": "대화 페이지 모듈을 만드는 중 - 계획 탭에는 원래 박스형 계획 보기를 그대로 넣음",
+      "lastActivityAt": 1792203960000,
+      "lastBriefAt": 1792203840000,
+      "changesNew": true,
+      "changes": [
+        {
+          "text": "레일·사이드바·탭 바 셸 모듈 완성, 테스트 통과",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-4/task-4-briefing-board-redesign-happy.txt",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "대화 페이지 모듈 초안: 하위 탭 5개와 경로 상세",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "C:/Users/USER/orca/projects/piomo-briefing/src/page/convo-view.js",
+          "evidenceState": "changed"
+        },
+        {
+          "text": "보고서 그림은 상황판 저장소 해시 파일로만 보여 줌",
+          "truth": "reported",
+          "applied": "none",
+          "evidenceState": "ok"
+        }
+      ],
+      "done": [
+        {
+          "text": "주석 모듈: 세 가지 선택 방법과 제자리 주석 창",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-6/task-6-briefing-board-redesign-happy.txt",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "시안 v5·v6·v7 소유자 승인",
+          "truth": "unverified",
+          "applied": "none",
+          "evidenceState": "ok"
+        }
+      ],
+      "next": "보고서 탭 그림 비교를 결정 #97과 연결하고 이걸로 고르기 확인",
+      "heldCount": 1,
+      "decisions": [
+        {
+          "id": 90,
+          "sessionId": "01a14957-2b1c-7a00-9c33-5e1f00a1b185",
+          "question": "알림 띠는 어디에 둘까요?",
+          "options": {
+            "A": {
+              "text": "탭 바 위",
+              "consequence": "레일과 사이드바를 가리지 않음"
+            },
+            "B": {
+              "text": "화면 아래",
+              "consequence": "입력창처럼 보여 헷갈림"
+            }
+          },
+          "recommend": "A",
+          "reason": "가리는 곳이 없음",
+          "blocks": false,
+          "createdAt": 1792193400000,
+          "source": "brief",
+          "answered": true,
+          "closed": false,
+          "questionPrompt": false,
+          "answer": {
+            "option": "A",
+            "text": "",
+            "at": 1792194000000
+          },
+          "receipt": {
+            "kind": "steered",
+            "mode": "admit",
+            "deliveredAt": 1792194120000,
+            "proven": true
+          },
+          "delivery": "전달됨 ⏱08:42"
+        },
+        {
+          "id": 91,
+          "sessionId": "01a14957-2b1c-7a00-9c33-5e1f00a1b185",
+          "question": "사이드바 기본 폭은?",
+          "options": {
+            "A": {
+              "text": "260px",
+              "consequence": "목록이 넉넉함"
+            },
+            "B": {
+              "text": "300px",
+              "consequence": "본문이 좁아짐"
+            }
+          },
+          "recommend": "A",
+          "reason": "본문 폭 우선",
+          "blocks": false,
+          "createdAt": 1792197000000,
+          "source": "brief",
+          "answered": true,
+          "closed": false,
+          "questionPrompt": false,
+          "answer": {
+            "option": "",
+            "text": "260으로 하되 끌어서 바꿀 수 있게 해 줘",
+            "at": 1792197600000
+          },
+          "receipt": null,
+          "delivery": "대기: 작업이 끝나면 전달"
+        },
+        {
+          "id": 92,
+          "sessionId": "01a14957-2b1c-7a00-9c33-5e1f00a1b185",
+          "question": "닫힌 창 목록을 몇 개까지 보일까요?",
+          "options": {
+            "A": {
+              "text": "30개",
+              "consequence": "오래된 것은 검색으로"
+            }
+          },
+          "recommend": "A",
+          "reason": "목록이 짧음",
+          "blocks": false,
+          "createdAt": 1792198200000,
+          "source": "brief",
+          "answered": false,
+          "closed": true,
+          "held": {
+            "at": null
+          },
+          "questionPrompt": false,
+          "answer": null,
+          "receipt": null
+        },
+        {
+          "id": 93,
+          "sessionId": "01a14957-2b1c-7a00-9c33-5e1f00a1b185",
+          "question": "탭 고정은 어떻게 할까요?",
+          "options": {
+            "A": {
+              "text": "두 번 누르기",
+              "consequence": "손이 덜 감"
+            }
+          },
+          "recommend": "A",
+          "reason": "빠름",
+          "blocks": false,
+          "createdAt": 1792198800000,
+          "source": "brief",
+          "answered": false,
+          "closed": true,
+          "questionPrompt": true,
+          "answer": null,
+          "receipt": null
+        },
+        {
+          "id": 94,
+          "sessionId": "01a14957-2b1c-7a00-9c33-5e1f00a1b185",
+          "question": "시안 v7 주석 창 위치",
+          "options": {
+            "A": {
+              "text": "고른 곳 바로 아래",
+              "consequence": "눈이 덜 움직임"
+            }
+          },
+          "recommend": "A",
+          "reason": "가까움",
+          "blocks": false,
+          "createdAt": 1792199400000,
+          "source": "brief",
+          "answered": true,
+          "closed": true,
+          "questionPrompt": false,
+          "answer": {
+            "text": "고른 곳 아래, 넘치면 위로",
+            "at": 1792199520000
+          },
+          "receipt": null,
+          "delivery": "질문창에서 답 받음"
+        },
+        {
+          "id": 97,
+          "sessionId": "01a14957-2b1c-7a00-9c33-5e1f00a1b185",
+          "question": "상황판 대화 구분은 어느 시안으로 갈까요?",
+          "options": {
+            "A": {
+              "text": "v3 덧칠형",
+              "consequence": "지금 화면에 색 이름표만 더함 - 구조는 그대로"
+            },
+            "B": {
+              "text": "v4 노션형",
+              "consequence": "노션처럼 섹션과 페이지 - 레일이 없음"
+            },
+            "C": {
+              "text": "v5 레일+탭",
+              "consequence": "Codex 레일 + 사이드바 안 전환 + 위 탭"
+            }
+          },
+          "recommend": "C",
+          "reason": "여러 대화를 오가기 가장 쉬움",
+          "blocks": true,
+          "createdAt": 1792202400000,
+          "source": "brief",
+          "answered": false,
+          "closed": false,
+          "questionPrompt": false,
+          "answer": null,
+          "receipt": null
+        },
+        {
+          "id": 98,
+          "sessionId": "01a14957-2b1c-7a00-9c33-5e1f00a1b185",
+          "question": "하위 탭 이름은 이대로 둘까요?",
+          "options": {
+            "A": {
+              "text": "그대로",
+              "consequence": "개요·계획·작업자·결정·보고서"
+            },
+            "B": {
+              "text": "짧게",
+              "consequence": "요약·계획·사람·결정·그림"
+            }
+          },
+          "recommend": "A",
+          "reason": "익숙한 말",
+          "blocks": false,
+          "createdAt": 1792203000000,
+          "source": "plan",
+          "answered": false,
+          "closed": false,
+          "questionPrompt": false,
+          "answer": null,
+          "receipt": null
+        }
+      ],
+      "notes": [
+        {
+          "key": "a-3f6c1a2e-9b4d-4c11-8e2a-7d5b9c0e1f21",
+          "at": 1792203480000,
+          "preview": "## 상황판 피드백: 🗂 상황판제작 #185 | 상황판 v6 대화 페이지\n\n**대화:** 상황판 v6 대화 페이지 · 01a1",
+          "delivery": "전달됨 ⏱11:19"
+        },
+        {
+          "key": "a-8a0d7e44-2c3b-4f9a-a1d6-5e7c3b2a9f10",
+          "at": 1792203660000,
+          "preview": "## 상황판 피드백: 🗂 상황판제작 #185 | 상황판 v6 대화 페이지\n\n**보낸 곳:** 상황판 → 개요",
+          "delivery": "전달 중"
+        },
+        {
+          "key": "a-c2b9e1f0-6d4a-4e8b-9f3c-1a2b3c4d5e6f",
+          "at": 1792203780000,
+          "preview": "## 상황판 피드백: 🗂 상황판제작 #185 | 상황판 v6 대화 페이지\n\n### 1. [질문] 보고서",
+          "delivery": "대기: 작업이 끝나면 전달"
+        },
+        {
+          "key": "a-e7f81a92-0b3c-4d5e-8f60-718293a4b5c6",
+          "at": 1792203900000,
+          "preview": "## 상황판 피드백: 🗂 상황판제작 #185 | 상황판 v6 대화 페이지\n\n### 1. [고쳐줘] 계획",
+          "delivery": "대기: 그 대화가 다시 열리면 전달"
+        }
+      ],
+      "flow": [
+        {
+          "label": "요구 정리",
+          "state": "done"
+        },
+        {
+          "label": "시안 v5~v7",
+          "state": "done"
+        },
+        {
+          "label": "계획",
+          "state": "done"
+        },
+        {
+          "label": "구현",
+          "state": "doing"
+        },
+        {
+          "label": "검증",
+          "state": "todo"
+        },
+        {
+          "label": "설치",
+          "state": "todo"
+        }
+      ],
+      "reports": [
+        {
+          "id": "r1",
+          "title": "상황판 대화 구분 시안 비교",
+          "summary": "세 시안을 같은 대화 3개로 그려 봤어요. v5는 레일과 위 탭으로 여러 대화를 오가기 쉽고, v3는 지금 화면을 그대로 둡니다.",
+          "at": 1792202520000,
+          "decisionId": 97,
+          "status": "결정 기다림",
+          "images": [
+            {
+              "src": "assets/84fecfda2b6702dc6015b4307ae048524399b4d6493664f11ecc3fc124a7ce37.png",
+              "alt": "v3 덧칠형: 지금 카드 목록에 색 이름표",
+              "option": "A",
+              "w": 200,
+              "h": 125,
+              "path": "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v3-overlay.png"
+            },
+            {
+              "src": "assets/ef2c2b08fcc42806091d2ff820a307b0cac8847ad356d6f22a3d25d55f956d4d.jpg",
+              "alt": "v4 노션형: 섹션과 페이지",
+              "option": "B",
+              "w": 200,
+              "h": 125,
+              "path": "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v4-notion.jpg"
+            },
+            {
+              "src": "assets/5742432ff85d373b5d81f8fc2206ebf4626a6ba9bd067a4a205e7a84f9762489.webp",
+              "alt": "v5 레일+탭: 왼쪽 레일, 사이드바, 위 탭",
+              "option": "C",
+              "w": 200,
+              "h": 125,
+              "path": "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v5-rail-tabs.webp"
+            }
+          ]
+        },
+        {
+          "id": "r2",
+          "title": "노션·Codex 앱 구조 분석",
+          "summary": "노션: 검색·홈·수신함 / 즐겨찾기·최근 / 폭 조절과 펼침 상태 기억.\nCodex: 별도 레일, 사이드바 안 화면 전환, 표시/숨기기, 탭 고정.",
+          "at": 1792200600000,
+          "decisionId": null,
+          "status": "참고",
+          "images": []
+        },
+        {
+          "id": "r3",
+          "title": "알림 띠 위치 시안",
+          "summary": "",
+          "at": 1792193700000,
+          "decisionId": 90,
+          "status": "답함",
+          "images": [
+            {
+              "src": "assets/84fecfda2b6702dc6015b4307ae048524399b4d6493664f11ecc3fc124a7ce37.png",
+              "alt": "탭 바 위 알림 띠",
+              "option": "A",
+              "w": 200,
+              "h": 125,
+              "path": "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v3-overlay.png"
+            }
+          ]
+        }
+      ],
+      "auto": {
+        "stage": "실행",
+        "todoCurrent": "5. 대화 페이지 모듈",
+        "todoNext": "7. 컨트롤러 통합",
+        "todoDone": 4,
+        "todoTotal": 12,
+        "workers": {
+          "running": 1,
+          "done": 2,
+          "error": 0
+        }
+      },
+      "live": {
+        "workers": [
+          {
+            "id": "st_01a14958",
+            "name": "대화 페이지 모듈",
+            "kind": "visual-engineering",
+            "model": "Opus 5.5",
+            "state": "running",
+            "step": "edit · src/page/convo-view.js",
+            "startedAt": "2026-10-17T01:50:00.000Z",
+            "updatedAt": "2026-10-17T02:29:00.000Z",
+            "childSessionId": "01a14958-0000-7000-8000-000000000005",
+            "stale": false,
+            "todo": {
+              "items": [
+                {
+                  "text": "설계 읽기",
+                  "status": "completed"
+                },
+                {
+                  "text": "모듈 작성",
+                  "status": "in_progress"
+                },
+                {
+                  "text": "테스트",
+                  "status": "pending"
+                }
+              ],
+              "total": 3,
+              "more": 0,
+              "done": 1
+            }
+          },
+          {
+            "id": "st_01a14956",
+            "name": "주석 모듈",
+            "kind": "visual-engineering",
+            "model": "Opus 5.5",
+            "state": "done",
+            "step": "",
+            "startedAt": "2026-10-16T23:50:00.000Z",
+            "endedAt": "2026-10-17T01:20:00.000Z",
+            "updatedAt": "2026-10-17T01:20:00.000Z",
+            "stale": false,
+            "todo": null
+          },
+          {
+            "id": "st_01a14955",
+            "name": "셸 모듈",
+            "kind": "visual-engineering",
+            "model": "Sol 6.1",
+            "state": "done",
+            "step": "",
+            "startedAt": "2026-10-16T23:10:00.000Z",
+            "endedAt": "2026-10-17T00:20:00.000Z",
+            "updatedAt": "2026-10-17T00:20:00.000Z",
+            "stale": false,
+            "todo": null
+          }
+        ]
+      },
+      "plan": {
+        "stage": "running",
+        "stageNote": "1단계 프런트 3개 중 2개 끝, 백엔드 1개 막힘",
+        "goal": "상황판을 레일·사이드바·위 탭과 대화별 페이지로 바꾸고, 어디서나 주석을 달아 그 대화에 보낸다",
+        "ideal": [
+          {
+            "id": "IS-4",
+            "text": "여백 없는 대화 페이지와 하위 탭 5개"
+          },
+          {
+            "id": "IS-5",
+            "text": "계획 탭에 원래 박스형 계획 보기"
+          },
+          {
+            "id": "IS-10",
+            "text": "항목마다 경로 상세와 이 대화 자료 목록"
+          }
+        ],
+        "components": [
+          {
+            "id": "shell",
+            "label": "셸",
+            "text": "레일, 사이드바, 위 탭"
+          },
+          {
+            "id": "page",
+            "label": "대화 페이지",
+            "text": "하위 탭과 경로 상세"
+          },
+          {
+            "id": "note",
+            "label": "주석",
+            "text": "고르기, 주석 창, 보내기"
+          }
+        ],
+        "waves": [
+          {
+            "n": 1,
+            "label": "모듈"
+          },
+          {
+            "n": 2,
+            "label": "통합과 검증"
+          }
+        ],
+        "tasks": [
+          {
+            "id": "1",
+            "wave": 1,
+            "label": "주석 보내기",
+            "what": "/answer에 주석 종류",
+            "done": "9KB 주석이 그대로 저장",
+            "deps": [],
+            "state": "done"
+          },
+          {
+            "id": "2",
+            "wave": 1,
+            "label": "보고서 그림",
+            "what": "그림을 해시 파일로",
+            "done": "/assets가 참조된 것만",
+            "deps": [
+              "1"
+            ],
+            "state": "done"
+          },
+          {
+            "id": "3",
+            "wave": 1,
+            "label": "보기 모델",
+            "what": "alive·첨부·블록 경로",
+            "done": "600KB 안에 모든 필드",
+            "deps": [
+              "2"
+            ],
+            "state": "stopped"
+          },
+          {
+            "id": "4",
+            "wave": 1,
+            "label": "셸",
+            "what": "레일·사이드바·탭 바",
+            "done": "네 가지로 다시 열기",
+            "deps": [],
+            "state": "done"
+          },
+          {
+            "id": "5",
+            "wave": 1,
+            "label": "대화 페이지",
+            "what": "하위 탭 5개와 경로 상세",
+            "done": "계획 탭이 박스형 계획 보기",
+            "deps": [],
+            "state": "doing"
+          },
+          {
+            "id": "6",
+            "wave": 1,
+            "label": "주석",
+            "what": "세 가지 선택 방법",
+            "done": "골든 Markdown 일치",
+            "deps": [],
+            "state": "done"
+          },
+          {
+            "id": "7",
+            "wave": 2,
+            "label": "통합",
+            "what": "컨트롤러에 셸·페이지·주석",
+            "done": "npm run check 통과",
+            "deps": [
+              "3",
+              "4",
+              "5",
+              "6"
+            ],
+            "state": "todo"
+          },
+          {
+            "id": "8",
+            "wave": 2,
+            "label": "보고서 연결",
+            "what": "그림 핀과 이걸로 고르기",
+            "done": "B를 고르면 B가 전달",
+            "deps": [
+              "7"
+            ],
+            "state": "todo"
+          }
+        ],
+        "questions": [
+          {
+            "id": "Q1",
+            "text": "주석은 어느 길로 보낼까요?",
+            "state": "answered",
+            "answer": "A 기존 답 경로에 새 종류",
+            "by": "owner",
+            "option": "A"
+          },
+          {
+            "id": "Q2",
+            "text": "작업자 탭 모양은?",
+            "state": "default",
+            "answer": "기존 펼침 줄",
+            "by": "agent"
+          },
+          {
+            "id": "Q3",
+            "text": "하위 탭 이름은 이대로 둘까요?",
+            "state": "open",
+            "decisionId": 98,
+            "options": {
+              "A": {
+                "text": "그대로",
+                "consequence": "개요·계획·작업자·결정·보고서"
+              },
+              "B": {
+                "text": "짧게",
+                "consequence": "요약·계획·사람·결정·그림"
+              }
+            },
+            "recommend": "A",
+            "reason": "익숙한 말",
+            "blocks": false
+          }
+        ],
+        "outOfScope": [
+          "오른쪽 아래 팝업과 아래쪽 입력창",
+          "설치·커밋·푸시"
+        ],
+        "planId": "p01a148a9cb4e",
+        "rev": 4,
+        "at": 1792201200000,
+        "checkedAt": 1792203300000,
+        "source": {
+          "root": "C:/Users/USER/orca/projects/기타 작업",
+          "slug": "briefing-board-redesign",
+          "planPath": "C:/Users/USER/orca/projects/기타 작업/.omo/plans/briefing-board-redesign.md"
+        },
+        "ownerSessionId": "01a14957-2b1c-7a00-9c33-5e1f00a1b185",
+        "chips": []
+      },
+      "alive": true,
+      "briefSeq": 12,
+      "briefPath": "C:/Users/USER/.omo-stable-500/home/.omo/agent/briefing/state/sessions/01a14957-2b1c-7a00-9c33-5e1f00a1b185/briefs/000012.json",
+      "sessionFile": "C:/Users/USER/.omo-stable-500/home/.senpi/agent/sessions/--C--Users-USER-orca-projects-piomo-briefing--/2026-10-17T01-02-03-000Z_01a14957-2b1c-7a00-9c33-5e1f00a1b185.jsonl",
+      "todo": {
+        "items": [
+          {
+            "text": "설계 읽기",
+            "status": "completed"
+          },
+          {
+            "text": "view.js kit",
+            "status": "completed"
+          },
+          {
+            "text": "convo-view.js",
+            "status": "in_progress"
+          },
+          {
+            "text": "convo.css",
+            "status": "pending"
+          },
+          {
+            "text": "테스트",
+            "status": "pending"
+          }
+        ],
+        "more": 0
+      },
+      "attachments": [
+        {
+          "label": "대화 id",
+          "path": "01a14957-2b1c-7a00-9c33-5e1f00a1b185"
+        },
+        {
+          "label": "세션 파일",
+          "path": "C:/Users/USER/.omo-stable-500/home/.senpi/agent/sessions/--C--Users-USER-orca-projects-piomo-briefing--/2026-10-17T01-02-03-000Z_01a14957-2b1c-7a00-9c33-5e1f00a1b185.jsonl"
+        },
+        {
+          "label": "계획 파일",
+          "path": "C:/Users/USER/orca/projects/기타 작업/.omo/plans/briefing-board-redesign.md"
+        },
+        {
+          "label": "증거",
+          "path": "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-4/task-4-briefing-board-redesign-happy.txt"
+        },
+        {
+          "label": "증거",
+          "path": "C:/Users/USER/orca/projects/piomo-briefing/src/page/convo-view.js"
+        },
+        {
+          "label": "증거",
+          "path": "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-6/task-6-briefing-board-redesign-happy.txt"
+        },
+        {
+          "label": "보고서 그림",
+          "path": "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v3-overlay.png"
+        },
+        {
+          "label": "보고서 그림",
+          "path": "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v4-notion.jpg"
+        },
+        {
+          "label": "보고서 그림",
+          "path": "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v5-rail-tabs.webp"
+        },
+        {
+          "label": "실행 기록",
+          "path": "C:/Users/USER/orca/projects/piomo-briefing/.omo/boulder/briefing-board-redesign/ledger.jsonl"
+        }
+      ],
+      "blockSources": {
+        "head": {
+          "paths": [
+            "C:/Users/USER/.omo-stable-500/home/.senpi/agent/sessions/--C--Users-USER-orca-projects-piomo-briefing--/2026-10-17T01-02-03-000Z_01a14957-2b1c-7a00-9c33-5e1f00a1b185.jsonl"
+          ]
+        },
+        "change/12/0": {
+          "paths": [
+            "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-4/task-4-briefing-board-redesign-happy.txt"
+          ]
+        },
+        "change/12/1": {
+          "paths": [
+            "C:/Users/USER/orca/projects/piomo-briefing/src/page/convo-view.js"
+          ]
+        },
+        "done/12/0": {
+          "paths": [
+            "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-6/task-6-briefing-board-redesign-happy.txt"
+          ]
+        },
+        "wk/st_01a14958": {
+          "paths": [
+            "C:/Users/USER/orca/projects/piomo-briefing/.omo/senpi-task/tasks/st_01a14958.json"
+          ]
+        },
+        "wk/st_01a14956": {
+          "paths": [
+            "C:/Users/USER/orca/projects/piomo-briefing/.omo/senpi-task/tasks/st_01a14956.json"
+          ]
+        },
+        "wk/st_01a14955": {
+          "paths": [
+            "C:/Users/USER/orca/projects/piomo-briefing/.omo/senpi-task/tasks/st_01a14955.json"
+          ]
+        },
+        "rep/r1": {
+          "paths": [
+            "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v3-overlay.png",
+            "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v4-notion.jpg",
+            "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v5-rail-tabs.webp"
+          ]
+        },
+        "rep/r1/img/0": {
+          "paths": [
+            "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v3-overlay.png"
+          ]
+        },
+        "rep/r1/img/1": {
+          "paths": [
+            "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v4-notion.jpg"
+          ]
+        },
+        "rep/r1/img/2": {
+          "paths": [
+            "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v5-rail-tabs.webp"
+          ]
+        },
+        "rep/r3": {
+          "paths": [
+            "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v3-overlay.png"
+          ]
+        },
+        "rep/r3/img/0": {
+          "paths": [
+            "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v3-overlay.png"
+          ]
+        },
+        "att/1": {
+          "paths": [
+            "C:/Users/USER/.omo-stable-500/home/.senpi/agent/sessions/--C--Users-USER-orca-projects-piomo-briefing--/2026-10-17T01-02-03-000Z_01a14957-2b1c-7a00-9c33-5e1f00a1b185.jsonl"
+          ]
+        },
+        "att/2": {
+          "paths": [
+            "C:/Users/USER/orca/projects/기타 작업/.omo/plans/briefing-board-redesign.md"
+          ]
+        },
+        "att/3": {
+          "paths": [
+            "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-4/task-4-briefing-board-redesign-happy.txt"
+          ]
+        },
+        "att/4": {
+          "paths": [
+            "C:/Users/USER/orca/projects/piomo-briefing/src/page/convo-view.js"
+          ]
+        },
+        "att/5": {
+          "paths": [
+            "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-6/task-6-briefing-board-redesign-happy.txt"
+          ]
+        },
+        "att/6": {
+          "paths": [
+            "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v3-overlay.png"
+          ]
+        },
+        "att/7": {
+          "paths": [
+            "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v4-notion.jpg"
+          ]
+        },
+        "att/8": {
+          "paths": [
+            "C:/Users/USER/orca/projects/기타 작업/.omo/evidence/briefing-board-redesign/task-2/shots/v5-rail-tabs.webp"
+          ]
+        },
+        "att/9": {
+          "paths": [
+            "C:/Users/USER/orca/projects/piomo-briefing/.omo/boulder/briefing-board-redesign/ledger.jsonl"
+          ]
+        }
+      }
+    },
+    {
+      "id": "01a14921-77d0-7c10-8a41-0c2e5b0d0184",
+      "project": "piomo-briefing",
+      "cwd": "C:/Users/USER/orca/projects/piomo-briefing",
+      "title": "README 다시 쓰기",
+      "paneId": "w4-p1",
+      "tabId": "w4:t184",
+      "tabLabel": "문서",
+      "tabNumber": 184,
+      "answerKinds": [
+        "option",
+        "text",
+        "annotation"
+      ],
+      "workName": "readme-pass",
+      "status": "in_progress",
+      "statusKey": "in_progress",
+      "tab": "나를 기다림",
+      "chips": [],
+      "headline": "README 화면 구성 절을 새 상황판에 맞춰 쓰는 중",
+      "lastActivityAt": 1792203300000,
+      "lastBriefAt": 1792202700000,
+      "changesNew": false,
+      "changes": [
+        {
+          "text": "화면 구성 표 초안",
+          "truth": "reported",
+          "applied": "none",
+          "evidenceState": "ok"
+        }
+      ],
+      "done": [],
+      "next": "주석 보내기 절",
+      "decisions": [],
+      "notes": [],
+      "flow": [],
+      "reports": [],
+      "openQuestion": {
+        "text": "문서 말투는 존댓말로 할까요?",
+        "at": 1792203360000,
+        "paneId": "w4-p1"
+      },
+      "auto": {
+        "stage": "실행",
+        "todoCurrent": "3. 화면 구성 절",
+        "todoNext": "4. 주석 보내기 절",
+        "todoDone": 2,
+        "todoTotal": 7,
+        "workers": {
+          "running": 0,
+          "done": 1,
+          "error": 0
+        }
+      },
+      "alive": true,
+      "briefSeq": 3,
+      "briefPath": "C:/Users/USER/.omo-stable-500/home/.omo/agent/briefing/state/sessions/01a14921-77d0-7c10-8a41-0c2e5b0d0184/briefs/000003.json",
+      "sessionFile": "C:/Users/USER/.omo-stable-500/home/.senpi/agent/sessions/--C--Users-USER-orca-projects-piomo-briefing--/2026-10-16T22-10-00-000Z_01a14921-77d0-7c10-8a41-0c2e5b0d0184.jsonl",
+      "todo": {
+        "items": [
+          {
+            "text": "열기 절",
+            "status": "completed"
+          },
+          {
+            "text": "화면 구성 표",
+            "status": "completed"
+          },
+          {
+            "text": "화면 구성 절",
+            "status": "in_progress"
+          },
+          {
+            "text": "주석 보내기 절",
+            "status": "pending"
+          },
+          {
+            "text": "옛 목차 지우기",
+            "status": "abandoned"
+          }
+        ],
+        "more": 2
+      },
+      "attachments": [
+        {
+          "label": "대화 id",
+          "path": "01a14921-77d0-7c10-8a41-0c2e5b0d0184"
+        },
+        {
+          "label": "세션 파일",
+          "path": "C:/Users/USER/.omo-stable-500/home/.senpi/agent/sessions/--C--Users-USER-orca-projects-piomo-briefing--/2026-10-16T22-10-00-000Z_01a14921-77d0-7c10-8a41-0c2e5b0d0184.jsonl"
+        },
+        {
+          "label": "실행 기록",
+          "path": "C:/Users/USER/orca/projects/piomo-briefing/.omo/boulder.json"
+        }
+      ],
+      "blockSources": {
+        "head": {
+          "paths": [
+            "C:/Users/USER/.omo-stable-500/home/.senpi/agent/sessions/--C--Users-USER-orca-projects-piomo-briefing--/2026-10-16T22-10-00-000Z_01a14921-77d0-7c10-8a41-0c2e5b0d0184.jsonl"
+          ]
+        },
+        "plan/todo/0": {
+          "paths": [
+            "C:/Users/USER/orca/projects/piomo-briefing/.omo/boulder.json"
+          ]
+        },
+        "plan/todo/1": {
+          "paths": [
+            "C:/Users/USER/orca/projects/piomo-briefing/.omo/boulder.json"
+          ]
+        },
+        "plan/todo/2": {
+          "paths": [
+            "C:/Users/USER/orca/projects/piomo-briefing/.omo/boulder.json"
+          ]
+        },
+        "plan/todo/3": {
+          "paths": [
+            "C:/Users/USER/orca/projects/piomo-briefing/.omo/boulder.json"
+          ]
+        },
+        "plan/todo/4": {
+          "paths": [
+            "C:/Users/USER/orca/projects/piomo-briefing/.omo/boulder.json"
+          ]
+        },
+        "att/1": {
+          "paths": [
+            "C:/Users/USER/.omo-stable-500/home/.senpi/agent/sessions/--C--Users-USER-orca-projects-piomo-briefing--/2026-10-16T22-10-00-000Z_01a14921-77d0-7c10-8a41-0c2e5b0d0184.jsonl"
+          ]
+        },
+        "att/2": {
+          "paths": [
+            "C:/Users/USER/orca/projects/piomo-briefing/.omo/boulder.json"
+          ]
+        }
+      }
+    },
+    {
+      "id": "01a13f02-91aa-7e3b-b2c0-46d7e9a1c0de",
+      "project": "piomo-briefing",
+      "cwd": "C:/Users/USER/orca/projects/piomo-briefing",
+      "title": "옛 설치 점검",
+      "paneId": "w2-p3",
+      "tabId": "w2:t170",
+      "tabLabel": "",
+      "tabNumber": null,
+      "answerKinds": [
+        "option",
+        "text"
+      ],
+      "workName": "",
+      "status": "done",
+      "statusKey": "done",
+      "tab": "끝남",
+      "chips": [],
+      "headline": "7세대 설치 확인 끝",
+      "lastActivityAt": 1791685800000,
+      "lastBriefAt": 1791685800000,
+      "changesNew": false,
+      "changes": [],
+      "done": [
+        {
+          "text": "설치 확인",
+          "truth": "reported",
+          "applied": "live",
+          "evidenceState": "ok"
+        }
+      ],
+      "next": "",
+      "decisions": [],
+      "notes": [],
+      "flow": [],
+      "reports": [],
+      "alive": false,
+      "briefSeq": 1,
+      "briefPath": "C:/Users/USER/.omo-stable-500/home/.omo/agent/briefing/state/sessions/01a13f02-91aa-7e3b-b2c0-46d7e9a1c0de/briefs/000001.json",
+      "sessionFile": "C:/Users/USER/.omo-stable-500/home/.senpi/agent/sessions/--C--Users-USER-orca-projects-piomo-briefing--/2026-10-10T09-00-00-000Z_01a13f02-91aa-7e3b-b2c0-46d7e9a1c0de.jsonl",
+      "todo": {
+        "items": [],
+        "more": 0
+      },
+      "attachments": [
+        {
+          "label": "대화 id",
+          "path": "01a13f02-91aa-7e3b-b2c0-46d7e9a1c0de"
+        },
+        {
+          "label": "세션 파일",
+          "path": "C:/Users/USER/.omo-stable-500/home/.senpi/agent/sessions/--C--Users-USER-orca-projects-piomo-briefing--/2026-10-10T09-00-00-000Z_01a13f02-91aa-7e3b-b2c0-46d7e9a1c0de.jsonl"
+        }
+      ],
+      "blockSources": {
+        "head": {
+          "paths": [
+            "C:/Users/USER/.omo-stable-500/home/.senpi/agent/sessions/--C--Users-USER-orca-projects-piomo-briefing--/2026-10-10T09-00-00-000Z_01a13f02-91aa-7e3b-b2c0-46d7e9a1c0de.jsonl"
+          ]
+        },
+        "att/1": {
+          "paths": [
+            "C:/Users/USER/.omo-stable-500/home/.senpi/agent/sessions/--C--Users-USER-orca-projects-piomo-briefing--/2026-10-10T09-00-00-000Z_01a13f02-91aa-7e3b-b2c0-46d7e9a1c0de.jsonl"
+          ]
+        }
+      }
+    }
+  ]
+}

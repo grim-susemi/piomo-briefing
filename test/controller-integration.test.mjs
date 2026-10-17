@@ -1,0 +1,484 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import vm from 'node:vm';
+import { makeController, memoryStorage } from './fixtures/controller-dom.mjs';
+import { buildViewModel, pageHtml } from '../src/render.mjs';
+
+const session = patch => ({ id: 's1', title: 'Test', alive: true, briefSeq: 1, status: 'in_progress',
+  changes: [{ text: 'same row', truth: 'reported', applied: 'none', evidence: 'C:/project/evidence.txt' }],
+  done: [{ text: 'done row', truth: 'reported', applied: 'none' }], notes: [], decisions: [], answerKinds: ['annotation'], ...patch });
+const model = (seq, s = session(), extra = {}) => ({ seq, generatedAt: 0, sessions: [s], ...extra });
+const note = { blocks: ['change/1/0'], sub: 'ov', text: 'same row', snip: 'same row', intent: '고쳐줘', comment: 'fix', paths: ['C:/project/evidence.txt'] };
+const flush = () => new Promise(resolve => setImmediate(resolve));
+const posts = e => e.fetches.filter(f => f.url === '/answer');
+const reply = (r, status, json) => r.resolve({ status, json: async () => json });
+function click(e, selector) {
+  const t = e.document.querySelector(selector);
+  assert.ok(t, 'rendered control ' + selector);
+  return e.fire(t, 'click');
+}
+function prepare(e, s = session()) {
+  e.page.receive(model(1, s)); e.page.open(s.id, 'ov');
+  assert.equal(e.ctx.BriefAnnotate.add(s.id, note).ok, true);
+  e.ctx.BriefAnnotate.decorate();
+}
+
+test('C-CAP2 integration: trimmed notice is present only with the counter', () => {
+  const e = makeController();
+  e.page.receive(model(1, session(), { trimmed: { cards: 3 } }));
+  assert.match(e.byId.app.textContent, /오래된 대화 3개는 자세한 정보를 줄였어요/);
+  e.advance(600); e.page.receive(model(2));
+  assert.doesNotMatch(e.byId.app.textContent, /오래된 대화/);
+  assert.deepEqual(e.errors, []);
+});
+
+test('regions: seq-only refresh and sidebar search keep main, input, resize handle and scroll nodes', () => {
+  const e = makeController(); prepare(e);
+  const input = e.app.querySelector('[data-sh="search"]');
+  const rz = e.app.querySelector('[data-sh="rz"]'), main = e.byId.main, list = e.app.querySelector('[data-sh-part="list"]');
+  const content = main.firstChild, writes = [e.byId.rail.writes, e.byId.tabs.writes, main.writes, list.writes];
+  list.scrollTop = 230; main.scrollTop = 340;
+  input.value = 'Test'; input.focus(); e.fire(input, 'input');
+  assert.equal(e.page.busy(), false, 'sidebar search focus cannot hold model updates');
+  e.advance(600); e.page.receive(model(2));
+  assert.equal(e.page.state.seq, 2);
+  assert.equal(e.app.querySelector('[data-sh="search"]'), input);
+  assert.equal(e.app.querySelector('[data-sh="rz"]'), rz);
+  assert.equal(e.document.activeElement, input);
+  assert.equal(input.value, 'Test');
+  assert.equal(main.firstChild, content);
+  assert.deepEqual([e.byId.rail.writes, e.byId.tabs.writes, main.writes], writes.slice(0, 3));
+  assert.equal(main.scrollTop, 340); assert.equal(list.scrollTop, 230);
+  assert.equal(e.ctx.BriefAnnotate.list('s1').length, 1);
+  assert.deepEqual(e.errors, []);
+});
+
+test('conversation refresh glow and worker measurements use stable block and session identities', () => {
+  const e = makeController({ modules: ['view', 'plan-view', 'workers-view', 'convo-view', 'shell', 'annotate'] });
+  const s = session({ live: { workers: [{ id: 'st_a', name: 'Worker', state: 'running', startedAt: 0, updatedAt: 0 }] } });
+  e.page.receive(model(1, s)); e.page.open('s1', 'wk');
+  const snap = e.ctx.BriefWorkersView.measure(e.byId.main);
+  assert.ok(snap.cards.s1);
+  assert.equal(snap.rows['s1\nwk/st_a'].el.getAttribute('data-block'), 'wk/st_a');
+  e.advance(600); e.page.receive(model(2, { ...s, title: 'Changed' }));
+  assert.equal(e.byId.main.querySelector('[data-block="head"]').classList.contains('flash'), true);
+  e.advance(900);
+  assert.equal(e.byId.main.querySelector('[data-block="head"]').classList.contains('flash'), false);
+  assert.deepEqual(e.errors, []);
+});
+
+test('regions: a rail click with running workers keeps #main and #tabs; worker rows use one clock per applied model', () => {
+  // the page scripts' own Date.now() moves on every read: a render that reads it draws another pulse phase
+  const e = makeController({ modules: ['view', 'plan-view', 'workers-view', 'convo-view', 'shell', 'annotate'],
+    configure: ctx => vm.runInContext('(function () { var t = 1700000000000; Date.now = function () { return t += 137; }; })();', ctx) });
+  const s = session({ live: { workers: [{ id: 'st_a', name: 'Worker', state: 'running', startedAt: 0, updatedAt: 0 }] } });
+  e.page.receive(model(1, s));
+  const main = e.byId.main, tabs = e.byId.tabs;
+  assert.match(main.innerHTML, /<span class="w-dot" style="animation-delay:-\d+ms"/, 'the overview card pulses');
+  const railClicks = where => {
+    for (const key of ['inbox', 'plans', 'home', 'archive', 'settings', 'conv']) {
+      const before = { main: main.innerHTML, tabs: tabs.innerHTML, writes: main.writes };
+      click(e, `#rail [data-sh="view"][data-key="${key}"]`);
+      assert.equal(e.page.state.ui.view, key, `${where} ${key}`);
+      assert.equal(main.innerHTML, before.main, `${where} ${key}: #main HTML unchanged`);
+      assert.equal(tabs.innerHTML, before.tabs, `${where} ${key}: #tabs HTML unchanged`);
+      assert.equal(main.writes, before.writes, `${where} ${key}: #main not rewritten`);
+    }
+  };
+  railClicks('overview');
+  // 65 s after the apply the same model's 작업자 sub-tab is drawn: its elapsed time is the current one, not the apply's
+  e.advance(65_000);
+  e.page.open('s1', 'wk');
+  assert.equal(main.querySelector('[data-since]').textContent, '⏱ 1분 06초');
+  railClicks('작업자');
+  assert.deepEqual(e.errors, []);
+});
+
+test('regions: model changes keep an anchor offset and independent scroll for each sub-tab', () => {
+  const e = makeController(); prepare(e);
+  const main = e.byId.main, old = main.querySelector('[data-block="now"]');
+  e.ctx.rects.set(main, { top: 40, left: 0, width: 1000, height: 800 });
+  for (const b of main.querySelectorAll('[data-block]')) e.ctx.rects.set(b, { top: -200, left: 0, width: 500, height: 20 });
+  e.ctx.rects.set(old, { top: 70, left: 0, width: 500, height: 80 });
+  main.scrollTop = 500;
+  // Layout is deterministic: the new now block moves 150px below its old offset.
+  const original = e.page.restoreAnchor;
+  const ctx = e.ctx;
+  const decorate = ctx.BriefAnnotate.decorate;
+  ctx.BriefAnnotate.decorate = () => {
+    decorate();
+    ctx.rects.set(main.querySelector('[data-block="now"]'), { top: 220, left: 0, width: 500, height: 80 });
+  };
+  e.advance(600); e.page.receive(model(2, session({ headline: 'changed' })));
+  assert.equal(main.scrollTop, 650);
+  ctx.BriefAnnotate.decorate = decorate;
+  assert.equal(e.page.restoreAnchor, original);
+  for (const b of main.querySelectorAll('[data-block]')) e.ctx.rects.set(b, { top: -200, left: 0, width: 500, height: 20 });
+  e.page.open('s1', 'dec'); assert.equal(main.scrollTop, 0);
+  main.scrollTop = 90;
+  e.page.open('s1', 'ov'); assert.equal(main.scrollTop, 650);
+  e.page.open('s1', 'dec'); assert.equal(main.scrollTop, 90);
+});
+
+test('anchor restore measures at the saved scroll, not the previous sub-tab scroll', () => {
+  const e = makeController(); e.page.receive(model(1)); e.page.open('s1', 'ov');
+  const main = e.byId.main, block = main.querySelector('[data-block="head"]');
+  block.getBoundingClientRect = () => ({ top: 1000 - main.scrollTop, bottom: 1050 - main.scrollTop });
+  main.scrollTop = 50;
+  e.page.restoreAnchor({ id: 'head', top: 100 }, 900);
+  assert.equal(main.scrollTop, 900);
+});
+
+test('known: every applied model records absence and prunes after 30 days without erasing current tabs', () => {
+  const storage = memoryStorage();
+  const e = makeController({ localStorage: storage });
+  e.page.receive(model(1)); e.page.open('s1', 'dec');
+  e.advance(600); e.page.receive({ seq: 2, sessions: [] });
+  assert.equal(e.page.state.ui.absent.s1, 1600);
+  assert.equal(e.page.state.ui.active, 's1');
+  assert.match(e.byId.main.textContent, /지금 안 보임/);
+  const next = makeController({ localStorage: storage });
+  next.advance(31 * 86400000);
+  next.page.receive({ seq: 3, sessions: [session({ id: 's2' })] });
+  assert.equal(next.page.state.ui.tabs.includes('s1'), false);
+  assert.equal(next.page.state.ui.absent.s1, undefined);
+  assert.equal(next.page.state.ui.active, null);
+});
+
+test('plan first open seeds only unset expansion keys and keeps an explicit collapse on later opens', () => {
+  const e = makeController();
+  const s = session({ plan: { planId: 'p1', goal: 'Goal', tasks: [{ id: '1', wave: 1, label: 'one', state: 'todo' }], waves: [{ n: 1, label: 'First' }] } });
+  e.page.receive(model(1, s));
+  assert.equal(e.page.state.ui.expanded['plan:p1'], undefined);
+  click(e, '[data-sh="open"][data-sid="s1"]');
+  click(e, '[data-act="sub"][data-sub="plan"]');
+  assert.equal(e.page.state.ui.expanded['plan:p1'], true);
+  assert.equal(e.page.state.ui.expanded['plan-tasks:p1'], true);
+  assert.ok(e.byId.main.querySelector('.plan-expanded'));
+  click(e, '[data-key="plan:p1"]');
+  assert.equal(e.page.state.ui.expanded['plan:p1'], false);
+  e.page.open('s1', 'ov'); e.page.open('s1', 'plan');
+  assert.ok(e.byId.main.querySelector('.plan-collapsed'));
+  e.page.state.ui.expanded['plan-tasks:p1'] = false;
+  e.advance(600); e.page.receive(model(2, s));
+  assert.equal(e.page.state.ui.expanded['plan-tasks:p1'], false);
+});
+
+test('details toggles, including annotation preview, survive main region refresh', () => {
+  const e = makeController(); prepare(e);
+  click(e, '[data-ann-act="list"]');
+  for (const d of e.byId.main.querySelectorAll('details')) {
+    assert.match(d.getAttribute('data-open-key'), /^cv:s1:/);
+    d.open = !d.open; e.fire(d, 'toggle');
+  }
+  const before = { ...e.page.state.ui.expanded };
+  e.advance(600); e.page.receive(model(2, session({ headline: 'new headline' })));
+  for (const d of e.byId.main.querySelectorAll('details')) assert.equal(d.open, before[d.getAttribute('data-open-key')]);
+  assert.equal(e.page.state.ui.expanded['cv:s1:ann-prev'], true);
+});
+
+test('overview held-details toggles persist through the shipped renderer', () => {
+  const e = makeController();
+  const s = session({ decisions: [{ id: 1, question: 'Later', held: true, closed: true }] });
+  e.page.receive(model(1, s));
+  const details = e.byId.main.querySelector('.held-decs');
+  assert.equal(details.getAttribute('data-open-key'), 'cv:s1:held');
+  details.open = true; e.fire(details, 'toggle');
+  e.advance(600); e.page.receive(model(2, { ...s, headline: 'updated' }));
+  assert.equal(e.byId.main.querySelector('.held-decs').open, true);
+  assert.match(e.ctx.BriefView.renderOverview(model(2, s), {}), /<details class="held-decs" data-open-key="cv:s1:held"><summary>/);
+});
+
+test('busy: real annotation editor and main selection hold refresh; sidebar selection and search do not', () => {
+  const e = makeController(); e.page.receive(model(1)); e.page.open('s1', 'ov');
+  click(e, '[data-block="now"] [data-ann-act="block"]');
+  assert.equal(e.ctx.BriefAnnotate.busy(), true);
+  e.advance(600); e.page.receive(model(2));
+  assert.equal(e.page.state.seq, 1);
+  click(e, '[data-ann-act="cancel"]');
+  e.document.activeElement = null; e.advance(100);
+  assert.equal(e.page.state.seq, 2);
+  e.selection.isCollapsed = false; e.selection.toString = () => 'selected'; e.selection.anchorNode = e.byId.main;
+  e.page.receive(model(3));
+  assert.equal(e.page.state.seq, 2);
+  e.selection.anchorNode = e.byId.side;
+  e.document.listeners.selectionchange(); e.advance(100);
+  assert.equal(e.page.state.seq, 3, 'a selection in the sidebar is not a main hold');
+  assert.deepEqual(e.errors, []);
+});
+
+test('annotation send success uses token and immutable UUID, clears only after storage success and opens feedback', async () => {
+  const e = makeController(); prepare(e);
+  const text = e.ctx.BriefAnnotate.compose(e.page.state.model.sessions[0]).text;
+  click(e, '[data-ann-act="send"]');
+  const request = posts(e)[0];
+  assert.deepEqual(JSON.parse(request.opts.body), { kind: 'annotation', sessionId: 's1', requestId: '11111111-1111-4111-8111-000000000001', text });
+  assert.equal(request.opts.headers['X-Board-Token'], 'tok-1');
+  assert.match(e.byId.main.textContent, /보내는 중/);
+  assert.equal(e.ctx.BriefAnnotate.list('s1').length, 1);
+  assert.ok(e.ctx.BriefAnnotate.add('s1', note).error, 'in-flight notes cannot be silently lost');
+  reply(request, 200, { ok: true, key: 'a-id' }); await flush();
+  assert.equal(e.ctx.BriefAnnotate.list('s1').length, 0);
+  assert.equal(e.ctx.sessionStorage.getItem('omo-briefing.annotation.s1'), null);
+  assert.equal(e.byId.main.querySelector('[data-open-key="cv:s1:notes"]').open, true);
+  assert.doesNotMatch(e.byId.main.textContent, /전달됨/);
+  e.advance(600); e.page.receive(model(2, session({ notes: [{ key: 'a-id', at: 1, preview: 'stored', delivery: '전달됨 ⏱10:00' }] })));
+  assert.match(e.byId.main.textContent, /전달됨 ⏱10:00/);
+  assert.deepEqual(e.errors, []);
+});
+
+test('409 NO_ANNOTATION_SUPPORT keeps notes, shows Korean error and switches to Markdown copy', async () => {
+  const e = makeController(); prepare(e); click(e, '[data-ann-act="send"]');
+  reply(posts(e)[0], 409, { ok: false, code: 'NO_ANNOTATION_SUPPORT' }); await flush();
+  assert.match(e.byId.main.textContent, /이 대화는 아직 주석을 못 받아요 - Markdown 복사로 붙여넣기/);
+  assert.equal(e.ctx.BriefAnnotate.list('s1').length, 1);
+  assert.equal(e.byId.main.querySelector('[data-ann-act="send"]'), null);
+  click(e, '[data-ann-act="copy"]'); await flush();
+  assert.match(e.ctx.copied, /상황판 피드백/);
+  assert.equal(posts(e).length, 1);
+  assert.deepEqual(e.errors, []);
+});
+
+test('annotation banner clears only on its matching delivered receipt and stays cleared through decision actions', async () => {
+  const e = makeController();
+  const s = session({ decisions: [{ id: 1, question: 'Which?', options: { A: { text: 'yes' } } }] });
+  prepare(e, s);
+  click(e, '[data-ann-act="send"]');
+  const request = posts(e)[0], key = 'a-' + JSON.parse(request.opts.body).requestId;
+  reply(request, 200, { ok: true, key }); await flush();
+  const banner = () => e.byId.main.querySelector('.ann-msg');
+  assert.ok(banner(), 'storage success is not delivery proof');
+  const receiveNotes = (seq, notes) => {
+    e.advance(600);
+    e.page.receive(model(seq, { ...s, notes }));
+  };
+  receiveNotes(2, [{ key: 'a-other', at: 1, preview: 'other', delivery: '전달됨 ⏱10:00' }]);
+  assert.ok(banner(), 'an unrelated receipt cannot clear this banner');
+  receiveNotes(3, [{ key, at: 1, preview: 'stored', delivery: '전달 중' }]);
+  assert.ok(banner(), 'admission without proof still waits');
+  receiveNotes(4, [{ key, at: 1, preview: 'stored', delivery: '전달됨 ⏱10:01' }]);
+  assert.equal(banner(), null, 'the matching proven receipt clears the banner');
+  assert.match(e.byId.main.textContent, /전달됨 ⏱10:01/);
+  click(e, '[data-act="ans-pick"]');
+  assert.equal(banner(), null, 'later decision actions cannot restore a stale banner');
+  assert.deepEqual(e.errors, []);
+});
+
+test('annotation errors preserve drafts; retries reuse the request; HTTP 200 without ok never claims success', async () => {
+  for (const [status, code, message] of [[429, 'BUSY', /다른 답/], [503, 'PAUSED', /꺼져/], [413, 'TOO_LARGE', /너무 길어요/], [403, 'FORBIDDEN_TOKEN', /다시 열어/], [200, null, /200/]]) {
+    const e = makeController({ sessionStorage: null }); prepare(e);
+    click(e, '[data-ann-act="send"]'); const first = posts(e)[0];
+    reply(first, status, { ok: false, code }); await flush();
+    assert.match(e.byId.main.textContent, message);
+    assert.equal(e.ctx.BriefAnnotate.list('s1').length, 1);
+    assert.equal(e.reloads.length, 0);
+    click(e, '[data-ann-act="send"]');
+    assert.equal(posts(e)[1].opts.body, first.opts.body);
+    reply(posts(e)[1], 200, { ok: true }); await flush();
+    assert.equal(e.ctx.BriefAnnotate.list('s1').length, 0);
+  }
+});
+
+test('annotation request conflict requires explicit new group and never discards the captured notes', async () => {
+  const e = makeController(); prepare(e); click(e, '[data-ann-act="send"]');
+  const first = posts(e)[0];
+  reply(first, 409, { ok: false, code: 'REQUEST_ID_CONFLICT' }); await flush();
+  assert.match(e.byId.main.textContent, /같은 묶음이 이미 다른 내용으로/);
+  assert.equal(e.ctx.BriefAnnotate.list('s1').length, 1);
+  click(e, '[data-act="ann-new"]');
+  assert.equal(posts(e).length, 1, 'explicit reset does not send');
+  click(e, '[data-ann-act="send"]');
+  assert.notEqual(JSON.parse(posts(e)[1].opts.body).requestId, JSON.parse(first.opts.body).requestId);
+  reply(posts(e)[1], 200, { ok: true }); await flush();
+});
+
+test('annotation 403 reload is bounded, carries notes and request ID, and never resends on startup', async () => {
+  const storage = memoryStorage(), prefs = memoryStorage();
+  const first = makeController({ sessionStorage: storage, localStorage: prefs }); prepare(first);
+  click(first, '[data-ann-act="send"]');
+  const body = posts(first)[0].opts.body;
+  reply(posts(first)[0], 403, { ok: false, code: 'FORBIDDEN_TOKEN' }); await flush();
+  assert.equal(first.reloads.length, 1);
+  const next = makeController({ sessionStorage: storage, localStorage: prefs, token: 'new-token' });
+  next.page.receive(model(1));
+  assert.equal(next.ctx.BriefAnnotate.list('s1').length, 1);
+  assert.equal(posts(next).length, 0);
+  click(next, '[data-ann-act="send"]');
+  assert.equal(posts(next)[0].opts.body, body);
+  assert.equal(posts(next)[0].opts.headers['X-Board-Token'], 'new-token');
+  reply(posts(next)[0], 403, { ok: false, code: 'FORBIDDEN_TOKEN' }); await flush();
+  assert.equal(next.reloads.length, 0);
+  assert.match(next.byId.main.textContent, /상황판을 다시 열어 주세요/);
+});
+
+test('generation reload keeps annotation drafts and the existing request without resending it', async () => {
+  const storage = memoryStorage(), prefs = memoryStorage();
+  const e = makeController({ generation: 8, sessionStorage: storage, localStorage: prefs });
+  prepare(e); click(e, '[data-ann-act="send"]');
+  const body = posts(e)[0].opts.body;
+  reply(posts(e)[0], 429, { ok: false, code: 'BUSY' }); await flush();
+  e.page.receive(model(2, session(), { gen: 9 }));
+  assert.equal(e.reloads.length, 1);
+  const next = makeController({ generation: 9, sessionStorage: storage, localStorage: prefs });
+  next.page.receive(model(3, session(), { gen: 9 }));
+  assert.equal(next.ctx.BriefAnnotate.list('s1').length, 1);
+  assert.equal(posts(next).length, 0);
+  click(next, '[data-ann-act="send"]');
+  assert.equal(posts(next)[0].opts.body, body);
+  reply(posts(next)[0], 200, { ok: true }); await flush();
+});
+
+test('decision and annotation sends share the same one-at-a-time POST queue', async () => {
+  const e = makeController();
+  prepare(e, session({ decisions: [{ id: 1, question: 'Which?', options: { A: { text: 'yes' } } }] }));
+  click(e, '[data-act="ans-pick"]'); click(e, '[data-act="ans-send"]');
+  click(e, '[data-ann-act="send"]');
+  assert.equal(posts(e).length, 1);
+  reply(posts(e)[0], 200, { ok: true }); await flush();
+  assert.equal(posts(e).length, 2);
+  assert.equal(JSON.parse(posts(e)[1].opts.body).kind, 'annotation');
+  reply(posts(e)[1], 200, { ok: true }); await flush();
+});
+
+test('report pick uses the existing decision confirm and token-bearing answer transport', async () => {
+  const e = makeController();
+  const s = session({ decisions: [{ id: 1, question: 'Which?', options: { B: { text: 'second', consequence: 'result' } } }],
+    reports: [{ id: 'r1', title: 'Report', decisionId: 1, images: [{ src: 'assets/' + 'a'.repeat(64) + '.png', option: 'B', alt: 'second', path: 'C:/project/second.png' }] }] });
+  e.page.receive(model(1, s)); e.page.open('s1', 'rep');
+  click(e, '[data-act="ans-pick"][data-dec="1"]');
+  assert.equal(e.page.state.ui.active, 's1');
+  assert.ok(e.byId.main.querySelector('.ans-confirm'));
+  assert.equal(posts(e).length, 0);
+  click(e, '[data-act="ans-send"]');
+  assert.deepEqual(JSON.parse(posts(e)[0].opts.body), { id: 1, sessionId: 's1', option: 'B' });
+  reply(posts(e)[0], 200, { ok: true }); await flush();
+});
+
+test('file mode and absent annotation capability offer copy before the owner starts composing', () => {
+  for (const options of [{ protocol: 'file:', token: 'ignored' }, {}]) {
+    const e = makeController(options);
+    prepare(e, session({ answerKinds: options.protocol ? ['annotation'] : [] }));
+    assert.equal(e.byId.main.querySelector('[data-ann-act="send"]'), null);
+    assert.ok(e.byId.main.querySelector('[data-ann-act="copy"]'));
+    assert.equal(posts(e).length, 0);
+  }
+});
+
+test('new regions escape hostile model strings and tolerate absent capped fields', () => {
+  const e = makeController();
+  const evil = '<script>fake success</script><img src=x onerror=alert(1)>';
+  const s = session({ title: evil, headline: evil, alive: undefined, briefSeq: undefined, todo: undefined, attachments: undefined, blockSources: undefined });
+  e.page.receive(model(1, s)); e.page.open('s1', 'ov');
+  assert.equal(e.app.querySelector('script'), null);
+  assert.equal(e.app.querySelector('img'), null);
+  assert.match(e.byId.main.innerHTML, /&lt;script&gt;/);
+  assert.deepEqual(e.errors, []);
+});
+
+test('file-mode index written by the test contains no server token marker with all modules inlined', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-controller-file-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'index.html'), html = pageHtml(model(1), 9, { mode: 'file', token: 'not-for-file' });
+  fs.writeFileSync(file, html);
+  assert.equal(fs.readFileSync(file, 'utf8').includes('omo-board-token'), false);
+  if (process.env.OMO_TASK7_FILE_PAGE) fs.copyFileSync(file, process.env.OMO_TASK7_FILE_PAGE);
+});
+
+test('fixture drift guard: real buildViewModel produces every board fixture key with the same type', () => {
+  const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/view-model-board.json', import.meta.url), 'utf8'));
+  const snapshot = { sessions: [], decisions: [], answers: [], receipts: [], closures: [], mirror: [], plans: [] };
+  for (const s of fixture.sessions) {
+    const auto = {
+      work: { name: s.workName, phase: s.auto?.stage, done: s.auto?.todoDone, total: s.auto?.todoTotal },
+      todo: { current: s.auto?.todoCurrent, next: s.auto?.todoNext, done: s.auto?.todoDone, total: s.auto?.todoTotal },
+      workers: s.auto?.workers, live: s.live, todoItems: s.todo,
+      ledgerPath: s.attachments.find(a => a.label === '실행 기록')?.path,
+    };
+    snapshot.sessions.push({
+      sid: s.id, meta: { ...s, hostPid: s.alive ? 1 : null, running: s.chips.includes('작업 중'), pid: 1, auto },
+      briefs: [{ seq: s.briefSeq, data: { at: s.lastBriefAt, brief: {
+        title: s.title, status: s.status, headline: s.headline, changes: s.changes, done: s.done, next: s.next, flow: s.flow,
+      } } }],
+      reports: s.reports.map(r => ({ ...r, images: r.images.map(i => {
+        const [, sha, ext] = /^assets\/([^.]+)\.(.+)$/.exec(i.src);
+        return { ...i, sha, ext };
+      }) })),
+    });
+    snapshot.decisions.push(...s.decisions);
+    for (const d of s.decisions) {
+      if (d.answer) snapshot.answers.push({ id: d.id, sessionId: s.id, ...d.answer });
+      if (d.receipt) snapshot.receipts.push({ id: d.id, sessionId: s.id, ...d.receipt });
+      if (d.closed) snapshot.closures.push({ id: d.id, reason: d.held ? 'held' : 'closed', questionPrompt: d.questionPrompt });
+    }
+    for (const n of s.notes) {
+      snapshot.answers.push({ key: n.key, kind: 'annotation', sessionId: s.id, at: n.at, text: n.preview });
+    }
+    if (s.openQuestion) snapshot.mirror.push({ sid: s.id, data: { ...s.openQuestion, question: s.openQuestion.text } });
+    if (s.plan) snapshot.plans.push({ planId: s.plan.planId,
+      rev: { rev: s.plan.rev, at: s.plan.at, ownerSessionId: s.id, source: s.plan.source, plan: s.plan },
+      status: { at: s.plan.checkedAt },
+    });
+  }
+  const actual = buildViewModel(snapshot, fixture.generatedAt, { generation: fixture.gen, stateDir: 'C:/fixture/state',
+    isAlive: pid => pid === 1, fs: { statSync(p) { if (p.includes('/senpi-task/tasks/')) return { isFile: () => true }; throw new Error('fixture evidence not on disk'); } } });
+  function sameType(expected, got, at) {
+    if (expected === null) { assert.equal(got, null, at); return; }
+    if (Array.isArray(expected)) {
+      assert.ok(Array.isArray(got), at + ' is an array');
+      for (let i = 0; i < expected.length; i++) sameType(expected[i], got[i], at + '[' + i + ']');
+    } else if (typeof expected === 'object') {
+      assert.ok(got && typeof got === 'object', at + ' is an object');
+      for (const [key, value] of Object.entries(expected)) {
+        assert.ok(Object.hasOwn(got, key), at + '.' + key);
+        sameType(value, got[key], at + '.' + key);
+      }
+    } else assert.equal(typeof got, typeof expected, at);
+  }
+  const { sessions: expectedSessions, ...expectedTop } = fixture;
+  sameType(expectedTop, actual, 'vm');
+  for (const s of expectedSessions) sameType(s, actual.sessions.find(a => a.id === s.id), 'sessions.' + s.id);
+});
+
+test('C-CAP2 integration: refresh without briefSeq keeps replacement rows visible and cannot inherit annotations', () => {
+  const e = makeController();
+  e.page.receive(model(1));
+  e.page.open('s1', 'ov');
+  assert.ok(e.byId.side.querySelector('[data-sec="tabs"]').querySelector('[data-row="s1"]'), 'alive card initially appears under open tabs');
+  const A = e.ctx.BriefAnnotate;
+  assert.equal(A.add('s1', note).ok, true);
+  A.decorate();
+  assert.equal(e.byId.main.querySelectorAll('mark.am').length, 1);
+  const next = session({ alive: undefined, briefSeq: undefined });
+  delete next.alive; delete next.briefSeq;
+  e.advance(600); e.page.receive(model(2, next));
+  const row = e.byId.main.querySelector('.row.chg');
+  assert.ok(row, 'replacement row stays visible');
+  assert.equal(row.hasAttribute('data-block'), false);
+  assert.equal(row.querySelector('mark.am'), null);
+  assert.equal(row.querySelector('.anum'), null);
+  assert.equal(row.querySelector('[data-ann-act="block"]'), null);
+  assert.match(row.textContent, /same row/);
+  assert.match(row.textContent, /C:\/project\/evidence.txt/);
+  assert.equal(e.byId.main.querySelector('.row.done').hasAttribute('data-block'), false);
+  assert.equal(A.list('s1')[0].gone, true);
+  assert.equal(A.list('s1')[0].blocks[0], 'change/1/0');
+  assert.equal(e.byId.side.querySelector('[data-sec="tabs"]').querySelector('[data-row="s1"]'), null, 'without alive, the card leaves the open-tabs group');
+  assert.deepEqual(e.errors, []);
+});
+
+test('C-ASK integration: askLive and builtin notes render for true, absent flags mean false', () => {
+  const e = makeController();
+  const dec = { id: 1, question: 'Which?', options: { A: { text: 'yes' }, B: { text: 'no' } }, askLive: true };
+  const s = session({ decisions: [dec], openQuestion: { text: 'native', builtin: true } });
+  e.page.receive(model(1, s)); e.page.open('s1', 'ov');
+  assert.match(e.byId.main.textContent, /터미널에도 같은 질문이 열려 있어요 - 어느 쪽에서 답해도 둘 다 닫혀요/);
+  assert.match(e.byId.main.textContent, /터미널에서 답하세요 - 이 질문은 하네스 기본 질문창이라 상황판에서 닫을 수 없어요/);
+  delete dec.askLive; delete s.openQuestion.builtin;
+  e.advance(600); e.page.receive(model(2, s));
+  assert.doesNotMatch(e.byId.main.textContent, /터미널에도 같은 질문|하네스 기본 질문창/);
+  assert.match(e.byId.main.textContent, /native/);
+  assert.deepEqual(e.errors, []);
+});

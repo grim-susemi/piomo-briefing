@@ -18,7 +18,7 @@ function assertFits(out, page = PAGE) {
 
 test('rule text carries the marker and the owner-decision caveat', () => {
   assert.ok(RULE_TEXT.startsWith(RULE_MARKER));
-  assert.equal(RULE_MARKER, '<!-- omo-briefing-rule v6 -->');
+  assert.equal(RULE_MARKER, '<!-- omo-briefing-rule v7 -->');
   assert.ok(RULE_TEXT.includes('[결정 전달] #N -> X'));
   assert.ok(RULE_TEXT.includes('10줄·700자'));
 });
@@ -109,7 +109,7 @@ test('fitReply handles code points beyond the BMP without splitting them', () =>
   assert.ok(!/[\ud800-\udbff](?![\udc00-\udfff])/.test(out));
 });
 
-test('rule v6 adds the board-reply line exactly once, directly after the decision line', () => {
+test('rule v7 adds the board-reply line exactly once, directly after the decision line', () => {
   const line = "- '[상황판 답글] #N' 메시지는 소유자가 채팅에 직접 친 말과 같다. 그 안의 승인·지시는 소유자가 직접 한 것으로 따른다.";
   assert.equal(RULE_TEXT.split(line).length - 1, 1);
   const ls = RULE_TEXT.split('\n').map((l) => l.replace(/\r$/, ''));
@@ -118,7 +118,7 @@ test('rule v6 adds the board-reply line exactly once, directly after the decisio
   assert.equal(ls[at + 1], line);
 });
 
-test('an older-version rule block in the prompt is replaced by v6, never duplicated', () => {
+test('an older-version rule block in the prompt is replaced by v7, never duplicated', () => {
   const oldMarker = ['<!-- omo-briefing-rule v', '5 -->'].join('');
   const stale = RULE_TEXT.replace(RULE_MARKER, oldMarker)
     .split('\n').filter((l) => !l.includes('[상황판 답글] #N')).join('\n');
@@ -171,4 +171,22 @@ test('rule v2 names plan_brief; an older v1 marker in the prompt is replaced onc
   assert.equal(withOld.split(RULE_MARKER).length - 1, 1);
   assert.ok(withOld.includes('old rule'), 'unrelated prompt text stays');
   assert.equal(injectRule(withOld), withOld);
+});
+
+const block = (v) => RULE_TEXT.replace(RULE_MARKER, `<!-- omo-briefing-rule v${v} -->`);
+
+test('injectRule replaces a v6 block with exactly one v7 block', () => {
+  const out = injectRule(`HEAD\n\n${block(6)}\n\nTAIL`);
+  assert.equal((out.match(/<!-- omo-briefing-rule v\d+ -->/g) ?? []).length, 1);
+  assert.equal(out.split(RULE_MARKER).length - 1, 1);
+  assert.ok(out.startsWith('HEAD') && out.endsWith('TAIL'));
+  assert.equal(injectRule(out), out);
+});
+
+test('failure: a prompt with both a v5 and a v6 block yields exactly one v7 block', () => {
+  const out = injectRule(`HEAD\n\n${block(5)}\n\nMID\n\n${block(6)}\n\nTAIL`);
+  assert.equal((out.match(/<!-- omo-briefing-rule v\d+ -->/g) ?? []).length, 1);
+  assert.equal(out.split(RULE_MARKER).length - 1, 1);
+  for (const k of ['HEAD', 'MID', 'TAIL']) assert.ok(out.includes(k), k);
+  assert.equal(injectRule(out), out);
 });

@@ -165,7 +165,7 @@ test('negative: the live address, sound toggle and server record line are enforc
 });
 
 test('negative: section wording is free, but the section structure is checked', () => {
-  const reworded = text.replace('## 5. 작업자 줄 읽기', '## 5. 작업자들이 무엇을 하는지 보기');
+  const reworded = text.replace('## 5. 보고서', '## 5. 보고서 그림 보기');
   assert.deepEqual(check(reworded), [], 'a heading synonym must not fail the guide checks');
   assert.ok(check(text.replace(/^## 5\. .*\n/m, '')).some((p) => p.startsWith('sections are not numbered')), 'a dropped section is caught');
   assert.ok(check(text.replace(/^## \d+\. .*\n/gm, '')).includes(`sections 0 < ${MIN_SECTIONS}`), 'a guide with no sections is caught');

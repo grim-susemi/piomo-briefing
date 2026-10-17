@@ -31,6 +31,8 @@ const READ_RETRY_DELAYS_MS = [2, 4, 8, 16, 32, 64, 100];
 const BRIEFS_KEPT = 20;
 const BRIEF_PATH = /^sessions\/([^/]+)\/briefs\/(\d+)\.json$/;
 const NUMBERED = /^(\d+)\.json$/;
+const ANNOTATION_FILE = /^a-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/;
+const ANNOTATION_RECENT_MS = 30 * 24 * 3600 * 1000;
 const PLAN_ID = /^p[0-9a-f]{12}$/;
 const REV_FILE = /^rev-(\d{6,})\.json$/;
 const REVS_KEPT = 10;
@@ -340,7 +342,7 @@ export function openStore(root, opts = {}) {
     return collectPlans(makeReader());
   }
 
-  function readSnapshot() {
+  function readSnapshot(now = Date.now()) {
     const reader = makeReader();
     const { readErrors, load, names, dirs } = reader;
     const byId = (relDir) => names(relDir, NUMBERED)
@@ -367,14 +369,33 @@ export function openStore(root, opts = {}) {
 
     const plans = collectPlans(reader);
     const published = load('published.json', false) ?? null;
+    const annotationReceipts = new Set(names('receipts', ANNOTATION_FILE));
+    let archivedAnnotations = 0;
+    const annotationAnswers = names('answers', ANNOTATION_FILE).flatMap((name) => {
+      const rel = `answers/${name}`;
+      // Answers are immutable: mtime lets us discard old delivered bodies without parsing them.
+      // An unreadable stat is reported and does not silently discard a potentially pending note.
+      if (annotationReceipts.has(name)) {
+        try {
+          if (now - fs.statSync(abs(rel)).mtimeMs >= ANNOTATION_RECENT_MS) {
+            archivedAnnotations++;
+            return [];
+          }
+        } catch (err) { readErrors.push({ rel, message: String(err?.message ?? err) }); }
+      }
+      const answer = load(rel);
+      return answer === undefined ? [] : [answer];
+    });
+    const annotations = (dir) => names(dir, ANNOTATION_FILE).map((name) => load(`${dir}/${name}`)).filter((v) => v !== undefined);
     return {
       settings,
       sessions,
       decisions: byId('decisions'),
       closures: byId('decision-closures'),
-      answers: byId('answers'),
-      claims: byId('claims'),
-      receipts: byId('receipts'),
+      answers: [...byId('answers'), ...annotationAnswers],
+      claims: [...byId('claims'), ...annotations('claims')],
+      receipts: [...byId('receipts'), ...annotations('receipts')],
+      archivedAnnotations,
       mirror,
       plans,
       published,

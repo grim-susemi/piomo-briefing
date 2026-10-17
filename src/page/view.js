@@ -1,5 +1,5 @@
 /* omo-briefing view: pure renderer, classic script (file:// safe, no modules).
- * globalThis.BriefView.renderApp(viewModel, uiState) -> html string.
+ * globalThis.BriefView.renderOverview(viewModel, uiState) -> html string.
  * Every piece of model text goes through esc(); the model is untrusted input. */
 (function (g) {
   'use strict';
@@ -219,13 +219,10 @@
         (k === rec ? ' <span class="ans-rec">추천</span>' : '') + '</button>';
     });
     if (canReply) html += '<button type="button" class="ans-write" data-act="ans-reply"' + at + ' aria-expanded="' + (a.open && !conf ? 'true' : 'false') + '">✍ 답글</button>';
+    html += '<button type="button" class="ans-write" data-act="ans-hold"' + at + '>보류</button>';
     html += '</div>';
     if (conf) {
-      var reply = typeof conf.text === 'string';
-      html += '<div class="ans-confirm" role="group" aria-label="보내기 확인"><span class="ans-q">' + esc(whereOf(s)) + ' 대화에 ' +
-        (reply ? '답글을 보낼까요? <q class="ans-quote">' + esc(cut(conf.text, 40)) + '</q>' : '<b>' + esc(conf.option) + '</b>를 보낼까요?') + '</span>' +
-        '<span class="ans-acts"><button type="button" class="ans-go" data-act="ans-send"' + at + '>보내기</button>' +
-        '<button type="button" class="ans-cancel" data-act="ans-cancel"' + at + '>취소</button></span></div>';
+      html += confirmRow(key, s, conf, where);
     } else if (canReply && a.open) {
       var draft = str(a.draft);
       html += '<div class="ans-reply"><textarea class="ans-text" data-draft="' + key + '" data-where="' + esc(where) + '" maxlength="' + REPLY_MAX +
@@ -235,6 +232,22 @@
     }
     if (str(a.error)) html += '<p class="ans-err" role="alert">' + esc(a.error) + '</p>';
     return html + '</div>';
+  }
+
+  // The pending confirm: '<tab> 대화에 <b>B</b>를 보낼까요?' (or the reply's first 40 characters), with 보내기 and 취소 for decision
+  // id. answerBox draws it under the A/B/C buttons; convo-view.js draws the same row in a report's picked option (이걸로 고르기).
+  function confirmRow(id, s, conf, where) {
+    var at = ' data-id="' + esc(id) + '" data-where="' + esc(where) + '"';
+    if (conf.hold === true) { // 보류 (C-HOLD 5): the same row, 보류 / 취소
+      return '<div class="ans-confirm ans-hold-confirm" role="group" aria-label="보류 확인"><span class="ans-q">' + esc(whereOf(s)) + ' 대화의 #' + esc(id) +
+        '를 보류할까요? 대화는 다시 묻지 않아요</span><span class="ans-acts"><button type="button" class="ans-go" data-act="ans-send"' + at + '>보류</button>' +
+        '<button type="button" class="ans-cancel" data-act="ans-cancel"' + at + '>취소</button></span></div>';
+    }
+    var reply = typeof conf.text === 'string';
+    return '<div class="ans-confirm" role="group" aria-label="보내기 확인"><span class="ans-q">' + esc(whereOf(s)) + ' 대화에 ' +
+      (reply ? '답글을 보낼까요? <q class="ans-quote">' + esc(cut(conf.text, 40)) + '</q>' : '<b>' + esc(conf.option) + '</b>를 보낼까요?') + '</span>' +
+      '<span class="ans-acts"><button type="button" class="ans-go" data-act="ans-send"' + at + '>보내기</button>' +
+      '<button type="button" class="ans-cancel" data-act="ans-cancel"' + at + '>취소</button></span></div>';
   }
 
   // Answered decisions the server page keeps on the card: every answer without a delivery proof yet, plus the ones this page
@@ -292,6 +305,7 @@
     html += '<div class="dline rec">추천: ' + esc(rec || '-') + ' - ' + esc(d.reason) + '</div>' +
       '<div class="dline from">대화: ' + esc(whereLabel(s)) + '</div>' +
       '<div class="dline when">⏱ ' + esc(when(d.createdAt, s.__now)) + '</div>' + box +
+      (d.askLive === true ? '<p class="ask-live">터미널에도 같은 질문이 열려 있어요 - 어느 쪽에서 답해도 둘 다 닫혀요</p>' : '') +
       (box ? '<div class="dline ans">답: <code>' + esc(answer) + '</code> ' + copyBtn(answer) + ' <span class="ans-hint">· ' + ANY_CHAT + '</span></div>'
         : '<div class="dline ans">답: ' + esc(answer) + ' ' + copyBtn(answer) + '</div>') +
       '</div><!--dcard-->';
@@ -409,7 +423,8 @@
       var tabbed = !!str(view.tabLabel);
       html += '<p class="oq"><span class="sym">❓</span>질문 알림 열림 - ' +
         (tabbed ? '답할 창: <code>' + esc(whereOf(view)) + '</code>' : qPane ? '<code>' + esc(qPane) + '</code>에서 답하기' : '질문이 뜬 창에서 답하기') + ' (읽기 전용): ' + esc(q.text) +
-        ' <span class="time">⏱ ' + esc(when(q.at, now)) + '</span> ' + focusBtn(fview, { live: live, focus: focus }) + '</p>';
+        ' <span class="time">⏱ ' + esc(when(q.at, now)) + '</span> ' + focusBtn(fview, { live: live, focus: focus }) + '</p>' +
+        (q.builtin === true ? '<p class="oq-builtin">터미널에서 답하세요 - 이 질문은 하네스 기본 질문창이라 상황판에서 닫을 수 없어요</p>' : '');
     }
 
     var changes = arr(s.changes);
@@ -426,6 +441,20 @@
       html += '<div class="decs">' + sent.map(sentLine).join('') +
         decs.slice(0, od ? decs.length : 2).map(function (d) { return decisionCard(d, view, ui, s); }).join('') +
         moreBtn(kd, Math.max(0, decs.length - 2), od) + '</div>';
+    }
+    var held = arr(s.decisions).filter(function (d) { return obj(d) && d.held; });
+    if (held.length) {
+      var heldKey = 'cv:' + n.id + ':held';
+      html += '<details class="held-decs"' + (ui.detailKeys ? ' data-open-key="' + esc(heldKey) + '"' + (own(expanded, heldKey) === true ? ' open' : '') : '') + '><summary>보류됨 ' + held.length + '개</summary>' +
+        held.map(function (d) {
+          var a = obj(own(ui.answers, str(d.id))) || {};
+          return '<p>#' + esc(d.id) + ' ' + esc(d.question) +
+            (live ? ' <button type="button" class="ans-write" data-act="ans-reopen" data-id="' + esc(d.id) + '">다시 열기</button>' : '') +
+            (str(a.error) ? ' <span role="alert">' + esc(a.error) + '</span>' : '') + '</p>';
+        }).join('') + '</details>';
+    }
+    if (arr(s.decisions).some(function (d) { return obj(d) && d.questionPrompt; })) {
+      html += '<p class="muted">질문창으로 옮김 · 여기서 답할 것 없음</p>';
     }
     var kx = 'detail:' + n.id, ox = !!own(expanded, kx);
     html += '<button type="button" class="detail-btn" data-act="exp" data-key="' + esc(kx) + '" aria-expanded="' + (ox ? 'true' : 'false') + '">' +
@@ -457,82 +486,39 @@
     ['x-err', '오류 있음', '이 대화를 처리하다 오류가 났음(예: 다른 곳이 상황판을 쓰는 중이라 갱신을 건너뜀). 다음에 잘 처리되면 사라짐']
   ];
 
-  function renderApp(viewModel, uiState) {
-    var vm = obj(viewModel) || {};
-    var ui = obj(uiState) || {};
-    var expanded = obj(ui.expanded) || {};
-    var now = toMs(vm.generatedAt);
-    var sessions = normSessions(vm, ui);
-    var byTab = { wait: [], run: [], done: [] };
-    sessions.forEach(function (n) { byTab[n.tab].push(n); });
-    var tab = own(byTab, ui.tab) ? ui.tab : (byTab.wait.length ? 'wait' : byTab.run.length ? 'run' : sessions.length ? 'done' : 'wait');
-    var byId = Object.create(null);
+  // kit: the card list's own building blocks for the conversation page (convo-view.js), the same functions with the same output
+  function renderOverview(viewModel, uiState) {
+    var vm = obj(viewModel) || {}, ui = obj(uiState) || {};
+    var sessions = normSessions(vm, ui), byId = Object.create(null);
     sessions.forEach(function (n) { byId[n.id] = n; });
-    var uiN = { expanded: expanded, byId: byId, wallNow: num(ui.wallNow), live: !!ui.live, focus: obj(ui.focus) };
-
-    var openCount = 0, blocked = 0, stale = 0;
+    var u = { expanded: obj(ui.expanded) || {}, byId: byId, wallNow: num(ui.wallNow), detailKeys: true,
+      live: ui.live === true, focus: obj(ui.focus), answers: obj(ui.answers) || {}, decs: decisionIndex(sessions) };
+    var open = 0, blocked = 0, stale = 0;
     sessions.forEach(function (n) {
-      openCount += openDecisions(n.raw).length;
+      open += openDecisions(n.raw).length;
       if (n.raw.statusKey === 'blocked' || n.raw.status === 'blocked') blocked++;
       if (arr(n.raw.chips).indexOf('오래됨') >= 0) stale++;
     });
-    // answer controls (server page): page state per decision (page.js) and decision id -> {d, s} for the plan Q&A rows
-    uiN.live = ui.live === true;
-    uiN.answers = obj(ui.answers) || {};
-    uiN.decs = decisionIndex(sessions);
-
-    // left sidebar: 3 tabs, each with project -> conversation links
-    var nav = '<nav class="toc' + (ui.tocOpen ? ' open' : '') + '" aria-label="목차">' +
-      '<button type="button" class="toc-toggle" data-act="toc" aria-expanded="' + (ui.tocOpen ? 'true' : 'false') + '">☰ 목차</button>' +
-      '<div class="toc-body"><div role="tablist" aria-orientation="vertical">';
-    TABS.forEach(function (t) {
-      var list = byTab[t.key];
-      var active = t.key === tab;
-      var open = active || t.key !== 'done' || !!ui.doneOpen;
-      nav += '<div class="tabgrp' + (active ? ' active' : '') + '">' +
-        '<button type="button" role="tab" class="tab" id="tab-' + t.key + '" data-act="tab" data-tab="' + t.key + '" aria-selected="' + (active ? 'true' : 'false') + '">' +
-        esc(t.label) + ' <span class="n">' + list.length + '</span></button>';
-      if (open && list.length) {
-        nav += '<ul class="toclist">';
-        groupByProject(list).forEach(function (grp) {
-          nav += '<li class="proj">📁 ' + esc(grp.project) + '</li>';
-          grp.items.forEach(function (n) {
-            nav += '<li><a class="toclink" href="#' + n.dom + '" data-goto="' + n.dom + '" data-tab="' + t.key + '">' +
-              (str(n.raw.workName) ? '<span class="tag">[' + esc(n.raw.workName) + ']</span> ' : '') + esc(whereLabel(n.raw)) + '</a></li>';
-          });
-        });
-        nav += '</ul>';
-      }
-      nav += '</div>';
-    });
-    nav += '</div></div></nav>';
-
-    var main = '<main class="main"><header class="sum">' +
-      '<p class="sumline">결정 대기 ' + openCount + ' · 막힘 ' + blocked + ' · 오래됨 ' + stale + ' · ⏱ 마지막 갱신 ' + hhmm(now) + '</p>' +
-      '<p class="note">브리핑이 켜진 대화 ' + sessions.length + '개만 보입니다 - 설치 전부터 열려 있던 대화는 새로 열어야 나타납니다</p>' +
-      (g.BriefAlarm ? '<p class="sum-tools">' + g.BriefAlarm.soundButtonHtml() + '</p>' : '') + '</header>';
-
-    var label = TABS.filter(function (t) { return t.key === tab; })[0].label;
-    main += '<section class="tabpanel" role="tabpanel" aria-labelledby="tab-' + tab + '" data-tab="' + tab + '"><h2>' + esc(label) + '</h2>';
-    if (!sessions.length) {
-      main += '<div class="empty"><p class="big">아직 보고 없음</p><p class="muted">• 브리핑이 켜진 대화가 작업 턴을 끝내면 여기에 카드가 생깁니다</p></div>';
-    } else if (!byTab[tab].length) {
-      main += '<p class="empty muted">• 이 탭에 해당하는 대화가 없습니다</p>';
-    } else {
-      if (!ui.live && openCount) main += '<p class="note ro">이 페이지는 보기 전용입니다 - 답은 아무 대화창에 /decide 로, 또는 실시간 상황판에서</p>';
-      groupByProject(byTab[tab]).forEach(function (grp) {
-        main += '<h3 class="projh">📁 ' + esc(grp.project) + '</h3>';
-        grp.items.forEach(function (n) { main += card(n, uiN, now); });
+    var html = '<div class="overview"><header class="sum"><p class="sumline">결정 대기 ' + open + ' · 막힘 ' + blocked +
+      ' · 오래됨 ' + stale + ' · ⏱ 마지막 갱신 ' + hhmm(vm.generatedAt) + '</p><p class="note">브리핑이 켜진 대화 ' +
+      sessions.length + '개만 보입니다 - 설치 전부터 열려 있던 대화는 새로 열어야 나타납니다</p></header>';
+    if (!sessions.length) html += '<div class="empty"><p class="big">아직 보고 없음</p><p class="muted">• 브리핑이 켜진 대화가 작업 턴을 끝내면 여기에 카드가 생깁니다</p></div>';
+    if (!u.live && open) html += '<p class="note ro">이 페이지는 보기 전용입니다 - 답은 아무 대화창에 /decide 로, 또는 실시간 상황판에서</p>';
+    groupByProject(sessions).forEach(function (grp) {
+      html += '<h3 class="projh">📁 ' + esc(grp.project) + '</h3>';
+      grp.items.forEach(function (n) {
+        html += '<button type="button" class="more" data-sh="open" data-sid="' + esc(n.id) + '">대화 페이지 열기 · ' +
+          esc(whereLabel(n.raw)) + '</button>' + card(n, u, toMs(vm.generatedAt));
       });
-    }
-    main += '</section>';
-
-    main += '<section class="legend"><button type="button" class="legend-btn" data-act="legend" aria-expanded="' + (ui.legendOpen ? 'true' : 'false') + '">ℹ 표시 뜻 ' + (ui.legendOpen ? '▴' : '▾') + '</button>' +
-      '<ul class="legend-list"' + (ui.legendOpen ? '' : ' hidden') + '>' +
-      LEGEND.map(function (l) { return '<li>' + chip(l[0], l[1]) + ' = ' + esc(l[2]) + '</li>'; }).join('') + '</ul></section></main>';
-
-    return '<div class="app" data-tab="' + tab + '">' + nav + main + '</div>';
+    });
+    return html + '</div>';
   }
 
-  g.BriefView = { renderApp: renderApp, escapeHtml: esc, TABS: TABS };
+  g.BriefView = {
+    renderOverview: renderOverview, escapeHtml: esc, TABS: TABS, legend: LEGEND,
+    kit: {
+      decisionCard: decisionCard, answerBox: answerBox, confirmRow: confirmRow, sentLine: sentLine, row: row, truthChip: truthChip,
+      appliedChip: appliedChip, copyBtn: copyBtn, flowSvg: flowSvg, whereLabel: whereLabel, esc: esc
+    }
+  };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

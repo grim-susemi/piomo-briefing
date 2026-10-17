@@ -417,11 +417,32 @@ export function createServerHost(options) {
     const d = e.driver;
     const snap = await d.readSnapshot();
     const vm = await d.buildViewModel(snap, d.now());
+    // '<sha>.<ext>' of every report image of this model: the board serves /assets/<name> only for these
+    const refs = new Set();
+    for (const s of Array.isArray(vm?.sessions) ? vm.sessions : []) {
+      for (const r of Array.isArray(s?.reports) ? s.reports : []) {
+        for (const img of Array.isArray(r?.images) ? r.images : []) {
+          if (typeof img?.src === 'string' && img.src.startsWith('assets/')) refs.add(img.src.slice('assets/'.length));
+        }
+      }
+    }
+    e.assetRefs = refs;
     if (vm && typeof vm === 'object') {
       if (!Number.isInteger(vm.seq)) vm.seq = snap && snap.published && Number.isInteger(snap.published.seq) ? snap.published.seq : 0;
       if (vm.gen === undefined) vm.gen = d.generation;
     }
     return vm;
+  }
+
+  // /assets/<name> is served only while the CURRENT model references it: the references of the latest built model are
+  // reused while published.json is unchanged (stat before build, like the poller), otherwise the model is rebuilt first.
+  async function assetAllowed(e, name) {
+    const k = await statKey();
+    if (!e.assetRefs || e.assetKey !== k) {
+      await buildVm(e);
+      e.assetKey = k;
+    }
+    return e.assetRefs.has(name);
   }
 
   function entryError(e, k, err) {
@@ -777,6 +798,8 @@ export function createServerHost(options) {
       getPage: async () => e.driver.getPage(await buildVm(e), e.token),
       getViewModel: () => buildVm(e),
       token: e.token,
+      assetsDir: join(stateDir, 'assets'),
+      assetAllowed: (name) => assetAllowed(e, name),
       onAnswer: (body) => writeVia(e, 'answer', body),
       onFocus: (body) => writeVia(e, 'focus', body),
       generation: e.driver.generation,

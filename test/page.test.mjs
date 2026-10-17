@@ -1,138 +1,27 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import vm from 'node:vm';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PAGE_SRC = fs.readFileSync(path.join(ROOT, 'src/page/page.js'), 'utf8');
-const VIEW_SRC = fs.readFileSync(path.join(ROOT, 'src/page/view.js'), 'utf8');
+import { makeController } from './fixtures/controller-dom.mjs';
 
 // Small fake browser. Time and timers are fully manual: nothing here waits on the wall clock.
 function makeEnv({ protocol = 'file:', throwingView = false, realView = false, token = '', fetchImpl = null } = {}) {
-  const byId = {};
-  const docListeners = {};
-  const winListeners = {};
-  const timers = [];
-  const intervals = [];
-  const fetches = [];
-  const sources = [];
-  const errors = [];
-  const rendered = [];
-  let cards = [];
-  let clock = 1000;
-
-  function el(tag) {
-    let html = '';
-    const e = {
-      tagName: tag, id: '', hidden: false, textContent: '', listeners: {}, attrs: {}, children: [],
-      classes: new Set(),
-      classList: { add: (c) => e.classes.add(c), remove: (c) => e.classes.delete(c), toggle() {} },
-      addEventListener(t, f) { e.listeners[t] = f; },
-      get firstChild() { return e.children[0] || null; },
-      appendChild(c) { if (c.id) byId[c.id] = c; e.children.push(c); return c; },
-      insertBefore(c, before) {
-        const index = e.children.indexOf(before);
-        assert.notEqual(index, -1, 'insertBefore reference belongs to parent');
-        if (c.id) byId[c.id] = c;
-        e.children.splice(index, 0, c);
-        return c;
-      },
-      setAttribute(k, v) { e.attrs[k] = v; },
-      getAttribute(k) { return e.attrs[k] ?? null; },
-      getBoundingClientRect() { return { top: 0, bottom: 100 }; },
-      querySelector(sel) {
-        if (sel !== '.app') return null;
-        const m = /data-tab="([^"]*)"/.exec(e.innerHTML);
-        return m ? { getAttribute: () => m[1] } : null;
-      },
-      querySelectorAll(sel) { return sel === '[data-card]' || sel === 'article.card' ? cards : []; },
-      contains() { return true; }, remove() {},
+  const e = makeController({ protocol, token, configure(ctx, rendered) {
+    if (!realView) ctx.BriefView.renderOverview = model => {
+      if (throwingView) throw new Error('boom');
+      rendered.push(model.seq);
+      return '<p>seq ' + model.seq + '</p>';
     };
-    Object.defineProperty(e, 'innerHTML', {
-      get: () => html,
-      set(value) {
-        html = value;
-        if (realView && e.id === 'app') {
-          for (const card of cards) delete byId[card.id];
-          cards = Array.from(value.matchAll(/<article\s+([^>]+)>/g), (match) => {
-            const card = el('ARTICLE');
-            for (const [, key, val] of match[1].matchAll(/([\w-]+)="([^"]*)"/g)) card.setAttribute(key, val);
-            card.id = card.getAttribute('id');
-            card.classes = new Set(card.getAttribute('class').split(/\s+/));
-            byId[card.id] = card;
-            return card;
-          });
-        }
-      },
-    });
-    return e;
-  }
-  const body = el('body');
-  const head = el('head');
-  head.appendChild = (c) => c;
-  const document = {
-    readyState: 'complete', visibilityState: 'visible', body, head, documentElement: { scrollHeight: 0 },
-    activeElement: null,
-    getElementById: (id) => byId[id] || null, createElement: el,
-    querySelector: (sel) => (token && sel === 'meta[name="omo-board-token"]' ? { getAttribute: () => token } : null),
-    addEventListener(t, f) { (docListeners[t] ||= []).push(f); },
-  };
-  let selection = { isCollapsed: true, toString: () => '' };
-  class FakeEventSource {
-    constructor(url) { this.url = url; this.handlers = {}; sources.push(this); }
-    addEventListener(t, f) { this.handlers[t] = f; }
-  }
-  const scrolls = [];
-  const ctx = {
-    document, scrollY: 0, innerHeight: 900,
-    scrollTo(x, y) { scrolls.push(y); ctx.scrollY = y; },
-    setInterval(fn, ms) { intervals.push({ fn, ms }); return intervals.length; },
-    setTimeout(fn, ms) { const t = { fn, ms, at: clock + ms }; timers.push(t); return t; },
-    clearTimeout(t) { const index = timers.indexOf(t); if (index !== -1) timers.splice(index, 1); },
-    addEventListener(t, f) { (winListeners[t] ||= []).push(f); },
-    getSelection: () => selection,
-    console: { error: (...a) => errors.push(a) },
-    BriefView: {
-      escapeHtml: (s) => String(s),
-      renderApp(model) {
-        if (throwingView) throw new Error('boom');
-        rendered.push(model.seq);
-        return `<div class="app" data-tab="run">seq ${model.seq}</div>`;
-      },
-    },
-    location: { protocol },
-  };
-  if (protocol.startsWith('http')) {
-    ctx.fetch = (url, opts) => {
-      fetches.push({ url, opts });
-      return fetchImpl && url !== '/data.json' ? fetchImpl(url, opts) : new Promise(() => {});
-    };
-    ctx.EventSource = FakeEventSource;
-  }
-  if (realView) vm.runInNewContext(VIEW_SRC, ctx, { filename: 'view.js' });
-  vm.runInNewContext(PAGE_SRC, ctx, { filename: 'page.js' });
-  const page = ctx.BriefPage;
-  page.state.now = () => clock;
-  return {
-    page, ctx, byId, timers, intervals, fetches, sources, errors, rendered, scrolls, document,
-    badge: byId['new-badge'], status: byId['live-status'], link: byId['live-link'],
-    advance(ms) {
-      const until = clock + ms;
-      for (;;) {
-        timers.sort((a, b) => a.at - b.at);
-        if (!timers.length || timers[0].at > until) break;
-        const t = timers.shift();
-        clock = t.at;
-        t.fn();
-      }
-      clock = until;
-    },
-    setCards(c) { cards = c; },
-    setSelection(text) { selection = { isCollapsed: !text, toString: () => text }; },
-    fireDoc(t) { (docListeners[t] || []).forEach((f) => f({ target: body })); },
-  };
+    if (fetchImpl) {
+      const pending = ctx.fetch;
+      ctx.fetch = (url, opts) => {
+        const result = pending(url, opts);
+        if (url === '/data.json') return result;
+        return fetchImpl(url, opts);
+      };
+    }
+  } });
+  e.setSelection = text => { e.selection.isCollapsed = !text; e.selection.toString = () => text; };
+  e.fireDoc = type => e.document.listeners[type]?.({ target: e.byId.main });
+  return e;
 }
 const data = (seq, extra = {}) => ({ seq, generatedAt: 0, sessions: [], ...extra });
 
@@ -150,8 +39,10 @@ test('focus click POSTs exactly {sessionId} with the page token; result is kept 
   for (const status of [200, 502]) {
     const e = makeEnv({ protocol: 'http:', token: 'tok', fetchImpl: async () => ({ ok: status === 200, status }) });
     assert.equal(e.page.state.ui.live, true);
-    const btn = { getAttribute: (k) => (k === 'data-act' ? 'focus' : k === 'data-session' ? 's1' : null), hasAttribute: () => false };
-    e.byId.app.listeners.click({ target: { closest: () => btn } });
+    const btn = e.document.createElement('button');
+    btn.setAttribute('data-act', 'focus'); btn.setAttribute('data-session', 's1');
+    e.byId.main.appendChild(btn);
+    e.byId.app.listeners.click({ target: btn });
     assert.equal(e.fetches.length, 2);
     const call = e.fetches[1];
     assert.equal(call.url, '/focus');
@@ -198,7 +89,7 @@ test('larger seq applies, stale seq is ignored, and only changed real-view cards
   v.page.receive(data(2, { sessions: [{ ...alpha, headline: 'after' }, { ...beta }] }));
   const changed = v.byId['c-alpha-0'];
   assert.ok(changed, 'actual renderer assigns a DOM id distinct from the session id');
-  assert.equal(v.byId.alpha, undefined);
+  assert.equal(v.byId.alpha, null);
   assert.equal(changed.classes.has('flash'), true, 'changed session found through data-card');
   assert.equal(v.byId['c-beta-1'].classes.has('flash'), false, 'equal session JSON does not glow');
   v.advance(899);
@@ -304,7 +195,11 @@ test('input, textarea, contenteditable and pointer holds release within 300 ms o
     const e = makeEnv();
     e.page.receive(data(1));
     e.advance(100);
-    if (active) e.document.activeElement = active;
+    if (active) {
+      const el = e.document.createElement(active.tagName);
+      el.isContentEditable = active.isContentEditable;
+      e.byId.main.appendChild(el); el.focus();
+    }
     else e.fireDoc('pointerdown');
     assert.equal(e.page.busy(), true);
     e.page.receive(data(2));
@@ -363,28 +258,25 @@ test('a throwing view is reported on console and on screen', () => {
   assert.match(e.byId.app.innerHTML, /fatal/);
 });
 
-test('scroll anchor: the first card visible at the top keeps its on-screen position', () => {
+test('region anchor: the first stable block visible inside main keeps its on-screen position', () => {
   const e = makeEnv();
-  const card = (id, top, bottom) => ({
-    getAttribute: () => id,
-    getBoundingClientRect: () => ({ top: card.tops[id] ?? top, bottom }),
-  });
-  card.tops = {};
-  const a = card('A', -300, -10); // scrolled past
-  const b = card('B', 40, 400); // first visible
-  e.setCards([a, b, card('C', 400, 800)]);
-  e.ctx.scrollY = 1000;
-  e.page.receive(data(1)); // first model: renders and restores
+  e.page.receive(data(1));
+  const main = e.byId.main;
+  main.innerHTML = '<div data-block="A">past</div><div data-block="B">visible</div><div data-block="C">next</div>';
+  const [a, b, c] = main.querySelectorAll('[data-block]');
+  const rect = (top, height) => ({ top, height, left: 0, width: 1000 });
+  e.ctx.rects.set(a, rect(-300, 290));
+  e.ctx.rects.set(b, rect(40, 360));
+  e.ctx.rects.set(c, rect(400, 400));
+  main.scrollTop = 1000;
   const anchor = e.page.captureAnchor();
   assert.deepEqual({ id: anchor.id, top: anchor.top }, { id: 'B', top: 40 });
-  // the card above grew: B is now 250 px lower on screen after re-render
-  card.tops.B = 290;
-  e.scrolls.length = 0;
+  e.ctx.rects.set(b, rect(290, 360));
   e.page.restoreAnchor(anchor, 1000);
-  assert.deepEqual(e.scrolls, [1250], 'scrolled by +250 to keep B where it was');
-  // anchor card vanished: plain old scroll position
+  assert.equal(main.scrollTop, 1250, 'scrolled by +250 to keep B where it was');
   e.page.restoreAnchor({ id: 'gone', top: 1 }, 777);
-  assert.equal(e.scrolls.at(-1), 777);
+  assert.equal(main.scrollTop, 777);
+  assert.deepEqual(e.scrolls, [], 'window scrolling is not used');
 });
 
 test('hooks run around apply and a throwing hook does not stop the apply', () => {
@@ -398,10 +290,10 @@ test('hooks run around apply and a throwing hook does not stop the apply', () =>
   assert.ok(e.errors.length >= 1, 'hook failure reported');
 });
 
-test('file live-server link is before the board and hides when its loopback URL is removed', () => {
+test('file live-server link is above tabs in the persistent wrap and hides when its loopback URL is removed', () => {
   const e = makeEnv();
-  const children = e.document.body.children;
-  assert.ok(children.indexOf(e.link) < children.indexOf(e.byId.app), 'link is above the board');
+  const children = e.byId.tabs.parentNode.children;
+  assert.ok(children.indexOf(e.link) < children.indexOf(e.byId.tabs), 'link is above the tabs');
   e.page.receive(data(1, { server: { url: 'http://127.0.0.1:47317/' } }));
   assert.equal(e.link.hidden, false);
   assert.match(e.link.textContent, /실시간 보기 열기/);

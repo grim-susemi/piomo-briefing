@@ -26,33 +26,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 code { font-family: var(--mono); font-size: 12px; }
 .app { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 100vh; }
 
-/* left sidebar */
-.toc {
-  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
-  border-right: 1px solid var(--line); background: var(--panel); padding: 10px 8px;
-}
-.toc-toggle { display: none; }
-.tabgrp { margin-bottom: 6px; }
-.tab {
-  display: flex; justify-content: space-between; align-items: center; width: 100%;
-  padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; font-weight: 700; text-align: left;
-}
-.tab:hover { background: var(--gray-bg); }
-.tab[aria-selected="true"] { background: var(--spy-bg); color: var(--accent); }
-.tab .n { min-width: 22px; padding: 0 6px; border-radius: 10px; background: var(--gray-bg); color: var(--muted); font-size: 11px; text-align: center; }
-.toclist { list-style: none; margin: 2px 0 0; padding: 0 0 0 6px; }
-.toclist .proj { margin-top: 4px; color: var(--muted); font-size: 11px; }
-.toclink {
-  display: block; padding: 2px 6px 2px 14px; border-left: 2px solid transparent; border-radius: 0 4px 4px 0;
-  color: var(--fg); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.toclink:hover { background: var(--gray-bg); }
-.toclink.spy { border-left-color: var(--accent); background: var(--spy-bg); color: var(--accent); }
-
 /* main */
 .main { padding: 12px 18px 40px; max-width: 1100px; }
-/* room at the end so a TOC jump can bring even the last card to the top */
-.main::after { content: ""; display: block; height: 55vh; }
 .sum { margin-bottom: 8px; }
 .sumline { margin: 0; font-weight: 700; font-size: 14px; }
 .note { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
@@ -72,14 +47,14 @@ h2 { margin: 10px 0 4px; font-size: 16px; }
 .card.st-blocked { border-left-color: var(--red); }
 .card.flash { box-shadow: 0 0 0 3px var(--accent); }
 .ch { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
-.title { font-weight: 700; }
+.title { font-weight: 700; min-width: 0; overflow-wrap: anywhere; } /* a title without spaces wraps, never widens the card */
 .tag { color: var(--accent); font-weight: 600; }
 .time { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .ch .time { margin-left: auto; }
 .hl, .oq, .kv { margin: 3px 0; display: flex; gap: 5px; align-items: baseline; }
 .kv.path { flex-wrap: nowrap; padding-left: 0; }
 .oq { color: var(--yellow); font-weight: 600; }
-.sym { flex: none; width: 1.2em; text-align: center; color: var(--muted); }
+.sym { flex: none; min-width: 1.2em; text-align: center; color: var(--muted); } /* at least one column; an emoji (📄 ❓ 📁) is wider */
 .lbl { margin: 6px 0 2px; font-size: 11px; font-weight: 700; color: var(--muted); }
 .rows { list-style: none; margin: 0; padding: 0; }
 .row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; padding: 1px 0; }
@@ -159,11 +134,12 @@ h2 { margin: 10px 0 4px; font-size: 16px; }
 }
 
 /* buttons inside cards */
-.copy, .more, .detail-btn, .legend-btn, .toc-toggle {
+.copy, .more, .detail-btn, .legend-btn {
   border: 1px solid var(--line); background: var(--panel); border-radius: 5px; padding: 0 6px; font-size: 11px; line-height: 18px;
 }
 .copy:hover, .more:hover, .detail-btn:hover, .legend-btn:hover { border-color: var(--accent); color: var(--accent); }
 .more { margin: 3px 0 0 1.4em; }
+.overview > .more { overflow-wrap: anywhere; text-align: left; } /* 대화 페이지 열기 · <title>: wraps like .title */
 .detail-btn { margin-top: 6px; }
 .detail { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
 
@@ -195,10 +171,6 @@ h2 { margin: 10px 0 4px; font-size: 16px; }
 
 @media (max-width: 599px) {
   .app { grid-template-columns: minmax(0, 1fr); } /* 1fr alone grows to the widest nowrap line (collapsed plan summary) and the page scrolls sideways */
-  .toc { position: sticky; top: 0; z-index: 5; height: auto; max-height: 100vh; border-right: 0; border-bottom: 1px solid var(--line); padding: 6px 8px; }
-  .toc-toggle { display: inline-block; padding: 2px 10px; font-size: 13px; }
-  .toc .toc-body { display: none; padding-top: 6px; }
-  .toc.open .toc-body { display: block; max-height: 70vh; overflow-y: auto; }
   .main { padding: 8px 10px 30px; }
   .flow-wide { display: none; }
   .flow-narrow { display: block; }
