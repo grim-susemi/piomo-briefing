@@ -1,5 +1,6 @@
 /* omo-briefing conversation page (convo-view.js): shared tokens and primitives for all five panels.
- * --stabs-h is the sub-tab bar height; annotate.css sticks its tray immediately below it. */
+ * --stabs-h is the sub-tab bar height; annotate.css sticks its tray immediately below it. On a phone it holds a whole
+ * --hit (44 px) tab above the bar's hairline. A pressed sub-tab takes shell.css's shared pressed variant. */
 :root {
   --cv-pad-y: var(--sp-4); --cv-pad-x: var(--sp-6); --cv-gap: var(--sp-3); --cv-gap-s: var(--sp-2);
   --cv-radius: var(--r-lg); --cv-fs: var(--fs-base); --cv-fs-s: var(--fs-sm); --cv-fs-xs: var(--fs-xs);
@@ -123,11 +124,11 @@ table.t th { color: var(--muted); font-size: var(--cv-fs-s); font-weight: var(--
 .stabs .st:focus-visible, .scard-go:focus-visible, .cv-pick:focus-visible, .cv-page summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 @media (max-width: 1099px) { .rgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 599px) {
-  :root { --cv-pad-x: var(--sp-3); --cv-ico: 36px; --cv-fs-h1: 18px; }
+  :root { --cv-pad-x: var(--sp-3); --cv-ico: 36px; --cv-fs-h1: 18px; --stabs-h: calc(var(--hit) + var(--hair)); }
   .cv-top { flex-wrap: wrap; row-gap: var(--sp-1); }
   .cv-names { flex: 1 1 calc(100% - var(--cv-ico) - var(--sp-3)); }
   .stabs { gap: 2px; }
-  .stabs .st { gap: 2px; padding: 0 var(--sp-1); }
+  .stabs .st { gap: 2px; min-width: var(--hit); min-height: var(--hit); padding: 0 var(--sp-1); } /* visual-qa D1 */
   .stabs .c { padding: 0 var(--sp-1); }
   .grid4 { grid-template-columns: minmax(0, 1fr); }
   .rgrid { grid-template-columns: minmax(0, 1fr); }

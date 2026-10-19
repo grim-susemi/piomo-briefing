@@ -68,7 +68,7 @@ pre.prev { max-height: 260px; margin: 4px 0 0; padding: 8px 10px; overflow: auto
 @media (max-width: 599px) {
   .pop { bottom: 0; width: 100%; max-width: 100%; max-height: calc(100dvh - env(safe-area-inset-top) - var(--sp-4)); overflow-y: auto; padding: var(--sp-4) var(--sp-4) calc(var(--sp-4) + env(safe-area-inset-bottom)); border-bottom: 0; border-radius: var(--r-xl) var(--r-xl) 0 0; }
   .pop .seg { gap: var(--sp-2); }
-  .pop .seg button, .pop .ann-btn, .ann-clear .ann-btn { min-height: 44px; min-width: 44px; }
+  .pop .seg button, .pop .ann-btn, .ann-clear .ann-btn, .tray .ann-btn { min-height: 44px; min-width: 44px; }
   .pop .pb { gap: var(--sp-2); }
   .pop .kb { flex-basis: 100%; }
   .tray { gap: var(--sp-2); padding: var(--sp-2); }

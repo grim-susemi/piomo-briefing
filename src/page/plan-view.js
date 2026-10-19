@@ -21,7 +21,8 @@
   function lanesOf(plan) { var tasks = arr(plan.tasks); return arr(plan.waves).map(function (w) { var items = tasks.filter(function (t) { return t.wave === w.n; }); var done = items.filter(function (t) { return state(t, tasks) === 'done'; }).length; return { wave: w, tasks: items, done: done }; }); }
   function currentOf(lanes) { for (var i = 0; i < lanes.length; i++) if (lanes[i].done < lanes[i].tasks.length) return i; return -1; }
   function summary(plan, e) { return ic('list-todo') + ' [' + e(flat((plan.source || {}).slug)) + '] ' + e(stage(plan)) + ' · ' + ic('target') + ' ' + e(flat(plan.goal)); }
-  function copyBtn(value, e) { return '<button type="button" class="copy" data-copy="' + e(value) + '" title="복사">⧉ 복사</button>'; }
+  // named apart from its text, which page.js swaps for the copy result (복사됨 / 복사 실패) and back
+  function copyBtn(value, e) { return '<button type="button" class="copy" data-copy="' + e(value) + '" aria-label="복사" title="복사">⧉ 복사</button>'; }
   function toggle(key, open, label, e) { return '<button type="button" class="more plan-toggle" data-act="exp" data-key="' + e(key) + '" aria-expanded="' + (open ? 'true' : 'false') + '">' + label + '</button>'; }
   function render(plan, now, ui) {
     var e = ui.esc, expanded = ui.expanded || {}, id = str(plan.planId), key = 'plan:' + id, open = !!own(expanded, key);

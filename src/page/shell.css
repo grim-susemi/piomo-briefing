@@ -289,10 +289,12 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
   background: color-mix(in srgb, var(--c-primary) 80%, var(--c-main)); color: var(--c-on-primary);
 }
 
-/* pressed (visual-qa H5/G5): one variant for every shell control, deeper than hover and selected and shown at once. Only
- * the pressed button paints it, never its row or tab (an ancestor matches :active too); inside a selected tab or row a
- * press adds only a little on top of that fill. */
-:is(.sh-rb, .sh-ib, .sh-back, .sh-topen, .sh-tadd, .sh-chip, .sh-sh, .sh-tg, .sh-go, .sh-fav, .sh-pt, .sh-it, .sh-hr, .sh-act, .tb-go, .tb-x):active:not(:disabled) {
+/* pressed (visual-qa H5/G5): one variant for every shell control and the conversation sub-tabs (convo.css .stabs .st),
+ * deeper than hover and selected and shown at once. Only the pressed button paints it, never its row or tab (an ancestor
+ * matches :active too); inside a selected tab or row a press adds only a little on top of that fill. The sub-tab is its
+ * own selector here so the :is() list keeps its specificity. */
+:is(.sh-rb, .sh-ib, .sh-back, .sh-topen, .sh-tadd, .sh-chip, .sh-sh, .sh-tg, .sh-go, .sh-fav, .sh-pt, .sh-it, .sh-hr, .sh-act, .tb-go, .tb-x):active:not(:disabled),
+.stabs .st:active:not(:disabled) {
   background: var(--press); box-shadow: inset 0 0 0 1px var(--press-edge); transition-duration: 0s;
 }
 .sh-topen:active:not(:disabled) { background: linear-gradient(var(--press), var(--press)), var(--sh-strip); }
@@ -303,7 +305,8 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
   .sh-ch { opacity: 1; } /* no hover to show the section chevron on a touch screen */
 }
 /* below 900 px the sidebar is an overlay that the rail, » and Ctrl+\ open (shell.js: toggleSide with narrow = peek) and its
- * header's close button or Ctrl+\ shuts; the selected rail item stays filled there too */
+ * header's close button, Ctrl+\ or Escape shuts; while it is open shell.js makes .sh-wrap inert; the selected rail item
+ * stays filled there too */
 @media (max-width: 899px) {
   .sh-shell[data-side][data-peek] > .sh-side {
     position: absolute; z-index: 7; left: var(--sh-rail-w); top: 0; bottom: 0;

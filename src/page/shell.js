@@ -28,12 +28,15 @@
  *     input, filter chips and the empty list region [data-sh-part="list"]; rendered once, kept current by sync()
  *   g.BriefShell.skeleton(st) -> html    .sh-shell > #rail + #edge + #side + .sh-wrap > #tabs + #main
  *   g.BriefShell.sync(root, st)          root = .sh-shell: data-side/data-peek/data-view, --sw, frame title/chips/search.
+ *     Below 900 px the open overlay makes .sh-wrap (tab bar, banners, #main: the column it covers) inert; never wider.
  *     Under prefers-reduced-motion a flip of data-side/data-peek cross-fades instead of sliding: .sh-wrap fades in when
  *     the docked sidebar opened or closed, the sidebar when it became visible (Web Animations, from the opacity an
  *     interrupted fade had reached)
  *   g.BriefShell.bind(root, hooks) -> unbind   hooks.dispatch(action) for clicks ([data-sh]), double-clicks (pin a tab),
  *     the search input, the edge hover, leaving the peek panel, the resize drag, the resize handle's keys (ArrowLeft /
  *     ArrowRight: 16 px, Home / End: 200 / 480 px, the same resize action as the drag) and Ctrl+\ (preventDefault).
+ *     Below 900 px Escape shuts the open overlay (unpeek, preventDefault) unless a dialog is open (the annotation
+ *     composer sits above it and takes Escape first); crossing 900 px re-applies sync()'s inert cover.
  *     hooks.narrow() / hooks.now() default to matchMedia('(max-width: 899px)') and Date.now().
  *   g.BriefShell.inbox(model, st) -> {wait, done, ans, held}; badge(model, st) = wait + done items (the inbox count; held
  *     decisions never count, C-HOLD 4). On the server page (st.live) every open decision in 'wait' carries 보류
@@ -785,6 +788,7 @@
       crossFade(root, side0 !== side, (side === 'open' && side0 !== 'open') || (peek === 'true' && peek0 !== 'true'));
     }
     if (root.style && typeof root.style.setProperty === 'function') root.style.setProperty('--sw', width(st) + 'px');
+    cover(root, narrowNow());
     var title = root.querySelector('[data-sh-part="title"]');
     if (title) title.textContent = VIEW_TITLE[view];
     var input = root.querySelector('[data-sh="search"]');
@@ -803,6 +807,23 @@
       else chips[i].classList.remove('on');
       chips[i].setAttribute('aria-pressed', on ? 'true' : 'false');
     }
+  }
+
+  function narrowNow() { return !!(typeof g.matchMedia === 'function' && g.matchMedia(NARROW).matches); }
+  // visual-qa I1 (task-1 deviations D1 overlay): below 900 px the open sidebar lies over the column beside the rail, and
+  // that column is inert while it does - no Tab stop, click or touch reaches what the panel hides. The rail stays usable.
+  function cover(root, narrow) {
+    var wrap = root.querySelector('.sh-wrap');
+    if (!wrap) return;
+    if (narrow && root.getAttribute('data-peek') === 'true') wrap.setAttribute('inert', '');
+    else wrap.removeAttribute('inert');
+  }
+  // visual-qa I2: Escape shuts the narrow overlay when it is the top layer. An open dialog (the annotation composer lies
+  // above the overlay) takes Escape first; a key another handler took, a modified key or an IME composition's is left.
+  function dismissKey(e, root, doc, narrow) {
+    if (!e || e.key !== 'Escape' || e.defaultPrevented || e.isComposing || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return false;
+    if (!narrow || root.getAttribute('data-peek') !== 'true') return false;
+    return !(doc && typeof doc.querySelector === 'function' && doc.querySelector('[role="dialog"]'));
   }
 
   // Ctrl+\ (no other modifier) toggles the sidebar; the browser's own use of the key is suppressed
@@ -845,8 +866,7 @@
   function bind(root, hooks) {
     var h = hooks || {};
     var doc = h.doc || root.ownerDocument || g.document;
-    var narrow = typeof h.narrow === 'function' ? h.narrow
-      : function () { return !!(typeof g.matchMedia === 'function' && g.matchMedia(NARROW).matches); };
+    var narrow = typeof h.narrow === 'function' ? h.narrow : narrowNow;
     var now = typeof h.now === 'function' ? h.now : function () { return Date.now(); };
     var send = function (a) { if (a) h.dispatch(a); };
     var listeners = [];
@@ -899,8 +919,14 @@
     });
     on(doc, 'keydown', function (e) {
       var a = keyAction(e);
-      if (a) { a.narrow = narrow(); send(a); }
+      if (a) { a.narrow = narrow(); send(a); return; }
+      if (!dismissKey(e, root, doc, narrow())) return;
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      send({ type: 'unpeek' });
     });
+    // a resize or rotation across 900 px turns the open overlay into the docked sidebar and back: the cover follows
+    var mq = typeof g.matchMedia === 'function' ? g.matchMedia(NARROW) : null;
+    if (mq && typeof mq.addEventListener === 'function') on(mq, 'change', function () { cover(root, narrow()); });
     return function unbind() {
       listeners.forEach(function (l) { l[0].removeEventListener(l[1], l[2]); });
       listeners = [];

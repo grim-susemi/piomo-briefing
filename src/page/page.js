@@ -211,9 +211,34 @@
       if (!Object.prototype.hasOwnProperty.call(state.ui.expanded, k)) state.ui.expanded[k] = true;
     });
   }
+  // The narrow sidebar overlay (visual-qa I1/I2): shell.js keeps the column under it inert while it is open. A focus the
+  // overlay covered moves into it; once it shuts, a focus it hid goes back to the control that opened it (the rail button,
+  // », or the control Ctrl+\ came from; found again by its focusKey if a render replaced it), else to ».
+  var overlayOpener = null;
+  function overlayOpen() { return !!(g.matchMedia && g.matchMedia('(max-width: 899px)').matches) && state.ui.peek === true; }
+  function overlayFocus(open, before) {
+    var side = shell.querySelector('.sh-side'), wrap = shell.querySelector('.sh-wrap'), a = doc.activeElement;
+    var away = !a || a === doc.body;
+    if (open) {
+      var from = !away && !side.contains(a) && !wrap.contains(a) ? a
+        : before && before !== doc.body && shell.contains(before) && !side.contains(before) ? before : null;
+      overlayOpener = from ? { el: from, key: focusKey(from) } : null;
+      var into = side.querySelector('.sh-head [data-sh="toggleSide"]');
+      if (into && (away || wrap.contains(a))) into.focus({ preventScroll: true });
+      return;
+    }
+    var o = overlayOpener, back = null;
+    overlayOpener = null;
+    if (!away && !side.contains(a)) return;
+    if (o && shell.contains(o.el)) back = o.el;
+    else if (o) back = Array.prototype.filter.call(shell.querySelectorAll(CONTROLS), function (el) { return !side.contains(el) && focusKey(el) === o.key; })[0];
+    if (!back || side.contains(back)) back = shell.querySelector('.sh-topen');
+    if (back) back.focus({ preventScroll: true });
+  }
   function dispatch(action) {
     var active = doc.activeElement;
     var sideToggle = active && active.getAttribute && active.getAttribute('data-sh') === 'toggleSide';
+    var overlay = overlayOpen();
     state.ui = g.BriefShell.reduce(state.ui, action);
     g.BriefShell.persist(undefined, state.ui);
     render();
@@ -223,6 +248,7 @@
       var target = shell.querySelector(shown ? '.sh-head [data-sh="toggleSide"]' : '.sh-topen');
       if (target) target.focus({ preventScroll: true });
     }
+    if (overlayOpen() !== overlay) overlayFocus(!overlay, active);
   }
   function open(sid, sub) { dispatch({ type: 'open', sid: sid, sub: sub, now: state.now() }); }
   // Match control identity, including the radio value and containing card/block, not just the first field in a group.

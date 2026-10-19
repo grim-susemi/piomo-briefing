@@ -783,3 +783,27 @@ test('C-HOLD: 보류 on every open decision in 개요, 결정 and 보고서, its
   const dec = render(ctx, A, 'dec');
   assert.equal((dec.match(/data-act="ans-reopen" data-id="92"/g) || []).length, 1, '#92 sits under 보류됨 with 다시 열기');
 });
+
+test('conversation sub-tabs: a press paints the shared pressed variant at once; on a phone each tab is a 44 px target its bar holds (A6-03)', () => {
+  const strip = (f) => read(f).replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = (css) => [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((r) => ({ sels: r[1].split(',').map((x) => x.replace(/\s+/g, ' ').trim()), body: r[2] }));
+  const pressed = rules(strip('src/page/shell.css')).filter((r) => r.sels.includes('.stabs .st:active:not(:disabled)'));
+  assert.equal(pressed.length, 1, 'the sub-tab joins the shared pressed rule');
+  assert.ok(pressed[0].sels.some((s) => s.startsWith(':is(.sh-rb')), 'the very rule the shell controls use, not a copy of it');
+  assert.match(pressed[0].body, /background: var\(--press\); box-shadow: inset 0 0 0 1px var\(--press-edge\); transition-duration: 0s;/);
+  const css = strip('src/page/convo.css'), at = css.indexOf('@media (max-width: 599px)');
+  assert.ok(at > 0);
+  const wide = rules(css.slice(0, at)), phone = rules(css.slice(at));
+  assert.ok(wide.some((r) => r.sels.includes('.stabs .st') && /height: 30px/.test(r.body)), 'pointer widths keep the 30 px tab');
+  assert.ok(phone.some((r) => r.sels.includes('.stabs .st') && /min-height: var\(--hit\)/.test(r.body) && /min-width: var\(--hit\)/.test(r.body)), 'a phone tab is at least --hit square');
+  assert.ok(phone.some((r) => r.sels.includes(':root') && /--stabs-h: calc\(var\(--hit\) \+ var\(--hair\)\)/.test(r.body)),
+    'the phone bar is the 44 px tab plus its hairline, so overflow-y: hidden clips none of the target');
+});
+
+test('the conversation page draws the open-question line as one sentence beside its icon, like the board card (B6-01)', () => {
+  const ctx = load(), s = clone(A);
+  s.openQuestion = { text: '문서 말투는 존댓말로 할까요?', at: NOW, paneId: s.paneId };
+  const line = /<p class="oq">([\s\S]*?)<\/p>/.exec(render(ctx, s, 'ov'));
+  assert.ok(line);
+  assert.match(line[1], /^<span class="sym"><svg [^>]*><use href="#i-circle-question-mark"><\/use><\/svg><\/span><span class="oq-b">질문 알림 열림 - [\s\S]*<span class="oq-t">문서 말투는 존댓말로 할까요\?<\/span> <span class="time">[\s\S]*<\/span>$/);
+});

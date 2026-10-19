@@ -600,3 +600,57 @@ test('server page: malformed decisions and answer state render without throwing;
   assert.equal(count(html, /data-act="ans-reply"/g), 0, 'answerKinds that is not a list offers no reply box');
   for (const bad of [null, 'x', 5, []]) assert.equal(typeof view.renderOverview(m, { live: true, answers: bad, tab: 'wait' }), 'string');
 });
+
+// A6-01 (visual-qa I3): the visible word sits in span[role=status], which Chrome leaves out of the button's name, so the
+// button names itself; the status label is feedback only
+test('copy buttons name themselves (aria-label 복사), apart from the status label their feedback rewrites (A6-01)', () => {
+  const view = loadView();
+  assert.equal(view.kit.copyBtn('C:/a "b"'), '<button type="button" class="copy" data-copy="C:/a &quot;b&quot;" aria-label="복사" title="복사">' +
+    '<svg class="ic ic-xs" aria-hidden="true" focusable="false"><use href="#i-copy"></use></svg> <span data-copy-label role="status">복사</span></button>');
+  const html = view.renderOverview(FIXTURE, { expanded: expandAll(FIXTURE) });
+  const buttons = html.match(/<button\b[^>]*\bdata-copy="[^"]*"[^>]*>/g) || [];
+  assert.ok(buttons.length > 0, 'the overview draws copy buttons');
+  for (const b of buttons) assert.match(b, /\baria-label="복사"/, b);
+});
+
+const cssRules = (css) => [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((r) => ({ sels: r[1].split(',').map((x) => x.replace(/\s+/g, ' ').trim()), body: r[2] }));
+const noComments = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+// the inside of the one at-rule block that starts with head, and the stylesheet without it
+function atBlock(css, head) {
+  const i = css.indexOf(head);
+  assert.ok(i >= 0, head);
+  let depth = 0, j = css.indexOf('{', i);
+  const open = j;
+  for (; j < css.length; j++) { if (css[j] === '{') depth++; else if (css[j] === '}' && --depth === 0) break; }
+  return { inside: css.slice(open + 1, j), outside: css.slice(0, i) + css.slice(j + 1) };
+}
+
+// B6-01: every text run of the open-question line used to be its own flex item, so at 390 they shrank into narrow columns
+test('the open-question line is one sentence beside its icon: the row holds the icon and span.oq-b only; phones flow it inline (B6-01)', () => {
+  const view = loadView();
+  const model = clone(FIXTURE);
+  model.sessions[0].openQuestion = { text: '문서 말투는 존댓말로 할까요?', at: model.generatedAt, paneId: 'p1' };
+  const line = /<p class="oq">([\s\S]*?)<\/p>/.exec(view.renderOverview(model, {}));
+  assert.ok(line, 'the board card draws the open-question line');
+  assert.match(marks(line[1]), /^<span class="sym">\[circle-question-mark\]<\/span><span class="oq-b">질문 알림 열림 - [\s\S]*<span class="oq-t">문서 말투는 존댓말로 할까요\?<\/span> <span class="time">[\s\S]*<\/span>$/);
+  const css = noComments('src/page/page.css'), phone = atBlock(css, '@media (max-width: 599px)');
+  const wide = cssRules(phone.outside).filter((r) => r.sels.includes('.oq-b'));
+  assert.deepEqual(wide.map((r) => r.body.trim()), ['display: contents;'], 'wider screens: no box of its own, the row lays out exactly as before');
+  const narrow = cssRules(phone.inside).filter((r) => r.sels.includes('.oq-b'));
+  assert.equal(narrow.length, 1);
+  assert.match(narrow[0].body, /display: block;/);
+  assert.match(narrow[0].body, /min-width: 0;/);
+  assert.ok(cssRules(phone.inside).some((r) => r.sels.includes('.oq-b code') && /word-break: keep-all/.test(r.body)), 'the location keeps its Korean words whole');
+});
+
+// B6-02 (D1): at <= 599 px every phone control is a 44 px target; the compact boxes stay on wider screens
+test('phone targets: card detail and expansion buttons and the annotation tray actions are 44 px below 600 px only (B6-02)', () => {
+  const big = (css, sel) => cssRules(css).some((r) => r.sels.includes(sel) && /min-height: (?:44px|var\(--hit\))/.test(r.body) && /min-width: (?:44px|var\(--hit\))/.test(r.body));
+  const page = atBlock(noComments('src/page/page.css'), '@media (max-width: 599px)');
+  const ann = atBlock(noComments('src/page/annotate.css'), '@media (max-width: 599px)');
+  for (const sel of ['.more', '.detail-btn']) assert.ok(big(page.inside, sel), sel + ' is a 44 px phone target');
+  assert.ok(big(ann.inside, '.tray .ann-btn'), 'the tray actions (목록 보기, 모두 지우기, Markdown 복사, send) are 44 px phone targets');
+  for (const [css, sel] of [[page.outside, '.more'], [page.outside, '.detail-btn'], [ann.outside, '.tray .ann-btn'], [ann.outside, '.ann-btn']]) {
+    assert.equal(big(css, sel), false, sel + ' keeps its compact box on wider screens');
+  }
+});

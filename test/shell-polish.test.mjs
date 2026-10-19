@@ -180,3 +180,92 @@ test('polish: text-only copy buttons (plan path, plan question) show success and
   }
   assert.deepEqual(e.errors, []);
 });
+
+test('polish: copy buttons keep one accessible name through success, failure and reset; only the visible label reports (A6-01)', async () => {
+  const e = env(), s = fixture.sessions[0];
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const label = button => (button.querySelector('[data-copy-label]') || button).textContent.trim();
+  const names = () => e.byId.main.querySelectorAll('[data-copy]').map(b => b.getAttribute('aria-label'));
+  const cycle = async button => {
+    const before = label(button);
+    assert.equal(button.getAttribute('aria-label'), '복사');
+    e.ctx.navigator.clipboard.writeText = async text => { e.ctx.copied = text; };
+    e.fire(button, 'click'); await settle();
+    assert.deepEqual([label(button), button.getAttribute('aria-label')], ['복사됨', '복사']);
+    e.advance(1200);
+    e.ctx.navigator.clipboard.writeText = () => Promise.reject(new Error('denied'));
+    e.document.execCommand = () => false;
+    e.fire(button, 'click'); await settle();
+    assert.deepEqual([label(button), button.getAttribute('aria-label')], ['복사 실패', '복사']);
+    e.advance(1200);
+    assert.deepEqual([label(button), button.getAttribute('aria-label')], [before, '복사']);
+    delete e.document.execCommand;
+  };
+  e.page.receive(fixture);
+  assert.ok(names().length > 0);
+  assert.deepEqual([...new Set(names())], ['복사'], 'every copy button on the board overview');
+  await cycle(e.byId.main.querySelector('[data-copy]'));
+  e.page.open(s.id, 'dec');
+  assert.ok(names().length > 0);
+  assert.deepEqual([...new Set(names())], ['복사'], 'every copy button on the conversation decision page');
+  e.page.open(s.id, 'plan');
+  for (const selector of ['.plan-path [data-copy]', '.plan-question [data-copy]']) await cycle(e.byId.main.querySelector(selector));
+  assert.deepEqual(e.errors, []);
+});
+
+test('polish: the phone sidebar overlay leaves the covered column inert, Escape shuts it and focus lands on a visible control (A6-02)', () => {
+  const e = env();
+  e.ctx.innerWidth = 390; // controller-dom matchMedia: below 900 px
+  e.page.receive(fixture);
+  const wrap = e.app.querySelector('.sh-wrap'), side = e.byId.side;
+  const topen = () => e.byId.tabs.querySelector('.sh-topen');
+  const escape = target => e.fire(target, 'keydown', { key: 'Escape' });
+  // » opens the overlay: focus moves into it; the tab bar and #main under it go inert, the rail and the panel do not
+  topen().focus(); e.fire(topen(), 'click');
+  assert.equal(e.page.state.ui.peek, true);
+  assert.equal(wrap.getAttribute('inert'), '');
+  assert.deepEqual([e.byId.rail.closest('[inert]'), side.closest('[inert]')], [null, null]);
+  assert.equal(side.contains(e.document.activeElement), true, 'focus is inside the overlay');
+  // Escape from the panel's last control shuts it; the column is live again and focus is back on »
+  const last = side.querySelectorAll('button').at(-1);
+  last.focus();
+  assert.equal(escape(last).defaultPrevented, true);
+  assert.equal(e.page.state.ui.peek, false);
+  assert.equal(wrap.hasAttribute('inert'), false);
+  assert.equal(e.document.activeElement, topen());
+  // a rail button opens it and keeps its focus; opening a conversation from the panel shuts it, focus back on that button
+  const conv = e.byId.rail.querySelector('[data-key="conv"]');
+  conv.focus(); e.fire(conv, 'click');
+  assert.equal(e.page.state.ui.peek, true);
+  const railButton = e.document.activeElement;
+  assert.equal(railButton.getAttribute('data-key'), 'conv');
+  const row = side.querySelector('[data-sh="open"]');
+  row.focus(); e.fire(row, 'click');
+  assert.equal(e.page.state.ui.peek, false);
+  assert.equal(e.document.activeElement, railButton, 'back on the rail button that opened it');
+  // Ctrl+\ from a control under the overlay: that control goes inert, so focus moves into the overlay; Escape returns it
+  const copy = e.byId.main.querySelector('[data-copy]');
+  copy.focus();
+  e.fire(copy, 'keydown', { key: '\\', code: 'Backslash', ctrlKey: true });
+  assert.equal(e.page.state.ui.peek, true);
+  assert.equal(e.document.activeElement.getAttribute('data-sh'), 'toggleSide');
+  assert.equal(side.contains(e.document.activeElement), true);
+  escape(e.document.activeElement);
+  assert.equal(e.document.activeElement, copy, 'back on the control it came from');
+  assert.deepEqual(e.errors, []);
+});
+
+test('polish: the wide layout keeps its sidebar as it was: nothing goes inert and Escape is not taken (A6-02)', () => {
+  const e = env();
+  e.page.receive(fixture);
+  const wrap = e.app.querySelector('.sh-wrap');
+  const close = e.byId.side.querySelector('.sh-head [data-sh="toggleSide"]');
+  close.focus(); e.fire(close, 'click');
+  assert.equal(e.page.state.ui.sideOpen, false);
+  e.fire(e.byId.edge, 'mouseover');
+  assert.equal(e.page.state.ui.peek, true, 'the edge hover still peeks');
+  assert.equal(wrap.hasAttribute('inert'), false);
+  assert.notEqual(e.fire(e.document.activeElement, 'keydown', { key: 'Escape' }).defaultPrevented, true);
+  assert.equal(e.page.state.ui.peek, true);
+  assert.deepEqual(e.errors, []);
+});

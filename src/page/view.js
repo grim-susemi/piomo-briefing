@@ -138,8 +138,10 @@
       (res ? ' <span class="focus-res ' + (res.ok ? 'ok' : 'err') + '">' + esc(res.ok ? '이동했어요' : '이동 실패 - herdr에서 직접 열어 주세요') + '</span>' : '');
   }
 
+  // The button names itself: Chrome leaves the role=status label out of the button's name, and page.js rewrites that
+  // label with the copy result (복사됨 / 복사 실패) - feedback, not the name.
   function copyBtn(value) {
-    return '<button type="button" class="copy" data-copy="' + esc(value) + '" title="복사">' + ic('copy', 'ic-xs') + ' <span data-copy-label role="status">복사</span></button>';
+    return '<button type="button" class="copy" data-copy="' + esc(value) + '" aria-label="복사" title="복사">' + ic('copy', 'ic-xs') + ' <span data-copy-label role="status">복사</span></button>';
   }
 
   function chip(cls, label) { return '<span class="chip ' + cls + '">' + esc(label) + '</span>'; }
@@ -429,9 +431,10 @@
       // Read-only alert: say where the question lives. Pane = the mirror's own paneId, else (older records) the session's pane.
       var qPane = str(q.paneId) || str(s.paneId);
       var tabbed = !!str(view.tabLabel);
-      html += '<p class="oq"><span class="sym">' + ic('circle-question-mark', 'ic-sm') + '</span>질문 알림 열림 - ' +
+      // the icon, then the whole sentence in span.oq-b (page.css: one line of flow on a phone, no box of its own wider)
+      html += '<p class="oq"><span class="sym">' + ic('circle-question-mark', 'ic-sm') + '</span><span class="oq-b">질문 알림 열림 - ' +
         (tabbed ? '답할 창: <code>' + whereOfHtml(view) + '</code>' : qPane ? '<code>' + esc(qPane) + '</code>에서 답하기' : '질문이 뜬 창에서 답하기') + ' (읽기 전용): <span class="oq-t">' + esc(q.text) + '</span>' +
-        ' <span class="time">' + ic('clock', 'ic-xs') + ' ' + esc(when(q.at, now)) + '</span> ' + focusBtn(fview, { live: live, focus: focus }) + '</p>' +
+        ' <span class="time">' + ic('clock', 'ic-xs') + ' ' + esc(when(q.at, now)) + '</span> ' + focusBtn(fview, { live: live, focus: focus }) + '</span></p>' +
         (q.builtin === true ? '<p class="oq-builtin">터미널에서 답하세요 - 이 질문은 하네스 기본 질문창이라 상황판에서 닫을 수 없어요</p>' : '');
     }
 

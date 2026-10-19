@@ -42,6 +42,8 @@ h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
 .oq { color: var(--yellow); font-weight: var(--fw-semibold); }
 /* The question itself: display: contents keeps the line's flex items as they were; an unbroken run in it breaks anywhere. */
 .oq-t { display: contents; overflow-wrap: anywhere; }
+/* the open-question sentence (view.js, convo-view.js): no box of its own here, so this row lays out as it always did */
+.oq-b { display: contents; }
 /* [그 창으로 이동] never shrinks below its longest word, so a long question cannot squeeze its label out of it. */
 .oq .focusbtn { min-width: min-content; }
 .sym { flex: none; min-width: var(--ic-md); text-align: center; color: var(--muted); }
@@ -151,5 +153,9 @@ h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
   .flow-narrow { display: block; }
   .ch .time { margin-left: 0; }
   .new-badge { top: 6px; right: 8px; }
-  .ans-opt, .ans-write, .ans-go, .ans-cancel, .focusbtn { min-height: 44px; min-width: 44px; }
+  .ans-opt, .ans-write, .ans-go, .ans-cancel, .focusbtn, .more, .detail-btn { min-height: 44px; min-width: 44px; }
+  /* B6-01: one flow box beside the icon, so the sentence wraps as a sentence instead of narrow flex columns; the location
+   * keeps its Korean words whole, and the focus button moves to the next line in one piece */
+  .oq-b { display: block; min-width: 0; }
+  .oq-b code { word-break: keep-all; }
 }

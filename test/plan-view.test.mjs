@@ -65,3 +65,8 @@ test('server page: view.js gives the plan row the same controls as the decision 
   const context = {}; vm.runInNewContext(VIEW_SOURCE, context, { filename: 'view.js' }); vm.runInNewContext(SOURCE, context, { filename: 'plan-view.js' }); const open = FIXTURE.questions.find(q => q.state === 'open'), model = { generatedAt: NOW, sessions: [{ id: 's1', title: '계획', tabLabel: '수리', tabNumber: 181, answerKinds: ['option', 'text'], status: 'needs_decision', plan: clone(FIXTURE), decisions: [{ id: 15, sessionId: 's1', question: open.text, options: open.options, recommend: 'A', reason: 'r', blocks: true, answered: false, closed: false }] }] };
   const row = ui => context.BriefView.renderOverview(model, { expanded: { ['plan:' + FIXTURE.planId]: true }, ...ui }).split('<tr class="plan-question is-open"')[1].split('</tr>')[0], live = row({ live: true }); assert.equal(count(live, /data-act="ans-pick" data-opt="[AB]" data-id="15" data-where="plan"/g), 2); assert.equal(count(live, /data-act="ans-reply" data-id="15" data-where="plan"/g), 1); assert.ok(row({ live: true, answers: { 15: { confirm: { option: 'B' } } } }).includes('class="ans-confirm"')); assert.equal(count(row({}), /data-act="ans-/g), 0); model.sessions[0].decisions[0].answered = true; assert.equal(count(row({ live: true }), /data-act="ans-/g), 0);
 });
+test('plan copy buttons (path, open question) keep their visible text and name themselves 복사, so copy feedback never renames them (A6-01)', () => {
+  const buttons = render().match(/<button[^>]*class="copy"[^>]*>[^<]*<\/button>/g) || [];
+  assert.equal(buttons.length, 2);
+  for (const b of buttons) assert.match(b, /^<button type="button" class="copy" data-copy="[^"]+" aria-label="복사" title="복사">⧉ 복사<\/button>$/);
+});

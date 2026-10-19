@@ -671,6 +671,7 @@ class El {
   }
   getAttribute(k) { return Object.hasOwn(this.attrs, k) ? this.attrs[k] : null; }
   setAttribute(k, v) { this.attrs[k] = String(v); }
+  removeAttribute(k) { delete this.attrs[k]; }
   matches(sel) {
     let m = /^\[([\w-]+)(?:="([^"]*)")?\]$/.exec(sel);
     if (m) return m[2] === undefined ? this.getAttribute(m[1]) !== null : this.getAttribute(m[1]) === m[2];
@@ -852,4 +853,87 @@ test('shell.css: mockup tokens mapped onto tokens.css, colour literals only in t
   assert.deepEqual(all(rest, /([^{}]+)\{[^}]*text-overflow:\s*ellipsis/g).map((s) => s.trim()), ['.sh-t', '.tt']);
   for (let i = 0; i < 12; i++) assert.match(css, new RegExp('\\.sh-h' + i + ' \\{ --sh-hue: var\\(--tabhue-' + i + '\\); --sh-hue-bg: var\\(--tabhue-' + i + '-bg\\); \\}'));
   assert.match(css, /@media \(max-width: 899px\)/);
+});
+
+// ---- A6-02 (visual-qa I1/I2): the narrow sidebar overlay ------------------------------------------------------------
+const NARROW_Q = '(max-width: 899px)';
+function mediaList(matches) {
+  return {
+    matches, listeners: [],
+    addEventListener(t, f) { this.listeners.push([t, f]); },
+    removeEventListener(t, f) { this.listeners = this.listeners.filter((l) => l[0] !== t || l[1] !== f); },
+  };
+}
+
+test('sync: below 900 px the open overlay makes the column it covers inert; shut, or on the wide layout, nothing is inert', () => {
+  const mq = mediaList(true);
+  const S = load({ matchMedia: (q) => (q === NARROW_Q ? mq : { matches: false }) }).BriefShell;
+  const root = new El({ class: 'sh-shell' });
+  root.ownerDocument = { activeElement: null };
+  const rail = new El({ class: 'sh-rail' }, root);
+  const side = new El({ class: 'sh-side' }, root);
+  const wrap = new El({ class: 'sh-wrap' }, root);
+  const open = S.reduce(S.defaults(), { type: 'toggleSide', narrow: true });
+  S.sync(root, open);
+  assert.deepEqual([wrap.getAttribute('inert'), rail.getAttribute('inert'), side.getAttribute('inert')], ['', null, null],
+    'the tab bar and #main under the overlay go inert; the rail and the panel stay usable');
+  S.sync(root, S.reduce(open, { type: 'unpeek' }));
+  assert.equal(wrap.getAttribute('inert'), null, 'shutting the overlay gives the column back');
+  mq.matches = false;
+  S.sync(root, open);
+  assert.equal(wrap.getAttribute('inert'), null, 'the wide layout docks the sidebar: no overlay, nothing inert');
+});
+
+test('bind: crossing the 900 px line re-applies the cover without a render, and unbind drops that listener', () => {
+  const mq = mediaList(true);
+  const S = load({ matchMedia: (q) => (q === NARROW_Q ? mq : { matches: false }) }).BriefShell;
+  const doc = new El();
+  const root = new El({ class: 'sh-shell', 'data-peek': 'true' });
+  root.ownerDocument = doc;
+  const wrap = new El({ class: 'sh-wrap' }, root);
+  const unbind = S.bind(root, { doc, dispatch: () => {} });
+  const change = () => mq.listeners.filter((l) => l[0] === 'change').forEach((l) => l[1]({ matches: mq.matches }));
+  mq.matches = false;
+  change();
+  assert.equal(wrap.getAttribute('inert'), null, 'widened past 900 px: the open overlay is the docked sidebar now');
+  mq.matches = true;
+  change();
+  assert.equal(wrap.getAttribute('inert'), '', 'narrowed again with the overlay open: covered again');
+  unbind();
+  assert.equal(mq.listeners.length, 0);
+});
+
+test('Escape shuts the narrow overlay with preventDefault; wide, shut, modified, composing, handled or under a dialog it passes', () => {
+  const S = load().BriefShell;
+  const esc = (extra) => {
+    const ev = { key: 'Escape', code: 'Escape', ctrlKey: false, altKey: false, metaKey: false, shiftKey: false, prevented: 0, ...extra };
+    ev.preventDefault = () => { ev.prevented++; };
+    return ev;
+  };
+  const open = S.reduce(S.defaults(), { type: 'toggleSide', narrow: true });
+  const narrow = bound(S, open, true);
+  narrow.root.setAttribute('data-peek', 'true'); // what sync() keeps on .sh-shell
+  const first = esc();
+  narrow.doc.fire('keydown', first);
+  assert.deepEqual(narrow.seen, [{ type: 'unpeek' }]);
+  assert.deepEqual([narrow.box.st.peek, first.prevented], [false, 1]);
+  const pass = [esc({ shiftKey: true }), esc({ ctrlKey: true }), esc({ altKey: true }), esc({ metaKey: true }), esc({ isComposing: true }),
+    esc({ defaultPrevented: true }), esc({ key: 'Enter', code: 'Enter' })];
+  for (const ev of pass) narrow.doc.fire('keydown', ev);
+  const shut = bound(S, S.defaults(), true);
+  shut.root.setAttribute('data-peek', 'false');
+  const shutEv = esc();
+  shut.doc.fire('keydown', shutEv);
+  const wide = bound(S, open, false);
+  wide.root.setAttribute('data-peek', 'true');
+  const wideEv = esc();
+  wide.doc.fire('keydown', wideEv);
+  const layered = bound(S, open, true);
+  layered.root.setAttribute('data-peek', 'true');
+  new El({ class: 'pop', role: 'dialog' }, layered.doc); // the annotation composer sits above the overlay and takes Escape first
+  const layeredEv = esc();
+  layered.doc.fire('keydown', layeredEv);
+  assert.equal(narrow.seen.length, 1, 'only the plain Escape acted');
+  assert.deepEqual([shut.seen, wide.seen, layered.seen], [[], [], []]);
+  assert.deepEqual([...pass, shutEv, wideEv, layeredEv].map((ev) => ev.prevented), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 });
