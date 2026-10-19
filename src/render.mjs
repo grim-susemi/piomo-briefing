@@ -899,7 +899,7 @@ const PAGE_JS = ['icons.js', 'view.js', 'plan-view.js', 'workers-view.js', 'conv
 const ICON_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'icons', 'lucide');
 const LUCIDE_COMMIT = '1ef60af944de207e0d5176905a0759ba12e6ee8d';
 const PAGE_ICONS = ['app-window', 'archive', 'arrow-left', 'arrow-right', 'bell', 'bell-off', 'check', 'chevron-down', 'chevron-right',
-  'circle-check', 'circle-question-mark', 'clock', 'file-text', 'folder', 'house', 'inbox', 'info', 'layout-grid', 'lightbulb', 'list-todo',
+  'circle-check', 'circle-question-mark', 'clock', 'copy', 'file-text', 'folder', 'house', 'inbox', 'info', 'layout-grid', 'lightbulb', 'list-todo',
   'map-pin', 'message-square', 'panel-left-close', 'panel-left-open', 'paperclip', 'pencil', 'pin', 'plus', 'refresh-cw',
   'rotate-ccw-clock', 'search', 'send', 'settings', 'star', 'target', 'users', 'x'];
 const ICON_SHAPES = {

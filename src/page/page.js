@@ -212,15 +212,60 @@
     });
   }
   function dispatch(action) {
+    var active = doc.activeElement;
+    var sideToggle = active && active.getAttribute && active.getAttribute('data-sh') === 'toggleSide';
     state.ui = g.BriefShell.reduce(state.ui, action);
     g.BriefShell.persist(undefined, state.ui);
     render();
+    if (sideToggle && action.type === 'toggleSide') {
+      var narrow = g.matchMedia && g.matchMedia('(max-width: 899px)').matches;
+      var shown = narrow ? state.ui.peek : state.ui.sideOpen || state.ui.peek;
+      var target = shell.querySelector(shown ? '.sh-head [data-sh="toggleSide"]' : '.sh-topen');
+      if (target) target.focus({ preventScroll: true });
+    }
   }
   function open(sid, sub) { dispatch({ type: 'open', sid: sid, sub: sub, now: state.now() }); }
+  // Match control identity, including the radio value and containing card/block, not just the first field in a group.
+  // Values of editable text/number/select controls are state, not identity. Selection survives replacing a text node.
+  var CONTROLS = 'button,input,textarea,select,summary,a[href],[tabindex]';
+  function focusKey(el) {
+    var names = ['id', 'name', 'type', 'data-sh', 'data-act', 'data-key', 'data-sid', 'data-sub', 'data-id', 'data-dec',
+      'data-opt', 'data-where', 'data-draft', 'data-session', 'data-copy'];
+    var key = [el.tagName];
+    names.forEach(function (n) { key.push(el.getAttribute(n)); });
+    if (el.getAttribute('type') === 'radio' || el.getAttribute('type') === 'checkbox') key.push(el.getAttribute('value'));
+    var group = el.closest('[data-block],[data-card],[data-row],[data-tab],[data-decision]');
+    if (group) ['data-block', 'data-card', 'data-row', 'data-tab', 'data-decision'].forEach(function (n) { key.push(group.getAttribute(n)); });
+    return JSON.stringify(key);
+  }
   function region(name, el, html) {
     if (regionHtml[name] === html) return false;
+    var active = doc.activeElement, key = null, ordinal = 0, start, end, direction, group;
+    if (active && el.contains(active) && active.matches(CONTROLS)) {
+      key = focusKey(active);
+      var before = el.querySelectorAll(CONTROLS);
+      for (var i = 0; i < before.length && before[i] !== active; i++) if (focusKey(before[i]) === key) ordinal++;
+      start = active.selectionStart; end = active.selectionEnd; direction = active.selectionDirection;
+      group = active.closest('[data-block],[data-decision]');
+      group = group && (group.getAttribute('data-block') || group.getAttribute('data-decision'));
+    }
     el.innerHTML = html;
     regionHtml[name] = html;
+    if (key !== null) {
+      var after = el.querySelectorAll(CONTROLS), target = null;
+      for (var j = 0; j < after.length; j++) if (focusKey(after[j]) === key && ordinal-- === 0) { target = after[j]; break; }
+      // A report pick is replaced by its confirmation. Keep focus in that exact option, on Cancel, never Send.
+      if (!target && group) {
+        var groups = el.querySelectorAll('[data-block],[data-decision]');
+        for (var k = 0; k < groups.length; k++) if ((groups[k].getAttribute('data-block') || groups[k].getAttribute('data-decision')) === group) {
+          target = groups[k].querySelector('[data-act="ans-cancel"]'); break;
+        }
+      }
+      if (target && !target.hasAttribute('disabled')) {
+        target.focus({ preventScroll: true });
+        if (typeof start === 'number' && typeof target.setSelectionRange === 'function') target.setSelectionRange(start, end, direction);
+      }
+    }
     return true;
   }
   function render() {
@@ -462,17 +507,30 @@
 
   function copy(text, btn) {
     function done(ok) {
-      var old = btn.textContent;
-      btn.textContent = ok ? '✔ 복사됨' : '✖ 복사 실패';
-      g.setTimeout(function () { btn.textContent = old; }, 1200);
+      var use = btn.querySelector('use'), label = btn.querySelector('[data-copy-label]');
+      // A text-only button (plan-view.js) has neither child: swap its whole text, keeping the original across repeats.
+      var plain = !use && !label;
+      if (plain && btn.copyText == null) btn.copyText = btn.textContent;
+      if (use) use.setAttribute('href', ok ? '#i-check' : '#i-x');
+      if (label) label.textContent = ok ? '복사됨' : '복사 실패';
+      if (plain) btn.textContent = ok ? '복사됨' : '복사 실패';
+      if (btn.copyTimer) g.clearTimeout(btn.copyTimer);
+      btn.copyTimer = g.setTimeout(function () {
+        if (use) use.setAttribute('href', '#i-copy');
+        if (label) label.textContent = '복사';
+        if (plain) { btn.textContent = btn.copyText; btn.copyText = null; }
+        btn.copyTimer = null;
+      }, 1200);
     }
     function legacy() {
+      var active = doc.activeElement;
       var ta = doc.createElement('textarea');
       ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
       doc.body.appendChild(ta); ta.select();
       var ok = false;
       try { ok = doc.execCommand('copy'); } catch (e) { ok = false; }
       ta.remove();
+      if (active && typeof active.focus === 'function') active.focus({ preventScroll: true });
       done(ok);
     }
     if (g.navigator && g.navigator.clipboard && g.navigator.clipboard.writeText) {

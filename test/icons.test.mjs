@@ -143,10 +143,10 @@ test('no pictographic emoji left in the rail, the sidebar or the tab bar, in tex
 });
 
 // Baseline: Buffer.byteLength(pageHtml(test/fixtures/view-model-board.json, 7, { mode: 'file' })) rendered from the accepted
-// tree 5bcb1534b227691f0cd8d023519d0f1cc557982e (git checkout-index into a temp copy, 2026-10-18). A later todo that grows
-// the page on purpose re-points this baseline under its own scope_exceptions.
-const BASELINE_TREE = '5bcb1534b227691f0cd8d023519d0f1cc557982e';
-const BASELINE_PAGE_BYTES = 353152;
+// tree b4414fb4817ab55edd201f6d578d55024d7bb2e0 (independently re-measured via checkout-index into a temp copy, 2026-10-18).
+// Todo 4 scope exception: re-point the accepted starting page, keeping the 16384 B budget unchanged.
+const BASELINE_TREE = 'b4414fb4817ab55edd201f6d578d55024d7bb2e0';
+const BASELINE_PAGE_BYTES = 367296;
 
 test('fixture page growth over the accepted tree stays within 16 KB (whole page; icon payload printed too)', (t) => {
   const notice = /<!--\nIcons: Lucide[\s\S]*?-->\n/.exec(PAGE)[0];

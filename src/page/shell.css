@@ -1,19 +1,25 @@
 /* omo-briefing shell (shell.js): the left icon rail, the one switchable sidebar and the top tab bar (board v5).
  * Its variables name tokens.css tokens, so light and dark both follow prefers-color-scheme (--bg and --line are
  * page.css's own). --sw is the sidebar width; shell.js sync() keeps it on .sh-shell. No colour literal in this file:
- * the tab-number palette (--tabhue-N, the number's hue, and --tabhue-N-bg, its tint) is tokens.css's too. */
+ * the tab-number palette (--tabhue-N, the number's hue, and --tabhue-N-bg, its tint) is tokens.css's too.
+ * The look is the approved board-ui-polish mockup: the selected rail item, sidebar row, filter chip and tab are a grey fill
+ * with a --ctl-edge inset edge at every width; hover is the lighter fill; a press is the deeper --press fill with a
+ * --press-edge inset, at once; hairline borders, radii 4 / 8 / 10 / 12 and 4 px spacing steps from tokens.css. */
 :root {
   --rail: var(--c-rail);
   --side: var(--c-side);
   --hov: var(--fill-hover);
   --sel: var(--fill-sel);
+  --press: var(--fill-press);
   --tx: var(--c-fg);
   --tx2: var(--c-fg-2);
   --tx3: var(--c-fg-4);
   --acc: var(--c-accent);
   --sw: 260px;
-  --sh-rail-w: 52px;
-  --sh-bar-h: 40px;
+  --sh-rail-w: var(--rail-w);
+  --sh-rail-btn: var(--rail-btn);
+  --sh-rail-gap: 6px; /* design review M2 */
+  --sh-bar-h: var(--bar-h);
   --sh-edge-w: 10px;
   --sh-strip: var(--c-main);
   --sh-shade: var(--shadow-pop);
@@ -41,25 +47,32 @@
 .sh-main .overview { padding: 10px; }
 .sh-main .overview .card { margin-bottom: 10px; }
 
-/* rail */
+/* rail: home first, no border, 40 px items, the selected one always filled (every width, sidebar open, closed or peeking) */
 .sh-rail {
-  position: relative; z-index: 6; flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px;
-  width: var(--sh-rail-w); padding: 8px 0; background: var(--rail); border-right: 1px solid var(--line);
+  position: relative; z-index: 6; flex: none; display: flex; flex-direction: column; align-items: center; gap: var(--sh-rail-gap);
+  width: var(--sh-rail-w); padding: var(--sp-2) 0; background: var(--rail);
 }
 .sh-rb {
-  position: relative; display: grid; place-items: center; width: 38px; height: 38px; padding: 0;
-  border: 0; border-radius: 8px; background: none; color: var(--tx2); font-size: 17px; line-height: 1;
+  position: relative; display: grid; place-items: center; width: var(--sh-rail-btn); height: var(--sh-rail-btn); padding: 0;
+  border: 0; border-radius: var(--r-lg); background: none; color: var(--c-icon-2); line-height: 1;
+  transition: background-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
 }
+/* the hit area runs on through the gaps and out to the rail's edges (visual-qa D4) */
+.sh-rb::before { content: ""; position: absolute; inset: calc(var(--sh-rail-gap) / -2) calc((var(--sh-rail-btn) - var(--sh-rail-w)) / 2); }
 .sh-rb:hover, .sh-rb:focus-visible { background: var(--hov); color: var(--tx); }
-.sh-shell[data-side="open"] .sh-rb.on, .sh-shell[data-peek="true"] .sh-rb.on { background: var(--sel); color: var(--tx); }
+.sh-rb.on, .sh-rb.on:hover { background: var(--sel); color: var(--tx); box-shadow: inset 0 0 0 1px var(--ctl-edge); }
+/* the unread count: a quiet amber tint like every badge (design review B3), opaque over the icon, ringed in the rail colour */
 .sh-n {
-  position: absolute; top: 2px; right: 1px; min-width: 16px; padding: 0 4px; border-radius: 9px;
-  background: var(--yellow); color: var(--panel); font-size: var(--fs-2xs); font-weight: var(--fw-semibold); line-height: 14px; text-align: center;
+  position: absolute; top: 3px; right: 2px; min-width: 16px; padding: 0 var(--sp-1); border-radius: var(--r-xs);
+  background: linear-gradient(var(--c-amber-tint), var(--c-amber-tint)), var(--rail); color: var(--c-amber-text);
+  font-size: var(--fs-2xs); font-weight: var(--fw-semibold); line-height: 15px; text-align: center; font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 var(--hair) var(--c-amber-line), 0 0 0 2px var(--rail);
 }
+/* tooltip: the label on the elevated surface, right of the rail */
 .sh-tip {
-  display: none; position: absolute; z-index: 20; left: calc(100% + 6px); top: 50%; transform: translateY(-50%);
-  padding: 2px 8px; border-radius: 5px; background: var(--tx); color: var(--panel);
-  font-size: var(--fs-sm); line-height: 18px; white-space: nowrap; pointer-events: none;
+  display: none; position: absolute; z-index: 20; left: calc(100% + var(--sp-2)); top: 50%; transform: translateY(-50%);
+  padding: var(--sp-1) var(--sp-2); border-radius: var(--r-md); background: var(--c-pop); color: var(--tx); box-shadow: var(--shadow-pop);
+  font-size: var(--fs-sm); line-height: 16px; white-space: nowrap; pointer-events: none;
 }
 .sh-rb:hover .sh-tip, .sh-rb:focus-visible .sh-tip { display: block; }
 .sh-rsp { flex: 1; }
@@ -71,26 +84,41 @@
 /* sidebar: docked, closed (slid under the rail), or the peek panel over the content */
 .sh-side {
   position: relative; z-index: 5; flex: none; display: flex; flex-direction: column; width: var(--sw); min-height: 0;
-  background: var(--side); border-right: 1px solid var(--line); transition: margin-left .15s ease, box-shadow .15s ease;
+  background: var(--side); border-right: var(--hair) solid var(--c-line-strong);
+  transition: margin-left var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out);
 }
 .sh-shell[data-side="closed"] > .sh-side {
-  margin-left: calc(-1 * var(--sw)); visibility: hidden; transition: margin-left .15s ease, visibility 0s linear .15s;
+  margin-left: calc(-1 * var(--sw)); visibility: hidden;
+  transition: margin-left var(--dur) var(--ease-out), visibility 0s linear var(--dur);
 }
 .sh-shell[data-side="closed"][data-peek="true"] > .sh-side {
-  position: absolute; z-index: 7; left: var(--sh-rail-w); top: calc(var(--sh-bar-h) + var(--alarm-h, 0px)); bottom: 8px;
-  margin-left: 0; visibility: visible; border: 1px solid var(--line); border-left: 0; border-radius: 0 8px 8px 0;
+  position: absolute; z-index: 7; left: var(--sh-rail-w); top: calc(var(--sh-bar-h) + var(--alarm-h, 0px)); bottom: var(--sp-2);
+  margin-left: 0; visibility: visible; border: var(--hair) solid var(--c-line-strong); border-left: 0; border-radius: 0 var(--r-xl) var(--r-xl) 0;
   box-shadow: var(--sh-shade); transition: none;
 }
+/* the width handle: dragged, or focused and moved with the arrow keys (shell.js bind) */
 .sh-rz { position: absolute; z-index: 3; top: 0; right: -3px; bottom: 0; width: 6px; cursor: col-resize; }
-.sh-rz:hover, .sh-shell.is-resizing .sh-rz { background: color-mix(in srgb, var(--acc) 35%, transparent); }
+.sh-rz:hover, .sh-rz:focus-visible, .sh-shell.is-resizing .sh-rz { background: var(--c-line-strong); }
 .sh-shell.is-resizing { cursor: col-resize; user-select: none; }
-.sh-head { flex: none; display: flex; align-items: center; gap: 6px; height: var(--sh-bar-h); padding: 0 6px 0 12px; font-weight: var(--fw-semibold); }
+.sh-head {
+  flex: none; display: flex; align-items: center; gap: var(--sp-2); height: var(--sh-bar-h); padding: 0 var(--sp-2) 0 var(--sp-4);
+  font-size: var(--fs-lg); font-weight: var(--fw-semibold);
+}
 .sh-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.sh-ib, .sh-back, .sh-topen, .sh-tadd { border: 0; border-radius: 5px; background: none; color: var(--tx2); }
-.sh-ib:hover, .sh-back:hover, .sh-topen:hover, .sh-tadd:hover { background: var(--hov); color: var(--tx); }
-.sh-ib { flex: none; padding: 2px 6px; }
-.sh-back { display: none; margin: 0 8px 6px; padding: 2px 4px; font-size: var(--fs-sm); text-align: left; }
-.sh-shell[data-view="archive"] .sh-back { display: block; }
+.sh-ib, .sh-topen, .sh-tadd {
+  flex: none; display: grid; place-items: center; width: var(--ctl-h); height: var(--ctl-h); padding: 0; border: 0; border-radius: var(--r-md);
+  background: none; color: var(--tx3); transition: background-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
+}
+.sh-ib:hover, .sh-topen:hover, .sh-tadd:hover, .sh-ib:focus-visible, .sh-topen:focus-visible, .sh-tadd:focus-visible { background: var(--hov); color: var(--tx); }
+.sh-back {
+  display: none; align-items: center; gap: var(--sp-1); margin: 0 var(--sp-3) var(--sp-2); padding: var(--sp-1) var(--sp-2);
+  border: 0; border-radius: var(--r-md); background: none; color: var(--tx2); font-size: var(--fs-sm); text-align: left;
+}
+.sh-back:hover { background: var(--hov); color: var(--tx); }
+.sh-shell[data-view="archive"] .sh-back { display: flex; }
+/* the search box's visible label (visual-qa C7); the placeholder keeps the scope */
+.sh-qlbl { display: none; margin: var(--sp-1) var(--sp-4) 2px; color: var(--tx2); font-size: var(--fs-xs); font-weight: var(--fw-medium); line-height: 16px; }
+.sh-shell[data-view="conv"] .sh-qlbl, .sh-shell[data-view="archive"] .sh-qlbl { display: block; }
 .sh-srch {
   display: none; flex: none; align-items: center; gap: 6px; margin: 2px 10px 6px; padding: 0 8px;
   border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--tx2); font-size: var(--fs-sm);
@@ -98,56 +126,66 @@
 .sh-srch:focus-within { border-color: var(--acc); }
 .sh-shell[data-view="conv"] .sh-srch, .sh-shell[data-view="archive"] .sh-srch { display: flex; }
 .sh-q { flex: 1; min-width: 0; height: 26px; padding: 0; border: 0; background: none; color: var(--tx); font: inherit; font-size: var(--fs-base); outline: none; }
-.sh-flt { display: none; flex: none; flex-wrap: wrap; gap: 4px; margin: 0 10px 6px; }
+.sh-flt { display: none; flex: none; flex-wrap: wrap; gap: var(--sp-1); margin: 0 var(--sp-3) var(--sp-2); }
 .sh-shell[data-view="conv"] .sh-flt { display: flex; }
-.sh-chip { padding: 0 8px; border: 0; border-radius: 9px; background: var(--gray-bg); color: var(--tx2); font-size: var(--fs-sm); line-height: 20px; white-space: nowrap; }
-.sh-chip:hover { color: var(--tx); }
-.sh-chip.on { background: var(--sel); color: var(--tx); font-weight: var(--fw-medium); }
-.sh-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; padding-bottom: 12px; }
-
-/* sections and rows */
-.sh-sec { margin-top: 8px; }
-.sh-sh {
-  display: flex; align-items: center; gap: 4px; width: calc(100% - 12px); height: 26px; margin: 0 6px; padding: 0 6px;
-  border: 0; border-radius: 5px; background: none; color: var(--tx2); font-size: var(--fs-sm); font-weight: var(--fw-medium); text-align: left;
+.sh-chip {
+  padding: 0 var(--sp-2); border: var(--hair) solid var(--c-line-strong); border-radius: var(--r-md); background: none; color: var(--tx2);
+  font-size: var(--fs-sm); line-height: calc(var(--sp-6) - 2 * var(--hair)); white-space: nowrap;
+  transition: background-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
 }
-.sh-sh:hover { background: var(--hov); }
-.sh-cnt { font-weight: var(--fw-regular); }
-.sh-ch { font-size: var(--fs-2xs); color: var(--tx2); }
-.sh-nav { padding: 0 6px; }
-.sh-empty { margin: 4px 12px; color: var(--tx2); font-size: var(--fs-sm); }
-.sh-row { display: flex; align-items: center; min-height: 28px; border-radius: 5px; color: var(--tx); }
+.sh-chip:hover { background: var(--hov); color: var(--tx); }
+.sh-chip.on, .sh-chip.on:hover {
+  border-color: transparent; background: var(--sel); color: var(--tx); font-weight: var(--fw-medium); box-shadow: inset 0 0 0 1px var(--ctl-edge);
+}
+.sh-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; padding-bottom: var(--sp-4); }
+
+/* sections and rows: quiet section heads (their chevron shows on hover and focus), 32 px rows, the selected row filled */
+.sh-sec { margin-top: var(--sp-4); }
+.sh-sec:first-child { margin-top: var(--sp-2); }
+.sh-sh {
+  display: flex; align-items: center; gap: var(--sp-1); width: calc(100% - var(--sp-4)); height: var(--ctl-h); margin: 0 var(--sp-2); padding: 0 var(--sp-2);
+  border: 0; border-radius: var(--r-md); background: none; color: var(--tx3); font-size: var(--fs-sm); font-weight: var(--fw-medium); text-align: left;
+}
+.sh-sh:hover { color: var(--tx2); }
+.sh-cnt { color: var(--tx2); font-weight: var(--fw-regular); font-variant-numeric: tabular-nums; }
+.sh-ch { display: inline-flex; color: var(--tx3); opacity: 0; transition: opacity var(--dur) var(--ease-out); }
+.sh-sh:hover .sh-ch, .sh-sh:focus-visible .sh-ch { opacity: 1; }
+.sh-nav { padding: 0 var(--sp-2); }
+.sh-empty { margin: var(--sp-1) var(--sp-4); color: var(--tx3); font-size: var(--fs-sm); }
+.sh-row { display: flex; align-items: center; min-height: var(--row-h); border-radius: var(--r-md); color: var(--tx); transition: background-color var(--dur) var(--ease-out); }
 .sh-row:hover, .sh-row:focus-within { background: var(--hov); }
-.sh-row.sel { background: var(--sel); }
-.sh-row.sel .sh-t { color: var(--tx); font-weight: var(--fw-semibold); }
+.sh-row.sel, .sh-row.sel:hover { background: var(--sel); box-shadow: inset 0 0 0 1px var(--ctl-edge); }
+.sh-row.sel .sh-t { color: var(--tx); font-weight: var(--fw-medium); }
 .sh-tg {
-  flex: none; width: 16px; height: 20px; padding: 0; border: 0; border-radius: 3px; background: none;
-  color: var(--tx3); font-size: var(--fs-2xs); line-height: 20px; text-align: center;
+  flex: none; display: grid; place-items: center; width: var(--sp-5); height: var(--sp-5); padding: 0; border: 0; border-radius: var(--r-xs);
+  background: none; color: var(--tx3);
 }
 button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 .sh-go {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; min-height: 28px; padding: 0 4px;
-  border: 0; background: none; color: inherit; font-size: var(--fs-base); text-align: left;
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); min-height: var(--row-h); padding: 0 var(--sp-2) 0 var(--sp-1);
+  border: 0; border-radius: inherit; background: none; color: inherit; font-size: var(--fs-base); text-align: left;
 }
 .sh-gone .sh-go { cursor: default; }
 /* the only ellipsis in the sidebar: one-line row titles, each with its full text in a title attribute */
 .sh-t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.sh-sub { margin-left: 5px; color: var(--tx2); font-size: var(--fs-sm); }
-.sh-gone .sh-t { color: var(--tx2); font-style: italic; }
-.sh-fav { display: none; flex: none; padding: 2px 6px; border: 0; border-radius: 4px; background: none; color: var(--tx2); }
+.sh-sub { margin-left: var(--sp-2); color: var(--tx3); font-size: var(--fs-sm); }
+.sh-gone .sh-t { color: var(--tx3); font-style: italic; }
+.sh-fav { display: none; flex: none; padding: var(--sp-1); border: 0; border-radius: var(--r-xs); background: none; color: var(--tx3); line-height: 0; }
 .sh-fav:hover { color: var(--tx); }
-.sh-fav[aria-pressed="true"] { color: var(--yellow); }
+.sh-fav[aria-pressed="true"] { color: var(--yellow); } /* the star outline turns filled (page.css .ic-fill) */
 .sh-row:hover .sh-fav, .sh-row:focus-within .sh-fav { display: block; }
 .sh-row:hover .sh-bdg, .sh-row:focus-within .sh-bdg { display: none; }
-.sh-kids { padding-left: 16px; }
-.sh-kid .sh-go { min-height: 26px; font-size: var(--fs-sm); }
-.sh-ki { flex: none; width: 20px; text-align: center; }
-.sh-prev { opacity: .65; }
+.sh-kids { padding-left: var(--sp-4); }
+.sh-kid .sh-go { min-height: var(--ctl-h); color: var(--tx2); font-size: var(--fs-sm); }
+.sh-ki { flex: none; display: grid; place-items: center; width: var(--sp-5); color: var(--tx3); }
+.sh-prev { opacity: .7; }
+/* the tab-number chip: the number in its desaturated hue on that hue's tint; a conversation outside a herdr tab gets the dot */
 .sh-ico {
-  flex: none; display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 3px; border-radius: 4px;
-  background: var(--gray-bg); color: var(--tx2); font-size: var(--fs-2xs); font-weight: var(--fw-semibold); letter-spacing: -.3px; line-height: 1;
+  flex: none; display: grid; place-items: center; min-width: var(--sp-6); height: 18px; padding: 0 var(--sp-1); border-radius: var(--r-xs);
+  background: var(--fill-soft); color: var(--tx3); font-size: var(--fs-2xs); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; line-height: 1;
 }
-.sh-ico-n { background: var(--sh-hue-bg, var(--gray-bg)); color: var(--sh-hue, var(--tx2)); } /* the number in its hue on that hue's tint */
+.sh-ico-n { background: var(--sh-hue-bg, var(--fill-soft)); color: var(--sh-hue, var(--tx3)); }
+.sh-ico:not(.sh-ico-n) { background: none; }
 /* row and tab badges wear page.css's semantic chip tints (a solid fill would swallow the yellow 🔔) */
 .sh-bdg {
   flex: none; padding: 0 6px; border-radius: 9px; background: var(--yellow-bg); color: var(--c-amber-text);
@@ -157,89 +195,150 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 .sh-bdg-g { background: var(--green-bg); color: var(--green); }
 .sh-bdg-q { background: var(--spy-bg); color: var(--tx); }
 
-/* 📥 inbox, 🗂 plans: item cards with the conversation's colour on the left */
-.sh-ptabs { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; gap: 2px; padding: 0 8px 6px; background: var(--side); }
-.sh-pt { padding: 3px 6px; border: 0; border-radius: 5px; background: none; color: var(--tx2); font-size: var(--fs-sm); white-space: nowrap; }
-.sh-pt:hover { color: var(--tx); }
-.sh-pt.on { background: var(--hov); color: var(--tx); font-weight: var(--fw-medium); }
+/* inbox, plans: item cards with the conversation's colour on the left; the inbox groups are filled like the tabs */
+.sh-ptabs { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; gap: var(--sp-1); padding: 0 var(--sp-3) var(--sp-2); background: var(--side); }
+.sh-pt {
+  padding: 2px var(--sp-2); border: 0; border-radius: var(--r-md); background: none; color: var(--tx2); font-size: var(--fs-sm); white-space: nowrap;
+  transition: background-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
+}
+.sh-pt:hover { background: var(--hov); color: var(--tx); }
+.sh-pt.on, .sh-pt.on:hover { background: var(--sel); color: var(--tx); font-weight: var(--fw-medium); box-shadow: inset 0 0 0 1px var(--ctl-edge); }
 .sh-it {
-  display: flex; align-items: flex-start; gap: 9px; width: calc(100% - 12px); margin: 0 6px 2px; padding: 8px;
-  border: 0; border-left: 3px solid var(--sh-hue, var(--line)); border-radius: 6px; background: none; color: var(--tx); text-align: left;
+  display: flex; align-items: flex-start; gap: var(--sp-2); width: calc(100% - var(--sp-4)); margin: 0 var(--sp-2) 2px; padding: var(--sp-2);
+  border: 0; border-left: 3px solid var(--sh-hue, var(--c-line-strong)); border-radius: var(--r-md); background: none; color: var(--tx); text-align: left;
+  transition: background-color var(--dur) var(--ease-out);
 }
 .sh-it:hover { background: var(--hov); }
 .sh-itb { flex: 1; min-width: 0; display: grid; gap: 1px; }
-.sh-k { color: var(--tx2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.sh-k { color: var(--tx3); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .sh-iq { font-size: var(--fs-base); overflow-wrap: anywhere; }
-.sh-w { color: var(--tx2); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.sh-w { color: var(--tx3); font-size: var(--fs-xs); overflow-wrap: anywhere; }
 .sh-ans { color: var(--green); font-weight: var(--fw-semibold); }
 /* 수신함 보류 / 다시 열기 (server page): beside the item button, never inside it */
 .sh-iw { margin-bottom: 2px; }
 .sh-iw > .sh-it { margin-bottom: 0; }
-.sh-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0 6px 0 17px; }
-.sh-act { padding: 2px 8px; border: 1px solid var(--line); border-radius: 5px; background: none; color: var(--tx2); font-size: var(--fs-sm); }
+.sh-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); margin: 0 var(--sp-2) 0 calc(2 * var(--sp-2) + 3px); }
+.sh-act {
+  padding: 2px var(--sp-2); border: var(--hair) solid var(--c-line-strong); border-radius: var(--r-md); background: none; color: var(--tx2); font-size: var(--fs-sm);
+  transition: background-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
+}
 .sh-act:hover { background: var(--hov); color: var(--tx); }
 .sh-hq { flex-basis: 100%; font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .sh-err { color: var(--red); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 
-/* 🏠 home counts, ⚙ settings */
-.sh-home { padding-top: 2px; }
+/* 홈 counts, 설정 */
+.sh-home { padding-top: var(--sp-2); }
 .sh-hr {
-  display: flex; align-items: center; gap: 7px; width: 100%; min-height: 28px; padding: 0 6px;
-  border: 0; border-radius: 5px; background: none; color: var(--tx); font-size: var(--fs-base); text-align: left;
+  display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--row-h); padding: 0 var(--sp-2);
+  border: 0; border-radius: var(--r-md); background: none; color: var(--tx); font-size: var(--fs-base); text-align: left;
+  transition: background-color var(--dur) var(--ease-out);
 }
 .sh-hr:hover { background: var(--hov); }
+.sh-hr .sh-ki { color: var(--tx3); }
 .sh-hl { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.sh-num { font-weight: var(--fw-semibold); }
-.sh-set { padding: 4px 12px; }
-.sh-seth { margin: 10px 0 4px; color: var(--tx2); font-size: var(--fs-sm); font-weight: var(--fw-medium); }
-.sh-setr { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; }
+.sh-num { font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.sh-set { padding: var(--sp-1) var(--sp-4); }
+.sh-seth { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-4) 0 var(--sp-2); color: var(--tx3); font-size: var(--fs-sm); font-weight: var(--fw-medium); }
+.sh-setr { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0; }
 .sh-hint { color: var(--tx2); font-size: var(--fs-xs); }
-.sh-legend { margin: 0; font-size: var(--fs-sm); } /* page.css .legend-list: no bullets, 3px grid gap */
+.sh-legend { display: grid; gap: var(--sp-1); margin: 0; font-size: var(--fs-sm); } /* page.css .legend-list: no bullets */
 .sh-legend li { overflow-wrap: anywhere; }
 
-/* tab bar */
+/* tab bar: 30 px tabs on the page surface, the selected one filled, a hairline under the bar */
 .sh-tabs {
-  flex: none; display: flex; align-items: flex-end; gap: 2px; height: var(--sh-bar-h); padding: 0 6px;
-  background: var(--sh-strip); border-bottom: 1px solid var(--line); overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+  flex: none; display: flex; align-items: center; gap: var(--sp-1); height: var(--sh-bar-h); padding: 0 var(--sp-2);
+  background: var(--sh-strip); border-bottom: var(--hair) solid var(--c-line-strong); overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
 }
-.sh-topen { display: none; flex: none; align-self: center; margin-right: 4px; padding: 0 6px; font-size: 15px; line-height: 26px; }
-.sh-shell[data-side="closed"] .sh-topen { display: block; }
-.tb { display: flex; align-items: center; flex: 0 1 220px; min-width: 72px; height: 32px; border-radius: 7px 7px 0 0; color: var(--tx2); }
-.tb:hover { background: var(--hov); }
-.tb.on { background: var(--sel); color: var(--tx); } /* the strip is the page surface now: the selected tab is the grey fill */
+/* » stays at the left edge while a narrow tab bar scrolls under it */
+.sh-topen { display: none; position: sticky; left: 0; z-index: 1; background: var(--sh-strip); }
+.sh-topen:hover, .sh-topen:focus-visible { background: linear-gradient(var(--hov), var(--hov)), var(--sh-strip); }
+.sh-shell[data-side="closed"] .sh-topen { display: grid; }
+.tb {
+  display: flex; align-items: center; flex: 0 1 200px; min-width: 72px; height: 30px; border-radius: var(--r-md); color: var(--tx3);
+  transition: background-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
+}
+.tb:hover { background: var(--hov); color: var(--tx2); }
+.tb.on, .tb.on:hover { background: var(--sel); color: var(--tx); box-shadow: inset 0 0 0 1px var(--ctl-edge); }
+.tb.on .tt { font-weight: var(--fw-medium); }
 .tb-go {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 100%; padding: 0 2px 0 8px;
-  border: 0; background: none; color: inherit; font-size: var(--fs-base); white-space: nowrap;
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); height: 100%; padding: 0 var(--sp-1) 0 var(--sp-2);
+  border: 0; border-radius: inherit; background: none; color: inherit; font-size: var(--fs-base); white-space: nowrap;
 }
 /* the only ellipsis in the tab bar: the tab title; the full title is the tab's title attribute */
 .tt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.tb-pin { font-size: var(--fs-2xs); }
-.tb-x { flex: none; margin-right: 4px; padding: 0 4px; border: 0; border-radius: 3px; background: none; color: inherit; line-height: 18px; opacity: 0; }
+.tb-pin { display: inline-flex; color: var(--tx3); }
+.tb-x {
+  flex: none; display: grid; place-items: center; width: var(--sp-5); height: var(--sp-5); margin-right: var(--sp-1); padding: 0;
+  border: 0; border-radius: var(--r-xs); background: none; color: inherit; opacity: 0;
+}
 .tb:hover .tb-x, .tb.on .tb-x, .tb-x:focus-visible { opacity: .7; }
 .tb-x:hover { background: var(--hov); opacity: 1; }
-.sh-tadd { flex: none; align-self: center; padding: 2px 8px; }
 
 .sh-rb:focus-visible, .sh-ib:focus-visible, .sh-back:focus-visible, .sh-chip:focus-visible, .sh-sh:focus-visible,
 .sh-tg:focus-visible, .sh-go:focus-visible, .sh-fav:focus-visible, .sh-pt:focus-visible, .sh-it:focus-visible,
-.sh-hr:focus-visible, .sh-topen:focus-visible, .tb-go:focus-visible, .tb-x:focus-visible, .sh-tadd:focus-visible, .sh-act:focus-visible {
+.sh-hr:focus-visible, .sh-topen:focus-visible, .tb-go:focus-visible, .tb-x:focus-visible, .sh-tadd:focus-visible, .sh-act:focus-visible,
+.sh-rz:focus-visible, .copy:focus-visible {
   outline: 2px solid var(--acc); outline-offset: -2px;
 }
+.copy { display: inline-flex; align-items: center; gap: var(--sp-1); }
+/* Shell actions and the shared page actions acknowledge a press using the same token-driven variant. */
+:is(.copy, .more, .detail-btn, .ans-opt, .ans-write, .ans-go, .ans-cancel, .cv-pick):active:not(:disabled) {
+  background: var(--press); box-shadow: inset 0 0 0 1px var(--press-edge); transition-duration: 0s;
+}
+:is(.ans-opt.is-rec, .ans-go, .cv-pick.is-rec):active:not(:disabled) {
+  background: color-mix(in srgb, var(--c-primary) 80%, var(--c-main)); color: var(--c-on-primary);
+}
+
+/* pressed (visual-qa H5/G5): one variant for every shell control, deeper than hover and selected and shown at once. Only
+ * the pressed button paints it, never its row or tab (an ancestor matches :active too); inside a selected tab or row a
+ * press adds only a little on top of that fill. */
+:is(.sh-rb, .sh-ib, .sh-back, .sh-topen, .sh-tadd, .sh-chip, .sh-sh, .sh-tg, .sh-go, .sh-fav, .sh-pt, .sh-it, .sh-hr, .sh-act, .tb-go, .tb-x):active:not(:disabled) {
+  background: var(--press); box-shadow: inset 0 0 0 1px var(--press-edge); transition-duration: 0s;
+}
+.sh-topen:active:not(:disabled) { background: linear-gradient(var(--press), var(--press)), var(--sh-strip); }
+:is(.tb.on .tb-go, .sh-row.sel .sh-go, .sh-row.sel .sh-tg, .sh-row.sel .sh-fav):active:not(:disabled) { background: var(--fill-press-on); }
 
 @media (hover: none) {
   .sh-fav { display: block; }
+  .sh-ch { opacity: 1; } /* no hover to show the section chevron on a touch screen */
 }
-/* below 900 px the sidebar is an overlay that ☰, » and Ctrl+\ open (shell.js: toggleSide with narrow = peek) */
+/* below 900 px the sidebar is an overlay that the rail, » and Ctrl+\ open (shell.js: toggleSide with narrow = peek) and its
+ * header's close button or Ctrl+\ shuts; the selected rail item stays filled there too */
 @media (max-width: 899px) {
   .sh-shell[data-side][data-peek] > .sh-side {
     position: absolute; z-index: 7; left: var(--sh-rail-w); top: 0; bottom: 0;
     width: min(var(--sw), calc(100vw - var(--sh-rail-w) - 24px)); margin-left: 0; visibility: hidden;
-    border: 0; border-right: 1px solid var(--line); border-radius: 0; box-shadow: var(--sh-shade); transition: none;
+    border: 0; border-right: var(--hair) solid var(--c-line-strong); border-radius: 0; box-shadow: var(--sh-shade); transition: none;
   }
   .sh-shell[data-side][data-peek="true"] > .sh-side { visibility: visible; }
   .sh-shell[data-side] > .sh-edge { display: none; }
-  .sh-shell .sh-topen { display: block; }
-  .sh-shell[data-side="open"]:not([data-peek="true"]) .sh-rb.on { background: none; color: var(--tx2); }
+  .sh-shell .sh-topen { display: grid; }
+  /* the open overlay covers », which would close it there: hidden, and out of the tab order, until the overlay shuts */
+  .sh-shell[data-peek="true"] .sh-topen { visibility: hidden; }
 }
+/* phone (visual-qa D1): every shell control is a 44 px target (tokens.css --hit) with 8 px between neighbours. */
+@media (max-width: 599px) {
+  :root { --sh-rail-gap: var(--sp-2); }
+  .sh-k, .sh-iq, .sh-w { word-break: keep-all; overflow-wrap: anywhere; text-wrap: balance; }
+  .sh-n { top: auto; right: -2px; bottom: -4px; line-height: 18px; } /* the larger phone count sits on the corner, off the icon */
+  .sh-ib, .sh-topen, .sh-tadd, .sh-chip, .sh-sh, .sh-tg, .sh-fav, .sh-pt, .sh-act, .tb-x, .copy { min-width: var(--hit); min-height: var(--hit); }
+  .sh-back, .sh-row, .sh-go, .sh-kid .sh-go, .sh-hr, .tb { min-height: var(--hit); }
+  .sh-back { margin-bottom: var(--sp-2); }
+  .sh-flt, .sh-ptabs, .sh-acts, .sh-row, .sh-tabs { gap: var(--sp-2); }
+  .sh-scroll, .sh-nav, .sh-kids { display: flex; flex-direction: column; gap: var(--sp-2); }
+  .sh-scroll > *, .sh-nav > *, .sh-kids > * { flex-shrink: 0; }
+  .sh-iw { display: grid; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+  .sh-rz { display: none; } /* the phone overlay keeps one width: nothing to drag */
+  .tb { flex: 0 0 auto; min-width: 0; max-width: 168px; } /* the bar scrolls sideways; titles keep their ellipsis */
+  .tb .tt { max-width: 96px; }
+  /* The type scale makes the sub-tabs scroll. A sticky fade and a partly visible tab cue the continuation. */
+  .sh-main .stabs { padding-right: calc(var(--cv-pad-x) + var(--sp-6)); }
+  .sh-main .stabs::after {
+    content: ""; position: sticky; right: calc(-1 * var(--cv-pad-x)); flex: 0 0 var(--sp-6); margin-left: calc(-1 * var(--sp-6));
+    background: linear-gradient(to right, transparent, var(--bg)); pointer-events: none;
+  }
+}
+/* reduced motion (visual-qa G4): no slide; shell.js sync() cross-fades the part that changed instead; colour fades stay */
 @media (prefers-reduced-motion: reduce) {
-  .sh-shell[data-side][data-peek] > .sh-side { transition: none; }
+  .sh-side, .sh-shell[data-side="closed"] > .sh-side { transition: opacity var(--dur) linear; }
 }

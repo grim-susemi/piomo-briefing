@@ -50,6 +50,7 @@
   --bar-h: 44px;
   --row-h: 32px;
   --ctl-h: 28px;
+  --hit: 44px;
   --ic-sm: 14px;
   --ic-md: 16px;
   --ic-rail: 20px;
@@ -81,6 +82,7 @@
   --c-fg-2: light-dark(rgb(26 28 31 / 74%), rgb(230 230 233 / 74%));
   --c-fg-3: light-dark(rgb(26 28 31 / 70%), rgb(230 230 233 / 66%));
   --c-fg-4: var(--c-fg-3);
+  --c-icon-2: light-dark(rgb(26 28 31 / 50%), rgb(230 230 233 / 50%)); /* M2: decorative unselected icons, >= 3:1 on the rail */
 
   /* hairlines and fills */
   --c-line: light-dark(rgb(0 0 0 / 9%), rgb(255 255 255 / 8%));
@@ -153,3 +155,17 @@
 b, strong, h1, h2, h3, h4, th { font-weight: var(--fw-semibold); }
 button, input, select, textarea { font-family: inherit; }
 :focus-visible { outline-color: var(--c-accent); }
+
+/* Phone type is paired with the shell's scroll cue; conversation layout tokens stay in convo.css (todo 5). */
+@media (max-width: 599px) {
+  :root {
+    --fs-2xs: 15px;
+    --fs-xs: 15px;
+    --fs-sm: 15px;
+    --fs-base: 17px;
+    --fs-md: 17px;
+    --fs-lg: 18px;
+    --fs-xl: 22px;
+    --rail-btn: 44px;
+  }
+}

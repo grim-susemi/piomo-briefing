@@ -21,11 +21,13 @@
 //       plan-view.css's own ellipsis rules .plan-summary-line and .plan-link - nothing else
 //   (c) #main reaches the right edge and starts at the docked sidebar's right edge (>= 900 px, open), else at the rail's
 //   (d) the in-place tray is within 24 px below or above the selection rect and not in the bottom-right corner
-//   (e) ☰, », Ctrl+\ and the left-edge peek each show the sidebar (no peek below 900 px: the sidebar is an overlay there)
+//   (e) sidebar header close + tab-bar reopen, tab-bar open, Ctrl+\ and the left-edge peek each show the sidebar
+//       (no peek below 900 px: the sidebar is an overlay there)
 //   (f) no console error, page exception or failed load since the previous shot, and no 화면 오류 mark
 //   (g) 계획 holds the box plan view (.plan-expanded or .plan-collapsed)
 //   (h) a rail click changes #side only: #main and #tabs HTML are identical before and after the click
 //   (i) the alarm band with 2 waiting items covers neither the rail, the sidebar header nor the tab bar
+//   (j) the selected rail destination stays filled, with the sidebar open, closed or overlaying at every viewport
 // Self-tests (every viewport): each of (a), (b), (c), (i) and (f) is made to fail on purpose once (a block wider than #main,
 //   a clipped headline, a shifted #main, a full-width band, a console.error) and must recover; a check that cannot fail
 //   fails the run.
@@ -333,7 +335,7 @@ function pageLib() {
     const rows = band.querySelectorAll('.alarm-row').length;
     const b = band.getBoundingClientRect();
     const targets = [];
-    for (const [name, sel] of [['rail', '#rail'], ['rail ☰ button', '#rail [data-sh="toggleSide"]'], ['sidebar header', '#side .sh-head'], ['tab bar', '#tabs']]) {
+    for (const [name, sel] of [['rail', '#rail'], ['sidebar close button', '#side .sh-head [data-sh="toggleSide"]'], ['sidebar header', '#side .sh-head'], ['tab bar', '#tabs'], ['sidebar open button', '#tabs .sh-topen']]) {
       const el = document.querySelector(sel);
       if (!el || !visible(el)) { targets.push({ name, skipped: 'not shown' }); continue; }
       const r = el.getBoundingClientRect();
@@ -347,7 +349,16 @@ function pageLib() {
     const pass = rows === 2 && targets.every((t) => t.skipped || t.pass);
     return { result: pass ? 'pass' : 'fail', pass, rows, band: box(b), targets };
   };
-  qa.measure = (allow) => ({ a: qa.checkA(), b: qa.checkB(allow), c: qa.checkC(), i: qa.checkI(), pageError: !!document.getElementById('page-error'), errors: qa.errors.splice(0) });
+  qa.checkJ = () => {
+    const selected = [...document.querySelectorAll('#rail .sh-rb.on')].map(el => {
+      const background = getComputedStyle(el).backgroundColor;
+      const alpha = background === 'transparent' ? 0 : background.startsWith('rgba(') ? Number(background.slice(5, -1).split(',')[3]) : 1;
+      return { key: el.getAttribute('data-key'), background, alpha };
+    });
+    const pass = selected.length === 1 && selected[0].alpha > 0;
+    return { result: pass ? 'pass' : 'fail', pass, selected };
+  };
+  qa.measure = (allow) => ({ a: qa.checkA(), b: qa.checkB(allow), c: qa.checkC(), i: qa.checkI(), j: qa.checkJ(), pageError: !!document.getElementById('page-error'), errors: qa.errors.splice(0) });
   // --inject-overflow: the first visible text span of a 개요 row
   qa.inject = (css) => {
     const panel = document.querySelector('#main .cv-panel[data-sub="ov"]');
@@ -382,6 +393,15 @@ function pageLib() {
     run('c', qa.checkC, () => restyle(document.getElementById('main'), 'margin-left:9px'), (b, x) => Math.abs(x.mainLeft - b.mainLeft - 9) <= 1);
     run('i', qa.checkI, () => restyle(document.getElementById('alarm-band'), 'position:fixed;left:0;top:0;right:0'),
       (b, x) => x.targets.some((t) => t.name === 'rail' && t.overlapPx > 0));
+    run('j', qa.checkJ, () => {
+      const el = document.querySelector('#rail .sh-rb.on');
+      const undo = restyle(el, 'background:transparent;transition:none');
+      return () => {
+        undo();
+        // The recovery is a settled-state assertion. Finish its exact finite transition rather than waiting on time.
+        for (const a of el.getAnimations()) if (a.transitionProperty === 'background-color') a.finish();
+      };
+    }, (b, x, a) => b.pass && !x.pass && a.pass);
     return out;
   };
 }
@@ -496,7 +516,7 @@ async function shot(vp, n, state, o = {}) {
   const checks = {
     a: m.a, b: m.b, c: m.c, ...extra, ...(o.pre || {}),
     f: { result: fPass ? 'pass' : 'fail', pass: fPass, console: fresh, page: m.errors, pageErrorMark: m.pageError },
-    i: m.i,
+    i: m.i, j: m.j,
   };
   const name = `build-${vp.name}-${String(n).padStart(2, '0')}-${state}`;
   const file = `shots/${name}.png`;
@@ -546,7 +566,13 @@ async function reopenPaths(vp) {
     const st = await ev('__qa.sideState()');
     paths[name] = { ...st, pass: st.shown };
   };
-  await tryPath('☰ (rail)', () => click('#rail [data-sh="toggleSide"]'));
+  await tryPath('sidebar header close + tab-bar reopen', async () => {
+    await click('#tabs .sh-topen');
+    await click('#side .sh-head [data-sh="toggleSide"]');
+    await park();
+    if ((await ev('__qa.sideState()')).shown) throw new Error('the sidebar header close button did not close the sidebar');
+    await click('#tabs .sh-topen');
+  });
   await tryPath('» (tab bar)', () => click('#tabs .sh-topen'));
   await tryPath('Ctrl+\\', async () => { await park(); await ctrlBackslash(); });
   if (!narrow) {
@@ -555,7 +581,7 @@ async function reopenPaths(vp) {
       await mouse('mouseMoved', p.x, p.y);
     });
   } else {
-    paths['left-edge peek'] = { applicable: false, reason: 'below 900 px the sidebar is the overlay that ☰ / » / Ctrl+\\ open; shell.css hides the left-edge zone (.sh-edge) there' };
+    paths['left-edge peek'] = { applicable: false, reason: 'below 900 px the sidebar is the overlay that the rail / tab-bar opener / Ctrl+\\ open; shell.css hides the left-edge zone (.sh-edge) there' };
   }
   const applicable = Object.values(paths).filter((p) => p.applicable !== false);
   const pass = applicable.length >= 3 && applicable.every((p) => p.pass);
@@ -591,7 +617,7 @@ async function runViewport(vp, A, B, D) {
   results.sequences.e[vp.name] = e;
   await next('side-peek', { pre: { e } }); // the last path's state, still shown; the shot carries the sequence result
   await sidebarClose();
-  if (vp.width >= 900) { await click('#rail [data-sh="toggleSide"]'); await park(); } // docked open again for the pages
+  if (vp.width >= 900) { await click('#tabs .sh-topen'); await park(); } // docked open again for the pages
 
   // three tabs, A and B pinned (double-click), the 300-character conversation active
   for (const sid of [A.id, B.id, D.id]) await ev(`(BriefPage.open(${J(sid)}), true)`);

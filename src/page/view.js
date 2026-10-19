@@ -139,7 +139,7 @@
   }
 
   function copyBtn(value) {
-    return '<button type="button" class="copy" data-copy="' + esc(value) + '" title="복사">⧉ 복사</button>';
+    return '<button type="button" class="copy" data-copy="' + esc(value) + '" title="복사">' + ic('copy', 'ic-xs') + ' <span data-copy-label role="status">복사</span></button>';
   }
 
   function chip(cls, label) { return '<span class="chip ' + cls + '">' + esc(label) + '</span>'; }

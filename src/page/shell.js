@@ -21,13 +21,19 @@
  *                                    the same LIST_MAX (prefsError trimmed). Nothing is marked seen here.
  *     {type:'known', ids, now}       after every model: ids missing from it stay (drawn as (지금 안 보임)), are stamped in
  *                                    absent, and are pruned once gone for more than 30 days (alarm.js prune rule)
- *   g.BriefShell.rail(model, st) / side(model, st) / tabs(model, st) -> html   #rail, the sidebar list region, #tabs
- *   g.BriefShell.sideFrame(st) -> html   the persistent sidebar frame: resize handle, header, back link, search input,
- *     filter chips and the empty list region [data-sh-part="list"]; rendered once, kept current by sync()
+ *   g.BriefShell.rail(model, st) / side(model, st) / tabs(model, st) -> html   #rail, the sidebar list region, #tabs. The
+ *     rail is home, conv, inbox, plans, archive, a spacer, settings; the sidebar opens and closes from its header (close),
+ *     the tab bar (open), Ctrl+\ and the edge peek, never from the rail
+ *   g.BriefShell.sideFrame(st) -> html   the persistent sidebar frame: resize handle, header, back link, search label and
+ *     input, filter chips and the empty list region [data-sh-part="list"]; rendered once, kept current by sync()
  *   g.BriefShell.skeleton(st) -> html    .sh-shell > #rail + #edge + #side + .sh-wrap > #tabs + #main
- *   g.BriefShell.sync(root, st)          root = .sh-shell: data-side/data-peek/data-view, --sw, frame title/chips/search
+ *   g.BriefShell.sync(root, st)          root = .sh-shell: data-side/data-peek/data-view, --sw, frame title/chips/search.
+ *     Under prefers-reduced-motion a flip of data-side/data-peek cross-fades instead of sliding: .sh-wrap fades in when
+ *     the docked sidebar opened or closed, the sidebar when it became visible (Web Animations, from the opacity an
+ *     interrupted fade had reached)
  *   g.BriefShell.bind(root, hooks) -> unbind   hooks.dispatch(action) for clicks ([data-sh]), double-clicks (pin a tab),
- *     the search input, the edge hover, leaving the peek panel, the resize drag and Ctrl+\ (preventDefault).
+ *     the search input, the edge hover, leaving the peek panel, the resize drag, the resize handle's keys (ArrowLeft /
+ *     ArrowRight: 16 px, Home / End: 200 / 480 px, the same resize action as the drag) and Ctrl+\ (preventDefault).
  *     hooks.narrow() / hooks.now() default to matchMedia('(max-width: 899px)') and Date.now().
  *   g.BriefShell.inbox(model, st) -> {wait, done, ans, held}; badge(model, st) = wait + done items (the inbox count; held
  *     decisions never count, C-HOLD 4). On the server page (st.live) every open decision in 'wait' carries 보류
@@ -48,16 +54,17 @@
   // tabs and favourites: open/fav refuse a new id beyond it and load cuts at the same number, so every state the reducer
   // makes survives a reload. sub/seen/absent have no cap: they grow with history and age out by the 30-day absence rule.
   var LIST_MAX = 200;
+  var RZ_STEP = 16; // the resize handle's arrow-key step
   var SEARCH_MAX = 200;
   var RECENT_MAX = 5;
   var ANSWERED_MAX = 12;
   var HUES = 12; // tab icon colours: shell.css --tabhue-0..11
   var NARROW = '(max-width: 899px)';
+  var CALM = '(prefers-reduced-motion: reduce)';
   var GONE = '(지금 안 보임)';
-  var TOGGLE_TIP = '사이드바 표시/숨기기 (Ctrl+\\)';
   var VIEWS = ['conv', 'inbox', 'plans', 'home', 'archive', 'settings'];
   var VIEW_TITLE = { conv: '대화', inbox: '수신함', plans: '계획', home: '홈', archive: '닫힌 창', settings: '설정' };
-  var RAIL = [['conv', 'message-square', '대화'], ['inbox', 'inbox', '수신함'], ['plans', 'list-todo', '계획'], ['home', 'house', '홈'], ['archive', 'archive', '닫힌 창']];
+  var RAIL = [['home', 'house', '홈'], ['conv', 'message-square', '대화'], ['inbox', 'inbox', '수신함'], ['plans', 'list-todo', '계획'], ['archive', 'archive', '닫힌 창']];
   var FILTERS = [['all', '전체'], ['wait', '나를 기다림'], ['run', '진행 중'], ['done', '끝남']];
   var TAB_BY_LABEL = { '나를 기다림': 'wait', '진행 중': 'run', '끝남': 'done' }; // = view.js
   var BOXES = [['wait', '기다리는 것'], ['done', '끝남 확인'], ['ans', '내가 답함'], ['held', '보류됨']];
@@ -677,18 +684,17 @@
   function rail(model, st) {
     var n = badge(model, st);
     // the tooltip is the label word for word; a count lives in the badge and in the spoken name only
-    var btn = function (act, key, icon, label, on, extra, spoken) {
-      return '<button type="button" class="sh-rb' + (on ? ' on' : '') + '" data-sh="' + act + '"' + (key ? ' data-key="' + key + '"' : '') +
-        ' aria-label="' + esc(spoken || label) + '"' + (key ? ' aria-pressed="' + on + '"' : '') + '><span class="sh-ri" aria-hidden="true">' +
+    var btn = function (key, icon, label, on, extra, spoken) {
+      return '<button type="button" class="sh-rb' + (on ? ' on' : '') + '" data-sh="view" data-key="' + key + '"' +
+        ' aria-label="' + esc(spoken || label) + '" aria-pressed="' + on + '"><span class="sh-ri" aria-hidden="true">' +
         ic(icon, on ? 'ic-rail ic-sel' : 'ic-rail') + '</span>' + (extra || '') + '<span class="sh-tip" aria-hidden="true">' + esc(label) + '</span></button>';
     };
-    // the sidebar toggle shows what a press does to the docked sidebar: close it while it is open, else open it
-    var html = btn('toggleSide', '', st.sideOpen !== false ? 'panel-left-close' : 'panel-left-open', TOGGLE_TIP, false);
+    var html = '';
     RAIL.forEach(function (r) {
       var count = r[0] === 'inbox' && n ? '<span class="sh-n" aria-hidden="true">' + (n > 99 ? '99+' : n) + '</span>' : '';
-      html += btn('view', r[0], r[1], r[2], st.view === r[0], count, count ? r[2] + ' ' + n + '개' : '');
+      html += btn(r[0], r[1], r[2], st.view === r[0], count, count ? r[2] + ' ' + n + '개' : '');
     });
-    return html + '<span class="sh-rsp" aria-hidden="true"></span>' + btn('view', 'settings', 'settings', '설정', st.view === 'settings');
+    return html + '<span class="sh-rsp" aria-hidden="true"></span>' + btn('settings', 'settings', '설정', st.view === 'settings');
   }
 
   function tabs(model, st) {
@@ -722,12 +728,13 @@
   function sideFrame(state) {
     var st = obj(state) || defaults();
     var hint = searchHint(viewOf(st));
-    return '<div class="sh-rz" data-sh="rz" role="separator" aria-orientation="vertical" aria-label="사이드바 너비" aria-valuemin="' + MIN_W +
-      '" aria-valuemax="' + MAX_W + '" aria-valuenow="' + width(st) + '" title="끌어서 너비 조절"></div>' +
+    return '<div class="sh-rz" data-sh="rz" role="separator" tabindex="0" aria-orientation="vertical" aria-label="사이드바 너비" aria-valuemin="' + MIN_W +
+      '" aria-valuemax="' + MAX_W + '" aria-valuenow="' + width(st) + '" title="끌거나 왼쪽·오른쪽 화살표로 너비 조절"></div>' +
       '<div class="sh-head"><span class="sh-title" data-sh-part="title">' + VIEW_TITLE[viewOf(st)] + '</span>' +
       '<button type="button" class="sh-ib" data-sh="toggleSide" title="사이드바 닫기 (Ctrl+\\)" aria-label="사이드바 닫기">' + ic('panel-left-close', 'ic-md') + '</button></div>' +
       '<button type="button" class="sh-back" data-sh="view" data-key="conv">' + ic('arrow-left') + ' 사이드바로 돌아가기</button>' +
-      '<label class="sh-srch">' + ic('search', 'ic-md') + '<input type="search" class="sh-q" data-sh="search" maxlength="' + SEARCH_MAX +
+      '<label class="sh-qlbl" for="sh-q">검색</label>' +
+      '<label class="sh-srch">' + ic('search', 'ic-md') + '<input type="search" id="sh-q" class="sh-q" data-sh="search" maxlength="' + SEARCH_MAX +
       '" autocomplete="off" spellcheck="false" placeholder="' + hint + '" aria-label="' + hint + '" value="' + esc(st.search) + '"></label>' +
       '<div class="sh-flt" role="group" aria-label="걸러 보기">' + chipsHtml(st) + '</div>' +
       '<div class="sh-scroll" data-sh-part="list"></div>';
@@ -743,12 +750,40 @@
   }
 
   // ---- DOM: the frame's live bits and the listeners ---------------------------------------------------------------
+  // Reduced motion: the sidebar's slide (margin-left) is off in shell.css; instead the part that changed fades in over
+  // tokens.css --dur. A fade a new flip interrupts goes on from the opacity it had reached, never from 0 again.
+  function crossFade(root, docked, shown) {
+    if (typeof g.matchMedia !== 'function' || !g.matchMedia(CALM).matches) return;
+    var raw = typeof g.getComputedStyle === 'function' ? String(g.getComputedStyle(root).getPropertyValue('--dur')).trim() : '';
+    var dur = /ms$/.test(raw) ? parseFloat(raw) : parseFloat(raw) * 1000;
+    var ms = isFinite(dur) && dur > 0 ? dur : 150;
+    var kids = root.children || [];
+    for (var i = 0; i < kids.length; i++) {
+      var el = kids[i], cls = el.classList;
+      var fade = cls && ((docked && cls.contains('sh-wrap')) || (shown && cls.contains('sh-side')));
+      if (!fade || typeof el.animate !== 'function') continue;
+      var from = 0;
+      var running = typeof el.getAnimations === 'function' ? el.getAnimations().filter(function (a) { return a.id === 'sh-xfade'; }) : [];
+      if (running.length) {
+        from = Number(g.getComputedStyle(el).opacity) || 0;
+        running.forEach(function (a) { a.cancel(); });
+      }
+      if (ms * (1 - from) < 1) continue;
+      el.animate([{ opacity: from }, { opacity: 1 }], { duration: ms * (1 - from), easing: 'linear' }).id = 'sh-xfade';
+    }
+  }
+
   function sync(root, st) {
     if (!root || typeof root.setAttribute !== 'function') return;
     var view = viewOf(st);
-    root.setAttribute('data-side', st.sideOpen === false ? 'closed' : 'open');
-    root.setAttribute('data-peek', st.peek === true ? 'true' : 'false');
+    var side0 = root.getAttribute('data-side'), peek0 = root.getAttribute('data-peek');
+    var side = st.sideOpen === false ? 'closed' : 'open', peek = st.peek === true ? 'true' : 'false';
+    root.setAttribute('data-side', side);
+    root.setAttribute('data-peek', peek);
     root.setAttribute('data-view', view);
+    if (side0 !== null && (side0 !== side || peek0 !== peek)) {
+      crossFade(root, side0 !== side, (side === 'open' && side0 !== 'open') || (peek === 'true' && peek0 !== 'true'));
+    }
     if (root.style && typeof root.style.setProperty === 'function') root.style.setProperty('--sw', width(st) + 'px');
     var title = root.querySelector('[data-sh-part="title"]');
     if (title) title.textContent = VIEW_TITLE[view];
@@ -851,6 +886,16 @@
       if (root.classList) root.classList.add('is-resizing');
       doc.addEventListener('mousemove', move);
       doc.addEventListener('mouseup', up);
+    });
+    // the resize handle from the keyboard: the same resize action as the drag, from the width sync() keeps on it
+    on(root, 'keydown', function (e) {
+      var rz = closest(e.target, '[data-sh="rz"]');
+      if (!rz || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      var w = Number(rz.getAttribute('aria-valuenow'));
+      var px = { ArrowLeft: w - RZ_STEP, ArrowRight: w + RZ_STEP, Home: MIN_W, End: MAX_W }[e.key];
+      if (typeof px !== 'number' || !isFinite(px)) return;
+      if (typeof e.preventDefault === 'function') e.preventDefault(); // no page scroll
+      send({ type: 'resize', px: px });
     });
     on(doc, 'keydown', function (e) {
       var a = keyAction(e);

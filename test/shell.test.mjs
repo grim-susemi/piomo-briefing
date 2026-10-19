@@ -406,30 +406,31 @@ test('persist and restore use only omo-briefing.ui.v1 and never throw on blocked
 
 // ---- rail, sidebar views, tab bar ---------------------------------------------------------------------------------
 
-test('rail: the sidebar toggle, then the 대화 수신함 계획 홈 닫힌 창 icons, a spacer, then 설정, with the inbox badge', () => {
+test('rail: home first, then every destination, a spacer and settings; sidebar controls stay in its header and the tab bar', () => {
   const S = load().BriefShell;
   const st = base(S);
   const html = S.rail(fixture(), st);
   assert.equal(all(marks(html), /class="sh-ri"[^>]*>([^<]*)</g).join(' '),
-    '[panel-left-close] [message-square] [inbox] [list-todo] [house] [archive] [settings]');
-  assert.equal((html.match(/class="ic ic-rail"/g) || []).length, 6, 'rail-sized icons');
+    '[house] [message-square] [inbox] [list-todo] [archive] [settings]');
+  assert.equal((html.match(/class="ic ic-rail"/g) || []).length, 5, 'rail-sized icons');
   assert.match(html, /data-key="conv"[^>]*><span class="sh-ri" aria-hidden="true"><svg class="ic ic-rail ic-sel"/, 'the selected view: a heavier stroke');
   assert.equal((html.match(/ic-sel/g) || []).length, 1);
-  assert.match(marks(S.rail(fixture(), S.reduce(st, { type: 'toggleSide' }))), /^<button[^>]*data-sh="toggleSide"[^>]*><span class="sh-ri" aria-hidden="true">\[panel-left-open\]/,
-    'the toggle shows what a press does');
-  assert.deepEqual(all(html, /class="sh-tip"[^>]*>([^<]*)</g), ['사이드바 표시/숨기기 (Ctrl+\\)', '대화', '수신함', '계획', '홈', '닫힌 창', '설정']);
+  assert.doesNotMatch(html, /data-sh="toggleSide"/);
+  assert.match(marks(S.sideFrame(st)), /data-sh="toggleSide"[^>]*>\[panel-left-close\]/, 'the header control closes');
+  assert.match(marks(S.tabs(fixture(), S.reduce(st, { type: 'toggleSide' }))), /^<button[^>]*class="sh-topen"[^>]*>\[panel-left-open\]/, 'the tab-bar control opens');
+  assert.deepEqual(all(html, /class="sh-tip"[^>]*>([^<]*)</g), ['홈', '대화', '수신함', '계획', '닫힌 창', '설정']);
   assert.match(html, /data-key="inbox" aria-label="수신함 6개"/, 'the count is spoken, not shown in the tooltip');
   assert.match(marks(html), /\[archive\]<\/span><span class="sh-tip"[^>]*>닫힌 창<\/span><\/button><span class="sh-rsp" aria-hidden="true"><\/span><button[^>]*data-key="settings"/);
   assert.match(html, /<span class="sh-n" aria-hidden="true">6<\/span>/);
   assert.match(html, /class="sh-rb on" data-sh="view" data-key="conv"/);
-  assert.equal((html.match(/<button /g) || []).length, 7, 'no other control, no second panel');
+  assert.equal((html.match(/<button /g) || []).length, 6, 'every destination, no rail toggle or second panel');
 });
 
 test('regression R4: the inbox tooltip is exactly 수신함 while its badge carries the count', () => {
   const S = load().BriefShell;
   const vm = { sessions: [{ id: 'one', decisions: [{ id: 1, answered: false, closed: false }] }] };
   const html = S.rail(vm, S.defaults());
-  assert.deepEqual(all(html, /class="sh-tip"[^>]*>([^<]*)</g), ['사이드바 표시/숨기기 (Ctrl+\\)', '대화', '수신함', '계획', '홈', '닫힌 창', '설정']);
+  assert.deepEqual(all(html, /class="sh-tip"[^>]*>([^<]*)</g), ['홈', '대화', '수신함', '계획', '닫힌 창', '설정']);
   assert.match(marks(html), /\[inbox\]<\/span><span class="sh-n" aria-hidden="true">1<\/span><span class="sh-tip" aria-hidden="true">수신함<\/span>/);
   assert.doesNotMatch(S.rail({ sessions: [] }, S.defaults()), /sh-n|수신함 0/, 'nothing waiting: no badge, plain label');
 });
@@ -806,13 +807,14 @@ test('sideFrame is rendered once from state alone; sync keeps its title, chips, 
   const frame = S.sideFrame(st);
   assert.match(frame, /^<div class="sh-rz" data-sh="rz" role="separator"[^>]*aria-valuenow="300"/);
   assert.match(frame, /<span class="sh-title" data-sh-part="title">대화<\/span>/);
-  assert.match(frame, /<input type="search" class="sh-q" data-sh="search" maxlength="200"[^>]*placeholder="대화·결정 검색"[^>]*value="abc">/);
+  assert.match(frame, /<label class="sh-qlbl" for="sh-q">검색<\/label>/);
+  assert.match(frame, /<input type="search" id="sh-q" class="sh-q" data-sh="search" maxlength="200"[^>]*placeholder="대화·결정 검색"[^>]*value="abc">/);
   assert.match(marks(frame), /<button type="button" class="sh-back" data-sh="view" data-key="conv">\[arrow-left\] 사이드바로 돌아가기<\/button>/);
   assert.match(marks(frame), /aria-label="사이드바 닫기">\[panel-left-close\]<\/button>/);
   assert.match(marks(frame), /<label class="sh-srch">\[search\]<input type="search"/);
   assert.match(frame, /<div class="sh-scroll" data-sh-part="list"><\/div>$/);
   const sk = S.skeleton(st);
-  assert.deepEqual(all(sk, / id="([^"]+)"/g), ['rail', 'edge', 'side', 'tabs', 'main']);
+  assert.deepEqual(all(sk, / id="([^"]+)"/g), ['rail', 'edge', 'side', 'sh-q', 'tabs', 'main']);
   assert.equal((sk.match(/<aside/g) || []).length, 1, 'one sidebar column, no second panel');
   assert.match(sk, /^<div class="sh-shell" data-shell data-side="open" data-peek="false" data-view="conv" style="--sw:300px">/);
 
