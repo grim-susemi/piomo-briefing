@@ -29,7 +29,7 @@
  *   g.BriefShell.bind(root, hooks) -> unbind   hooks.dispatch(action) for clicks ([data-sh]), double-clicks (pin a tab),
  *     the search input, the edge hover, leaving the peek panel, the resize drag and Ctrl+\ (preventDefault).
  *     hooks.narrow() / hooks.now() default to matchMedia('(max-width: 899px)') and Date.now().
- *   g.BriefShell.inbox(model, st) -> {wait, done, ans, held}; badge(model, st) = wait + done items (the 📥 count; held
+ *   g.BriefShell.inbox(model, st) -> {wait, done, ans, held}; badge(model, st) = wait + done items (the inbox count; held
  *     decisions never count, C-HOLD 4). On the server page (st.live) every open decision in 'wait' carries 보류
  *     (data-act="ans-hold", data-where="inbox") and, while st.answers[id].confirm.hold, the hold confirm row; 'held'
  *     items carry 다시 열기 (data-act="ans-reopen"). page.js handles those clicks.
@@ -57,7 +57,7 @@
   var TOGGLE_TIP = '사이드바 표시/숨기기 (Ctrl+\\)';
   var VIEWS = ['conv', 'inbox', 'plans', 'home', 'archive', 'settings'];
   var VIEW_TITLE = { conv: '대화', inbox: '수신함', plans: '계획', home: '홈', archive: '닫힌 창', settings: '설정' };
-  var RAIL = [['conv', '💬', '대화'], ['inbox', '📥', '수신함'], ['plans', '🗂', '계획'], ['home', '🏠', '홈'], ['archive', '🗄', '닫힌 창']];
+  var RAIL = [['conv', 'message-square', '대화'], ['inbox', 'inbox', '수신함'], ['plans', 'list-todo', '계획'], ['home', 'house', '홈'], ['archive', 'archive', '닫힌 창']];
   var FILTERS = [['all', '전체'], ['wait', '나를 기다림'], ['run', '진행 중'], ['done', '끝남']];
   var TAB_BY_LABEL = { '나를 기다림': 'wait', '진행 중': 'run', '끝남': 'done' }; // = view.js
   var BOXES = [['wait', '기다리는 것'], ['done', '끝남 확인'], ['ans', '내가 답함'], ['held', '보류됨']];
@@ -88,6 +88,10 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c];
     });
   }
+  // a Lucide icon from the page's sprite (icons.js); '' without icons.js (this file's unit tests)
+  function ic(name, cls) { var m = g.BriefIcons; return m ? m.icon(name, cls) : ''; }
+  // render.mjs's status text ('전달됨 <stopwatch>11:58'), escaped, with the clock icon for its stopwatch
+  function timed(v) { var m = g.BriefIcons; return m ? m.timed(str(v)) : esc(v); }
   // own-property lookups: ids like '__proto__' or 'constructor' must not reach Object.prototype
   function has(o, k) { return o != null && typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k); }
   function arr(v) { return Array.isArray(v) ? v : []; }
@@ -370,7 +374,7 @@
     return tabOf(s) === 'done' && at !== null && at > (has(st.seen, s.id) ? st.seen[s.id] : 0);
   }
   function workers(s) { return arr(obj(s.live) && s.live.workers).filter(obj).length; }
-  // 🗂 계획: a plan, or auto.work, which reaches the model as workName (work.name) and auto.stage (work.phase).
+  // 계획: a plan, or auto.work, which reaches the model as workName (work.name) and auto.stage (work.phase).
   // Worker or todo telemetry alone (auto.workers, auto.todo*) is not a plan.
   function hasPlan(s) {
     var a = obj(s.auto);
@@ -442,7 +446,7 @@
     return reply ? '→ 답글 “' + cut(reply, 40) + '”' : '→ 답 받음';
   }
 
-  // 📥: wait = each open decision, each blocked conversation, each open terminal question; done = finished conversations
+  // 수신함: wait = each open decision, each blocked conversation, each open terminal question; done = finished conversations
   // with activity after the owner last opened them; ans = the 12 newest answered decisions.
   function inboxOf(c, st) {
     var wait = [], done = [], ans = [], held = [];
@@ -497,7 +501,7 @@
   function fullOf(s) {
     var title = str(s.title) || '(제목 없음)';
     if (!isAlive(s) || !str(s.tabLabel)) return title;
-    return '🗂 ' + str(s.tabLabel) + (num(s.tabNumber) === null ? '' : ' #' + s.tabNumber) + ' · ' + title;
+    return str(s.tabLabel) + (num(s.tabNumber) === null ? '' : ' #' + s.tabNumber) + ' · ' + title;
   }
   function ago(t, now) {
     var ms = toMs(t);
@@ -508,7 +512,7 @@
   }
   function rowBadge(s, st) {
     var o = openDecs(s).length;
-    if (o) return '<span class="sh-bdg" title="답을 기다리는 결정 ' + o + '개">🔔' + o + '</span>';
+    if (o) return '<span class="sh-bdg" title="답을 기다리는 결정 ' + o + '개">' + ic('bell', 'ic-xs') + o + '</span>';
     if (isBlocked(s)) return '<span class="sh-bdg sh-bdg-r">막힘</span>';
     if (obj(s.openQuestion)) return '<span class="sh-bdg sh-bdg-q">질문</span>';
     if (unseen(s, st)) return '<span class="sh-bdg sh-bdg-g">확인</span>';
@@ -517,10 +521,10 @@
   function favBtn(sid, st) {
     var on = st.favs.indexOf(sid) >= 0;
     return '<button type="button" class="sh-fav" data-sh="fav" data-sid="' + esc(sid) + '" aria-pressed="' + on + '" aria-label="즐겨찾기" title="즐겨찾기">' +
-      (on ? '★' : '☆') + '</button>';
+      ic('star', on ? 'ic-md ic-fill' : 'ic-md') + '</button>';
   }
 
-  // o.flat: no ▶ kids toggle; o.sub: the grey text after the name ('' = none)
+  // o.flat: no kids toggle; o.sub: the grey text after the name ('' = none)
   function row(s, st, c, o) {
     var id = s.id;
     var kids = !o.flat && isAlive(s);
@@ -528,28 +532,28 @@
     var sub = o.sub !== undefined ? o.sub : (isAlive(s) && str(s.tabLabel) ? str(s.title) : '');
     var html = '<div class="sh-row' + (st.active === id ? ' sel' : '') + (c.isPrev(s) ? ' sh-prev' : '') + '" data-row="' + esc(id) + '">' +
       (kids ? '<button type="button" class="sh-tg" data-sh="expand" data-sid="' + esc(id) + '" aria-expanded="' + open + '" aria-label="' +
-        (open ? '접기' : '펼치기') + '">' + (open ? '▼' : '▶') + '</button>' : '<span class="sh-tg" aria-hidden="true"></span>') +
+        (open ? '접기' : '펼치기') + '">' + ic(open ? 'chevron-down' : 'chevron-right', 'ic-xs') + '</button>' : '<span class="sh-tg" aria-hidden="true"></span>') +
       '<button type="button" class="sh-go" data-sh="open" data-sid="' + esc(id) + '">' + icon(s, c) +
       '<span class="sh-t" title="' + esc(fullOf(s)) + '">' + esc(nameOf(s)) + (sub ? '<span class="sh-sub">' + esc(sub) + '</span>' : '') + '</span>' +
       rowBadge(s, st) + '</button>' + favBtn(id, st) + '</div>';
     if (open) html += '<div class="sh-kids" role="group" aria-label="' + esc(nameOf(s)) + ' 펼침">' + kidRows(s, c) + '</div>';
     return html;
   }
-  function kid(sid, sub, sym, text, extra) {
+  function kid(sid, sub, icon, text, extra) {
     return '<div class="sh-row sh-kid' + (extra || '') + '"><span class="sh-tg" aria-hidden="true"></span>' +
       '<button type="button" class="sh-go" data-sh="open" data-sid="' + esc(sid) + '"' + (sub ? ' data-sub="' + sub + '"' : '') + '>' +
-      '<span class="sh-ki" aria-hidden="true">' + sym + '</span><span class="sh-t" title="' + esc(text) + '">' + esc(text) + '</span></button></div>';
+      '<span class="sh-ki" aria-hidden="true">' + ic(icon, 'ic-sm') + '</span><span class="sh-t" title="' + esc(text) + '">' + esc(text) + '</span></button></div>';
   }
   function kidRows(s, c) {
     var html = '';
-    if (hasPlan(s)) { var pc = planCount(s); html += kid(s.id, 'plan', '🗂', '계획' + (pc ? ' ' + pc : '')); }
+    if (hasPlan(s)) { var pc = planCount(s); html += kid(s.id, 'plan', 'list-todo', '계획' + (pc ? ' ' + pc : '')); }
     var w = workers(s);
-    if (w) html += kid(s.id, 'wk', '👷', '작업자 ' + w);
-    html += kid(s.id, 'dec', '🔔', '결정 ' + openDecs(s).length + ' 대기 · ' + answeredDecs(s).length + ' 답함');
-    c.prevsOf(s).forEach(function (p) { html += kid(p.id, '', '🕘', '이전 대화 · ' + (str(p.title) || '(제목 없음)'), ' sh-prev'); });
+    if (w) html += kid(s.id, 'wk', 'users', '작업자 ' + w);
+    html += kid(s.id, 'dec', 'bell', '결정 ' + openDecs(s).length + ' 대기 · ' + answeredDecs(s).length + ' 답함');
+    c.prevsOf(s).forEach(function (p) { html += kid(p.id, '', 'rotate-ccw-clock', '이전 대화 · ' + (str(p.title) || '(제목 없음)'), ' sh-prev'); });
     return html;
   }
-  // a remembered id the model does not have now: shown, not openable from here; ★ still takes it off the favourites
+  // a remembered id the model does not have now: shown, not openable from here; its star still takes it off the favourites
   function goneRow(id, st) {
     return '<div class="sh-row sh-gone" data-row="' + esc(id) + '"><span class="sh-tg" aria-hidden="true"></span>' +
       '<span class="sh-go"><span class="sh-ico" aria-hidden="true">·</span><span class="sh-t" title="' + esc(GONE + ' · ' + id) + '">' + GONE + '</span></span>' +
@@ -559,7 +563,7 @@
     var open = expanded(st, 'sec:' + key);
     return '<div class="sh-sec" data-sec="' + key + '"><button type="button" class="sh-sh" data-sh="expand" data-sid="sec:' + key + '" aria-expanded="' + open + '">' +
       '<span class="sh-sht">' + esc(title) + '</span>' + (n === null ? '' : '<span class="sh-cnt">' + n + '</span>') +
-      '<span class="sh-ch" aria-hidden="true">' + (open ? '▾' : '▸') + '</span></button>' +
+      '<span class="sh-ch" aria-hidden="true">' + ic(open ? 'chevron-down' : 'chevron-right', 'ic-xs') + '</span></button>' +
       (open ? '<div class="sh-nav">' + (body || '<p class="sh-empty">' + esc(empty) + '</p>') + '</div>' : '') + '</div>';
   }
   function item(it, c) {
@@ -568,7 +572,7 @@
     return '<button type="button" class="sh-it' + hueClass(s, c) + '" data-sh="open" data-sid="' + esc(s.id) + '" data-sub="' + it.sub + '">' +
       icon(s, c, true) + '<span class="sh-itb"><span class="sh-k">' + esc(nameOf(s)) + ' · ' + esc(it.kind) + '</span>' +
       '<span class="sh-iq">' + esc(it.text || '(내용 없음)') + (it.answer ? ' <span class="sh-ans">' + esc(it.answer) + '</span>' : '') + '</span>' +
-      (when || it.note ? '<span class="sh-w">' + esc([when, it.note].filter(Boolean).join(' · ')) + '</span>' : '') + '</span></button>';
+      (when || it.note ? '<span class="sh-w">' + timed([when, it.note].filter(Boolean).join(' · ')) + '</span>' : '') + '</span></button>';
   }
   function empty(text) { return '<p class="sh-empty">' + esc(text) + '</p>'; }
   // an inbox item with its 보류 / 다시 열기 controls (server page only): the controls sit beside the item button, never in it
@@ -583,17 +587,17 @@
     if (phase === 'sending') ctl = '<span class="sh-w" role="status">보내는 중…</span>';
     else if (it.reopen) ctl = '<button type="button" class="sh-act" data-act="ans-reopen"' + at + '>다시 열기</button>';
     else if (a && !phase && obj(a.confirm) && a.confirm.hold === true) {
-      ctl = '<span class="sh-hq">' + esc(holdWhere(it.s)) + ' 대화의 #' + id + '를 보류할까요? 대화는 다시 묻지 않아요</span>' +
+      ctl = '<span class="sh-hq">' + holdWhere(it.s) + ' 대화의 #' + id + '를 보류할까요? 대화는 다시 묻지 않아요</span>' +
         '<button type="button" class="sh-act" data-act="ans-send"' + at + '>보류</button><button type="button" class="sh-act" data-act="ans-cancel"' + at + '>취소</button>';
     } else ctl = '<button type="button" class="sh-act" data-act="ans-hold"' + at + '>보류</button>';
     var err = a && str(a.error) ? '<span class="sh-err" role="alert">' + esc(a.error) + '</span>' : '';
     return '<div class="sh-iw">' + item(it, c) + '<div class="sh-acts">' + ctl + err + '</div></div>';
   }
-  // = view.js whereOf: herdr tab label and number, else the pane, else the title
+  // = view.js whereHtml: herdr tab label and number, else the pane, else the title (html)
   function holdWhere(s) {
     var label = str(s.tabLabel);
-    if (label) return '🗂 ' + label + (num(s.tabNumber) === null ? '' : ' #' + s.tabNumber);
-    return str(s.paneId) ? '창 ' + str(s.paneId) : (str(s.title) || '(제목 없음)');
+    if (label) return ic('app-window') + ' ' + esc(label + (num(s.tabNumber) === null ? '' : ' #' + s.tabNumber));
+    return esc(str(s.paneId) ? '창 ' + str(s.paneId) : (str(s.title) || '(제목 없음)'));
   }
 
   // ---- sidebar views (list region) ----------------------------------------------------------------------------------
@@ -612,7 +616,7 @@
       section('tabs', '열린 탭', open.map(function (s) { return row(s, st, c, {}); }).join(''), open.length, st, narrowed ? '맞는 대화 없음' : '열린 대화 없음') +
       section('recent', '최근 항목', recent.map(function (s) { return row(s, st, c, { flat: true, sub: '' }); }).join(''), recent.length, st, '없음') +
       '<div class="sh-sec"><button type="button" class="sh-sh" data-sh="view" data-key="archive"><span class="sh-sht">닫힌 창</span>' +
-      '<span class="sh-cnt">' + closedN + '</span><span class="sh-ch" aria-hidden="true">›</span></button></div>';
+      '<span class="sh-cnt">' + closedN + '</span><span class="sh-ch" aria-hidden="true">' + ic('chevron-right', 'ic-xs') + '</span></button></div>';
   }
   function inboxView(c, st) {
     var ib = inboxOf(c, st);
@@ -634,12 +638,12 @@
   }
   function homeView(c, st) {
     var ib = inboxOf(c, st);
-    var line = function (key, box, sym, label, n) {
+    var line = function (key, box, icon, label, n) {
       return '<button type="button" class="sh-hr" data-sh="view" data-key="' + key + '"' + (box ? ' data-box="' + box + '"' : '') + '>' +
-        '<span class="sh-ki" aria-hidden="true">' + sym + '</span><span class="sh-hl">' + label + '</span><b class="sh-num">' + n + '</b></button>';
+        '<span class="sh-ki" aria-hidden="true">' + ic(icon, 'ic-sm') + '</span><span class="sh-hl">' + label + '</span><b class="sh-num">' + n + '</b></button>';
     };
-    return '<div class="sh-nav sh-home">' + line('inbox', 'wait', '🔔', '기다리는 것', ib.wait.length) +
-      line('inbox', 'done', '✓', '끝남 확인', ib.done.length) + line('conv', '', '▦', '열린 탭', c.alive.length) + '</div>' +
+    return '<div class="sh-nav sh-home">' + line('inbox', 'wait', 'bell', '기다리는 것', ib.wait.length) +
+      line('inbox', 'done', 'check', '끝남 확인', ib.done.length) + line('conv', '', 'layout-grid', '열린 탭', c.alive.length) + '</div>' +
       section('tabs', '열린 탭', c.alive.map(function (s) { return row(s, st, c, { flat: true }); }).join(''), c.alive.length, st, '열린 대화 없음');
   }
   function archiveView(c, st) {
@@ -650,10 +654,10 @@
   }
   function settingsView() {
     var alarm = g.BriefAlarm;
-    return '<div class="sh-set"><p class="sh-seth">🔔 알림 소리</p><p class="sh-setr">' +
+    return '<div class="sh-set"><p class="sh-seth">' + ic('bell') + ' 알림 소리</p><p class="sh-setr">' +
       (alarm && typeof alarm.soundButtonHtml === 'function' ? alarm.soundButtonHtml() : '<span class="sh-empty">알림 모듈이 없어 바꿀 수 없음</span>') +
       ' <span class="sh-hint">답 기다림 알람 소리 켜기/끄기 (이 브라우저에만 저장)</span></p>' +
-      '<p class="sh-seth">ℹ 표시 뜻</p><ul class="legend-list sh-legend">' + LEGEND.map(function (l) {
+      '<p class="sh-seth">' + ic('info') + ' 표시 뜻</p><ul class="legend-list sh-legend">' + LEGEND.map(function (l) {
         return '<li><span class="chip ' + l[0] + '">' + esc(l[1]) + '</span> = ' + esc(l[2]) + '</li>';
       }).join('') + '</ul></div>';
   }
@@ -673,22 +677,23 @@
   function rail(model, st) {
     var n = badge(model, st);
     // the tooltip is the label word for word; a count lives in the badge and in the spoken name only
-    var btn = function (act, key, sym, label, on, extra, spoken) {
+    var btn = function (act, key, icon, label, on, extra, spoken) {
       return '<button type="button" class="sh-rb' + (on ? ' on' : '') + '" data-sh="' + act + '"' + (key ? ' data-key="' + key + '"' : '') +
-        ' aria-label="' + esc(spoken || label) + '"' + (key ? ' aria-pressed="' + on + '"' : '') + '><span class="sh-ri" aria-hidden="true">' + sym + '</span>' +
-        (extra || '') + '<span class="sh-tip" aria-hidden="true">' + esc(label) + '</span></button>';
+        ' aria-label="' + esc(spoken || label) + '"' + (key ? ' aria-pressed="' + on + '"' : '') + '><span class="sh-ri" aria-hidden="true">' +
+        ic(icon, on ? 'ic-rail ic-sel' : 'ic-rail') + '</span>' + (extra || '') + '<span class="sh-tip" aria-hidden="true">' + esc(label) + '</span></button>';
     };
-    var html = btn('toggleSide', '', '☰', TOGGLE_TIP, false);
+    // the sidebar toggle shows what a press does to the docked sidebar: close it while it is open, else open it
+    var html = btn('toggleSide', '', st.sideOpen !== false ? 'panel-left-close' : 'panel-left-open', TOGGLE_TIP, false);
     RAIL.forEach(function (r) {
       var count = r[0] === 'inbox' && n ? '<span class="sh-n" aria-hidden="true">' + (n > 99 ? '99+' : n) + '</span>' : '';
       html += btn('view', r[0], r[1], r[2], st.view === r[0], count, count ? r[2] + ' ' + n + '개' : '');
     });
-    return html + '<span class="sh-rsp" aria-hidden="true"></span>' + btn('view', 'settings', '⚙', '설정', st.view === 'settings');
+    return html + '<span class="sh-rsp" aria-hidden="true"></span>' + btn('view', 'settings', 'settings', '설정', st.view === 'settings');
   }
 
   function tabs(model, st) {
     var c = context(model);
-    var html = '<button type="button" class="sh-topen" data-sh="toggleSide" title="사이드바 열기 (Ctrl+\\)" aria-label="사이드바 열기">»</button>';
+    var html = '<button type="button" class="sh-topen" data-sh="toggleSide" title="사이드바 열기 (Ctrl+\\)" aria-label="사이드바 열기">' + ic('panel-left-open', 'ic-md') + '</button>';
     order(st).forEach(function (id) {
       var s = has(c.byId, id) ? c.byId[id] : null;
       var on = st.active === id, pin = st.pinned.indexOf(id) >= 0;
@@ -697,11 +702,11 @@
       html += '<div class="tb' + (on ? ' on' : '') + (pin ? ' pinned' : '') + (s ? '' : ' sh-gone') + '" data-tab="' + esc(id) + '" title="' +
         esc((s ? fullOf(s) : GONE + ' · ' + id) + ' (두 번 누르면 탭 고정' + (pin ? ' 풀기' : '') + ')') + '">' +
         '<button type="button" class="tb-go" data-sh="active" data-sid="' + esc(id) + '" aria-pressed="' + on + '">' +
-        (pin ? '<span class="tb-pin" aria-hidden="true">📌</span>' : '') + (s ? icon(s, c) : '<span class="sh-ico" aria-hidden="true">·</span>') +
-        '<span class="tt">' + esc(name) + '</span>' + (o ? '<span class="sh-bdg">🔔' + o + '</span>' : '') + '</button>' +
-        '<button type="button" class="tb-x" data-sh="close" data-sid="' + esc(id) + '" aria-label="탭 닫기: ' + esc(name) + '" title="탭 닫기">✕</button></div>';
+        (pin ? '<span class="tb-pin" aria-hidden="true">' + ic('pin', 'ic-xs') + '</span>' : '') + (s ? icon(s, c) : '<span class="sh-ico" aria-hidden="true">·</span>') +
+        '<span class="tt">' + esc(name) + '</span>' + (o ? '<span class="sh-bdg">' + ic('bell', 'ic-xs') + o + '</span>' : '') + '</button>' +
+        '<button type="button" class="tb-x" data-sh="close" data-sid="' + esc(id) + '" aria-label="탭 닫기: ' + esc(name) + '" title="탭 닫기">' + ic('x', 'ic-xs') + '</button></div>';
     });
-    return html + '<button type="button" class="sh-tadd" data-sh="view" data-key="home" title="새 탭: 홈" aria-label="홈 보기">＋</button>';
+    return html + '<button type="button" class="sh-tadd" data-sh="view" data-key="home" title="새 탭: 홈" aria-label="홈 보기">' + ic('plus', 'ic-md') + '</button>';
   }
 
   function searchHint(view) { return view === 'archive' ? '닫힌 창 검색' : '대화·결정 검색'; }
@@ -720,9 +725,9 @@
     return '<div class="sh-rz" data-sh="rz" role="separator" aria-orientation="vertical" aria-label="사이드바 너비" aria-valuemin="' + MIN_W +
       '" aria-valuemax="' + MAX_W + '" aria-valuenow="' + width(st) + '" title="끌어서 너비 조절"></div>' +
       '<div class="sh-head"><span class="sh-title" data-sh-part="title">' + VIEW_TITLE[viewOf(st)] + '</span>' +
-      '<button type="button" class="sh-ib" data-sh="toggleSide" title="사이드바 닫기 (Ctrl+\\)" aria-label="사이드바 닫기">«</button></div>' +
-      '<button type="button" class="sh-back" data-sh="view" data-key="conv">← 사이드바로 돌아가기</button>' +
-      '<label class="sh-srch"><span aria-hidden="true">🔍</span><input type="search" class="sh-q" data-sh="search" maxlength="' + SEARCH_MAX +
+      '<button type="button" class="sh-ib" data-sh="toggleSide" title="사이드바 닫기 (Ctrl+\\)" aria-label="사이드바 닫기">' + ic('panel-left-close', 'ic-md') + '</button></div>' +
+      '<button type="button" class="sh-back" data-sh="view" data-key="conv">' + ic('arrow-left') + ' 사이드바로 돌아가기</button>' +
+      '<label class="sh-srch">' + ic('search', 'ic-md') + '<input type="search" class="sh-q" data-sh="search" maxlength="' + SEARCH_MAX +
       '" autocomplete="off" spellcheck="false" placeholder="' + hint + '" aria-label="' + hint + '" value="' + esc(st.search) + '"></label>' +
       '<div class="sh-flt" role="group" aria-label="걸러 보기">' + chipsHtml(st) + '</div>' +
       '<div class="sh-scroll" data-sh-part="list"></div>';

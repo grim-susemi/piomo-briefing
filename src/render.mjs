@@ -890,11 +890,60 @@ const attrEscape = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').repla
 
 // tokens.css first: the design tokens every later sheet names.
 const PAGE_CSS = ['tokens.css', 'page.css', 'plan-view.css', 'workers-view.css', 'alarm.css', 'shell.css', 'convo.css', 'annotate.css'];
-// view.js first, then the block renderers it calls into, then alarm.js, then page.js which wires them together.
-const PAGE_JS = ['view.js', 'plan-view.js', 'workers-view.js', 'convo-view.js', 'shell.js', 'alarm.js', 'annotate.js', 'page.js'];
+// icons.js (the icon helper the templates call), view.js, then the block renderers it calls into, then alarm.js, then
+// page.js which wires them together.
+const PAGE_JS = ['icons.js', 'view.js', 'plan-view.js', 'workers-view.js', 'convo-view.js', 'shell.js', 'alarm.js', 'annotate.js', 'page.js'];
+// The icons the page scripts draw (icons.js): Lucide, one file per icon in assets/icons/lucide, vendored from LUCIDE_COMMIT
+// with the upstream LICENSE (ISC; MIT for the icons derived from Feather). pageHtml inlines them once as a hidden sprite of
+// <symbol id="i-<name>"> that keeps only the shapes' geometry: stroke, size and colour are page.css's (.ic).
+const ICON_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'icons', 'lucide');
+const LUCIDE_COMMIT = '1ef60af944de207e0d5176905a0759ba12e6ee8d';
+const PAGE_ICONS = ['app-window', 'archive', 'arrow-left', 'arrow-right', 'bell', 'bell-off', 'check', 'chevron-down', 'chevron-right',
+  'circle-check', 'circle-question-mark', 'clock', 'file-text', 'folder', 'house', 'inbox', 'info', 'layout-grid', 'lightbulb', 'list-todo',
+  'map-pin', 'message-square', 'panel-left-close', 'panel-left-open', 'paperclip', 'pencil', 'pin', 'plus', 'refresh-cw',
+  'rotate-ccw-clock', 'search', 'send', 'settings', 'star', 'target', 'users', 'x'];
+const ICON_SHAPES = {
+  path: ['d'], circle: ['cx', 'cy', 'r'], rect: ['x', 'y', 'width', 'height', 'rx', 'ry'], line: ['x1', 'y1', 'x2', 'y2'],
+  polyline: ['points'], polygon: ['points'], ellipse: ['cx', 'cy', 'rx', 'ry'],
+};
+
+// One vendored file -> <symbol>: its shape elements with their geometry only; anything else is refused, never inlined.
+function iconSymbol(name, svg) {
+  const bad = (why) => new Error(`icon ${name}: ${why}`);
+  const open = /^\s*<svg\b([^>]*)>/.exec(svg);
+  const end = svg.lastIndexOf('</svg>');
+  if (!open || end < open[0].length || !/\sviewBox="0 0 24 24"/.test(open[1])) throw bad('not a 24x24 Lucide svg');
+  const shapes = [];
+  const rest = svg.slice(open[0].length, end).replace(/<([a-z]+)\b([^>]*?)\s*\/>/g, (m, tag, attrs) => {
+    if (!Object.hasOwn(ICON_SHAPES, tag)) throw bad(`<${tag}> is not a shape`);
+    const kept = [];
+    const left = attrs.replace(/\s+([a-z0-9-]+)="([^"]*)"/g, (a, k, v) => {
+      if (!ICON_SHAPES[tag].includes(k) || !/^[0-9a-zA-Z .,-]*$/.test(v)) throw bad(`${k}="${v}" on <${tag}>`);
+      kept.push(`${k}="${v}"`);
+      return '';
+    });
+    if (left.trim()) throw bad(`unparsed <${tag}>`);
+    shapes.push(`<${tag} ${kept.join(' ')}/>`);
+    return '';
+  });
+  if (rest.trim() || !shapes.length) throw bad('unexpected content');
+  return `<symbol id="i-${name}" viewBox="0 0 24 24">${shapes.join('')}</symbol>`;
+}
+
+// The licence notice (licences, pin, copyright lines, where the full text is) and the hidden sprite, the first things in <body>.
+function iconSprite(fs) {
+  const file = (name) => fs.readFileSync(join(ICON_DIR, name), 'utf8');
+  // the LICENSE's copyright lines, verbatim; its full text ships in the package (scripts/build.mjs copies assets/)
+  const rights = file('LICENSE').split('\n').filter((l) => l.startsWith('Copyright (c) ')).join('\n');
+  if (/<!--|-->|--!>/.test(rights)) throw new Error('icon LICENSE would end the HTML comment');
+  return '<!--\nIcons: Lucide (ISC License; the icons it derives from Feather: MIT License), github.com/lucide-icons/lucide at commit ' +
+    LUCIDE_COMMIT + ', ' + PAGE_ICONS.length + ' icons.\n' + rights + '\nFull licence text: assets/icons/lucide/LICENSE of omo-briefing.\n-->\n' +
+    '<svg id="icon-sprite" width="0" height="0" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true" focusable="false">' +
+    PAGE_ICONS.map((n) => iconSymbol(n, file(n + '.svg'))).join('') + '</svg>\n';
+}
 
 /**
- * The whole board page (all scripts and styles inline, first paint from `vm`). mode 'file' = STATE/index.html,
+ * The whole board page (all scripts, styles and icons inline, first paint from `vm`). mode 'file' = STATE/index.html,
  * 'server' = GET / of the board server; both are built from the same template of this generation.
  * `token` (the board server's per-process write token) is emitted as <meta name="omo-board-token"> in server mode ONLY:
  * the file page, data.js, /data.json and the SSE model never carry it.
@@ -908,7 +957,7 @@ export function pageHtml(vm, generation, { mode = 'file', token, fs = nodeFs } =
     (Number.isInteger(generation) ? `<meta name="omo-briefing-generation" content="${generation}">` : '') +
     `<meta name="omo-briefing-mode" content="${mode === 'server' ? 'server' : 'file'}">` +
     (mode === 'server' && typeof token === 'string' && token !== '' ? `<meta name="omo-board-token" content="${attrEscape(token)}">` : '') +
-    '<title>OMO 상황판</title>\n<style>\n' + css + '\n</style></head>\n<body>\n<div id="app"></div>\n' +
+    '<title>OMO 상황판</title>\n<style>\n' + css + '\n</style></head>\n<body>\n' + iconSprite(fs) + '<div id="app"></div>\n' +
     PAGE_JS.map((n) => '<script>\n' + inlineJs(read(n)) + '\n</script>\n').join('') +
     // Runs after page.js's own DOMContentLoaded start(): first paint uses the inline data,
     // data.js re-injection then only raises the badge for a larger seq.

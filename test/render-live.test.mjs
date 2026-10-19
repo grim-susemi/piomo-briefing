@@ -161,11 +161,11 @@ test('pageHtml inlines every page module and the first-paint model, with generat
   const html = pageHtml(vm, 4, { mode: 'server' });
   assert.match(html, /<meta name="omo-briefing-generation" content="4">/);
   assert.match(html, /<meta name="omo-briefing-mode" content="server">/);
-  const order = ['g.BriefView = ', 'g.BriefPlanView = ', 'g.BriefWorkersView = ', 'g.BriefConvo = ', 'g.BriefShell = ', 'g.BriefAlarm = ', 'g.BriefAnnotate = ', 'g.BriefPage = '].map((n) => html.indexOf(n));
-  assert.ok(order.every((i) => i > 0), `all eight modules are inline: ${order}`);
-  assert.deepEqual(order, [...order].sort((a, b) => a - b), 'view.js first, page.js last');
+  const order = ['g.BriefIcons = ', 'g.BriefView = ', 'g.BriefPlanView = ', 'g.BriefWorkersView = ', 'g.BriefConvo = ', 'g.BriefShell = ', 'g.BriefAlarm = ', 'g.BriefAnnotate = ', 'g.BriefPage = '].map((n) => html.indexOf(n));
+  assert.ok(order.every((i) => i > 0), `all nine modules are inline: ${order}`);
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), 'icons.js first, page.js last');
   for (const css of ['.plan-view', '.w-row', '#alarm-band', '.sh-shell', '.cv-page', '.ann-tray']) assert.ok(html.includes(css), css);
-  assert.equal((html.match(/<script>/g) ?? []).length, 9, 'eight modules + first paint');
+  assert.equal((html.match(/<script>/g) ?? []).length, 10, 'nine modules + first paint');
   assert.ok(!html.includes('</script><script>alert(1)'));
   assert.equal(pageHtml(vm, null, { mode: 'file' }).includes('omo-briefing-generation'), false);
 });

@@ -7,7 +7,7 @@
  *   at most 3 rows + '외 n개'. Row text is exactly '답 기다림: <대화> · <문구 40자>' (40 code points; a longer text keeps 39
  *   and ends in '…') + [보기], which scrolls to the conversation card. An answered or closed item leaves the band.
  * - Tab title: '(N) ' in front while N items wait (replaced, never stacked).
- * - An update that brings at least one key never seen on this origin rings once: http(s) page only, 🔔 on, WebAudio
+ * - An update that brings at least one key never seen on this origin rings once: http(s) page only, sound on, WebAudio
  *   880 Hz 120 ms then 1320 Hz 120 ms at gain 0.15 (no sound file). The first update after load marks what is already
  *   there as seen: band only, no sound.
  * - localStorage['omo-briefing.seenWaiting'] = {key: first seen ms} (each origin has its own; a key gone for 30 days is
@@ -16,7 +16,7 @@
  * - Audio the browser has not allowed yet (context not running): the band says '소리를 켜려면 화면을 한 번 누르세요' and the
  *   first click or key resumes the AudioContext. A sound owed for more than 2 s is dropped, never played late.
  * - Storage that throws: in-memory fallback + one console.warn. No WebAudio: one console.warn, the band still works.
- * g.BriefAlarm.toggleSound() flips 🔔/🔕 and returns the new state; soundOn() reads it; soundButtonHtml() is the header
+ * g.BriefAlarm.toggleSound() flips the bell / bell-off label and returns the new state; soundOn() reads it; soundButtonHtml() is the header
  * button ([data-alarm-sound]; its clicks are handled here at document level, so view.js only places it). */
 (function (g) {
   'use strict';
@@ -36,8 +36,8 @@
   var LIVE_URL = /^http:\/\/(127\.0\.0\.1|localhost):\d+\//;
   var TITLE_PREFIX = /^\(\d+\) /;
   var BLOCKED_TEXT = '소리를 켜려면 화면을 한 번 누르세요';
-  var SOUND_ON = '🔔 소리 켜짐';
-  var SOUND_OFF = '🔕 꺼짐';
+  var SOUND_ON = '소리 켜짐';
+  var SOUND_OFF = '꺼짐';
 
   var env = { doc: null, storage: undefined, audioFactory: null, http: false, liveUrl: '', now: null };
   var calls = 0;
@@ -55,6 +55,9 @@
   var hookedDoc = null;
 
   function str(v) { return typeof v === 'string' ? v : typeof v === 'number' && isFinite(v) ? String(v) : ''; }
+  // a Lucide icon from the page's sprite (icons.js); '' without icons.js (this file's unit tests)
+  function ic(name, cls) { var m = g.BriefIcons; return m ? m.icon(name, cls) : ''; }
+  function soundLabel(on) { return on ? ic('bell') + ' ' + SOUND_ON : ic('bell-off') + ' ' + SOUND_OFF; } // our own words only
   function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
   function flat(v) { return str(v).replace(/\s+/g, ' ').trim(); }
   function esc(v) {
@@ -105,7 +108,7 @@
     return own(mem, key) ? mem[key] : null;
   }
   // A failed write (quota full, blocked) makes only that key memory-only: values that can still be read, such as a
-  // saved 🔕, stay in force.
+  // saved off, stay in force.
   function save(key, value) {
     mem[key] = value;
     if (storageBroken) return;
@@ -276,7 +279,7 @@
 
   // who: herdr tab label and number when known, else the pane, else the title alone (plain text; escaped by the caller)
   function whoOf(it) {
-    if (it.tabLabel) return '🗂 ' + it.tabLabel + (it.tabNumber === null ? '' : ' #' + it.tabNumber) + ' · ' + it.title;
+    if (it.tabLabel) return it.tabLabel + (it.tabNumber === null ? '' : ' #' + it.tabNumber) + ' · ' + it.title;
     if (it.paneId) return '창 ' + it.paneId + ' · ' + it.title;
     return it.title;
   }
@@ -287,7 +290,8 @@
       var text = clip(it.text, TEXT_MAX);
       var who = whoOf(it);
       return '<p class="alarm-row' + (flashUntil[it.key] > t ? ' is-new' : '') + '" data-alarm-key="' + esc(it.key) + '">' +
-        '<span class="alarm-text" title="' + esc('답 기다림: ' + who + ' · ' + it.text) + '">답 기다림: <b class="alarm-who">' + esc(who) +
+        '<span class="alarm-text" title="' + esc('답 기다림: ' + who + ' · ' + it.text) + '">답 기다림: <b class="alarm-who">' +
+        (it.tabLabel ? ic('app-window') + ' ' : '') + esc(who) +
         '</b> · <span class="alarm-what">' + esc(text) + '</span></span>' +
         '<span class="alarm-act">' + (it.blocks ? '<span class="alarm-tag">막는 결정</span>' : '') +
         '<button type="button" class="alarm-go" data-alarm-goto="' + esc(it.sessionId) + '">보기</button></span></p>';
@@ -348,8 +352,7 @@
     var list = d.querySelectorAll('[data-alarm-sound]');
     for (var i = 0; i < list.length; i++) {
       var b = list[i];
-      var label = on ? SOUND_ON : SOUND_OFF;
-      if (b.textContent !== label) b.textContent = label;
+      if (b.getAttribute('aria-pressed') !== (on ? 'true' : 'false')) b.innerHTML = soundLabel(on); // the label goes with the state
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
       if (b.classList) { if (on) b.classList.remove('is-off'); else b.classList.add('is-off'); }
     }
@@ -480,7 +483,7 @@
   function soundButtonHtml() {
     var on = soundOn();
     return '<button type="button" class="alarm-sound' + (on ? '' : ' is-off') + '" data-alarm-sound aria-pressed="' + (on ? 'true' : 'false') +
-      '" title="답 기다림 알람 소리 켜기/끄기">' + (on ? SOUND_ON : SOUND_OFF) + '</button>';
+      '" title="답 기다림 알람 소리 켜기/끄기">' + soundLabel(on) + '</button>';
   }
 
   g.BriefAlarm = { update: update, toggleSound: toggleSound, soundOn: soundOn, soundButtonHtml: soundButtonHtml };

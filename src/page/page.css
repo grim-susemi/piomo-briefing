@@ -49,7 +49,20 @@ h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
 .hl, .oq, .kv { margin: 3px 0; display: flex; gap: 5px; align-items: baseline; }
 .kv.path { flex-wrap: nowrap; padding-left: 0; }
 .oq { color: var(--yellow); font-weight: var(--fw-semibold); }
-.sym { flex: none; min-width: 1.2em; text-align: center; color: var(--muted); } /* at least one column; an emoji (📄 ❓ 📁) is wider */
+.sym { flex: none; min-width: var(--ic-md); text-align: center; color: var(--muted); } /* one icon column: its icon is ic-sm, a • is narrower */
+/* icons (icons.js): Lucide line symbols from the page's sprite, stroked in the text colour. In a line of text an icon is
+ * a little taller than the text; ic-xs (the small type size), ic-sm, ic-md and ic-rail are the sizes of fixed boxes.
+ * Lucide has no filled variants: ic-fill fills the favourite star, ic-sel thickens the selected rail item. */
+.ic {
+  display: inline-block; flex: none; width: 1.15em; height: 1.15em; vertical-align: -.2em;
+  fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round;
+}
+.ic-xs { width: var(--fs-sm); height: var(--fs-sm); }
+.ic-sm { width: var(--ic-sm); height: var(--ic-sm); }
+.ic-md { width: var(--ic-md); height: var(--ic-md); }
+.ic-rail { display: block; width: var(--ic-rail); height: var(--ic-rail); }
+.ic-fill { fill: currentColor; }
+.ic-sel { stroke-width: 2.1; }
 .lbl { margin: 6px 0 2px; font-size: var(--fs-xs); font-weight: var(--fw-medium); color: var(--muted); }
 .rows { list-style: none; margin: 0; padding: 0; }
 .row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; padding: 1px 0; }

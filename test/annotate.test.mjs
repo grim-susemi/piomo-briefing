@@ -11,6 +11,7 @@ import { buildViewModel, withReports } from '../src/render.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Read lazily so a missing file fails each test on its own.
 const source = () => fs.readFileSync(path.join(ROOT, 'src/page/annotate.js'), 'utf8');
+const icons = () => fs.readFileSync(path.join(ROOT, 'src/page/icons.js'), 'utf8'); // loaded first, as render.mjs inlines it
 const css = () => fs.readFileSync(path.join(ROOT, 'src/page/annotate.css'), 'utf8');
 const plain = (v) => JSON.parse(JSON.stringify(v)); // vm-realm values -> this realm
 // Settles promise chains that are already resolved (the fake clipboard resolves at once); no wall-clock wait.
@@ -69,8 +70,9 @@ const note = (i, extra = {}) => ({ blocks: ['dec/' + (100 + i)], sub: 'dec', tex
 const EVIL = '<img src=x onerror=alert(1)>"\'`<script>alert(2)</script>';
 
 function pure() {
-  const context = {};
-  vm.runInNewContext(source(), context, { filename: 'annotate.js' });
+  const context = vm.createContext({});
+  vm.runInContext(icons(), context, { filename: 'icons.js' });
+  vm.runInContext(source(), context, { filename: 'annotate.js' });
   return context.BriefAnnotate;
 }
 
@@ -165,6 +167,10 @@ class FakeEl {
     for (const n of parse(html, this.win)) this.appendChild(n);
   }
 }
+
+// an element's text with each icons.js icon read as [name] (an icon has no text of its own)
+const shown = (el) => el.childNodes.map((n) => (n instanceof FakeText ? n.data
+  : n.tagName === 'SVG' ? '[' + n.querySelector('use').getAttribute('href').replace('#i-', '') + ']' : shown(n))).join('');
 
 function serialize(n) {
   if (n instanceof FakeText) return encode(n.data);
@@ -314,6 +320,7 @@ function makePage({ storage = new FakeStorage(), mode = 'live', session = SESSIO
     execCommand: () => false,
   };
   vm.createContext(win);
+  vm.runInContext(icons(), win, { filename: 'icons.js' });
   vm.runInContext(source(), win, { filename: 'annotate.js' });
   const root = new FakeEl('main', win);
   root.setAttribute('id', 'main');
@@ -543,10 +550,10 @@ test('file mode: Markdown 복사 with the live-board hint and no send button; li
   assert.equal(file.querySelector('[data-ann-act="send"]'), null);
   assert.ok(!file.textContent.includes('로 보내기'));
   const live = parseHtml(A.trayBar(SESSION, NOTES, false, 'live'));
-  assert.equal(live.querySelector('[data-ann-act="send"]').textContent, '🗂 상황판제작 #185로 보내기');
+  assert.equal(shown(live.querySelector('[data-ann-act="send"]')), '[app-window] 상황판제작 #185로 보내기');
   assert.equal(live.querySelector('[data-ann-act="copy"]'), null);
-  assert.equal(live.querySelector('.tray-n').textContent, '📌 이 대화에 보낼 주석 3개');
-  assert.deepEqual(live.querySelectorAll('.ann-btn').map((b) => b.textContent), ['목록 보기', '모두 지우기', '🗂 상황판제작 #185로 보내기']);
+  assert.equal(shown(live.querySelector('.tray-n')), '[pin] 이 대화에 보낼 주석 3개');
+  assert.deepEqual(live.querySelectorAll('.ann-btn').map((b) => shown(b)), ['목록 보기', '모두 지우기', '[app-window] 상황판제작 #185로 보내기']);
   assert.equal(live.querySelector('.tlist'), null, 'list closed');
   const open = parseHtml(A.trayBar(SESSION, NOTES, true, 'live'));
   assert.deepEqual(open.querySelectorAll('.tlist .ti').map((r) => [r.querySelector('.n').textContent, r.querySelector('.it2').textContent, r.querySelector('.ti-w').textContent]),
@@ -554,7 +561,7 @@ test('file mode: Markdown 복사 with the live-board hint and no send button; li
   assert.equal(open.querySelectorAll('[data-ann-act="del"]').length, 3);
   assert.equal(open.querySelector('pre.prev').textContent, GOLDEN, 'the preview is the exact text');
   const empty = parseHtml(A.trayBar(SESSION, [], false, 'live'));
-  assert.equal(empty.querySelector('.hint').textContent, '글자를 드래그하거나, 블록 위 💬 주석을 누르거나, 빈 곳에서 끌어 여러 블록을 고르면 그 자리에 주석 창이 떠');
+  assert.equal(shown(empty.querySelector('.hint')), '글자를 드래그하거나, 블록 위 [message-square] 주석을 누르거나, 빈 곳에서 끌어 여러 블록을 고르면 그 자리에 주석 창이 떠');
   assert.equal(empty.querySelectorAll('button').length, 0, 'only the hint line');
   // a mounted file page copies the composed Markdown and sends nothing
   const t = makePage({ mode: 'file' });
@@ -577,9 +584,10 @@ test('a text drag inside a block opens the tray at the selection; Ctrl+Enter add
   t.fire(rt, 'mouseup');
   const pop = t.pop();
   assert.equal(pop.parentNode, t.body);
-  assert.equal(pop.querySelector('.ph').textContent, '💬 🗂 상황판제작 #185 대화에 주석 · 개요 · 최근 변화');
+  assert.equal(shown(pop.querySelector('.ph')), '[message-square] [app-window] 상황판제작 #185 대화에 주석 · 개요 · 최근 변화');
   assert.equal(pop.querySelector('.pq').textContent, '주석 분석');
-  assert.equal(pop.querySelector('.pp').textContent, '📎 ' + P_EVID);
+  assert.equal(shown(pop.querySelector('.pp')), '[paperclip] ' + P_EVID);
+  assert.deepEqual(pop.querySelectorAll('.seg button').map((b) => shown(b)), ['[pencil] 고쳐줘', '[circle-question-mark] 질문']);
   assert.equal(pop.querySelector('.seg .on').getAttribute('data-ann-intent'), '고쳐줘', '고쳐줘 is the default');
   assert.equal(pop.querySelector('.kb').textContent, 'Ctrl+Enter 추가 · Esc 취소');
   assert.equal(t.document.activeElement, pop.querySelector('textarea'));
@@ -599,7 +607,7 @@ test('a text drag inside a block opens the tray at the selection; Ctrl+Enter add
   assert.equal(li.querySelector('.anum').textContent, '1');
   assert.equal(li.querySelector('mark.am').textContent, '주석 분석');
   assert.equal(JSON.parse(t.storage.getItem(KEY)).list.length, 1);
-  assert.equal(t.root.querySelector('.tray-n').textContent, '📌 이 대화에 보낼 주석 1개', 'the tray under the sub-tabs follows');
+  assert.equal(shown(t.root.querySelector('.tray-n')), '[pin] 이 대화에 보낼 주석 1개', 'the tray under the sub-tabs follows');
   // a 300-code-point selection of text that is on the page: the tray shows 200 of it, the annotation keeps and marks all 300
   const dline = t.block('dec/96').querySelector('.dline');
   const long = 'ㅎ'.repeat(300);
@@ -727,12 +735,13 @@ test('after a refresh a block that took a captured block\'s place gets no mark; 
   assert.deepEqual([...t.errors, ...u.errors], []);
 });
 
-test('💬 buttons sit on blocks but not on table rows or summaries; a press opens the tray for that block and never reaches the page handler', () => {
+test('주석 buttons sit on blocks but not on table rows or summaries; a press opens the tray for that block and never reaches the page handler', () => {
   const t = makePage();
   t.render();
   const pageClicks = [];
   t.root.addEventListener('click', (ev) => pageClicks.push(ev));
   for (const id of ['head', 'now', 'card/plan', 'change/12/0', 'dec/96']) assert.ok(t.bh(t.block(id)), id);
+  assert.equal(shown(t.bh(t.block('now'))), '[message-square] 주석', 'the button: its icon and word');
   assert.equal(t.block('dec/90').querySelector('.bh'), null, 'table row');
   assert.equal(t.block('note/k1').querySelector('.bh'), null, 'summary');
   assert.ok(t.bh(t.anchor('p1/task/3')), 'plan item');
@@ -741,7 +750,7 @@ test('💬 buttons sit on blocks but not on table rows or summaries; a press ope
   t.click(t.bh(t.block('card/plan')));
   assert.equal(pageClicks.length, 0, 'the clickable card underneath never sees the press');
   let pop = t.pop();
-  assert.equal(pop.querySelector('.ph').textContent, '💬 🗂 상황판제작 #185 대화에 주석 · 개요 · 요약 카드');
+  assert.equal(shown(pop.querySelector('.ph')), '[message-square] [app-window] 상황판제작 #185 대화에 주석 · 개요 · 요약 카드');
   assert.equal(pop.querySelector('.pq').textContent, '🗂 계획 3/12');
   assert.equal(pop.querySelector('.pp'), null, 'no paths, no 📎 line');
   assert.deepEqual({ ...pop.style }, { top: '218px', left: '300px' }, 'below the block');
@@ -752,8 +761,8 @@ test('💬 buttons sit on blocks but not on table rows or summaries; a press ope
   // a plan item: block id from its anchor, path from the plan source
   t.click(t.bh(t.anchor('p1/task/3')));
   pop = t.pop();
-  assert.equal(pop.querySelector('.ph').textContent, '💬 🗂 상황판제작 #185 대화에 주석 · 개요 · 계획 할 일');
-  assert.equal(pop.querySelector('.pp').textContent, '📎 ' + P_PLAN);
+  assert.equal(shown(pop.querySelector('.ph')), '[message-square] [app-window] 상황판제작 #185 대화에 주석 · 개요 · 계획 할 일');
+  assert.equal(shown(pop.querySelector('.pp')), '[paperclip] ' + P_PLAN);
   t.key(pop.querySelector('textarea'), 'Enter', { ctrlKey: true });
   assert.deepEqual(plain(t.A.list(SID)), [{ blocks: ['plan/p1/task/3'], sub: 'ov', text: '', snip: '격리 규칙', intent: '고쳐줘', comment: '', paths: [P_PLAN], gone: false }]);
   assert.equal(t.bh(t.anchor('p1/task/3')).parentNode, t.anchor('p1/task/3'));
@@ -790,7 +799,7 @@ test('box drag from empty space takes every intersecting top-level block; Alt+dr
   assert.equal(t.root.classList.contains('ann-banding'), false);
   let pop = t.pop();
   assert.match(pop.querySelector('.ph').textContent, / · 개요 · 블록 2개$/);
-  assert.equal(pop.querySelector('.pp').textContent, '📎 ' + P_EVID + ' 외 1');
+  assert.equal(shown(pop.querySelector('.pp')), '[paperclip] ' + P_EVID + ' 외 1');
   assert.deepEqual({ ...pop.style }, { top: '270px', left: '295px' }, 'right below the dragged box');
   const ta = pop.querySelector('textarea');
   ta.value = '둘 다 줄여';
@@ -812,7 +821,7 @@ test('box drag from empty space takes every intersecting top-level block; Alt+dr
   t.fire(t.root, 'mouseup', { clientX: 600, clientY: 530 });
   pop = t.pop();
   assert.match(pop.querySelector('.ph').textContent, / · 개요 · 계획 단계$/);
-  assert.equal(pop.querySelector('.pp').textContent, '📎 ' + P_PLAN);
+  assert.equal(shown(pop.querySelector('.pp')), '[paperclip] ' + P_PLAN);
   t.key(t.document.body, 'Escape');
   // the scrollbar of #main is not empty space; Esc cancels a drag
   t.fire(t.root, 'mousedown', { clientX: 1430, clientY: 300 });
@@ -938,7 +947,7 @@ test('hostile titles, comments, quotes and paths are escaped in the tray, its li
   assert.equal(pop.querySelectorAll('img').length, 0);
   assert.equal(pop.querySelectorAll('script').length, 0);
   assert.ok(pop.querySelector('.ph b').textContent.includes(EVIL));
-  assert.equal(pop.querySelector('.pp').textContent, '📎 C:/' + EVIL);
+  assert.equal(shown(pop.querySelector('.pp')), '[paperclip] C:/' + EVIL);
 });
 
 test('drafts live in sessionStorage omo-briefing.notes.<sid>, survive a reload, and a corrupted value starts empty with a warning', () => {
@@ -1040,9 +1049,9 @@ test('a click on a report image opens the tray at that spot with an empty, focus
   p.fire(imgs[1], 'click', { clientX: 670, clientY: 350 }); // 25% across and 40% down the box at (620, 300)
   const pop = p.pop();
   assert.ok(pop, 'the tray opens right at the spot');
-  assert.equal(pop.querySelector('.ph').textContent, '💬 🗂 상황판제작 #185 대화에 주석 · 보고서 · 보고서 그림 (25%, 40%)');
+  assert.equal(shown(pop.querySelector('.ph')), '[message-square] [app-window] 상황판제작 #185 대화에 주석 · 보고서 · 보고서 그림 (25%, 40%)');
   assert.equal(pop.querySelector('.pq').textContent, 'B · 노션형 추천 섹션과 페이지');
-  assert.equal(pop.querySelector('.pp').textContent, '📎 ' + SHOTS.B);
+  assert.equal(shown(pop.querySelector('.pp')), '[paperclip] ' + SHOTS.B);
   assert.equal(pop.querySelector('.seg .on').getAttribute('data-ann-intent'), '고쳐줘', '고쳐줘 is the default');
   const ta = pop.querySelector('textarea');
   assert.equal(p.document.activeElement, ta, 'the empty comment is focused');

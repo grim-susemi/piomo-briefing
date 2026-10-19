@@ -57,6 +57,10 @@
   function num(v) { return typeof v === 'number' && isFinite(v) ? v : null; }
   function safeId(v) { return str(v).replace(/[^A-Za-z0-9_-]/g, '_'); }
   function pad(n) { return n < 10 ? '0' + n : String(n); }
+  // a Lucide icon from the page's sprite (icons.js); '' without icons.js (this file's unit tests)
+  function ic(name, cls) { var m = g.BriefIcons; return m ? m.icon(name, cls) : ''; }
+  // render.mjs's status text ('전달됨 <stopwatch>09:12'), escaped, with the clock icon for its stopwatch
+  function timed(v) { var m = g.BriefIcons; return m ? m.timed(str(v)) : esc(v); }
 
   function toMs(t) {
     if (typeof t === 'number' && isFinite(t)) return t;
@@ -116,13 +120,15 @@
     return out;
   }
 
-  // Which conversation: herdr tab label and number when known, else the pane. Plain text; callers escape it.
+  // Which conversation: herdr tab label and number when known, else the pane. Plain text (tooltips); callers escape it.
+  // whereLabelHtml: the same on the page, a tab label behind the tab icon.
   function whereLabel(s) {
     var title = str(s.title) || '(제목 없음)';
     var label = str(s.tabLabel);
-    if (label) return '🗂 ' + label + (num(s.tabNumber) == null ? '' : ' #' + s.tabNumber) + ' · ' + title;
+    if (label) return label + (num(s.tabNumber) == null ? '' : ' #' + s.tabNumber) + ' · ' + title;
     return '창 ' + (str(s.paneId) || '모름') + ' · ' + title;
   }
+  function whereLabelHtml(s, cls) { return (str(s.tabLabel) ? ic('app-window', cls) + ' ' : '') + esc(whereLabel(s)); }
 
   // [그 창으로 이동]: only in server mode (ui.live) and only when the session has a herdr tab. Result text lives in ui.focus.
   function focusBtn(view, ui) {
@@ -151,11 +157,11 @@
 
   function row(kind, item) {
     var it = obj(item) || {};
-    var sym = kind === 'done' ? '✔' : '•';
+    var sym = kind === 'done' ? ic('check', 'ic-sm') : '•';
     var html = '<li class="row ' + kind + '"><span class="sym">' + sym + '</span><span class="rt">' + esc(it.text) + '</span>' +
       truthChip(it) + appliedChip(it);
     var ev = str(it.evidence);
-    if (ev) html += '<span class="path"><span class="sym">📄</span><code>' + esc(ev) + '</code>' + copyBtn(ev) + '</span>';
+    if (ev) html += '<span class="path"><span class="sym">' + ic('file-text', 'ic-sm') + '</span><code>' + esc(ev) + '</code>' + copyBtn(ev) + '</span>';
     return html + '</li>';
   }
 
@@ -179,13 +185,14 @@
   var ANY_CHAT = '아무 대화창에 붙여넣어도 됩니다';
 
   // Which conversation an answer goes to, and which window answers an open question: herdr tab label and number when
-  // known, else the pane, else the title. One helper for the confirm row and the open-question line. Plain text;
-  // callers escape it.
+  // known, else the pane, else the title. One helper for the confirm row and the open-question line: whereOfHtml draws
+  // it, a tab label behind the tab icon; whereOf is its plain text.
   function whereOf(s) {
     var label = str(s.tabLabel);
-    if (label) return '🗂 ' + label + (num(s.tabNumber) == null ? '' : ' #' + s.tabNumber);
+    if (label) return label + (num(s.tabNumber) == null ? '' : ' #' + s.tabNumber);
     return str(s.paneId) ? '창 ' + str(s.paneId) : (str(s.title) || '(제목 없음)');
   }
+  function whereOfHtml(s) { return (str(s.tabLabel) ? ic('app-window') + ' ' : '') + esc(whereOf(s)); }
   function cut(v, n) {
     var cps = Array.from(str(v));
     return cps.length > n ? cps.slice(0, n).join('') + '…' : cps.join('');
@@ -218,7 +225,7 @@
         ' aria-pressed="' + (conf && conf.option === k ? 'true' : 'false') + '"><b>' + k + '</b> · ' + esc(o.text) +
         (k === rec ? ' <span class="ans-rec">추천</span>' : '') + '</button>';
     });
-    if (canReply) html += '<button type="button" class="ans-write" data-act="ans-reply"' + at + ' aria-expanded="' + (a.open && !conf ? 'true' : 'false') + '">✍ 답글</button>';
+    if (canReply) html += '<button type="button" class="ans-write" data-act="ans-reply"' + at + ' aria-expanded="' + (a.open && !conf ? 'true' : 'false') + '">' + ic('pencil') + ' 답글</button>';
     html += '<button type="button" class="ans-write" data-act="ans-hold"' + at + '>보류</button>';
     html += '</div>';
     if (conf) {
@@ -239,12 +246,12 @@
   function confirmRow(id, s, conf, where) {
     var at = ' data-id="' + esc(id) + '" data-where="' + esc(where) + '"';
     if (conf.hold === true) { // 보류 (C-HOLD 5): the same row, 보류 / 취소
-      return '<div class="ans-confirm ans-hold-confirm" role="group" aria-label="보류 확인"><span class="ans-q">' + esc(whereOf(s)) + ' 대화의 #' + esc(id) +
+      return '<div class="ans-confirm ans-hold-confirm" role="group" aria-label="보류 확인"><span class="ans-q">' + whereOfHtml(s) + ' 대화의 #' + esc(id) +
         '를 보류할까요? 대화는 다시 묻지 않아요</span><span class="ans-acts"><button type="button" class="ans-go" data-act="ans-send"' + at + '>보류</button>' +
         '<button type="button" class="ans-cancel" data-act="ans-cancel"' + at + '>취소</button></span></div>';
     }
     var reply = typeof conf.text === 'string';
-    return '<div class="ans-confirm" role="group" aria-label="보내기 확인"><span class="ans-q">' + esc(whereOf(s)) + ' 대화에 ' +
+    return '<div class="ans-confirm" role="group" aria-label="보내기 확인"><span class="ans-q">' + whereOfHtml(s) + ' 대화에 ' +
       (reply ? '답글을 보낼까요? <q class="ans-quote">' + esc(cut(conf.text, 40)) + '</q>' : '<b>' + esc(conf.option) + '</b>를 보낼까요?') + '</span>' +
       '<span class="ans-acts"><button type="button" class="ans-go" data-act="ans-send"' + at + '>보내기</button>' +
       '<button type="button" class="ans-cancel" data-act="ans-cancel"' + at + '>취소</button></span></div>';
@@ -266,8 +273,8 @@
     var o = opt ? obj(own(obj(d.options) || {}, opt)) : null;
     var what = opt ? '답 ' + esc(opt) + (o && str(o.text) ? ' · ' + esc(o.text) : '')
       : reply ? '답글 <q class="ans-quote">' + esc(cut(reply, 40)) + '</q>' : '답 받음';
-    return '<p class="dsent"><span class="sym">✅</span><span>#' + esc(d.id) + ' ' + what + '</span>' +
-      chip(obj(d.receipt) ? 's-done' : 'x-busy', str(d.delivery) || '전달 기다림') + '</p>';
+    return '<p class="dsent"><span class="sym">' + ic('circle-check', 'ic-sm') + '</span><span>#' + esc(d.id) + ' ' + what + '</span>' +
+      '<span class="chip ' + (obj(d.receipt) ? 's-done' : 'x-busy') + '">' + timed(str(d.delivery) || '전달 기다림') + '</span></p>';
   }
 
   // plan Q&A rows (plan-view.js) draw the same controls for their open decision, wherever that decision's conversation is
@@ -303,8 +310,8 @@
       html += '<div class="dline opt' + (k === rec ? ' rec-opt' : '') + '"><b>' + k + ':</b> ' + esc(o.text) + ' <span class="arrow">=&gt;</span> ' + esc(o.consequence) + '</div>';
     });
     html += '<div class="dline rec">추천: ' + esc(rec || '-') + ' - ' + esc(d.reason) + '</div>' +
-      '<div class="dline from">대화: ' + esc(whereLabel(s)) + '</div>' +
-      '<div class="dline when">⏱ ' + esc(when(d.createdAt, s.__now)) + '</div>' + box +
+      '<div class="dline from">대화: ' + whereLabelHtml(s, 'ic-xs') + '</div>' +
+      '<div class="dline when">' + ic('clock', 'ic-xs') + ' ' + esc(when(d.createdAt, s.__now)) + '</div>' + box +
       (d.askLive === true ? '<p class="ask-live">터미널에도 같은 질문이 열려 있어요 - 어느 쪽에서 답해도 둘 다 닫혀요</p>' : '') +
       (box ? '<div class="dline ans">답: <code>' + esc(answer) + '</code> ' + copyBtn(answer) + ' <span class="ans-hint">· ' + ANY_CHAT + '</span></div>'
         : '<div class="dline ans">답: ' + esc(answer) + ' ' + copyBtn(answer) + '</div>') +
@@ -348,15 +355,15 @@
   function detail(s, now) {
     var html = '<div class="detail">';
     var done = arr(s.done);
-    html += '<p class="lbl">✔ 끝낸 일 ' + done.length + '개</p>';
+    html += '<p class="lbl">' + ic('check') + ' 끝낸 일 ' + done.length + '개</p>';
     html += done.length ? '<ul class="rows">' + done.map(function (d) { return row('done', d); }).join('') + '</ul>' : '<p class="muted">• 아직 없음</p>';
-    if (str(s.next)) html += '<p class="kv"><span class="sym">➜</span>다음: ' + esc(s.next) + '</p>';
+    if (str(s.next)) html += '<p class="kv"><span class="sym">' + ic('arrow-right', 'ic-sm') + '</span>다음: ' + esc(s.next) + '</p>';
     var steps = arr(s.flow).filter(obj).slice(0, FLOW_MAX);
-    if (steps.length) html += '<p class="lbl">➜ 단계 흐름</p><div class="flowbox">' + flowSvg(steps, false) + flowSvg(steps, true) + '</div>';
+    if (steps.length) html += '<p class="lbl">' + ic('arrow-right') + ' 단계 흐름</p><div class="flowbox">' + flowSvg(steps, false) + flowSvg(steps, true) + '</div>';
     var auto = obj(s.auto);
     if (auto) {
       var w = obj(auto.workers) || {};
-      html += '<p class="lbl">⚙ 자동 정보 <span class="muted">(절차 진행, 목표 달성 아님)</span></p>' +
+      html += '<p class="lbl">' + ic('settings') + ' 자동 정보 <span class="muted">(절차 진행, 목표 달성 아님)</span></p>' +
         '<p class="kv"><span class="sym">•</span>작업: [' + esc(s.workName || '-') + '] · 단계 ' + esc(auto.stage || '-') + '</p>' +
         '<p class="kv"><span class="sym">•</span>todo 현재: ' + esc(auto.todoCurrent || '-') + ' · 다음: ' + esc(auto.todoNext || '-') +
         ' · ' + esc(num(auto.todoDone) == null ? '-' : auto.todoDone) + '/' + esc(num(auto.todoTotal) == null ? '-' : auto.todoTotal) + '</p>' +
@@ -364,9 +371,10 @@
     }
     arr(s.decisions).filter(function (d) { return obj(d) && d.answered; }).forEach(function (d) {
       var rc = obj(d.receipt);
-      html += '<p class="kv"><span class="sym">✅</span>#' + esc(d.id) + ' 답 받음' + (rc ? ' · 전달됨 ⏱ ' + esc(when(rc.deliveredAt, now)) : ' · ' + esc(str(d.delivery) || '전달 기다림')) + '</p>';
+      html += '<p class="kv"><span class="sym">' + ic('circle-check', 'ic-sm') + '</span>#' + esc(d.id) + ' 답 받음' +
+        (rc ? ' · 전달됨 ' + ic('clock', 'ic-xs') + ' ' + esc(when(rc.deliveredAt, now)) : ' · ' + timed(str(d.delivery) || '전달 기다림')) + '</p>';
     });
-    if (str(s.cwd)) html += '<p class="kv path"><span class="sym">📁</span><code>' + esc(s.cwd) + '</code>' + copyBtn(s.cwd) + '</p>';
+    if (str(s.cwd)) html += '<p class="kv path"><span class="sym">' + ic('folder', 'ic-sm') + '</span><code>' + esc(s.cwd) + '</code>' + copyBtn(s.cwd) + '</p>';
     return html + '</div>';
   }
 
@@ -411,9 +419,9 @@
         return chip(own(EXTRA_CHIP, c) || 'x-info', c);
       }).join('') +
       (view.workName ? '<span class="tag">[' + esc(view.workName) + ']</span>' : '') +
-      '<span class="title">' + esc(whereLabel(view)) + '</span>' + focusBtn(fview, { live: live, focus: focus }) +
-      '<span class="time">⏱ ' + esc(when(s.lastActivityAt != null ? s.lastActivityAt : s.lastBriefAt, now)) + '</span></div>' +
-      '<p class="hl"><span class="sym">▸</span>' + esc(s.headline || '아직 보고 없음') + '</p>';
+      '<span class="title">' + whereLabelHtml(view, 'ic-sm') + '</span>' + focusBtn(fview, { live: live, focus: focus }) +
+      '<span class="time">' + ic('clock', 'ic-xs') + ' ' + esc(when(s.lastActivityAt != null ? s.lastActivityAt : s.lastBriefAt, now)) + '</span></div>' +
+      '<p class="hl"><span class="sym">' + ic('chevron-right', 'ic-sm') + '</span>' + esc(s.headline || '아직 보고 없음') + '</p>';
     html += liveBlocks(s, n, ui, now);
 
     var q = obj(s.openQuestion);
@@ -421,16 +429,16 @@
       // Read-only alert: say where the question lives. Pane = the mirror's own paneId, else (older records) the session's pane.
       var qPane = str(q.paneId) || str(s.paneId);
       var tabbed = !!str(view.tabLabel);
-      html += '<p class="oq"><span class="sym">❓</span>질문 알림 열림 - ' +
-        (tabbed ? '답할 창: <code>' + esc(whereOf(view)) + '</code>' : qPane ? '<code>' + esc(qPane) + '</code>에서 답하기' : '질문이 뜬 창에서 답하기') + ' (읽기 전용): ' + esc(q.text) +
-        ' <span class="time">⏱ ' + esc(when(q.at, now)) + '</span> ' + focusBtn(fview, { live: live, focus: focus }) + '</p>' +
+      html += '<p class="oq"><span class="sym">' + ic('circle-question-mark', 'ic-sm') + '</span>질문 알림 열림 - ' +
+        (tabbed ? '답할 창: <code>' + whereOfHtml(view) + '</code>' : qPane ? '<code>' + esc(qPane) + '</code>에서 답하기' : '질문이 뜬 창에서 답하기') + ' (읽기 전용): ' + esc(q.text) +
+        ' <span class="time">' + ic('clock', 'ic-xs') + ' ' + esc(when(q.at, now)) + '</span> ' + focusBtn(fview, { live: live, focus: focus }) + '</p>' +
         (q.builtin === true ? '<p class="oq-builtin">터미널에서 답하세요 - 이 질문은 하네스 기본 질문창이라 상황판에서 닫을 수 없어요</p>' : '');
     }
 
     var changes = arr(s.changes);
     if (changes.length) {
       var kc = 'more-ch:' + n.id, oc = !!own(expanded, kc);
-      html += '<div class="blk"><p class="lbl">' + (s.changesNew ? '✚ 새로 바뀜' : '↻ 최근 변화') + '</p><ul class="rows">' +
+      html += '<div class="blk"><p class="lbl">' + (s.changesNew ? ic('plus') + ' 새로 바뀜' : ic('refresh-cw') + ' 최근 변화') + '</p><ul class="rows">' +
         changes.slice(0, oc ? changes.length : 3).map(function (c) { return row('chg', c); }).join('') + '</ul>' +
         moreBtn(kc, Math.max(0, changes.length - 3), oc) + '</div>';
     }
@@ -500,15 +508,15 @@
       if (arr(n.raw.chips).indexOf('오래됨') >= 0) stale++;
     });
     var html = '<div class="overview"><header class="sum"><p class="sumline">결정 대기 ' + open + ' · 막힘 ' + blocked +
-      ' · 오래됨 ' + stale + ' · ⏱ 마지막 갱신 ' + hhmm(vm.generatedAt) + '</p><p class="note">브리핑이 켜진 대화 ' +
+      ' · 오래됨 ' + stale + ' · ' + ic('clock', 'ic-sm') + ' 마지막 갱신 ' + hhmm(vm.generatedAt) + '</p><p class="note">브리핑이 켜진 대화 ' +
       sessions.length + '개만 보입니다 - 설치 전부터 열려 있던 대화는 새로 열어야 나타납니다</p></header>';
     if (!sessions.length) html += '<div class="empty"><p class="big">아직 보고 없음</p><p class="muted">• 브리핑이 켜진 대화가 작업 턴을 끝내면 여기에 카드가 생깁니다</p></div>';
     if (!u.live && open) html += '<p class="note ro">이 페이지는 보기 전용입니다 - 답은 아무 대화창에 /decide 로, 또는 실시간 상황판에서</p>';
     groupByProject(sessions).forEach(function (grp) {
-      html += '<h3 class="projh">📁 ' + esc(grp.project) + '</h3>';
+      html += '<h3 class="projh">' + ic('folder') + ' ' + esc(grp.project) + '</h3>';
       grp.items.forEach(function (n) {
         html += '<button type="button" class="more" data-sh="open" data-sid="' + esc(n.id) + '">대화 페이지 열기 · ' +
-          esc(whereLabel(n.raw)) + '</button>' + card(n, u, toMs(vm.generatedAt));
+          whereLabelHtml(n.raw, 'ic-xs') + '</button>' + card(n, u, toMs(vm.generatedAt));
       });
     });
     return html + '</div>';

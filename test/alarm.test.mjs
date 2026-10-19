@@ -8,6 +8,9 @@ import { waitingItems } from '../src/waiting.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE = fs.readFileSync(path.join(ROOT, 'src/page/alarm.js'), 'utf8');
+const ICONS = fs.readFileSync(path.join(ROOT, 'src/page/icons.js'), 'utf8'); // the page's icon helper, as a prelude
+// icons.js markup -> [name]: which icon is drawn where
+const marks = (html) => html.replace(/<svg class="ic[^"]*" aria-hidden="true" focusable="false"><use href="#i-([a-z0-9-]+)"><\/use><\/svg>/g, '[$1]');
 const CSS = fs.readFileSync(path.join(ROOT, 'src/page/alarm.css'), 'utf8');
 const T0 = 1_700_000_000_000;
 const DAY = 24 * 3600 * 1000;
@@ -135,7 +138,7 @@ const decode = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&qu
 function rows(html) {
   return [...html.matchAll(/<p class="(alarm-row[^"]*)" data-alarm-key="([^"]*)"[^>]*>([\s\S]*?)<\/p>/g)].map((m) => {
     const text = /<span class="alarm-text"[^>]*>([\s\S]*?)<\/span><span class="alarm-act">/.exec(m[3]);
-    return { cls: m[1], key: decode(m[2]), text: text ? decode(text[1].replace(/<[^>]+>/g, '')) : null, html: m[3] };
+    return { cls: m[1], key: decode(m[2]), text: text ? decode(marks(text[1]).replace(/<[^>]+>/g, '')) : null, html: m[3] };
   });
 }
 
@@ -523,21 +526,22 @@ test('band text is exact: 답 기다림: <대화> · <문구 40자>, and model t
   assert.deepEqual(texts, { d1: `답 기다림: 대화 하나 · ${'x'.repeat(40)}`, d2: `답 기다림: S9 · ${'😀'.repeat(39)}…` }, '40 is kept, code points not UTF-16 units');
 });
 
-test('band names the herdr tab: 🗂 <label> #<n> · <title>, else 창 <pane> · <title>, escaped in text and tooltip', () => {
-  const p = makePage();
+test('band names the herdr tab: <tab icon> <label> #<n> · <title>, else 창 <pane> · <title>, escaped in text and tooltip', () => {
+  const p = makePage({ prelude: ICONS });
   p.update([
     item('d1', { title: '작업', tabLabel: '수리', tabNumber: 181, paneId: 'w1:pR2', at: T0 + 3 }),
     item('d2', { title: '작업', tabLabel: '', tabNumber: null, paneId: 'w1:pR2', at: T0 + 2 }),
     item('d3', { title: '<b>대화</b>', tabLabel: '<i>수리</i>', tabNumber: 9, at: T0 + 1 }),
   ]);
   const byKey = Object.fromEntries(p.rows().map((r) => [r.key, r]));
-  assert.equal(byKey.d1.text, '답 기다림: 🗂 수리 #181 · 작업 · 질문 d1?');
+  assert.equal(byKey.d1.text, '답 기다림: [app-window] 수리 #181 · 작업 · 질문 d1?');
   assert.equal(byKey.d2.text, '답 기다림: 창 w1:pR2 · 작업 · 질문 d2?');
-  assert.equal(byKey.d3.text, '답 기다림: 🗂 <i>수리</i> #9 · <b>대화</b> · 질문 d3?');
+  assert.equal(byKey.d3.text, '답 기다림: [app-window] <i>수리</i> #9 · <b>대화</b> · 질문 d3?');
+  // the tooltip is text: the label without its icon
   const tip = (r) => decode(/class="alarm-text" title="([^"]*)"/.exec(r.html)[1]);
-  assert.equal(tip(byKey.d1), '답 기다림: 🗂 수리 #181 · 작업 · 질문 d1?');
+  assert.equal(tip(byKey.d1), '답 기다림: 수리 #181 · 작업 · 질문 d1?');
   assert.equal(tip(byKey.d2), '답 기다림: 창 w1:pR2 · 작업 · 질문 d2?');
-  assert.equal(tip(byKey.d3), '답 기다림: 🗂 <i>수리</i> #9 · <b>대화</b> · 질문 d3?');
+  assert.equal(tip(byKey.d3), '답 기다림: <i>수리</i> #9 · <b>대화</b> · 질문 d3?');
   assert.ok(!p.html().includes('<i>') && !p.html().includes('<b>대화'), 'escaped');
 });
 
@@ -577,21 +581,21 @@ test('[보기] opens the conversation 결정 sub-tab, including when its card is
   assert.deepEqual(q.errors, []);
 });
 
-test('header sound button: soundButtonHtml shows the state, a click on [data-alarm-sound] toggles and relabels it in place', () => {
-  const p = makePage();
+test('header sound button: soundButtonHtml shows the state with its bell, a click on [data-alarm-sound] toggles and relabels it in place', () => {
+  const p = makePage({ prelude: ICONS });
   p.update([]);
   const html = p.alarm.soundButtonHtml();
-  assert.match(html, /^<button type="button" class="alarm-sound" data-alarm-sound aria-pressed="true"[^>]*>🔔 소리 켜짐<\/button>$/);
+  assert.match(marks(html), /^<button type="button" class="alarm-sound" data-alarm-sound aria-pressed="true"[^>]*>\[bell\] 소리 켜짐<\/button>$/);
   const btn = p.d.el('button');
   btn.setAttribute('data-alarm-sound', '');
   p.d.soundButtons.push(btn);
   p.d.fire('click', { target: targetFor('[data-alarm-sound]', btn) });
   assert.equal(p.storage.getItem(SOUND), 'off');
-  assert.equal(btn.textContent, '🔕 꺼짐');
+  assert.equal(marks(btn.innerHTML), '[bell-off] 꺼짐');
   assert.equal(btn.getAttribute('aria-pressed'), 'false');
-  assert.match(p.alarm.soundButtonHtml(), /aria-pressed="false"[^>]*>🔕 꺼짐</);
+  assert.match(marks(p.alarm.soundButtonHtml()), /aria-pressed="false"[^>]*>\[bell-off\] 꺼짐</);
   p.d.fire('click', { target: targetFor('[data-alarm-sound]', btn) });
-  assert.equal(btn.textContent, '🔔 소리 켜짐');
+  assert.equal(marks(btn.innerHTML), '[bell] 소리 켜짐');
   assert.equal(p.storage.getItem(SOUND), 'on');
 });
 

@@ -329,13 +329,15 @@ test('annotation notes: newest 20, 80-code-point previews, capability passthroug
 
 describe('gate repros: delivery rows, replyTrimmed chip, owned read failure', () => {
   const pageHtml = (model) => {
-    const ctx = {};
-    vm.runInNewContext(fs.readFileSync(join(HERE, '..', 'src', 'page', 'view.js'), 'utf8'), ctx);
+    const ctx = vm.createContext({});
+    for (const f of ['icons.js', 'view.js']) vm.runInContext(fs.readFileSync(join(HERE, '..', 'src', 'page', f), 'utf8'), ctx); // PAGE_JS order
     const expanded = {};
     for (const s of model.sessions) expanded['detail:' + s.id] = true;
     return ctx.BriefView.renderOverview(model, { expanded, tab: '나를 기다림' }); // every card is in the HTML; the tab only hides
   };
-  const rows = (html) => [...html.matchAll(/<p class="kv"><span class="sym">✅<\/span>([^<]*)<\/p>/g)].map((m) => m[1]);
+  // icons.js markup -> [name], then each answered-decision row ([circle-check]) of every card
+  const marks = (html) => html.replace(/<svg class="ic[^"]*" aria-hidden="true" focusable="false"><use href="#i-([a-z0-9-]+)"><\/use><\/svg>/g, '[$1]');
+  const rows = (html) => [...marks(html).matchAll(/<p class="kv"><span class="sym">\[circle-check\]<\/span>([^<]*)<\/p>/g)].map((m) => m[1]);
 
   test('page shows each pending delivery state with its own planned text', (t) => {
     const store = openStore(tempRoot(t));
@@ -351,7 +353,7 @@ describe('gate repros: delivery rows, replyTrimmed chip, owned read failure', ()
     assert.equal(got.filter((r) => r === '#1 답 받음 · 대기: 그 대화가 다시 열리면 전달').length, 1, JSON.stringify(got));
     assert.equal(got.filter((r) => r === '#2 답 받음 · 전달 중').length, 1, JSON.stringify(got));
     assert.equal(got.filter((r) => r === '#3 답 받음 · 대기: 작업이 끝나면 전달').length, 1, JSON.stringify(got));
-    assert.equal(got.filter((r) => /^#4 답 받음 · 전달됨 ⏱ \d\d:\d\d$/.test(r)).length, 1, JSON.stringify(got));
+    assert.equal(got.filter((r) => /^#4 답 받음 · 전달됨 \[clock\] \d\d:\d\d$/.test(r)).length, 1, JSON.stringify(got));
   });
 
   test('meta.replyTrimmed (the producer field) shows the 답 자동 줄임 chip on the card', (t) => {
@@ -436,7 +438,7 @@ describe('gate repros: delivery rows, replyTrimmed chip, owned read failure', ()
     const got = rows(pageHtml(model));
     assert.ok(got.includes('#21 답 받음 · 전달 중'), JSON.stringify(got)); // in-memory list, no receipt written
     assert.ok(got.includes('#23 답 받음 · 대기: 그 대화가 다시 열리면 전달'), JSON.stringify(got));
-    assert.ok(got.some((r) => /^#24 답 받음 · 전달됨 ⏱ \d\d:\d\d$/.test(r)), 'a real receipt wins over the pending list: ' + JSON.stringify(got));
+    assert.ok(got.some((r) => /^#24 답 받음 · 전달됨 \[clock\] \d\d:\d\d$/.test(r)), 'a real receipt wins over the pending list: ' + JSON.stringify(got));
     const d21 = byId(model).busy.decisions[0];
     assert.equal(d21.receipt, null);
     assert.equal(fs.existsSync(join(store.root, 'receipts/000021.json')), false, 'no receipt is created for an admission');

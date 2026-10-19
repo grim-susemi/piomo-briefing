@@ -11,9 +11,14 @@ import { applyBoardAnswer } from '../src/decide.mjs';
 import { buildViewModel, withReports } from '../src/render.mjs';
 
 // http: + token = the page the board server serves (src/render.mjs pageHtml, server mode); file: = the file page.
+// the page's scripts in render.mjs PAGE_JS order: icons.js first, so the confirm rows and chips carry their icons
 function makeEnv(options = {}) {
-  return makeController({ sessionStorage: null, ...options });
+  return makeController({ sessionStorage: null, modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'annotate'], ...options });
 }
+// an element's text with each icons.js icon read as [name] (an icon has no text of its own); the same for markup
+const shown = (el) => el.childNodes.map((n) => (n.nodeType !== 1 ? n.textContent
+  : n.tagName === 'SVG' ? '[' + n.querySelector('use').getAttribute('href').replace('#i-', '') + ']' : shown(n))).join('');
+const marks = (html) => html.replace(/<svg class="ic[^"]*" aria-hidden="true" focusable="false"><use href="#i-([a-z0-9-]+)"><\/use><\/svg>/g, '[$1]');
 const generationModel = (seq, gen, serverGen) => ({ ...answerModel(seq), gen, server: { generation: serverGen } });
 const closedNotice = e => !e.status.hidden && e.status.attrs['data-state'] === 'closed';
 
@@ -446,7 +451,7 @@ test('answering the last open decision keeps the active conversation and sub-tab
       assert.equal(e.page.state.ui.active, 'owner', `${label}: active conversation persists`);
       assert.equal(e.page.state.ui.sub.owner, 'ov', `${label}: sub-tab persists`);
       assert.ok(html.includes('data-sid="owner"'), `${label}: the page is still on the screen`);
-      assert.ok(line && line.textContent.includes(ownerOf(m).decisions[0].delivery) && line.querySelector('.chip.' + chipClass), `${label}: ${line?.textContent}`);
+      assert.ok(line && shown(line).includes(ownerOf(m).decisions[0].delivery.replace('⏱', '[clock]')) && line.querySelector('.chip.' + chipClass), `${label}: ${line && shown(line)}`);
     };
     const first = model();
     assert.equal(ownerOf(first).tab, '나를 기다림');
@@ -553,11 +558,11 @@ test('report: 이걸로 고르기 on B opens the answer box\'s confirm row in pl
   pressPick(e, id, 'B'); // a double click
   assert.equal(posts(e).length, 0, 'nothing leaves before the confirm');
   assert.deepEqual([e.page.state.ui.active, e.page.state.ui.sub.owner], ['owner', 'rep'], 'the confirm opens in place, on the report');
-  assert.equal(cellOf(e, 1).querySelector('.ans-confirm').textContent, '🗂 수리 #181 대화에 B를 보낼까요?보내기취소');
+  assert.equal(shown(cellOf(e, 1).querySelector('.ans-confirm')), '[app-window] 수리 #181 대화에 B를 보낼까요?보내기취소');
   assert.deepEqual(pickOff(e), [false, null, false]);
   // the 결정 sub-tab shows the same pending choice on the decision card: one answer state per decision
   e.page.open('owner', 'dec');
-  assert.equal(e.byId.main.querySelector('[data-decision="' + id + '"] .ans-confirm').textContent, '🗂 수리 #181 대화에 B를 보낼까요?보내기취소');
+  assert.equal(shown(e.byId.main.querySelector('[data-decision="' + id + '"] .ans-confirm')), '[app-window] 수리 #181 대화에 B를 보낼까요?보내기취소');
   e.page.open('owner', 'rep');
   const send = target(e, 'ans-send', id);
   assert.equal(send.getAttribute('data-where'), 'rep');
@@ -579,7 +584,7 @@ test('report: 이걸로 고르기 on B opens the answer box\'s confirm row in pl
   e.page.receive(model());
   assert.equal(status(), '답함');
   assert.deepEqual([0, 1, 2].map((n) => cellOf(e, n).classList.contains('chosen')), [false, true, false]);
-  assert.equal(cellOf(e, 1).querySelector('.cv-chosen').textContent, '✔ 고른 안');
+  assert.equal(shown(cellOf(e, 1).querySelector('.cv-chosen')), '[check] 고른 안');
   assert.deepEqual(pickOff(e), [true, true, true]);
   assert.equal(report().querySelector('.rep-closed').textContent, '이미 답했거나 닫힌 결정');
   assert.equal(e.byId.main.querySelector('.ans-confirm'), null);
@@ -635,12 +640,12 @@ test('C-HOLD on a conversation page: 보류 asks in the confirm row first, 취�
   const e = makeEnv();
   e.page.receive(answerModel(1));
   clickTab(e, 's-a1', 'dec');
-  const Q = '🗂 수리 #181 대화의 #12를 보류할까요? 대화는 다시 묻지 않아요';
+  const Q = '[app-window] 수리 #181 대화의 #12를 보류할까요? 대화는 다시 묻지 않아요';
   press(e, 'ans-hold', 12);
   assert.equal(posts(e).length, 0, 'the first press only asks');
-  assert.ok(e.app.innerHTML.includes(Q));
+  assert.ok(marks(e.app.innerHTML).includes(Q));
   press(e, 'ans-cancel', 12);
-  assert.ok(!e.app.innerHTML.includes(Q));
+  assert.ok(!marks(e.app.innerHTML).includes(Q));
   assert.equal(posts(e).length, 0);
   press(e, 'ans-hold', 12);
   press(e, 'ans-send', 12, { 'data-where': 'dc' });
@@ -667,16 +672,16 @@ test('C-HOLD on a conversation page: 보류 asks in the confirm row first, 취�
 test('C-HOLD on the all-conversations overview: 보류 shows the same confirm row; 취소 posts nothing; 보류 in the row posts once', async () => {
   const e = makeEnv();
   e.page.receive(answerModel(1)); // no conversation tab open: view.js renderOverview draws the cards
-  const Q = '🗂 수리 #181 대화의 #12를 보류할까요? 대화는 다시 묻지 않아요';
+  const Q = '[app-window] 수리 #181 대화의 #12를 보류할까요? 대화는 다시 묻지 않아요';
   press(e, 'ans-hold', 12);
   assert.equal(posts(e).length, 0, 'the first press only asks');
   const row = decHtml(e, 12);
-  assert.ok(row.includes(Q), 'the hold confirm row under the card');
+  assert.ok(marks(row).includes(Q), 'the hold confirm row under the card');
   assert.ok(row.includes('data-act="ans-send" data-id="12" data-where="dc">보류</button>'));
   assert.ok(row.includes('data-act="ans-cancel" data-id="12" data-where="dc">취소</button>'));
   assert.ok(!/를 보낼까요\?/.test(row) && !row.includes('undefined'), 'not the answer-only confirm row');
   press(e, 'ans-cancel', 12);
-  assert.ok(!e.app.innerHTML.includes(Q));
+  assert.ok(!marks(e.app.innerHTML).includes(Q));
   assert.equal(posts(e).length, 0);
   press(e, 'ans-hold', 12);
   press(e, 'ans-send', 12, { 'data-where': 'dc' });

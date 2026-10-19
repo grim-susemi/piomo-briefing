@@ -7,23 +7,29 @@ import { fileURLToPath } from 'node:url';
 import { makeController } from './fixtures/controller-dom.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const ICONS_SRC = fs.readFileSync(path.join(ROOT, 'src/page/icons.js'), 'utf8');
 const VIEW_SRC = fs.readFileSync(path.join(ROOT, 'src/page/view.js'), 'utf8');
 const SHELL_SRC = fs.readFileSync(path.join(ROOT, 'src/page/shell.js'), 'utf8');
 const FIXTURE = JSON.parse(fs.readFileSync(path.join(ROOT, 'test/fixtures/view-model.json'), 'utf8'));
 
+// the page's icons.js first, as render.mjs inlines it
 function loadView() {
-  const ctx = {};
-  vm.runInNewContext(VIEW_SRC, ctx, { filename: 'view.js' });
+  const ctx = vm.createContext({});
+  vm.runInContext(ICONS_SRC, ctx, { filename: 'icons.js' });
+  vm.runInContext(VIEW_SRC, ctx, { filename: 'view.js' });
   assert.equal(typeof ctx.BriefView?.renderOverview, 'function');
   return ctx.BriefView;
 }
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const count = (s, re) => (s.match(re) || []).length;
 function loadShell() {
-  const ctx = {};
-  vm.runInNewContext(SHELL_SRC, ctx, { filename: 'shell.js' });
+  const ctx = vm.createContext({});
+  vm.runInContext(ICONS_SRC, ctx, { filename: 'icons.js' });
+  vm.runInContext(SHELL_SRC, ctx, { filename: 'shell.js' });
   return ctx.BriefShell;
 }
+// icons.js markup -> [name]: which icon is drawn where
+const marks = (html) => html.replace(/<svg class="ic[^"]*" aria-hidden="true" focusable="false"><use href="#i-([a-z0-9-]+)"><\/use><\/svg>/g, '[$1]');
 
 // split rendered html into per-card chunks keyed by data-card id
 function cards(html) {
@@ -98,7 +104,7 @@ test('sidebar holds the status filters; tabs is the only top row and contains on
 test('top summary line and gray note', () => {
   const view = loadView();
   const html = view.renderOverview(FIXTURE, {});
-  assert.match(html, /결정 대기 5 · 막힘 1 · 오래됨 1 · ⏱ 마지막 갱신 \d\d:\d\d/);
+  assert.match(marks(html), /결정 대기 5 · 막힘 1 · 오래됨 1 · \[clock\] 마지막 갱신 \d\d:\d\d/);
   assert.ok(html.includes('브리핑이 켜진 대화 6개만 보입니다 - 설치 전부터 열려 있던 대화는 새로 열어야 나타납니다'));
 });
 
@@ -113,7 +119,7 @@ test('decision card has 8 logical lines and a /decide copy value', () => {
   assert.ok(card.includes('[결정 기록기]'));
   assert.ok(card.includes('추천: A - '));
   assert.ok(card.includes('class="dline from">대화: '));
-  assert.ok(card.includes('⏱'));
+  assert.ok(marks(card).includes('class="dline when">[clock] '));
   assert.ok(card.includes('data-copy="/decide 12A"'));
   assert.ok(card.includes('답: /decide 12A'));
 });
@@ -122,15 +128,15 @@ test('herdr tab label names the header, decision and sidebar tooltip; no label f
   const view = loadView();
   const model = clone(FIXTURE);
   const s = model.sessions.find((x) => x.decisions.some((d) => !d.answered && !d.closed));
-  const title = (html, id) => /<span class="title">([^<]*)<\/span>/.exec(cards(html)[id])[1];
-  const from = (html, id) => /class="dline from">([^<]*)<\/div>/.exec(cards(html)[id])[1];
+  const title = (html, id) => /<span class="title">([^<]*)<\/span>/.exec(marks(cards(html)[id]))[1];
+  const from = (html, id) => /class="dline from">([^<]*)<\/div>/.exec(marks(cards(html)[id]))[1];
   const S = loadShell(), side = () => S.side(model, S.defaults());
 
   Object.assign(s, { alive: true, title: '작업', tabLabel: '수리', tabNumber: 181, paneId: 'w1:pR2' });
   let html = view.renderOverview(model, { tab: 'wait' });
-  assert.equal(title(html, s.id), '🗂 수리 #181 · 작업');
-  assert.equal(from(html, s.id), '대화: 🗂 수리 #181 · 작업');
-  assert.ok(side().includes('title="🗂 수리 #181 · 작업"'));
+  assert.equal(title(html, s.id), '[app-window] 수리 #181 · 작업');
+  assert.equal(from(html, s.id), '대화: [app-window] 수리 #181 · 작업');
+  assert.ok(side().includes('title="수리 #181 · 작업"'), 'the tooltip is text: the label without its icon');
 
   Object.assign(s, { tabLabel: '', tabNumber: null });
   html = view.renderOverview(model, { tab: 'wait' });
@@ -149,10 +155,10 @@ test('tab label and title markup are escaped in the header, decision line and si
   Object.assign(s, { alive: true, title: '<b>제목</b>', tabLabel: '<i>수리</i>', tabNumber: 181 });
   const html = view.renderOverview(model, { tab: 'wait' });
   assert.ok(!html.includes('<b>제목</b>') && !html.includes('<i>수리</i>'));
-  const want = '🗂 &lt;i&gt;수리&lt;/i&gt; #181 · &lt;b&gt;제목&lt;/b&gt;';
-  const c = cards(html)[s.id];
-  assert.ok(c.includes('<span class="title">' + want + '</span>'), 'header');
-  assert.ok(c.includes('class="dline from">대화: ' + want + '</div>'), 'decision line');
+  const want = '&lt;i&gt;수리&lt;/i&gt; #181 · &lt;b&gt;제목&lt;/b&gt;';
+  const c = marks(cards(html)[s.id]);
+  assert.ok(c.includes('<span class="title">[app-window] ' + want + '</span>'), 'header');
+  assert.ok(c.includes('class="dline from">대화: [app-window] ' + want + '</div>'), 'decision line');
   const S = loadShell();
   assert.ok(S.side(model, S.defaults()).includes('title="' + want + '"'), 'sidebar tooltip');
 });
@@ -261,7 +267,7 @@ test('prototype-like names render as ordinary text', () => {
     let html;
     assert.doesNotThrow(() => { html = renderAllTabs(view, m, { expanded: expandAll(m) }); }, name);
     assert.equal(Object.keys(cards(html)).length, 6, name + ' cards');
-    assert.ok(html.includes('📁 ' + name), name + ' group heading');
+    assert.ok(marks(html).includes('[folder] ' + name), name + ' group heading');
     assert.ok(!html.includes('[native code]'), name + ' leaks prototype');
     assert.ok(!html.includes('/decide 12' + name), name + ' recommend');
     assert.equal(typeof view.renderOverview(m, { tab: name }), 'string');
@@ -334,7 +340,7 @@ test('open question with a herdr tab names the tab; focus button only in live mo
     return { html, oq: html.slice(i, html.indexOf('</p>', i)) };
   };
   let r = oqOf({ live: true });
-  assert.ok(r.oq.includes('답할 창: <code>🗂 수리 #181</code>'));
+  assert.ok(marks(r.oq).includes('답할 창: <code>[app-window] 수리 #181</code>'));
   assert.ok(r.oq.includes('data-act="focus" data-session="' + s.id + '"'));
   assert.equal(count(r.html, /data-act="focus"/g), 2, 'card header and question line');
   // the tab label is untrusted text on the line this helper feeds: it stays escaped
@@ -342,7 +348,7 @@ test('open question with a herdr tab names the tab; focus button only in live mo
   s.tabLabel = '<b>x</b> & "y"';
   s.tabNumber = 7;
   const hostile = oqOf({ live: true });
-  assert.ok(hostile.oq.includes('답할 창: <code>🗂 &lt;b&gt;x&lt;/b&gt; &amp; &quot;y&quot; #7</code>'), 'escaped tab label on the open-question line');
+  assert.ok(marks(hostile.oq).includes('답할 창: <code>[app-window] &lt;b&gt;x&lt;/b&gt; &amp; &quot;y&quot; #7</code>'), 'escaped tab label on the open-question line');
   assert.ok(!hostile.html.includes('<b>x</b>'), 'no raw markup from the label');
   s.tabLabel = label;
   s.tabNumber = 181;
@@ -388,8 +394,8 @@ test('a title with no break opportunity wraps in the overview: page.css breaks t
   const html = loadView().renderOverview(model, {});
   assert.ok(html.startsWith('<div class="overview">'));
   assert.ok(html.includes('<button type="button" class="more" data-sh="open" data-sid="' + s.id + '">대화 페이지 열기 · '), 'the open button is a .more child of div.overview');
-  assert.match(html, new RegExp('대화 페이지 열기 · [^<]*' + s.title + '</button>'), 'it carries the whole title');
-  assert.match(cards(html)[s.id], new RegExp('<span class="title">[^<]*' + s.title + '</span>'), 'so does the card header');
+  assert.match(marks(html), new RegExp('대화 페이지 열기 · [^<]*' + s.title + '</button>'), 'it carries the whole title');
+  assert.match(marks(cards(html)[s.id]), new RegExp('<span class="title">[^<]*' + s.title + '</span>'), 'so does the card header');
   const title = cssRule('src/page/page.css', '.title');
   assert.match(title, /min-width: 0/, 'a .ch flex item may shrink below its longest word');
   assert.match(title, /overflow-wrap: anywhere/);
@@ -398,16 +404,17 @@ test('a title with no break opportunity wraps in the overview: page.css breaks t
   assert.match(open, /overflow-wrap: anywhere/);
 });
 
-test('page.css sizes .sym to its glyph: a 1.2em minimum and no fixed width an emoji symbol would overflow', () => {
+test('page.css gives .sym one icon column and no fixed width; its icons are drawn in span.sym, no emoji left there', () => {
   for (const file of ['src/page/page.css', 'src/page/convo.css']) {
     const css = fs.readFileSync(path.join(ROOT, file), 'utf8');
     for (const m of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
       if (/(^|[\s,>])\.sym(?![\w-])/.test(m[1])) assert.doesNotMatch(m[2], /(^|[\s;])width\s*:\s*(?!auto)/, `${file} ${m[1].trim()}: no fixed width`);
     }
   }
-  assert.match(cssRule('src/page/page.css', '.sym'), /min-width: 1\.2em/, 'narrow marks (▸ • ✔) keep one column');
+  assert.match(cssRule('src/page/page.css', '.sym'), /min-width: var\(--ic-md\)/, 'an ic-sm icon and a narrow • share one column');
   const html = loadView().renderOverview(FIXTURE, {});
-  for (const sym of ['📄', '❓']) assert.ok(html.includes('<span class="sym">' + sym + '</span>'), sym + ' is drawn in span.sym');
+  for (const name of ['file-text', 'circle-question-mark']) assert.ok(marks(html).includes('<span class="sym">[' + name + ']</span>'), name + ' is drawn in span.sym');
+  assert.doesNotMatch(html, /<span class="sym">[^<]*\p{Extended_Pictographic}/u, 'no emoji in span.sym');
 });
 
 test('open question alert names the pane to answer in and stays read-only; old records fall back to the session pane', () => {
@@ -469,7 +476,7 @@ test('the pending confirm names the receiving conversation and the choice; a rep
   const view = loadView();
   let c = liveCard(view, FIXTURE, 12, { 12: { confirm: { option: 'B' } } });
   const confirm = /<div class="ans-confirm"[\s\S]*?<\/div>/.exec(c)[0];
-  assert.ok(confirm.includes('🗂 수리 #181 '), 'herdr tab label and number');
+  assert.ok(marks(confirm).includes('[app-window] 수리 #181 '), 'herdr tab label and number');
   assert.ok(confirm.includes('<b>B</b>'));
   assert.ok(confirm.includes('data-act="ans-send" data-id="12"') && confirm.includes('data-act="ans-cancel" data-id="12"'));
   assert.deepEqual([...c.matchAll(/data-opt="([ABC])"[^>]*aria-pressed="true"/g)].map((x) => x[1]), ['B']);
@@ -535,7 +542,7 @@ test('answer controls escape model text in buttons and attributes', () => {
   const c = liveCard(view, m, 12, { 12: { confirm: { option: 'B' } } });
   assert.ok(!c.includes('<img') && !c.includes('<script>'));
   assert.ok(c.includes('&quot;&gt;&lt;img src=x onerror=alert(1)&gt;'));
-  assert.ok(c.includes('🗂 &lt;script&gt;x&lt;/script&gt; #181 '));
+  assert.ok(marks(c).includes('[app-window] &lt;script&gt;x&lt;/script&gt; #181 '));
 });
 
 test('server page: malformed decisions and answer state render without throwing; only positive integer ids get controls', () => {

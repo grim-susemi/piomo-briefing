@@ -7,7 +7,7 @@
  *                                                       server's page; anything else can only copy)
  *     hooks.send(session, text)   '<tab>로 보내기' was pressed and the text passed compose()
  *     hooks.idle()                busy() turned false: the controller may apply what it held back
- *   g.BriefAnnotate.decorate()   after every render of root: 💬 buttons, numbered marks, the 바뀜·사라짐 check, the tray.
+ *   g.BriefAnnotate.decorate()   after every render of root: 주석 buttons, numbered marks, the 바뀜·사라짐 check, the tray.
  *   g.BriefAnnotate.trayBar(session, list, open, mode[, msg]) -> html   the sticky tray under the sub-tabs
  *   g.BriefAnnotate.tray(session, mode) -> html   trayBar with this page's own list, list-open state and last message
  *   g.BriefAnnotate.toMarkdown(session, list, attachments) -> string   the feedback Markdown (C-NOTE item 8), pure
@@ -16,7 +16,7 @@
  *     sessionStorage['omo-briefing.notes.<sid>'] = {v: 1, list: [{blocks, sub, text, snip, intent, comment, paths, gone, pin?}]}
  *   g.BriefAnnotate.place(rect, size, view) -> {top, left}   the tray position, pure
  *   g.BriefAnnotate.busy()   the tray is open or a box drag is in progress (the controller holds updates)
- * Selection: a text drag inside a block, a block's 💬 button, or a box drag from empty space (Alt+drag also over blocks,
+ * Selection: a text drag inside a block, a block's 주석 button, or a box drag from empty space (Alt+drag also over blocks,
  * clickable ones too) that takes every intersecting top-level block; the click that ends a box drag never reaches the
  * page. Blocks are [data-block] elements and the plan view's [data-anchor]
  * elements, whose block id is 'plan/' + the full anchor (C-BLOCK). An annotation keeps
@@ -66,7 +66,7 @@
     empty: '보낼 주석이 없어요',
     bad: '이 주석은 만들 수 없어요',
     draft: '쓰던 주석을 먼저 추가하거나 취소하세요',
-    hint: '글자를 드래그하거나, 블록 위 💬 주석을 누르거나, 빈 곳에서 끌어 여러 블록을 고르면 그 자리에 주석 창이 떠',
+    hint: ['글자를 드래그하거나, 블록 위 ', ' 주석을 누르거나, 빈 곳에서 끌어 여러 블록을 고르면 그 자리에 주석 창이 떠'], // around the 주석 button's icon
     gone: '바뀜·사라짐',
     goneTip: '주석을 단 뒤 이 블록이 바뀌었거나 사라졌어요 - 그때 적어 둔 내용 그대로 보내져요',
     copy: 'Markdown 복사',
@@ -109,6 +109,8 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c];
     });
   }
+  // a Lucide icon from the page's sprite (icons.js); '' without icons.js (this file's unit tests)
+  function ic(name, cls) { var m = g.BriefIcons; return m ? m.icon(name, cls) : ''; }
   function collapse(v) { return str(v).replace(/\s+/g, ' ').trim(); }
   function first(v, n) { return cps(v).slice(0, n).join(''); }
   function cut(v, n) {
@@ -148,12 +150,14 @@
   }
 
   // ---- names --------------------------------------------------------------------------------------------------------
-  // The receiving conversation: herdr tab label and number when known, else its title (C-NOTE heading).
-  function tabName(s) {
+  // The receiving conversation: herdr tab label and number when known, else its title. tabName is the C-NOTE heading's
+  // text; on the page the label wears the tab icon instead (tabNameHtml).
+  function tabLabel(s) {
     var label = field(s.tabLabel);
-    if (label) return '🗂 ' + label + (typeof s.tabNumber === 'number' && isFinite(s.tabNumber) ? ' #' + s.tabNumber : '');
-    return field(s.title) || '(제목 없음)';
+    return label ? label + (typeof s.tabNumber === 'number' && isFinite(s.tabNumber) ? ' #' + s.tabNumber : '') : '';
   }
+  function tabName(s) { return tabLabel(s) ? '🗂 ' + tabLabel(s) : field(s.title) || '(제목 없음)'; }
+  function tabNameHtml(s) { return tabLabel(s) ? ic('app-window') + ' ' + esc(tabLabel(s)) : esc(field(s.title) || '(제목 없음)'); }
   function subName(key) { return own(SUB_NAME, key) || field(key) || '페이지'; }
   // block kind from the block id grammar (C-BLOCK), never from DOM classes
   function kindOf(blocks) {
@@ -342,7 +346,7 @@
       '<span class="ti-b"><span class="ti-w">' + esc(subName(a.sub) + ' · ' + kindOf(a.blocks) + (a.pin ? ' ' + pinText(a.pin) : '')) + '</span>' +
       (a.gone ? ' <span class="chip x-stale ann-gone" title="' + esc(TXT.goneTip) + '">' + esc(TXT.gone) + '</span>' : '') +
       '<span class="ti-t">' + quote + esc(str(a.comment) || TXT.noComment) + '</span></span>' +
-      '<button type="button" class="ti-x" data-ann-act="del" data-ann-i="' + i + '" title="지우기" aria-label="' + (i + 1) + '번 주석 지우기">✕</button></div>';
+      '<button type="button" class="ti-x" data-ann-act="del" data-ann-i="' + i + '" title="지우기" aria-label="' + (i + 1) + '번 주석 지우기">' + ic('x', 'ic-xs') + '</button></div>';
   }
 
   function trayInner(s, l, open, mode, msg, expanded) {
@@ -350,13 +354,13 @@
     var note = m && str(m.text) ? '<p class="ann-msg' + (m.ok ? ' ok' : '') + '" role="' + (m.ok || m.sending ? 'status' : 'alert') + '">' + esc(m.text) + '</p>' : '';
     if (m && m.copy && mode === 'live') note += '<button type="button" class="ann-btn" data-ann-act="copy">Markdown 복사</button>';
     if (m && m.conflict) note += '<button type="button" class="ann-btn" data-act="ann-new" data-sid="' + esc(s.id) + '">새로 보내기</button>';
-    if (!l.length) return '<p class="hint">' + esc(TXT.hint) + '</p>' + note;
+    if (!l.length) return '<p class="hint">' + esc(TXT.hint[0]) + ic('message-square', 'ic-xs') + esc(TXT.hint[1]) + '</p>' + note;
     var live = mode === 'live';
     var html = '<div class="tray" role="group" aria-label="보낼 주석">' +
-      '<span class="tray-n">📌 이 대화에 보낼 주석 <b>' + l.length + '</b>개</span><span class="sp"></span>' +
+      '<span class="tray-n">' + ic('pin') + ' 이 대화에 보낼 주석 <b>' + l.length + '</b>개</span><span class="sp"></span>' +
       '<button type="button" class="ann-btn" data-ann-act="list" aria-expanded="' + (open ? 'true' : 'false') + '">' + (open ? '목록 접기' : '목록 보기') + '</button>' +
       '<button type="button" class="ann-btn" data-ann-act="clear">모두 지우기</button>' +
-      (live ? '<button type="button" class="ann-btn go" data-ann-act="send"' + (m && m.sending ? ' disabled' : '') + '>' + esc(tabName(s)) + '로 보내기</button>'
+      (live ? '<button type="button" class="ann-btn go" data-ann-act="send"' + (m && m.sending ? ' disabled' : '') + '>' + tabNameHtml(s) + '로 보내기</button>'
         : '<button type="button" class="ann-btn go" data-ann-act="copy">' + esc(TXT.copy) + '</button><span class="tray-hint">' + esc(TXT.fileHint) + '</span>') +
       '</div>';
     if (open) {
@@ -627,7 +631,7 @@
       b.setAttribute('class', 'bh');
       b.setAttribute('data-ann-act', 'block');
       b.setAttribute('title', '이 블록에 주석 달기');
-      b.textContent = '💬 주석';
+      b.innerHTML = ic('message-square', 'ic-xs') + ' 주석'; // this module's own constant markup
       el.appendChild(b);
     });
     var l = load(c.sid), changed = false, badges = [], pins = [];
@@ -699,12 +703,12 @@
   }
 
   function popHtml(c, kind, shown, paths) {
-    return '<div class="ph">💬 <b>' + esc(tabName(c.session)) + '</b> 대화에 주석 · ' + esc(subName(c.sub)) + ' · ' + esc(kind) + '</div>' +
+    return '<div class="ph">' + ic('message-square') + ' <b>' + tabNameHtml(c.session) + '</b> 대화에 주석 · ' + esc(subName(c.sub)) + ' · ' + esc(kind) + '</div>' +
       (shown ? '<div class="pq">' + esc(shown) + '</div>' : '') +
-      (paths.length ? '<div class="pp" title="' + esc(paths.join('\n')) + '">📎 ' + esc(paths[0]) + (paths.length > 1 ? ' 외 ' + (paths.length - 1) : '') + '</div>' : '') +
+      (paths.length ? '<div class="pp" title="' + esc(paths.join('\n')) + '">' + ic('paperclip') + ' ' + esc(paths[0]) + (paths.length > 1 ? ' 외 ' + (paths.length - 1) : '') + '</div>' : '') +
       '<div class="seg" role="group" aria-label="주석 종류">' +
-      '<button type="button" class="on" data-ann-intent="고쳐줘" aria-pressed="true">✏️ 고쳐줘</button>' +
-      '<button type="button" data-ann-intent="질문" aria-pressed="false">❓ 질문</button></div>' +
+      '<button type="button" class="on" data-ann-intent="고쳐줘" aria-pressed="true">' + ic('pencil') + ' 고쳐줘</button>' +
+      '<button type="button" data-ann-intent="질문" aria-pressed="false">' + ic('circle-question-mark') + ' 질문</button></div>' +
       '<textarea class="pt" rows="3" placeholder="여기에 대한 의견" aria-label="의견"></textarea>' +
       '<div class="pb"><span class="kb">Ctrl+Enter 추가 · Esc 취소</span><span class="pc">0/' + COMMENT_MAX + '</span><span class="sp"></span>' +
       '<button type="button" class="ann-btn" data-ann-act="cancel">취소</button>' +
@@ -891,7 +895,7 @@
     if (!t) { pinClick(ev); return; }
     var inPop = !!pop && pop.el.contains(t);
     if (!inPop && !connected(t)) return;
-    // the page's own click handler never sees this module's buttons (a 💬 button can sit inside a clickable card)
+    // the page's own click handler never sees this module's buttons (a 주석 button can sit inside a clickable card)
     if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
     if (typeof ev.preventDefault === 'function') ev.preventDefault();
     if (t.hasAttribute('data-ann-intent')) { if (inPop) setIntent(t.getAttribute('data-ann-intent')); return; }

@@ -14,7 +14,7 @@ const NOW = FIXTURE.generatedAt; // injected clock: the model's own generatedAt
 const WALL = NOW + 30000; // wall clock for the worker rows; nothing here reads the real one
 const [A, B, C] = FIXTURE.sessions;
 const SUB_KEYS = ['ov', 'plan', 'wk', 'dec', 'rep'];
-const MODULES = ['src/page/view.js', 'src/page/plan-view.js', 'src/page/workers-view.js', 'src/page/convo-view.js'];
+const MODULES = ['src/page/icons.js', 'src/page/view.js', 'src/page/plan-view.js', 'src/page/workers-view.js', 'src/page/convo-view.js'];
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const pad = (n) => String(n).padStart(2, '0');
 const hhmm = (ms) => { const d = new Date(ms); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
@@ -71,6 +71,11 @@ const cls = (n, c) => els(n, (e) => hasCls(e, c));
 const attrs = (n, k, v) => els(n, (e) => Object.hasOwn(e.attrs, k) && (v === undefined || e.attrs[k] === v));
 const text = (n) => (n.text !== undefined ? n.text : (n.kids || []).map(text).join(''));
 const flat = (n) => text(n).replace(/\s+/g, ' ').trim();
+// text with each icons.js icon read as [name] (an icon has no text of its own)
+const shown = (n) => (n.text !== undefined ? n.text : n.tag === 'svg' ? '[' + ((n.kids.find((k) => k.tag === 'use') || { attrs: {} }).attrs.href || '').replace('#i-', '') + ']'
+  : (n.kids || []).map(shown).join(''));
+const flatShown = (n) => shown(n).replace(/\s+/g, ' ').trim();
+const marks = (html) => html.replace(/<svg class="ic[^"]*" aria-hidden="true" focusable="false"><use href="#i-([a-z0-9-]+)"><\/use><\/svg>/g, '[$1]');
 const block = (root, id) => { const hit = attrs(root, 'data-block', id); assert.equal(hit.length, 1, 'one element for block ' + id); return hit[0]; };
 const blocks = (root) => attrs(root, 'data-block').map((e) => e.attrs['data-block']);
 const panel = (root) => { const p = cls(root, 'cv-panel'); assert.equal(p.length, 1, 'exactly one panel'); return p[0]; };
@@ -182,7 +187,7 @@ test('sub-tab bar: 개요 계획 작업자 결정 보고서 in order with counts
 
 // ---- header ------------------------------------------------------------------------------------------------------------
 
-test('page header: tab-number icon, label, topic, plan name, time, focus button, the old card header chips and the 📁 cwd row', () => {
+test('page header: tab-number icon, label, topic, plan name, time, focus button, the old card header chips and the cwd row', () => {
   const ctx = load();
   const s = clone(A);
   s.chips = ['작업 중', '오래됨', '이 대화는 예전 세대라 실시간 상황판을 맡지 않음 · 대화를 재시작하면 최신 상황판이 열림', '새 칩'];
@@ -196,9 +201,10 @@ test('page header: tab-number icon, label, topic, plan name, time, focus button,
   assert.ok(hasCls(ico, 'sh-h' + ((185 * 5) % 12)), 'the tab bar colour (shell.js hueOf)');
   const h1 = els(head, (e) => e.tag === 'h1')[0];
   assert.equal(text(h1), '상황판제작');
-  assert.equal(h1.attrs.title, '🗂 상황판제작 #185 · 상황판 v6 대화 페이지');
-  assert.equal(flat(cls(head, 'cv-sub')[0]), '상황판 v6 대화 페이지🗂 briefing-board-redesign');
-  assert.equal(text(cls(head, 'time')[0]), '⏱ ' + hhmm(A.lastActivityAt));
+  assert.equal(h1.attrs.title, '상황판제작 #185 · 상황판 v6 대화 페이지');
+  assert.equal(flatShown(cls(head, 'cv-sub')[0]), '상황판 v6 대화 페이지[list-todo] briefing-board-redesign');
+  assert.equal(shown(cls(head, 'time')[0]), '[clock] ' + hhmm(A.lastActivityAt));
+  assert.ok(shown(cls(head, 'cv-cwd')[0]).startsWith('[folder]'), 'the cwd row');
   assert.deepEqual(attrs(head, 'data-act', 'focus').map((b) => b.attrs['data-session']), [A.id]);
   // the chips are the old card header's, stale-generation chip markup included
   const chipsOf = (el) => cls(el, 'chip').map((c) => [c.attrs.class, text(c), c.attrs.style || '', c.attrs.title || '']);
@@ -233,14 +239,14 @@ test('개요: 지금/다음 callout, flow chips with →, four summary cards wit
     const el = block(p, 'card/' + k);
     const go = els(el, (e) => e.tag === 'button')[0];
     assert.deepEqual([go.attrs['data-act'], go.attrs['data-sub'], go.attrs['data-sid']], ['sub', k, A.id]);
-    return [flat(cls(el, 'scard-l')[0]), flat(cls(el, 'scard-v')[0])];
+    return [flatShown(cls(el, 'scard-l')[0]), flat(cls(el, 'scard-v')[0])];
   };
   // counts from the model's rows: tasks, live workers, decisions and reports
   const running = A.live.workers.filter((w) => w.state === 'running' && !w.stale).length;
-  assert.deepEqual(card('plan'), ['🗂 계획', '4/8 · briefing-board-redesign']);
-  assert.deepEqual(card('wk'), ['👷 작업자', `${A.live.workers.length} · ${running}명 진행 중`]);
-  assert.deepEqual(card('dec'), ['🔔 결정', '2 대기 · 3 답함']);
-  assert.deepEqual(card('rep'), ['📑 보고서', '3 · ' + A.reports[0].title]);
+  assert.deepEqual(card('plan'), ['[list-todo] 계획', '4/8 · briefing-board-redesign']);
+  assert.deepEqual(card('wk'), ['[users] 작업자', `${A.live.workers.length} · ${running}명 진행 중`]);
+  assert.deepEqual(card('dec'), ['[bell] 결정', '2 대기 · 3 답함']);
+  assert.deepEqual(card('rep'), ['[file-text] 보고서', '3 · ' + A.reports[0].title]);
   assert.equal(cls(p, 'grid4').length, 1);
   // open decision cards with answer boxes (dec/<id>), after the sent lines of answers not yet delivered
   const kit = ctx.BriefView.kit;
@@ -258,7 +264,7 @@ test('개요: 지금/다음 callout, flow chips with →, four summary cards wit
   // the open-question line is the old card's markup
   const oq = (h) => /<p class="oq">[\s\S]*?<\/p>/.exec(h)[0];
   assert.equal(oq(render(ctx, B, 'ov')), oq(oldCard(ctx, B)));
-  assert.ok(oq(render(ctx, B, 'ov')).includes('답할 창: <code>🗂 문서 #184</code> (읽기 전용): 문서 말투는 존댓말로 할까요?'));
+  assert.ok(marks(oq(render(ctx, B, 'ov'))).includes('답할 창: <code>[app-window] 문서 #184</code> (읽기 전용): 문서 말투는 존댓말로 할까요?'));
 });
 
 test('개요: 최근 변화 open and 한 일 closed; kit rows keep their chips and every row with evidence has its path and copy in a collapsed .dt', () => {
@@ -267,11 +273,11 @@ test('개요: 최근 변화 open and 한 일 closed; kit rows keep their chips a
   const html = render(ctx, A, 'ov');
   const p = panel(parse(html));
   const secs = cls(p, 'cv-sec');
-  const sec = (title) => secs.find((d) => text(d.kids[0]).startsWith(title));
-  assert.ok(Object.hasOwn(sec('✚ 새로 바뀜').attrs, 'open'), '최근 변화 is open');
-  assert.ok(!Object.hasOwn(sec('✔ 한 일').attrs, 'open'), '한 일 is closed');
-  assert.equal(flat(sec('✚ 새로 바뀜').kids[0]), '✚ 새로 바뀜 3');
-  assert.equal(flat(sec('✔ 한 일').kids[0]), '✔ 한 일 2');
+  const sec = (title) => secs.find((d) => shown(d.kids[0]).startsWith(title));
+  assert.ok(Object.hasOwn(sec('[plus] 새로 바뀜').attrs, 'open'), '최근 변화 is open');
+  assert.ok(!Object.hasOwn(sec('[check] 한 일').attrs, 'open'), '한 일 is closed');
+  assert.equal(flatShown(sec('[plus] 새로 바뀜').kids[0]), '[plus] 새로 바뀜 3');
+  assert.equal(flatShown(sec('[check] 한 일').kids[0]), '[check] 한 일 2');
   const rows = [...A.changes.map((c, i) => ['chg', 'change/12/' + i, c]), ...A.done.map((c, i) => ['done', 'done/12/' + i, c])];
   for (const [kind, id, item] of rows) {
     const li = block(p, id);
@@ -298,27 +304,27 @@ test('개요: 최근 변화 open and 한 일 closed; kit rows keep their chips a
   assert.deepEqual([chip('change/12/0', 'a-candidate'), chip('change/12/2', 'a-none')], [1, 1]);
 });
 
-test('개요: 보낸 피드백 lists notes[] with their delivery strings; 📎 이 대화 자료 lists the attachments in C-VM order with copy', () => {
+test('개요: 보낸 피드백 lists notes[] with their delivery strings; 이 대화 자료 lists the attachments in C-VM order with copy', () => {
   const ctx = load();
   const p = panel(parse(render(ctx, A, 'ov')));
   const notes = cls(p, 'cv-notes')[0];
   assert.ok(!Object.hasOwn(notes.attrs, 'open'));
-  assert.equal(flat(notes.kids[0]), '📨 보낸 피드백 4');
+  assert.equal(flatShown(notes.kids[0]), '[send] 보낸 피드백 4');
   const CLASS = { '전달됨': 's-done', '전달 중': 'x-busy', '대기: 작업이 끝나면 전달': 'x-stale', '대기: 그 대화가 다시 열리면 전달': 'x-stale' };
   for (const n of A.notes) {
     const li = block(notes, 'note/' + n.key);
     assert.equal(text(cls(li, 'rt')[0]), n.preview);
-    assert.equal(text(cls(li, 'time')[0]), '⏱ ' + hhmm(n.at));
+    assert.equal(shown(cls(li, 'time')[0]), '[clock] ' + hhmm(n.at));
     const chip = cls(li, 'chip')[0];
-    assert.equal(text(chip), n.delivery, 'delivery string verbatim');
+    assert.equal(shown(chip), n.delivery.replace('⏱', '[clock]'), 'the delivery string, its stopwatch drawn as the clock icon');
     assert.ok(hasCls(chip, CLASS[n.delivery.replace(/ ⏱\d\d:\d\d$/, '')]), n.delivery);
   }
   const none = cls(parse(render(ctx, B, 'ov')), 'cv-notes')[0];
-  assert.deepEqual([flat(none.kids[0]), text(cls(none, 'cv-empty')[0])], ['📨 보낸 피드백 0', '아직 보낸 피드백 없음']);
+  assert.deepEqual([flatShown(none.kids[0]), text(cls(none, 'cv-empty')[0])], ['[send] 보낸 피드백 0', '아직 보낸 피드백 없음']);
   const att = cls(p, 'att')[0];
   assert.equal(att.tag, 'details');
   assert.ok(!Object.hasOwn(att.attrs, 'open'));
-  assert.equal(text(att.kids[0]), `📎 이 대화 자료 ${A.attachments.length} (AI에게 "이거 고쳐줘" 할 때 같이 붙음)`);
+  assert.equal(shown(att.kids[0]), `[paperclip] 이 대화 자료 ${A.attachments.length} (AI에게 "이거 고쳐줘" 할 때 같이 붙음)`);
   const rows = cls(att, 'path');
   assert.deepEqual(rows.map((r) => r.attrs['data-block']), A.attachments.map((_, n) => 'att/' + n), 'C-VM order');
   rows.forEach((r, n) => {
@@ -353,7 +359,7 @@ test('계획 without a plan: work name as goal, progress bar and the todo table 
   const p = panel(parse(render(ctx, B, 'plan')));
   const fb = cls(p, 'cv-fb');
   assert.equal(fb.length, 1);
-  assert.equal(text(cls(fb[0], 'cv-goal')[0]), '🎯 readme-pass');
+  assert.equal(shown(cls(fb[0], 'cv-goal')[0]), '[target] readme-pass');
   assert.ok(els(fb[0], (e) => e.tag === 'h3').some((h) => text(h) === '할 일 2/7'));
   const bar = cls(fb[0], 'prog')[0];
   assert.deepEqual([bar.attrs.role, bar.attrs['aria-valuenow'], bar.attrs['aria-valuemax']], ['progressbar', '2', '7']);
@@ -362,8 +368,8 @@ test('계획 without a plan: work name as goal, progress bar and the todo table 
   assert.deepEqual(els(table, (e) => e.tag === 'th').map(text), ['#', '할 일', '상태']);
   const rows = els(table, (e) => e.tag === 'tr' && e.attrs['data-block']);
   assert.deepEqual(rows.map((r) => r.attrs['data-block']), B.todo.items.map((_, i) => 'plan/todo/' + i));
-  assert.deepEqual(rows.map((r) => r.kids.map(text)), [
-    ['1', '열기 절', '✔ 완료'], ['2', '화면 구성 표', '✔ 완료'], ['3', '화면 구성 절', '● 진행 중'], ['4', '주석 보내기 절', '○ 남음'], ['5', '옛 목차 지우기', '– 취소'],
+  assert.deepEqual(rows.map((r) => r.kids.map(shown)), [
+    ['1', '열기 절', '[check] 완료'], ['2', '화면 구성 표', '[check] 완료'], ['3', '화면 구성 절', '● 진행 중'], ['4', '주석 보내기 절', '○ 남음'], ['5', '옛 목차 지우기', '– 취소'],
   ]);
   assert.ok(flat(p).includes('외 2개'));
   assert.equal(cls(p, 'plan-host').length, 0);
@@ -424,8 +430,8 @@ test('결정: open cards, 보류됨 with 다시 열기, and the 결정 기록 ta
   assert.deepEqual(els(table, (e) => e.tag === 'th').map(text), ['#', '질문', '내 답', '결과', '전달']);
   const rows = els(table, (e) => e.tag === 'tr' && e.attrs['data-block']);
   assert.deepEqual(rows.map((r) => r.attrs['data-block']), ['dec/90', 'dec/91', 'dec/94']);
-  assert.deepEqual(rows.map((r) => r.kids.map(text)), [
-    ['#90', '알림 띠는 어디에 둘까요?', 'A · 탭 바 위', '레일과 사이드바를 가리지 않음', A.decisions[0].delivery],
+  assert.deepEqual(rows.map((r) => r.kids.map(shown)), [
+    ['#90', '알림 띠는 어디에 둘까요?', 'A · 탭 바 위', '레일과 사이드바를 가리지 않음', A.decisions[0].delivery.replace('⏱', '[clock]')],
     ['#91', '사이드바 기본 폭은?', '답글 “260으로 하되 끌어서 바꿀 수 있게 해 줘”', '-', '대기: 작업이 끝나면 전달'],
     ['#94', '시안 v7 주석 창 위치', '답글 “고른 곳 아래, 넘치면 위로”', '-', '질문창에서 답 받음'],
   ]);
@@ -436,7 +442,7 @@ test('결정: open cards, 보류됨 with 다시 열기, and the 결정 기록 ta
   delete s.decisions[0].delivery;
   s.decisions[1].delivery = '';
   const rows2 = els(cls(panel(parse(render(ctx, s, 'dec'))), 'cv-hist')[0], (e) => e.tag === 'tr' && e.attrs['data-block']);
-  assert.deepEqual(rows2.slice(0, 2).map((r) => text(r.kids[4])), ['전달됨 ⏱' + hhmm(A.decisions[0].receipt.deliveredAt), '전달 기다림']);
+  assert.deepEqual(rows2.slice(0, 2).map((r) => shown(r.kids[4])), ['전달됨 [clock]' + hhmm(A.decisions[0].receipt.deliveredAt), '전달 기다림']);
   const empty = panel(parse(render(ctx, B, 'dec')));
   assert.deepEqual(empty.kids.map(text), ['답을 기다리는 결정 없음', '결정 기록', '아직 답한 결정 없음']);
 });
@@ -448,11 +454,11 @@ test('보고서: callout header, side-by-side .ropt images with the decision\'s 
   const p = panel(parse(render(ctx, A, 'rep')));
   assert.deepEqual(cls(p, 'rep').map((r) => r.attrs['data-block']), ['rep/r1', 'rep/r2', 'rep/r3']);
   const r1 = block(p, 'rep/r1');
-  assert.equal(flat(cls(r1, 'rep-t')[0]), A.reports[0].title + '결정 기다림⏱ ' + hhmm(A.reports[0].at));
+  assert.equal(flatShown(cls(r1, 'rep-t')[0]), A.reports[0].title + '결정 기다림[clock] ' + hhmm(A.reports[0].at));
   assert.equal(cls(r1, 'chip')[0].attrs.class, 'chip s-needs_decision');
   assert.equal(text(cls(r1, 'rep-sum')[0]), A.reports[0].summary);
-  assert.equal(text(cls(r1, 'rep-dq')[0]), '🔔 #97 상황판 대화 구분은 어느 시안으로 갈까요?');
-  assert.equal(text(cls(r1, 'rep-hint')[0]), '📍 그림을 누르면 그 자리에 주석이 붙어');
+  assert.equal(shown(cls(r1, 'rep-dq')[0]), '[bell] #97 상황판 대화 구분은 어느 시안으로 갈까요?');
+  assert.equal(shown(cls(r1, 'rep-hint')[0]), '[map-pin] 그림을 누르면 그 자리에 주석이 붙어');
   const d97 = A.decisions.find((d) => d.id === 97);
   const cells = cls(cls(r1, 'rgrid')[0], 'ropt');
   assert.deepEqual(cells.map((c) => c.attrs['data-block']), ['rep/r1/img/0', 'rep/r1/img/1', 'rep/r1/img/2']);
@@ -502,7 +508,7 @@ test('보고서 이걸로 고르기: the picked option shows the decision answer
   assert.equal(dc.replaceAll('data-where="dc"', 'data-where="rep"'), row, 'the very row of the decision card');
   r = report(html);
   const [ca, cb, cc] = cells(r);
-  assert.equal(flat(cls(cb, 'ans-confirm')[0]), '🗂 상황판제작 #185 대화에 B를 보낼까요?보내기취소');
+  assert.equal(flatShown(cls(cb, 'ans-confirm')[0]), '[app-window] 상황판제작 #185 대화에 B를 보낼까요?보내기취소');
   assert.deepEqual(attrs(cb, 'data-act', 'ans-send').map((b) => [b.attrs['data-id'], b.attrs['data-where']]), [['97', 'rep']]);
   assert.deepEqual([picks(ca).length, picks(cb).length, picks(cc).length, cls(ca, 'ans-confirm').length], [1, 0, 1, 0]);
   assert.deepEqual(off(r), [[false], [], [false]]);
@@ -535,7 +541,7 @@ test('보고서 이걸로 고르기: the picked option shows the decision answer
   assert.deepEqual(cls(r, 'rep-closed').map(text), [CLOSED]);
   assert.deepEqual([attrs(r, 'data-act', 'ans-send').length, cls(r, 'ans-confirm').length], [0, 0]);
   assert.deepEqual(cells(r).map((c) => hasCls(c, 'chosen')), [true, false, false]);
-  assert.deepEqual(cls(cells(r)[0], 'cv-chosen').map(text), ['✔ 고른 안']);
+  assert.deepEqual(cls(cells(r)[0], 'cv-chosen').map(shown), ['[check] 고른 안']);
   assert.equal(cls(r, 'chip')[0].attrs.class, 'chip s-done');
   // closed without an answer (held, timed out): off with the note, nothing highlighted
   const h = clone(A);
@@ -551,7 +557,7 @@ test('보고서 이걸로 고르기: the picked option shows the decision answer
   evil.tabLabel = HOSTILE;
   evil.decisions.find((d) => d.id === 97).options.B.text = HOSTILE;
   r = report(render(ctx, evil, 'rep', { answers }));
-  assert.ok(flat(cls(r, 'ans-confirm')[0]).includes('🗂 ' + HOSTILE + ' #185 대화에 B를 보낼까요?'));
+  assert.ok(flatShown(cls(r, 'ans-confirm')[0]).includes('[app-window] ' + HOSTILE + ' #185 대화에 B를 보낼까요?'));
   assert.ok(text(cls(cells(r)[1], 'nm')[0]).includes(HOSTILE));
   for (const e of els(r)) for (const k of Object.keys(e.attrs)) assert.ok(!/^on/i.test(k), k);
 });
@@ -614,7 +620,7 @@ test('hostile model strings are escaped in text and attributes; images only from
   }
   const ov = parse(render(ctx, s, 'ov'));
   assert.equal(attrs(ov, 'data-copy', 'C:/' + H).length, 2, 'cwd and attachment copy values round-trip');
-  assert.equal(els(ov, (e) => e.tag === 'h1')[0].attrs.title, '🗂 ' + H + ' #185 · ' + H);
+  assert.equal(els(ov, (e) => e.tag === 'h1')[0].attrs.title, H + ' #185 · ' + H);
   const rep = parse(render(ctx, s, 'rep'));
   assert.deepEqual(els(rep, (e) => e.tag === 'img').map((e) => [e.attrs.src, e.attrs.alt]), [[ok, H]], 'only the valid source is drawn');
   assert.ok(!blocks(rep).some((b) => b.startsWith('rep/r1')), 'a malformed report id gets no block id');
@@ -664,7 +670,7 @@ test('a model without the C-VM fields (or notes and reports) renders every sub-t
   assert.equal(cls(parse(render(ctx, a, 'rep')), 'c').map(text).join(','), '4/8,3,2', 'no 보고서 count');
   // no todo: the fallback still has the work name and auto's progress, without a table
   const b = panel(parse(render(ctx, strip(B), 'plan')));
-  assert.deepEqual([flat(cls(b, 'cv-goal')[0]), cls(b, 'prog').length, els(b, (e) => e.tag === 'table').length], ['🎯 readme-pass', 1, 0]);
+  assert.deepEqual([flatShown(cls(b, 'cv-goal')[0]), cls(b, 'prog').length, els(b, (e) => e.tag === 'table').length], ['[target] readme-pass', 1, 0]);
   // the older fixtures (before C-VM, C-NOTE and C-REPORT) render on every sub-tab
   for (const f of ['test/fixtures/view-model.json', 'test/fixtures/view-model-workers.json']) {
     for (const s of JSON.parse(read(f)).sessions) {
@@ -755,11 +761,11 @@ test('C-HOLD: 보류 on every open decision in 개요, 결정 and 보고서, its
   const holdIds = (html, where) => [...html.matchAll(new RegExp('data-act="ans-hold" data-id="(\\d+)" data-where="' + where + '"', 'g'))].map((m) => Number(m[1]));
   for (const sub of ['ov', 'dec']) assert.deepEqual(holdIds(render(ctx, A, sub), 'dc'), [97, 98], sub + ': every open decision card, never the held #92');
   assert.deepEqual(holdIds(render(ctx, A, 'rep'), 'rep'), [97], '보고서: the report linked to open #97');
-  const Q = '🗂 상황판제작 #185 대화의 #97를 보류할까요? 대화는 다시 묻지 않아요';
+  const Q = '[app-window] 상황판제작 #185 대화의 #97를 보류할까요? 대화는 다시 묻지 않아요';
   const answers = { 97: { open: false, draft: '', confirm: { hold: true }, phase: '', error: '' } };
   for (const [sub, where] of [['ov', 'dc'], ['dec', 'dc'], ['rep', 'rep']]) {
     const html = render(ctx, A, sub, { answers });
-    assert.ok(html.includes(Q), sub + ': the hold confirm row');
+    assert.ok(marks(html).includes(Q), sub + ': the hold confirm row');
     assert.ok(html.includes('data-act="ans-send" data-id="97" data-where="' + where + '">보류</button>'), sub + ': 보류 sends');
     assert.ok(html.includes('data-act="ans-cancel" data-id="97" data-where="' + where + '">취소</button>'), sub + ': 취소');
     assert.ok(!/를 보낼까요\?/.test(html), sub + ': the answer-only confirm row is not drawn for a hold');

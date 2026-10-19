@@ -125,7 +125,7 @@ function check(text) {
 
   const LIVE_FACTS = [
     ['🔔', ['🔔']],
-    ['🔕', ['🔕']],
+    ['bell-off', ['bell-off']],
     ['server.json', ['server.json']],
   ];
   for (const [shown, code] of LIVE_FACTS) {
@@ -160,7 +160,7 @@ test('negative: the live address, sound toggle and server record line are enforc
   assert.ok(check(noPorts).includes(`the default board port ${DEFAULT_PORT_BASE} is not named`));
   assert.ok(check(text.replace('47326', '47400')).some((p) => p.startsWith('port 47400 outside')));
   assert.ok(check(text.replace(/🔔/g, '')).includes('missing live-board fact: 🔔'));
-  assert.ok(check(text.replace(/🔕/g, '')).includes('missing live-board fact: 🔕'));
+  assert.ok(check(text.replace(/bell-off/g, '')).includes('missing live-board fact: bell-off'));
   assert.ok(check(text.replace(/server\.json/g, 'records.json')).includes('missing live-board fact: server.json'));
 });
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Build: copy sources to .dist-stage-<pid>, node --check every .mjs/.js,
-// then replace dist/ atomically. On failure keep existing dist, remove stage, exit 1.
+// Build: copy sources (with assets/: the page's vendored icons and their licence) to .dist-stage-<pid>, node --check
+// every .mjs/.js, then replace dist/ atomically. On failure keep existing dist, remove stage, exit 1.
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, renameSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,7 +23,7 @@ function listJs(dir, out = []) {
 try {
   rmSync(STAGE, { recursive: true, force: true });
   mkdirSync(STAGE, { recursive: true });
-  const sources = ['extension.mjs', 'src', join('scripts', 'install.mjs')];
+  const sources = ['extension.mjs', 'src', 'assets', join('scripts', 'install.mjs')];
   for (const rel of sources) {
     const src = join(REPO, rel);
     if (!existsSync(src)) throw new Error('missing source: ' + rel);

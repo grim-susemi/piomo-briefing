@@ -64,7 +64,7 @@
   var FLOW_STATE = { done: '끝', doing: '진행 중', todo: '할 일', blocked: '막힘' };
   // native todo statuses (= workers-view.js TODO): class and text of the fallback table's 상태 cell
   var TODO_STATE = {
-    completed: ['ok2', '✔ 완료'],
+    completed: ['ok2', '완료', 'check'], // [class, text, icon]
     in_progress: ['doing2', '● 진행 중'],
     pending: ['no2', '○ 남음'],
     abandoned: ['no2', '– 취소'],
@@ -72,7 +72,7 @@
   };
   var REPORT_STATUS = { '결정 기다림': 's-needs_decision', '답함': 's-done', '참고': 'x-info' };
   var CLOSED = '이미 답했거나 닫힌 결정'; // = page.js ANSWER_TEXT.closed
-  var PIN_HINT = '📍 그림을 누르면 그 자리에 주석이 붙어';
+  var PIN_HINT = '그림을 누르면 그 자리에 주석이 붙어'; // behind the map-pin icon
   var ASSET_SRC = /^assets\/[0-9a-f]{64}\.(?:png|jpg|webp)$/; // C-REPORT: the only image source the page draws
   var REPORT_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
   var SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/; // worker ids and note keys inside block ids
@@ -95,6 +95,10 @@
   function pad(n) { return n < 10 ? '0' + n : String(n); }
   function kit() { return g.BriefView.kit; }
   function esc(v) { return kit().esc(v); }
+  // a Lucide icon from the page's sprite (icons.js); '' without icons.js (this file's unit tests)
+  function ic(name, cls) { var m = g.BriefIcons; return m ? m.icon(name, cls) : ''; }
+  // render.mjs's status text ('전달됨 <stopwatch>09:12'), escaped, with the clock icon for its stopwatch
+  function timed(v) { var m = g.BriefIcons; return m ? m.timed(str(v)) : esc(v); }
 
   // = view.js toMs / hhmm / when
   function toMs(t) {
@@ -150,7 +154,7 @@
   function holdRow(d, s, U, where) {
     if (!U.live || !holdPending(d, U)) return '';
     var at = ' data-id="' + esc(d.id) + '" data-where="' + esc(where) + '"';
-    return '<div class="ans-confirm ans-hold-confirm" role="group" aria-label="보류 확인"><span class="ans-q">' + esc(whereOf(s)) + ' 대화의 #' +
+    return '<div class="ans-confirm ans-hold-confirm" role="group" aria-label="보류 확인"><span class="ans-q">' + whereOfHtml(s) + ' 대화의 #' +
       esc(d.id) + '를 보류할까요? 대화는 다시 묻지 않아요</span><span class="ans-acts"><button type="button" class="ans-go" data-act="ans-send"' + at + '>보류</button>' +
       '<button type="button" class="ans-cancel" data-act="ans-cancel"' + at + '>취소</button></span></div>';
   }
@@ -213,11 +217,11 @@
 
   // ---- header --------------------------------------------------------------------------------------------------------
   function hue(n) { return ((n * 5) % HUES + HUES) % HUES; } // = shell.js hueOf: the tab bar shows the same colour
-  // = view.js whereOf: herdr tab label and number, else the pane, else the title
-  function whereOf(s) {
+  // = view.js whereOfHtml: herdr tab label and number behind the tab icon, else the pane, else the title
+  function whereOfHtml(s) {
     var label = str(s.tabLabel);
-    if (label) return '🗂 ' + label + (num(s.tabNumber) == null ? '' : ' #' + s.tabNumber);
-    return str(s.paneId) ? '창 ' + str(s.paneId) : (str(s.title) || '(제목 없음)');
+    if (label) return ic('app-window') + ' ' + esc(label + (num(s.tabNumber) == null ? '' : ' #' + s.tabNumber));
+    return esc(str(s.paneId) ? '창 ' + str(s.paneId) : (str(s.title) || '(제목 없음)'));
   }
   // = view.js focusBtn: [그 창으로 이동] on the server page, for a conversation in a herdr tab
   function focusBtn(s, U) {
@@ -250,10 +254,10 @@
         : '<span class="cv-ico sh-h' + hue(n) + '" role="img" aria-label="탭 ' + esc(n) + '" title="탭 #' + esc(n) + '">' + esc(n) + '</span>') +
       '<div class="cv-names"><h1 class="cv-h1" title="' + esc(K.whereLabel(s)) + '">' + esc(label || title) + '</h1>' +
       (topic || plan ? '<p class="cv-sub">' + (topic ? '<span>' + esc(topic) + '</span>' : '') +
-        (plan ? '<span class="cv-plan">🗂 ' + esc(plan) + '</span>' : '') + '</p>' : '') + '</div>' +
-      '<span class="time">⏱ ' + esc(when(s.lastActivityAt != null ? s.lastActivityAt : s.lastBriefAt, now)) + '</span>' + focusBtn(s, U) + '</div>' +
+        (plan ? '<span class="cv-plan">' + ic('list-todo') + ' ' + esc(plan) + '</span>' : '') + '</p>' : '') + '</div>' +
+      '<span class="time">' + ic('clock', 'ic-xs') + ' ' + esc(when(s.lastActivityAt != null ? s.lastActivityAt : s.lastBriefAt, now)) + '</span>' + focusBtn(s, U) + '</div>' +
       '<div class="ch cv-chips">' + statusChips(s) + '</div>';
-    if (str(s.cwd)) html += '<p class="kv path cv-cwd"><span class="sym">📁</span><code>' + esc(s.cwd) + '</code>' + K.copyBtn(s.cwd) + '</p>';
+    if (str(s.cwd)) html += '<p class="kv path cv-cwd"><span class="sym">' + ic('folder', 'ic-sm') + '</span><code>' + esc(s.cwd) + '</code>' + K.copyBtn(s.cwd) + '</p>';
     return html + '</header>';
   }
 
@@ -279,7 +283,7 @@
 
   // ---- 개요 --------------------------------------------------------------------------------------------------------------
   function nowCallout(s) {
-    return '<div class="cv-now" data-block="now"><span class="cv-bulb" aria-hidden="true">💡</span><div class="cv-nowt">' +
+    return '<div class="cv-now" data-block="now"><span class="cv-bulb" aria-hidden="true">' + ic('lightbulb', 'ic-md') + '</span><div class="cv-nowt">' +
       '<p class="cv-hl"><b>지금</b> ' + esc(str(s.headline) || '아직 보고 없음') + '</p>' +
       '<p class="cv-next">다음: ' + esc(str(s.next) || '-') + '</p></div></div>';
   }
@@ -299,10 +303,10 @@
     }
     var wk = workerList(s), reps = reportsOf(s), name = planName(s);
     return '<div class="grid4">' +
-      card('plan', '🗂 계획', counts.plan || '-', '· ' + (name || (counts.plan ? '할 일' : '계획 없음'))) +
-      card('wk', '👷 작업자', String(wk.length), '· ' + runningCount(wk) + '명 진행 중') +
-      card('dec', '🔔 결정', String(openDecs(s).length), '대기 · ' + answeredDecs(s).length + ' 답함') +
-      card('rep', '📑 보고서', String(reps.length), '· ' + (reps.length ? str(reps[0].title) || '(제목 없음)' : '없음')) + '</div>';
+      card('plan', ic('list-todo', 'ic-sm') + ' 계획', counts.plan || '-', '· ' + (name || (counts.plan ? '할 일' : '계획 없음'))) +
+      card('wk', ic('users', 'ic-sm') + ' 작업자', String(wk.length), '· ' + runningCount(wk) + '명 진행 중') +
+      card('dec', ic('bell', 'ic-sm') + ' 결정', String(openDecs(s).length), '대기 · ' + answeredDecs(s).length + ' 답함') +
+      card('rep', ic('file-text', 'ic-sm') + ' 보고서', String(reps.length), '· ' + (reps.length ? str(reps[0].title) || '(제목 없음)' : '없음')) + '</div>';
   }
   // = view.js card's open-question line (read-only: the question is answered in its own window)
   function openQuestion(s, U, now) {
@@ -310,9 +314,9 @@
     if (!q) return '';
     var qPane = str(q.paneId) || str(s.paneId);
     var tabbed = !!str(s.tabLabel);
-    return '<p class="oq"><span class="sym">❓</span>질문 알림 열림 - ' +
-      (tabbed ? '답할 창: <code>' + esc(whereOf(s)) + '</code>' : qPane ? '<code>' + esc(qPane) + '</code>에서 답하기' : '질문이 뜬 창에서 답하기') + ' (읽기 전용): ' + esc(q.text) +
-      ' <span class="time">⏱ ' + esc(when(q.at, now)) + '</span> ' + focusBtn(s, U) + '</p>' +
+    return '<p class="oq"><span class="sym">' + ic('circle-question-mark', 'ic-sm') + '</span>질문 알림 열림 - ' +
+      (tabbed ? '답할 창: <code>' + whereOfHtml(s) + '</code>' : qPane ? '<code>' + esc(qPane) + '</code>에서 답하기' : '질문이 뜬 창에서 답하기') + ' (읽기 전용): ' + esc(q.text) +
+      ' <span class="time">' + ic('clock', 'ic-xs') + ' ' + esc(when(q.at, now)) + '</span> ' + focusBtn(s, U) + '</p>' +
       (q.builtin === true ? '<p class="oq-builtin">터미널에서 답하세요 - 이 질문은 하네스 기본 질문창이라 상황판에서 닫을 수 없어요</p>' : '');
   }
   // the decision card's view of its conversation (= view.js card's `view`)
@@ -339,7 +343,7 @@
     var html = withBlock(K.row(kind, ev ? Object.assign({}, item, { evidence: '' }) : item), block);
     if (!ev) return html;
     return html.slice(0, -'</li>'.length) + '<details class="dt"' + openAttr(U, sid, 'dt/' + key, false) + '><summary>상세 · 증거 파일</summary>' +
-      '<div class="path"><span class="sym">📄</span><code>' + esc(ev) + '</code>' + K.copyBtn(ev) + '</div></details></li>';
+      '<div class="path"><span class="sym">' + ic('file-text', 'ic-sm') + '</span><code>' + esc(ev) + '</code>' + K.copyBtn(ev) + '</div></details></li>';
   }
   function rowsSection(s, kind, U) {
     var sid = str(s.id), seq = seqOf(s), chg = kind === 'chg';
@@ -351,23 +355,23 @@
       rows.push(rowHtml(chg ? 'chg' : 'done', item, block, U, sid, block || part + '/' + i));
     });
     if (!rows.length) return '';
-    var title = chg ? (s.changesNew ? '✚ 새로 바뀜' : '↻ 최근 변화') : '✔ 한 일';
+    var title = chg ? (s.changesNew ? ic('plus', 'ic-sm') + ' 새로 바뀜' : ic('refresh-cw', 'ic-sm') + ' 최근 변화') : ic('check', 'ic-sm') + ' 한 일';
     return '<details class="cv-sec"' + openAttr(U, sid, part, chg) + '><summary>' + title + ' <span class="cv-n">' + rows.length + '</span></summary>' +
       '<ul class="rows">' + rows.join('') + '</ul></details>';
   }
   function deliveryChip(text, receipt) {
     var t = str(text) || (obj(receipt) ? '전달됨 ⏱' + hhmm(receipt.deliveredAt) : '전달 기다림');
     var cls = /^전달됨/.test(t) ? 's-done' : t === '전달 중' ? 'x-busy' : /^대기|기다림$/.test(t) ? 'x-stale' : 'x-info';
-    return chip(cls, t);
+    return '<span class="chip ' + cls + '">' + timed(t) + '</span>';
   }
   function notesSection(s, U, now) {
     if (!Array.isArray(s.notes)) return '';
     var sid = str(s.id);
     var list = s.notes.filter(function (n) { return !!obj(n); });
-    return '<details class="cv-sec cv-notes"' + openAttr(U, sid, 'notes', false) + '><summary>📨 보낸 피드백 <span class="cv-n">' + list.length + '</span></summary>' +
+    return '<details class="cv-sec cv-notes"' + openAttr(U, sid, 'notes', false) + '><summary>' + ic('send', 'ic-sm') + ' 보낸 피드백 <span class="cv-n">' + list.length + '</span></summary>' +
       (list.length ? '<ul class="rows">' + list.map(function (n) {
         var key = str(n.key);
-        return '<li class="row cv-note"' + blockAttr(SAFE_ID.test(key) ? 'note/' + key : '') + '><span class="time">⏱ ' + esc(when(n.at, now)) + '</span>' +
+        return '<li class="row cv-note"' + blockAttr(SAFE_ID.test(key) ? 'note/' + key : '') + '><span class="time">' + ic('clock', 'ic-xs') + ' ' + esc(when(n.at, now)) + '</span>' +
           '<span class="rt">' + esc(n.preview) + '</span>' + deliveryChip(n.delivery, null) + '</li>';
       }).join('') + '</ul>' : '<p class="muted cv-empty">아직 보낸 피드백 없음</p>') + '</details>';
   }
@@ -379,7 +383,7 @@
       rows.push('<div class="path"' + blockAttr('att/' + n) + '><span class="lb">' + esc(str(a.label) || '자료') + '</span><code>' + esc(a.path) + '</code>' + K.copyBtn(a.path) + '</div>');
     });
     if (!rows.length) return '';
-    return '<details class="att"' + openAttr(U, sid, 'att', false) + '><summary>📎 이 대화 자료 ' + rows.length + ' (AI에게 "이거 고쳐줘" 할 때 같이 붙음)</summary>' +
+    return '<details class="att"' + openAttr(U, sid, 'att', false) + '><summary>' + ic('paperclip', 'ic-sm') + ' 이 대화 자료 ' + rows.length + ' (AI에게 "이거 고쳐줘" 할 때 같이 붙음)</summary>' +
       rows.join('') + '</details>';
   }
   function overview(s, U, now, counts) {
@@ -397,11 +401,11 @@
       t.items.forEach(function (it, i) {
         if (!obj(it)) return;
         var st = own(TODO_STATE, it.status) ? TODO_STATE[it.status] : TODO_STATE.pending;
-        rows.push('<tr' + blockAttr('plan/todo/' + i) + '><td>' + (i + 1) + '</td><td>' + esc(it.text) + '</td><td class="' + st[0] + '">' + st[1] + '</td></tr>');
+        rows.push('<tr' + blockAttr('plan/todo/' + i) + '><td>' + (i + 1) + '</td><td>' + esc(it.text) + '</td><td class="' + st[0] + '">' + (st[2] ? ic(st[2]) + ' ' : '') + st[1] + '</td></tr>');
       });
     }
     if (!rows.length && !p) return ''; // a work name alone is no plan
-    var html = '<div class="cv-fb"><h3 class="cv-h3">목표</h3><p class="cv-goal">🎯 ' + esc(work || '(작업 이름 없음)') + '</p>';
+    var html = '<div class="cv-fb"><h3 class="cv-h3">목표</h3><p class="cv-goal">' + ic('target') + ' ' + esc(work || '(작업 이름 없음)') + '</p>';
     if (p) {
       var pct = p.total > 0 ? Math.max(0, Math.min(100, Math.round(p.done / p.total * 100))) : 0;
       html += '<h3 class="cv-h3">할 일 ' + esc(p.done) + '/' + esc(p.total) + '</h3><div class="prog" role="progressbar" aria-label="할 일 진행" aria-valuemin="0" aria-valuemax="' +
@@ -413,12 +417,12 @@
     }
     return html + '</div>';
   }
-  // = view.js detail's ⚙ 자동 정보 lines
+  // = view.js detail's 자동 정보 lines
   function autoInfo(s, U) {
     var auto = obj(s.auto);
     if (!auto) return '';
     var w = obj(auto.workers) || {};
-    return '<details class="cv-sec cv-auto"' + openAttr(U, str(s.id), 'auto', false) + '><summary>⚙ 자동 정보 <span class="muted">(절차 진행, 목표 달성 아님)</span></summary>' +
+    return '<details class="cv-sec cv-auto"' + openAttr(U, str(s.id), 'auto', false) + '><summary>' + ic('settings', 'ic-sm') + ' 자동 정보 <span class="muted">(절차 진행, 목표 달성 아님)</span></summary>' +
       '<p class="kv"><span class="sym">•</span>작업: [' + esc(s.workName || '-') + '] · 단계 ' + esc(auto.stage || '-') + '</p>' +
       '<p class="kv"><span class="sym">•</span>todo 현재: ' + esc(auto.todoCurrent || '-') + ' · 다음: ' + esc(auto.todoNext || '-') +
       ' · ' + esc(num(auto.todoDone) == null ? '-' : auto.todoDone) + '/' + esc(num(auto.todoTotal) == null ? '-' : auto.todoTotal) + '</p>' +
@@ -541,7 +545,7 @@
       : '<span class="rimg-x">그림을 보여 줄 수 없음</span>';
     var body = o
       ? '<p class="nm">' + esc(opt) + ' · ' + esc(o.text) + (rec ? ' <span class="chip s-done">추천</span>' : '') +
-        (mine ? ' <span class="chip cv-chosen">✔ 고른 안</span>' : '') + '</p>' + (str(o.consequence) ? '<p class="nt">' + esc(o.consequence) + '</p>' : '')
+        (mine ? ' <span class="chip cv-chosen">' + ic('check') + ' 고른 안</span>' : '') + '</p>' + (str(o.consequence) ? '<p class="nt">' + esc(o.consequence) + '</p>' : '')
       : (str(im.alt) ? '<p class="nt">' + esc(im.alt) + '</p>' : '');
     var pick = o && ps ? pickSlot(s, d, opt, rec, ps) : '';
     return '<div class="ropt' + (rec ? ' rec' : '') + (mine ? ' chosen' : '') + '"' + blockAttr(block) + '><div class="rimg">' + img + '</div>' +
@@ -563,12 +567,12 @@
       line += holdRow(d, s, U, 'rep') || '<p class="rep-hold"><button type="button" class="ans-write" data-act="ans-hold" data-id="' + esc(d.id) +
         '" data-where="rep">보류</button>' + (ps.error ? ' <span class="ans-err" role="alert">' + esc(ps.error) + '</span>' : '') + '</p>';
     }
-    var html = '<section class="rep"' + blockAttr(okId ? 'rep/' + rid : '') + '><div class="rep-head"><span class="cv-bulb" aria-hidden="true">📑</span><div class="rep-ht">' +
+    var html = '<section class="rep"' + blockAttr(okId ? 'rep/' + rid : '') + '><div class="rep-head"><span class="cv-bulb" aria-hidden="true">' + ic('file-text', 'ic-md') + '</span><div class="rep-ht">' +
       '<p class="rep-t"><b>' + esc(str(r.title) || '(제목 없음)') + '</b>' + chip(own(REPORT_STATUS, status) || 'x-info', status) +
-      '<span class="time">⏱ ' + esc(when(r.at, now)) + '</span></p>' +
-      (d ? '<p class="rep-dq">🔔 #' + esc(d.id) + ' ' + esc(d.question) + '</p>' : '') + line +
+      '<span class="time">' + ic('clock', 'ic-xs') + ' ' + esc(when(r.at, now)) + '</span></p>' +
+      (d ? '<p class="rep-dq">' + ic('bell') + ' #' + esc(d.id) + ' ' + esc(d.question) + '</p>' : '') + line +
       (str(r.summary) ? '<p class="rep-sum">' + esc(r.summary) + '</p>' : '') +
-      (pins ? '<p class="rep-hint">' + esc(PIN_HINT) + '</p>' : '') + '</div></div>';
+      (pins ? '<p class="rep-hint">' + ic('map-pin') + ' ' + esc(PIN_HINT) + '</p>' : '') + '</div></div>';
     var cells = [];
     arr(r.images).forEach(function (im, n) {
       if (obj(im)) cells.push(imageCell(s, d, im, okId ? 'rep/' + rid + '/img/' + n : '', ps, chosen));

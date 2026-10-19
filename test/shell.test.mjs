@@ -14,8 +14,9 @@ const NOW = 1792170000000; // injected clock; nothing in shell.js reads the real
 const HOSTILE = '<img src=x onerror="alert(1)">\'`&';
 const GONE = '(지금 안 보임)';
 
-// Each test gets its own realm; extra = globals such as BriefAlarm or a console that records warnings.
-function load(extra = {}, files = ['src/page/shell.js']) {
+// Each test gets its own realm; extra = globals such as BriefAlarm or a console that records warnings. icons.js comes
+// first, as render.mjs inlines it.
+function load(extra = {}, files = ['src/page/icons.js', 'src/page/shell.js']) {
   const ctx = vm.createContext({ ...extra });
   for (const f of files) vm.runInContext(read(f), ctx, { filename: f });
   assert.equal(typeof ctx.BriefShell?.reduce, 'function');
@@ -75,6 +76,8 @@ const DEFAULT_SAVED = { sideOpen: true, sideWidth: 260, view: 'conv', filter: 'a
 
 // html probes
 const all = (html, re) => [...html.matchAll(re)].map((m) => m[1]);
+// icons.js markup -> [name]: which icon is drawn where
+const marks = (html) => html.replace(/<svg class="ic[^"]*" aria-hidden="true" focusable="false"><use href="#i-([a-z0-9-]+)"><\/use><\/svg>/g, '[$1]');
 const headings = (html) => all(html, /class="sh-sht">([^<]*)</g);
 function sections(html) {
   const out = {};
@@ -209,7 +212,7 @@ test('reduce: pin toggles, pinned tabs sort first in pin order, and only open ta
   assert.deepEqual(plain(S.order(st)), ['d012', 'a185', 'c184']);
   const html = S.tabs(fixture(), st);
   assert.deepEqual(tabOrder(html), ['d012', 'a185', 'c184'], 'the pin re-sorts the tab bar');
-  assert.match(html, /class="tb[^"]* pinned" data-tab="d012"[^>]*><button[^>]*><span class="tb-pin"[^>]*>📌<\/span>/);
+  assert.match(marks(html), /class="tb[^"]* pinned" data-tab="d012"[^>]*><button[^>]*><span class="tb-pin"[^>]*>\[pin\]<\/span>/);
   st = S.reduce(st, { type: 'pin', sid: 'a185' });
   assert.deepEqual(tabOrder(S.tabs(fixture(), st)), ['d012', 'a185', 'c184']);
   st = S.reduce(st, { type: 'pin', sid: 'd012' });
@@ -403,25 +406,31 @@ test('persist and restore use only omo-briefing.ui.v1 and never throw on blocked
 
 // ---- rail, sidebar views, tab bar ---------------------------------------------------------------------------------
 
-test('rail: ☰ 💬 📥 🗂 🏠 🗄, a spacer, then ⚙, with the inbox badge', () => {
+test('rail: the sidebar toggle, then the 대화 수신함 계획 홈 닫힌 창 icons, a spacer, then 설정, with the inbox badge', () => {
   const S = load().BriefShell;
   const st = base(S);
   const html = S.rail(fixture(), st);
-  assert.equal(all(html, /class="sh-ri"[^>]*>([^<]*)</g).join(' '), '☰ 💬 📥 🗂 🏠 🗄 ⚙');
+  assert.equal(all(marks(html), /class="sh-ri"[^>]*>([^<]*)</g).join(' '),
+    '[panel-left-close] [message-square] [inbox] [list-todo] [house] [archive] [settings]');
+  assert.equal((html.match(/class="ic ic-rail"/g) || []).length, 6, 'rail-sized icons');
+  assert.match(html, /data-key="conv"[^>]*><span class="sh-ri" aria-hidden="true"><svg class="ic ic-rail ic-sel"/, 'the selected view: a heavier stroke');
+  assert.equal((html.match(/ic-sel/g) || []).length, 1);
+  assert.match(marks(S.rail(fixture(), S.reduce(st, { type: 'toggleSide' }))), /^<button[^>]*data-sh="toggleSide"[^>]*><span class="sh-ri" aria-hidden="true">\[panel-left-open\]/,
+    'the toggle shows what a press does');
   assert.deepEqual(all(html, /class="sh-tip"[^>]*>([^<]*)</g), ['사이드바 표시/숨기기 (Ctrl+\\)', '대화', '수신함', '계획', '홈', '닫힌 창', '설정']);
   assert.match(html, /data-key="inbox" aria-label="수신함 6개"/, 'the count is spoken, not shown in the tooltip');
-  assert.match(html, /🗄<\/span><span class="sh-tip"[^>]*>닫힌 창<\/span><\/button><span class="sh-rsp" aria-hidden="true"><\/span><button[^>]*data-key="settings"/);
+  assert.match(marks(html), /\[archive\]<\/span><span class="sh-tip"[^>]*>닫힌 창<\/span><\/button><span class="sh-rsp" aria-hidden="true"><\/span><button[^>]*data-key="settings"/);
   assert.match(html, /<span class="sh-n" aria-hidden="true">6<\/span>/);
   assert.match(html, /class="sh-rb on" data-sh="view" data-key="conv"/);
   assert.equal((html.match(/<button /g) || []).length, 7, 'no other control, no second panel');
 });
 
-test('regression R4: the 📥 tooltip is exactly 수신함 while its badge carries the count', () => {
+test('regression R4: the inbox tooltip is exactly 수신함 while its badge carries the count', () => {
   const S = load().BriefShell;
   const vm = { sessions: [{ id: 'one', decisions: [{ id: 1, answered: false, closed: false }] }] };
   const html = S.rail(vm, S.defaults());
   assert.deepEqual(all(html, /class="sh-tip"[^>]*>([^<]*)</g), ['사이드바 표시/숨기기 (Ctrl+\\)', '대화', '수신함', '계획', '홈', '닫힌 창', '설정']);
-  assert.match(html, /📥<\/span><span class="sh-n" aria-hidden="true">1<\/span><span class="sh-tip" aria-hidden="true">수신함<\/span>/);
+  assert.match(marks(html), /\[inbox\]<\/span><span class="sh-n" aria-hidden="true">1<\/span><span class="sh-tip" aria-hidden="true">수신함<\/span>/);
   assert.doesNotMatch(S.rail({ sessions: [] }, S.defaults()), /sh-n|수신함 0/, 'nothing waiting: no badge, plain label');
 });
 
@@ -474,7 +483,7 @@ test('수신함 on the server page: 보류 with its confirm row on open decision
   assert.deepEqual(all(html, /data-act="ans-hold" data-id="(\d+)" data-where="inbox"/g), ['102', '101'], '보류 on every open decision item only');
   assert.doesNotMatch(html, /<button[^>]*class="sh-it[^"]*"[^>]*>(?:(?!<\/button>).)*data-act=/s, 'controls sit beside the item button, never inside it');
   html = S.side(model, Object.assign({}, st, { answers: { 101: { confirm: { hold: true }, phase: '' } } }));
-  assert.match(html, /🗂 상황판제작 #185 대화의 #101를 보류할까요\? 대화는 다시 묻지 않아요/);
+  assert.match(marks(html), /\[app-window\] 상황판제작 #185 대화의 #101를 보류할까요\? 대화는 다시 묻지 않아요/);
   assert.match(html, /data-act="ans-send" data-id="101" data-where="inbox">보류<\/button><button type="button" class="sh-act" data-act="ans-cancel" data-id="101"/);
   html = S.side(model, Object.assign({}, st, { box: 'held' }));
   assert.deepEqual(all(html, /data-act="ans-reopen" data-id="(\d+)"/g), ['95']);
@@ -485,7 +494,7 @@ test('수신함 on the server page: 보류 with its confirm row on open decision
   assert.deepEqual(plain(S.inbox(heldMore, st).held.map((x) => x.kind)), ['#101 보류됨', '#95 보류됨']);
 });
 
-test('the other sidebar views: 수신함 groups, 계획, 홈 counts, 닫힌 창 and ⚙', () => {
+test('the other sidebar views: 수신함 groups, 계획, 홈 counts, 닫힌 창 and 설정', () => {
   const S = load({ BriefAlarm: { soundButtonHtml: () => '<button type="button" class="alarm-sound" data-alarm-sound>🔔</button>' } }).BriefShell;
   const model = fixture();
   const st = base(S);
@@ -502,20 +511,21 @@ test('the other sidebar views: 수신함 groups, 계획, 홈 counts, 닫힌 창 
   html = view('inbox', 'ans');
   assert.deepEqual(kinds(html), ['상황판제작 · #90', '끝난 설치 작업 · #80']);
   assert.match(html, /사이드바 기본 폭\? <span class="sh-ans">→ A · 260px<\/span>/);
-  assert.deepEqual(all(html, /class="sh-w">([^<]*)</g), ['5분 전 · 전달됨 ⏱11:58', '전달 중']);
+  assert.deepEqual(all(marks(html), /class="sh-w">([^<]*)</g), ['5분 전 · 전달됨 [clock]11:58', '전달 중'], 'the delivery text\'s stopwatch is the clock icon');
   assert.match(html, /설치할까\? <span class="sh-ans">→ 답글 “내일 해 줘”<\/span>/);
   html = view('plans');
   assert.deepEqual(items(html), ['a185', 'd012']);
   assert.deepEqual(all(html, /class="sh-iq">([^<]*)</g), ['briefing-board-redesign · 2/3', 'docs-plan · 1/4']);
   html = view('home');
   assert.deepEqual(all(html, /class="sh-hl">([^<]*)<\/span><b class="sh-num">/g), ['기다리는 것', '끝남 확인', '열린 탭']);
+  assert.deepEqual(all(marks(html), /class="sh-ki" aria-hidden="true">([^<]*)</g), ['[bell]', '[check]', '[layout-grid]']);
   assert.deepEqual(all(html, /class="sh-num">([^<]*)</g), ['4', '2', '3']);
   assert.deepEqual(headings(html), ['열린 탭']);
   html = view('archive');
   assert.deepEqual(all(html, /data-row="([^"]*)"/g), ['f-q', 'e-done', 'p185', 'g-old']);
   assert.deepEqual(all(html, /class="sh-sub">([^<]*)</g), ['45분 전', '2시간 전', '3시간 전', '5일 전']);
   html = view('settings');
-  assert.deepEqual(all(html, /class="sh-seth">([^<]*)</g), ['🔔 알림 소리', 'ℹ 표시 뜻']);
+  assert.deepEqual(all(marks(html), /class="sh-seth">([^<]*)</g), ['[bell] 알림 소리', '[info] 표시 뜻']);
   assert.match(html, /data-alarm-sound>🔔<\/button>/, 'the sound toggle is BriefAlarm\'s own button');
   assert.match(load().BriefShell.side(model, S.reduce(st, { type: 'view', key: 'settings' })), /알림 모듈이 없어 바꿀 수 없음/);
 });
@@ -603,14 +613,15 @@ test('⚙ legend preserves every legacy legend entry after the overview footer i
   assert.doesNotMatch(ctx.BriefView.renderOverview(fixture(), {}), /legend-list/);
 });
 
-test('tab bar: », the tabs with icon, full title tooltip and 🔔 count, then ＋ (홈 in the sidebar)', () => {
+test('tab bar: the open-sidebar button, the tabs with icon, full title tooltip and bell count, then plus (홈 in the sidebar)', () => {
   const S = load().BriefShell;
   const html = S.tabs(fixture(), base(S));
-  assert.match(html, /^<button type="button" class="sh-topen" data-sh="toggleSide" title="사이드바 열기 \(Ctrl\+\\\)" aria-label="사이드바 열기">»<\/button>/);
-  assert.match(html, /<button type="button" class="sh-tadd" data-sh="view" data-key="home" title="새 탭: 홈" aria-label="홈 보기">＋<\/button>$/);
+  assert.match(marks(html), /^<button type="button" class="sh-topen" data-sh="toggleSide" title="사이드바 열기 \(Ctrl\+\\\)" aria-label="사이드바 열기">\[panel-left-open\]<\/button>/);
+  assert.match(marks(html), /<button type="button" class="sh-tadd" data-sh="view" data-key="home" title="새 탭: 홈" aria-label="홈 보기">\[plus\]<\/button>$/);
   assert.deepEqual(tabOrder(html), ['a185', 'c184', 'gone-1']);
-  assert.match(html, /class="tb on" data-tab="a185" title="🗂 상황판제작 #185 · 상황판 v5 셸 \(두 번 누르면 탭 고정\)">/);
-  assert.match(html, /<span class="tt">상황판제작<\/span><span class="sh-bdg">🔔2<\/span>/);
+  assert.match(html, /class="tb on" data-tab="a185" title="상황판제작 #185 · 상황판 v5 셸 \(두 번 누르면 탭 고정\)">/);
+  assert.match(marks(html), /<span class="tt">상황판제작<\/span><span class="sh-bdg">\[bell\]2<\/span>/);
+  assert.equal((marks(html).match(/aria-label="탭 닫기: [^"]*" title="탭 닫기">\[x\]<\/button>/g) || []).length, 3);
   assert.match(html, /<span class="sh-ico sh-ico-n sh-h1" aria-hidden="true">185<\/span>/);
   assert.equal((html.match(/data-sh="close"/g) || []).length, 3);
   assert.equal((html.match(/<button /g) || []).length, 2 + 3 * 2, '», ＋ and each tab\'s own two buttons only');
@@ -632,7 +643,7 @@ test('hostile titles, labels, headlines and ids are escaped everywhere, title at
     ...['conv', 'inbox', 'plans', 'home', 'archive'].map((key) => S.side(model, { ...st, view: key, search: '' })),
     S.side(model, st), S.side(model, { ...st, view: 'archive' }), S.side(model, { ...st, view: 'inbox', box: 'wait' }),
   ].join('\n');
-  assert.doesNotMatch(html, /<img|<svg|onerror="|onload=alert\(2\)>/);
+  assert.doesNotMatch(marks(html), /<img|<svg|onerror="|onload=alert\(2\)>/, 'past the page\'s own icons, no element comes from the data');
   assert.ok(html.includes(esc(HOSTILE)), 'the hostile text is shown, escaped');
   for (const [, value] of html.matchAll(/ (?:title|aria-label|data-sid|data-tab|data-row|value)="([^"]*)"/g)) assert.doesNotMatch(value, /[<>"`']/, value);
   assert.match(html, new RegExp('data-tab="' + esc(evil).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"'));
@@ -796,7 +807,9 @@ test('sideFrame is rendered once from state alone; sync keeps its title, chips, 
   assert.match(frame, /^<div class="sh-rz" data-sh="rz" role="separator"[^>]*aria-valuenow="300"/);
   assert.match(frame, /<span class="sh-title" data-sh-part="title">대화<\/span>/);
   assert.match(frame, /<input type="search" class="sh-q" data-sh="search" maxlength="200"[^>]*placeholder="대화·결정 검색"[^>]*value="abc">/);
-  assert.match(frame, /<button type="button" class="sh-back" data-sh="view" data-key="conv">← 사이드바로 돌아가기<\/button>/);
+  assert.match(marks(frame), /<button type="button" class="sh-back" data-sh="view" data-key="conv">\[arrow-left\] 사이드바로 돌아가기<\/button>/);
+  assert.match(marks(frame), /aria-label="사이드바 닫기">\[panel-left-close\]<\/button>/);
+  assert.match(marks(frame), /<label class="sh-srch">\[search\]<input type="search"/);
   assert.match(frame, /<div class="sh-scroll" data-sh-part="list"><\/div>$/);
   const sk = S.skeleton(st);
   assert.deepEqual(all(sk, / id="([^"]+)"/g), ['rail', 'edge', 'side', 'tabs', 'main']);
