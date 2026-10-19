@@ -72,7 +72,7 @@ test('conversation refresh glow and worker measurements use stable block and ses
 
 test('regions: a rail click with running workers keeps #main and #tabs; worker rows use one clock per applied model', () => {
   // the page scripts' own Date.now() moves on every read: a render that reads it draws another pulse phase
-  const e = makeController({ modules: ['view', 'plan-view', 'workers-view', 'convo-view', 'shell', 'annotate'],
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'workers-view', 'convo-view', 'shell', 'annotate'],
     configure: ctx => vm.runInContext('(function () { var t = 1700000000000; Date.now = function () { return t += 137; }; })();', ctx) });
   const s = session({ live: { workers: [{ id: 'st_a', name: 'Worker', state: 'running', startedAt: 0, updatedAt: 0 }] } });
   e.page.receive(model(1, s));
@@ -92,8 +92,12 @@ test('regions: a rail click with running workers keeps #main and #tabs; worker r
   // 65 s after the apply the same model's 작업자 sub-tab is drawn: its elapsed time is the current one, not the apply's
   e.advance(65_000);
   e.page.open('s1', 'wk');
-  assert.equal(main.querySelector('[data-since]').textContent, '⏱ 1분 06초');
+  const timer = main.querySelector('[data-since]');
+  assert.ok(timer, 'the stable timer node remains available to the ticker');
+  assert.equal(timer.textContent, '1분 06초');
+  assert.ok(timer.parentNode.querySelector('svg.ic use[href="#i-clock"]'), 'a separate Lucide clock precedes the timer');
   railClicks('작업자');
+  assert.equal(main.querySelector('[data-since]'), timer, 'rail navigation preserves the timer node');
   assert.deepEqual(e.errors, []);
 });
 

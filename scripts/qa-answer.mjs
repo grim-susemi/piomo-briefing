@@ -183,15 +183,15 @@ const recordStates = (page, id) => page.eval(`(() => {
 
 async function openLive(page, url, openDecisions) {
   await page.goto(url);
-  return waitFor(page, `document.querySelectorAll(${J(card + ' .dcard .ans-box')}).length === ${openDecisions} && document.querySelector('.alarm-who') ? innerWidth + 'x' + innerHeight : null`, 'live page with answer buttons and waiting band');
+  return waitFor(page, `document.querySelectorAll(${J(card + ' .dcard .ans-box')}).length === ${openDecisions} && Object.keys(JSON.parse(localStorage.getItem('omo-briefing.seenWaiting') || '{}')).length >= 1 && !document.querySelector('#alarm-band,.alarm-row') ? innerWidth + 'x' + innerHeight : null`, 'live page with answer buttons and recorded alarms, no band');
 }
 
 const identity = (page) => page.eval(`(() => {
   const c = document.querySelector(${J(card)});
   return {
     cardText: c ? c.textContent.replace(/\\s+/g, ' ').slice(0, 300) : null,
-    band: [...document.querySelectorAll('.alarm-who')].map((el) => el.textContent),
-    bandTitles: [...document.querySelectorAll('.alarm-text')].map((el) => el.getAttribute('title')),
+    bandPresent: !!document.querySelector('#alarm-band,.alarm-row'),
+    seenKeys: Object.keys(JSON.parse(localStorage.getItem('omo-briefing.seenWaiting') || '{}')),
     focusButtons: [...document.querySelectorAll(${J(card + ' .focusbtn')})].length,
     tokenMetas: document.querySelectorAll('meta[name="omo-board-token"]').length,
   };
@@ -263,17 +263,17 @@ try {
   const [idOpt, idText] = await shownIds();
   let idForge = null;
 
-  await check('identity-desktop', 'card, focus button and waiting band name the herdr tab (desktop 1280x900)', async () => {
+  await check('identity-desktop', 'card/focus retain herdr identity and alarms are recorded without a band (desktop 1280x900)', async () => {
     const id = await identity(page);
     assert.equal(desktopSize, '1280x900');
     assert.ok(id.cardText.includes('🗂 수리 #181'), `card text: ${id.cardText}`);
-    assert.ok(id.band.some((t) => t.includes('🗂 수리 #181 · 상황판 답하기 점검')), `band: ${J(id.band)}`);
+    assert.equal(id.bandPresent, false);
     const plain = await page.eval(`document.querySelector('[data-card="qa-plain"]').textContent`);
     assert.ok(plain.includes('창 w1:pR9 · 탭 정보 없는 대화'), 'card without a herdr tab falls back to the pane');
-    assert.ok(id.bandTitles.some((t) => t && t.includes('🗂 수리 #181')), 'band tooltip');
+    assert.ok(id.seenKeys.includes('d' + idOpt) && id.seenKeys.includes('d' + idText), 'waiting alarms are recorded');
     assert.equal(id.tokenMetas, 1);
     assert.ok(id.focusButtons >= 1, 'focus button on the card with a tabId');
-    await shot(page, 'desktop-band');
+    await shot(page, 'desktop-alarm-state');
     await shot(page, 'desktop-card-before', card);
     return { viewport: desktopSize, ...id };
   });
@@ -292,14 +292,15 @@ try {
   const mobileSize = await openLive(page, url, 2);
   idForge = (await shownIds()).find((n) => n !== idText && n !== idOpt);
   assert.ok(Number.isInteger(idForge), 'third decision shown once the first is answered');
-  await check('identity-mobile', 'card and waiting band name the herdr tab (mobile 390x844)', async () => {
+  await check('identity-mobile', 'card retains herdr identity and alarms remain recorded without a band (mobile 390x844)', async () => {
     const id = await identity(page);
     assert.equal(mobileSize, '390x844');
     assert.ok(id.cardText.includes('🗂 수리 #181'));
-    assert.ok(id.band.some((t) => t.includes('🗂 수리 #181')));
+    assert.equal(id.bandPresent, false);
+    assert.ok(id.seenKeys.includes('d' + idText));
     const overflow = await page.eval('document.documentElement.scrollWidth - innerWidth');
     assert.ok(overflow <= 0, `page wider than the viewport by ${overflow}px`);
-    await shot(page, 'mobile-band');
+    await shot(page, 'mobile-alarm-state');
     await shot(page, 'mobile-card-before', card);
     return { viewport: mobileSize, ...id };
   });

@@ -41,7 +41,7 @@
 .sh-shell { position: relative; display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
 .sh-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .sh-main { flex: 1; min-height: 0; overflow: auto; }
-.sh-wrap > .live-status, .sh-wrap > .live-link, .sh-wrap > .alarm-band { flex: none; }
+.sh-wrap > .live-status, .sh-wrap > .live-link { flex: none; }
 .trimmed-note { flex: none; margin: 0; padding: 4px 12px; color: var(--muted); font-size: var(--fs-sm); }
 .trimmed-note[hidden] { display: none; }
 .sh-main .overview { padding: 10px; }
@@ -92,7 +92,7 @@
   transition: margin-left var(--dur) var(--ease-out), visibility 0s linear var(--dur);
 }
 .sh-shell[data-side="closed"][data-peek="true"] > .sh-side {
-  position: absolute; z-index: 7; left: var(--sh-rail-w); top: calc(var(--sh-bar-h) + var(--alarm-h, 0px)); bottom: var(--sp-2);
+  position: absolute; z-index: 7; left: var(--sh-rail-w); top: var(--sh-bar-h); bottom: var(--sp-2);
   margin-left: 0; visibility: visible; border: var(--hair) solid var(--c-line-strong); border-left: 0; border-radius: 0 var(--r-xl) var(--r-xl) 0;
   box-shadow: var(--sh-shade); transition: none;
 }

@@ -1,135 +1,109 @@
-/* omo-briefing situation board. Colours and type are tokens.css tokens (light and dark follow prefers-color-scheme).
- * Colors: teal=in progress, green=done/evidence, yellow=reported/decision, red=blocked/gone, gray=unverified. */
+/* omo-briefing situation board. Shared tokens; teal=in progress, green=done/evidence,
+ * amber=reported/decision, red=blocked/gone, grey=unverified. */
 :root {
   --bg: var(--c-main); --panel: var(--c-elev); --fg: var(--c-fg); --muted: var(--c-fg-3); --line: var(--c-line);
   --teal: var(--c-teal); --teal-bg: var(--c-teal-tint); --green: var(--c-green); --green-bg: var(--c-green-tint);
   --yellow: var(--c-amber); --yellow-bg: var(--c-amber-tint); --red: var(--c-red); --red-bg: var(--c-red-tint);
-  --gray: var(--c-gray); --gray-bg: var(--c-gray-tint); --accent: var(--c-accent); --spy-bg: var(--c-accent-tint);
-  --mono: var(--font-mono);
+  --gray: var(--c-gray); --gray-bg: var(--c-gray-tint); --accent: var(--c-accent); --spy-bg: var(--c-accent-tint); --mono: var(--font-mono);
 }
 * { box-sizing: border-box; }
 html { scroll-padding-top: 12px; }
-body {
-  margin: 0; background: var(--bg); color: var(--fg);
-  font: var(--fs-base)/var(--lh) var(--font-ui); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
-  /* Korean wraps between words and no word is left alone on a last line; a run with no break opportunity still wraps */
-  word-break: keep-all; overflow-wrap: break-word; text-wrap-style: pretty;
-}
-/* paths, ids and code are not words: they may break anywhere */
+body { margin: 0; background: var(--bg); color: var(--fg); font: var(--fs-base)/var(--lh) var(--font-ui); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; word-break: keep-all; overflow-wrap: normal; text-wrap-style: pretty; }
 :where(code, pre, .path, .plan-summary-line, .plan-link, .pop .pp, .w-model, .plan-box-id, .plan-task-id, .plan-question-id) { overflow-wrap: anywhere; word-break: normal; text-wrap-style: auto; }
+/* Conversation labels can themselves be an unbroken diagnostic identifier. Korean still breaks at spaces first. */
+.dline.from, .title, .overview > .more, .cv-page .cv-h1 { overflow-wrap: anywhere; }
 button { font: inherit; color: inherit; cursor: pointer; }
 code { font-family: var(--mono); font-size: var(--fs-sm); }
 .app { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 100vh; }
-
-/* main */
 .main { padding: 12px 18px 40px; max-width: 1100px; }
-.sum { margin-bottom: 8px; }
+.sum { margin-bottom: var(--sp-3); }
 .sumline { margin: 0; font-weight: var(--fw-semibold); font-size: var(--fs-md); }
 .note { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-sm); }
 h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
-.projh { margin: 12px 0 4px; font-size: var(--fs-sm); color: var(--muted); font-weight: var(--fw-medium); }
+.projh { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-5) 0 var(--sp-2); font-size: var(--fs-sm); color: var(--muted); font-weight: var(--fw-medium); }
 .muted { color: var(--muted); }
-.empty .big { font-size: 18px; font-weight: var(--fw-semibold); margin: 24px 0 4px; }
-
-/* cards */
-.card {
-  background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--teal);
-  border-radius: 8px; padding: 8px 10px; margin: 0 0 8px; transition: box-shadow .2s;
-}
+.empty { display: grid; justify-items: center; align-content: center; gap: var(--sp-2); min-height: min(26rem, 62vh); padding: var(--sp-8) var(--sp-4); color: var(--muted); text-align: center; }
+.empty > .ic { width: var(--ic-empty); height: var(--ic-empty); margin-bottom: var(--sp-2); stroke-width: 1.25; vertical-align: 0; }
+.empty .big { margin: 0; color: var(--fg); font-size: var(--fs-2xl); font-weight: var(--fw-semibold); line-height: 1.3; }
+.empty .big + p { margin: 0; }
+.card { background: var(--panel); border: var(--hair) solid light-dark(var(--line), transparent); border-left: 3px solid var(--teal); border-radius: var(--r-lg); padding: var(--sp-3) var(--sp-4); margin: 0 0 var(--sp-4); box-shadow: var(--shadow-card); transition: box-shadow var(--dur) var(--ease-out); }
 .card.st-done { border-left-color: var(--green); }
 .card.st-done_no_evidence { border-left-color: var(--gray); }
 .card.st-needs_decision, .card.st-recheck { border-left-color: var(--yellow); }
 .card.st-blocked { border-left-color: var(--red); }
-.card.flash { box-shadow: 0 0 0 3px var(--accent); }
-.ch { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
-.title { font-weight: var(--fw-semibold); min-width: 0; overflow-wrap: anywhere; } /* a title without spaces wraps, never widens the card */
-.tag { color: var(--c-fg-2); font-weight: var(--fw-semibold); } /* on cards and on the decision tint alike: >= 4.5:1 */
+.card.flash { box-shadow: 0 0 0 2px var(--accent); }
+.ch { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.title { font-weight: var(--fw-semibold); min-width: 0; }
+.tag { color: var(--c-fg-2); font-weight: var(--fw-medium); }
 .time { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
 .ch .time { margin-left: auto; }
-.hl, .oq, .kv { margin: 3px 0; display: flex; gap: 5px; align-items: baseline; }
+.hl, .oq, .kv { margin: 3px 0; display: flex; gap: var(--sp-2); align-items: baseline; }
 .kv.path { flex-wrap: nowrap; padding-left: 0; }
 .oq { color: var(--yellow); font-weight: var(--fw-semibold); }
-.sym { flex: none; min-width: var(--ic-md); text-align: center; color: var(--muted); } /* one icon column: its icon is ic-sm, a • is narrower */
-/* icons (icons.js): Lucide line symbols from the page's sprite, stroked in the text colour. In a line of text an icon is
- * a little taller than the text; ic-xs (the small type size), ic-sm, ic-md and ic-rail are the sizes of fixed boxes.
- * Lucide has no filled variants: ic-fill fills the favourite star, ic-sel thickens the selected rail item. */
-.ic {
-  display: inline-block; flex: none; width: 1.15em; height: 1.15em; vertical-align: -.2em;
-  fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round;
-}
+/* The question itself: display: contents keeps the line's flex items as they were; an unbroken run in it breaks anywhere. */
+.oq-t { display: contents; overflow-wrap: anywhere; }
+/* [그 창으로 이동] never shrinks below its longest word, so a long question cannot squeeze its label out of it. */
+.oq .focusbtn { min-width: min-content; }
+.sym { flex: none; min-width: var(--ic-md); text-align: center; color: var(--muted); }
+.ic { display: inline-block; flex: none; width: 1.15em; height: 1.15em; vertical-align: -.2em; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 .ic-xs { width: var(--fs-sm); height: var(--fs-sm); }
 .ic-sm { width: var(--ic-sm); height: var(--ic-sm); }
 .ic-md { width: var(--ic-md); height: var(--ic-md); }
 .ic-rail { display: block; width: var(--ic-rail); height: var(--ic-rail); }
 .ic-fill { fill: currentColor; }
 .ic-sel { stroke-width: 2.1; }
-.lbl { margin: 6px 0 2px; font-size: var(--fs-xs); font-weight: var(--fw-medium); color: var(--muted); }
+.lbl { margin: var(--sp-2) 0 var(--sp-1); font-size: var(--fs-xs); font-weight: var(--fw-medium); color: var(--muted); }
 .rows { list-style: none; margin: 0; padding: 0; }
-.row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; padding: 1px 0; }
+.row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); padding: 1px 0; }
 .row .rt { flex: 1 1 260px; min-width: 0; }
+.overview .row, .overview .row > * { min-width: 0; }
+.overview .row .rt { overflow-wrap: anywhere; }
 .path { display: flex; flex-wrap: nowrap; align-items: baseline; gap: 4px; flex-basis: 100%; padding-left: 1.4em; color: var(--muted); }
 .path code { flex: 0 1 auto; min-width: 0; word-break: break-all; }
 .path .copy { flex: none; }
-
-/* chips */
-.chip { display: inline-block; padding: 0 6px; border-radius: 9px; font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 18px; white-space: nowrap; background: var(--gray-bg); color: var(--gray); }
+.chip { display: inline-block; padding: 0 6px; border-radius: var(--r-xs); font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 18px; white-space: nowrap; background: var(--gray-bg); color: var(--gray); }
 .s-in_progress { background: var(--teal-bg); color: var(--teal); }
 .s-done, .t-evidence { background: var(--green-bg); color: var(--green); }
 .s-needs_decision, .s-recheck, .t-reported, .t-changed, .x-stale, .x-block { background: var(--yellow-bg); color: var(--yellow); }
 .s-blocked, .t-gone, .x-dead, .x-err { background: var(--red-bg); color: var(--red); }
 .t-unverified, .s-done_no_evidence, .x-norep, .x-info { background: var(--gray-bg); color: var(--gray); }
 .x-busy { background: var(--teal-bg); color: var(--teal); }
-.a-candidate, .a-live, .a-none { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+.a-candidate, .a-live, .a-none { background: transparent; border: var(--hair) solid var(--c-line-strong); color: var(--muted); }
 .a-live { border-color: var(--teal); color: var(--teal); }
-
-/* decision cards */
-.decs { margin-top: 6px; display: grid; gap: 6px; }
+.decs { margin-top: var(--sp-2); display: grid; gap: var(--sp-2); }
 .decs > .more { justify-self: start; margin-left: 0; }
-.dcard { border: 1px dashed var(--yellow); background: var(--yellow-bg); border-radius: 6px; padding: 5px 8px; }
-.dcard.blocks { border-style: solid; }
+.dcard { border: var(--hair) solid var(--c-amber-line); border-left: 3px solid var(--yellow); background: var(--yellow-bg); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); }
+.dcard.blocks { border-left-color: var(--red); }
 .dline { padding: 1px 0; }
 .dline.opt { padding-left: 1em; }
 .dline.rec-opt b { color: var(--fg); }
 .dline.rec { font-weight: var(--fw-medium); }
+/* Decision text can hold a path, URL or id with no break opportunity: it breaks there instead of widening the card, and
+ * keep-all still makes Korean break between words. */
+.dline.dq, .dline.opt, .dline.rec { word-break: keep-all; overflow-wrap: anywhere; }
 .dline.from, .dline.when { color: var(--muted); font-size: var(--fs-sm); }
 .dline.ans { font-family: var(--mono); }
 .arrow { color: var(--muted); }
-
-/* answer controls (server page only: view.js answerBox, page.js 'board answers'): A/B/C buttons with the recommended one
- * primary, reply box, confirm row naming the receiving tab, send state and error. The /decide line drops to small print.
- * The [그 창으로 이동] button (view.js focusBtn, server page) wears the same clothes as the answer buttons. */
-.ans-box { display: grid; gap: 4px; margin: 4px 0 2px; }
-.ans-opts, .ans-confirm, .ans-acts, .ans-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
-.ans-opt, .ans-write, .ans-go, .ans-cancel, .focusbtn {
-  max-width: 100%; padding: 2px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel);
-  font-size: var(--fs-sm); line-height: 18px; text-align: left; overflow-wrap: anywhere;
-}
-.ans-opt:hover, .ans-write:hover, .ans-cancel:hover, .focusbtn:hover { border-color: var(--accent); color: var(--accent); }
-.ans-opt.is-rec, .ans-go { border-color: var(--accent); background: var(--accent); color: var(--panel); font-weight: var(--fw-medium); }
-.ans-opt.is-rec:hover, .ans-go:hover { background: color-mix(in srgb, var(--accent) 82%, var(--fg)); color: var(--panel); }
-.ans-opt[aria-pressed="true"], .ans-write[aria-expanded="true"] { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent); }
-.ans-opt:focus-visible, .ans-write:focus-visible, .ans-go:focus-visible, .ans-cancel:focus-visible, .focusbtn:focus-visible, .ans-text:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: 2px;
-}
-.ans-rec { display: inline-block; margin-left: 2px; padding: 0 5px; border-radius: 9px; background: var(--panel); color: var(--accent); font-size: var(--fs-2xs); line-height: 16px; }
-.ans-confirm { padding: 4px 8px; border: 1px solid var(--accent); border-radius: 6px; background: var(--spy-bg); }
-.ans-q { flex: 1 1 240px; min-width: 0; font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
-.ans-quote { color: var(--muted); font-weight: var(--fw-regular); overflow-wrap: anywhere; }
+.ans-box { display: grid; gap: var(--sp-2); margin: var(--sp-2) 0 var(--sp-1); }
+.ans-opts, .ans-confirm, .ans-acts, .ans-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.ans-opt, .ans-write, .ans-go, .ans-cancel, .focusbtn { max-width: 100%; padding: 3px var(--sp-3); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); color: var(--fg); font-size: var(--fs-sm); line-height: 18px; text-align: left; transition: background-color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out); }
+.ans-opt:hover, .ans-write:hover, .ans-cancel:hover, .focusbtn:hover { border-color: var(--c-fg-4); }
+.ans-opt.is-rec, .ans-go { border-color: var(--c-primary); background: var(--c-primary); color: var(--c-on-primary); font-weight: var(--fw-medium); }
+.ans-opt.is-rec:hover, .ans-go:hover { border-color: transparent; background: var(--c-fg-2); color: var(--c-on-primary); }
+.ans-opt[aria-pressed="true"], .ans-write[aria-expanded="true"] { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--c-fg-3); }
+.ans-opt:focus-visible, .ans-write:focus-visible, .ans-go:focus-visible, .ans-cancel:focus-visible, .focusbtn:focus-visible, .ans-text:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ans-rec { display: inline-block; margin-left: 2px; padding: 0 var(--sp-1); border-radius: var(--r-xs); background: transparent; color: inherit; box-shadow: inset 0 0 0 1px currentColor; font-size: var(--fs-2xs); line-height: 16px; }
+.ans-confirm { padding: var(--sp-2) var(--sp-3); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); }
+.ans-q { flex: 1 1 240px; min-width: 0; font-weight: var(--fw-semibold); }
+.ans-quote { color: var(--muted); font-weight: var(--fw-regular); }
 .ans-reply { display: grid; gap: 4px; }
-.ans-text {
-  width: 100%; min-height: 4.4em; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px;
-  background: var(--panel); color: var(--fg); font: inherit; resize: vertical;
-}
+.ans-text { width: 100%; min-height: 4.4em; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); color: var(--fg); font: inherit; resize: vertical; }
 .ans-hint { color: var(--muted); font-size: var(--fs-xs); }
 .ans-count { margin-left: auto; color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .ans-state, .ans-err { margin: 0; font-weight: var(--fw-semibold); }
 .ans-state { color: var(--teal); }
-.ans-state::before {
-  content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%;
-  background: currentColor; vertical-align: middle; animation: ans-pulse 1s ease-in-out infinite alternate;
-}
+.ans-state::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: middle; animation: ans-pulse 1s ease-in-out 6 alternate; }
 .ans-err { color: var(--red); }
-/* [그 창으로 이동]: the result of the click, right beside the button (view.js focusBtn, server page) */
 .focus-res { font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
 .focus-res.ok { color: var(--teal); }
 .focus-res.err { color: var(--red); }
@@ -137,51 +111,42 @@ h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
 .dcard.can-answer .dline.ans code { font-size: var(--fs-xs); }
 .dsent { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin: 0; padding: 1px 0; }
 @keyframes ans-pulse { from { opacity: 1; } to { opacity: .25; } }
-@media (prefers-reduced-motion: reduce) {
-  .ans-state::before { animation: none; }
-}
-
-/* buttons inside cards */
-.copy, .more, .detail-btn, .legend-btn {
-  border: 1px solid var(--line); background: var(--panel); border-radius: 5px; padding: 0 6px; font-size: var(--fs-xs); line-height: 18px;
-}
-.copy:hover, .more:hover, .detail-btn:hover, .legend-btn:hover { border-color: var(--accent); color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .ans-state::before { animation: none; } }
+.copy, .more, .detail-btn, .legend-btn { padding: 0 var(--sp-2); border: var(--hair) solid var(--c-line-strong); border-radius: var(--r-md); background: transparent; color: var(--c-fg-2); font-size: var(--fs-xs); line-height: 20px; transition: background-color var(--dur) var(--ease-out); }
+.copy:hover, .more:hover, .detail-btn:hover, .legend-btn:hover { background: var(--fill-hover); color: var(--fg); }
 .more { margin: 3px 0 0 1.4em; }
-.overview > .more { overflow-wrap: anywhere; text-align: left; } /* 대화 페이지 열기 · <title>: wraps like .title */
-.detail-btn { margin-top: 6px; }
-.detail { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
-
-/* flow svg: one line on wide screens, two lines under 600px */
+.overview > .more { display: block; max-width: 100%; margin: 0 0 var(--sp-1); padding: 2px var(--sp-2); border: 0; color: var(--muted); font-size: var(--fs-sm); text-align: left; }
+.detail-btn { margin-top: var(--sp-2); }
+.detail { margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: var(--hair) solid var(--line); }
 .flowbox { overflow-x: auto; padding: 2px 0; }
 .flow { display: block; max-width: 100%; height: auto; }
 .flow-narrow { display: none; }
-.flow rect { stroke-width: 1.5; }
+.flow rect { stroke-width: 1; }
 .flow text { font-size: 12px; fill: var(--fg); }
 .f-done { fill: var(--green-bg); stroke: var(--green); }
 .f-doing { fill: var(--teal-bg); stroke: var(--teal); }
-.f-todo { fill: var(--panel); stroke: var(--line); }
+.f-todo { fill: var(--panel); stroke: var(--c-line-strong); }
 .f-blocked { fill: var(--red-bg); stroke: var(--red); }
 .f-arrow { fill: none; stroke: var(--muted); stroke-width: 1.5; }
 .f-head { fill: var(--muted); }
-
-/* legend */
-.legend { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 8px; }
+.legend { margin-top: 18px; border-top: var(--hair) solid var(--line); padding-top: 8px; }
 .legend-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; }
 .legend-list[hidden] { display: none; }
-
-/* new content badge */
-.new-badge {
-  position: fixed; top: 10px; right: 14px; z-index: 10; border: 0; border-radius: 16px;
-  padding: 6px 12px; background: var(--accent); color: var(--panel); font-weight: var(--fw-semibold); box-shadow: 0 2px 8px var(--c-shadow-strong);
-}
+.new-badge { position: fixed; top: 10px; right: 14px; z-index: 10; border: 0; border-radius: var(--r-full); padding: 6px 12px; background: var(--c-primary); color: var(--c-on-primary); font-weight: var(--fw-semibold); box-shadow: var(--shadow-pop); }
 .new-badge[hidden] { display: none; }
 .fatal { margin: 20px; color: var(--red); font-weight: var(--fw-semibold); }
-
+.sh-shell .sh-srch { flex-wrap: wrap; gap: var(--sp-1) var(--sp-2); margin: var(--sp-1) var(--sp-3) var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 0; border-radius: var(--r-lg); background: var(--fill-soft); box-shadow: inset 0 0 0 1px var(--ctl-edge); }
+.sh-shell .sh-srch::before { content: "검색"; flex-basis: 100%; color: var(--c-fg-2); font-size: var(--fs-sm); font-weight: var(--fw-medium); }
+.sh-shell .sh-srch:focus-within { outline: 2px solid var(--acc); outline-offset: 2px; }
+.sh-shell .sh-q { height: 32px; }
+.sh-shell .sh-q::placeholder { color: var(--muted); }
+.sh-shell .sh-cnt { color: var(--c-fg-2); }
 @media (max-width: 599px) {
-  .app { grid-template-columns: minmax(0, 1fr); } /* 1fr alone grows to the widest nowrap line (collapsed plan summary) and the page scrolls sideways */
+  .app { grid-template-columns: minmax(0, 1fr); }
   .main { padding: 8px 10px 30px; }
   .flow-wide { display: none; }
   .flow-narrow { display: block; }
   .ch .time { margin-left: 0; }
   .new-badge { top: 6px; right: 8px; }
+  .ans-opt, .ans-write, .ans-go, .ans-cancel, .focusbtn { min-height: 44px; min-width: 44px; }
 }

@@ -26,10 +26,10 @@
 //   (f) no console error, page exception or failed load since the previous shot, and no 화면 오류 mark
 //   (g) 계획 holds the box plan view (.plan-expanded or .plan-collapsed)
 //   (h) a rail click changes #side only: #main and #tabs HTML are identical before and after the click
-//   (i) the alarm band with 2 waiting items covers neither the rail, the sidebar header nor the tab bar
+//   (i) no alarm band; tabs precede main while waiting keys/title remain recorded
 //   (j) the selected rail destination stays filled, with the sidebar open, closed or overlaying at every viewport
 // Self-tests (every viewport): each of (a), (b), (c), (i) and (f) is made to fail on purpose once (a block wider than #main,
-//   a clipped headline, a shifted #main, a full-width band, a console.error) and must recover; a check that cannot fail
+//   a clipped headline, a shifted #main, a reintroduced band, a console.error) and must recover; a check that cannot fail
 //   fails the run.
 // --inject-overflow: the negative run (never part of the normal one). Before every 개요 shot the first visible text span of a
 //   개요 row gets width:120px; white-space:nowrap; overflow:hidden (plus flex:0 0 120px: that span is a flex item whose
@@ -117,7 +117,7 @@ function matrixModel() {
     blockSources: Object.fromEntries(Object.entries(C.blockSources).map(([k, v]) => [k, { paths: v.paths.map(swap) }])),
   });
   vm.sessions.push(D);
-  // the alarm band's items, computed by the renderer's own module from the fixture's decisions (answered/closed ones excluded)
+  // waiting alarms, computed by the renderer's module (answered/closed ones excluded); no band is rendered
   const decisions = vm.sessions.flatMap((s) => s.decisions.map((d) => ({ ...d, sessionId: d.sessionId || s.id })));
   vm.waiting = waitingItems({
     sessions: vm.sessions.map((s) => ({ sid: s.id, meta: { title: s.title, tabLabel: s.tabLabel, tabNumber: s.tabNumber, paneId: s.paneId }, briefs: [{ data: { brief: { title: s.title } } }] })),
@@ -129,7 +129,7 @@ function matrixModel() {
   return {
     vm,
     additions: {
-      waiting: { why: 'check (i) needs 2 waiting items; the committed fixture has waiting: []', items: vm.waiting },
+      waiting: { why: 'check (i) proves no band while 2 real waiting alarms remain recorded; the committed fixture has waiting: []', items: vm.waiting },
       longTitleSession: { why: 'the plan\'s 300-character title without spaces (check (b) and (a))', id: LONG_ID, clonedFrom: C.id, title: LONG_TITLE, titleLength: [...LONG_TITLE].length },
     },
   };
@@ -275,7 +275,7 @@ function pageLib() {
     return { result: pass ? 'pass' : 'fail', pass, mode, mainLeft: main.left, mainRight: main.right, innerWidth, expectLeft, railRight: rail.right, sideRight: side.right };
   };
   // (d)
-  qa.checkD = (sel) => {
+  qa.checkD = (sel, probe = true) => {
     const pop = document.querySelector('.pop');
     if (!pop || !sel) return { result: 'fail', pass: false, error: !pop ? 'no tray open' : 'no selection rect' };
     const r = pop.getBoundingClientRect();
@@ -283,6 +283,25 @@ function pageLib() {
     const gapAbove = Math.round((sel.top - r.bottom) * 10) / 10;
     const near = Math.abs(gapBelow) <= 24 || Math.abs(gapAbove) <= 24;
     const corner = innerWidth - r.right <= 24 && innerHeight - r.bottom <= 24;
+    if (matchMedia('(max-width: 599px)').matches) {
+      const position = getComputedStyle(pop).position;
+      const pass = position === 'fixed' && Math.abs(r.left) <= 1 && Math.abs(r.right - innerWidth) <= 1 &&
+        Math.abs(r.bottom - innerHeight) <= 1 && r.top >= 0 && r.height > 0;
+      const measured = { result: pass ? 'pass' : 'fail', pass, compactSheet: true, tray: box(r), selection: sel, position };
+      if (!probe) return measured;
+      const old = pop.getAttribute('style');
+      let broken;
+      try {
+        pop.style.cssText += ';top:0!important;bottom:auto!important';
+        broken = qa.checkD(sel, false);
+      } finally {
+        if (old === null) pop.removeAttribute('style'); else pop.setAttribute('style', old);
+      }
+      const recovered = qa.checkD(sel, false);
+      const flipped = pass && broken.pass === false && recovered.pass;
+      return { ...recovered, result: flipped ? 'pass' : 'fail', pass: flipped,
+        positionProbe: { flipped, before: measured, broken, after: recovered } };
+    }
     const pass = near && !corner;
     return { result: pass ? 'pass' : 'fail', pass, tray: box(r), selection: sel, gapBelow, gapAbove, bottomRightCorner: corner, position: getComputedStyle(pop).position };
   };
@@ -330,24 +349,16 @@ function pageLib() {
   };
   // (i)
   qa.checkI = () => {
-    const band = document.getElementById('alarm-band');
-    if (!band || band.hidden) return { result: 'fail', pass: false, error: 'no alarm band' };
-    const rows = band.querySelectorAll('.alarm-row').length;
-    const b = band.getBoundingClientRect();
-    const targets = [];
-    for (const [name, sel] of [['rail', '#rail'], ['sidebar close button', '#side .sh-head [data-sh="toggleSide"]'], ['sidebar header', '#side .sh-head'], ['tab bar', '#tabs'], ['sidebar open button', '#tabs .sh-topen']]) {
-      const el = document.querySelector(sel);
-      if (!el || !visible(el)) { targets.push({ name, skipped: 'not shown' }); continue; }
-      const r = el.getBoundingClientRect();
-      const w = Math.min(b.right, r.right) - Math.max(b.left, r.left);
-      const h = Math.min(b.bottom, r.bottom) - Math.max(b.top, r.top);
-      const overlapPx = w > 1 && h > 1 ? Math.round(w * h) : 0;
-      const hit = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + Math.min(r.height / 2, 12)));
-      const covered = !!hit && band.contains(hit);
-      targets.push({ name, rect: box(r), overlapPx, probe: hit ? simple(hit) : null, covered, pass: !overlapPx && !covered });
-    }
-    const pass = rows === 2 && targets.every((t) => t.skipped || t.pass);
-    return { result: pass ? 'pass' : 'fail', pass, rows, band: box(b), targets };
+    const bandPresent = !!document.querySelector('#alarm-band,.alarm-band,.alarm-row');
+    const tabs = document.getElementById('tabs'), main = document.getElementById('main');
+    const adjacent = !!tabs && !!main && tabs.nextElementSibling === main;
+    const gap = tabs && main ? main.getBoundingClientRect().top - tabs.getBoundingClientRect().bottom : null;
+    const waiting = BriefPage.state.model.waiting || [];
+    const seen = JSON.parse(localStorage.getItem('omo-briefing.seenWaiting') || '{}');
+    const recorded = waiting.every(w => Number.isFinite(seen[w.key]));
+    const counted = !waiting.length || document.title.startsWith('(' + waiting.length + ') ');
+    const pass = !bandPresent && adjacent && Math.abs(gap) <= 1 && waiting.length === 2 && recorded && counted;
+    return { result: pass ? 'pass' : 'fail', pass, bandPresent, adjacent, gap, waitingKeys: waiting.map(w => w.key), recorded, title: document.title, counted };
   };
   qa.checkJ = () => {
     const selected = [...document.querySelectorAll('#rail .sh-rb.on')].map(el => {
@@ -391,8 +402,12 @@ function pageLib() {
     run('b', () => qa.checkB(allow), () => { const el = document.querySelector('#main .cv-hl'); hl = cssPath(el); return restyle(el, 'width:60px;white-space:nowrap;overflow:hidden'); },
       (b, x, a) => x.failures.some((f) => f.selector === hl) && a.failures.length === b.failures.length);
     run('c', qa.checkC, () => restyle(document.getElementById('main'), 'margin-left:9px'), (b, x) => Math.abs(x.mainLeft - b.mainLeft - 9) <= 1);
-    run('i', qa.checkI, () => restyle(document.getElementById('alarm-band'), 'position:fixed;left:0;top:0;right:0'),
-      (b, x) => x.targets.some((t) => t.name === 'rail' && t.overlapPx > 0));
+    run('i', qa.checkI, () => {
+      const band = document.createElement('section');
+      band.id = 'alarm-band';
+      document.getElementById('main').before(band);
+      return () => band.remove();
+    }, (b, x, a) => !b.bandPresent && x.bandPresent && !a.bandPresent);
     run('j', qa.checkJ, () => {
       const el = document.querySelector('#rail .sh-rb.on');
       const undo = restyle(el, 'background:transparent;transition:none');

@@ -430,7 +430,7 @@
       var qPane = str(q.paneId) || str(s.paneId);
       var tabbed = !!str(view.tabLabel);
       html += '<p class="oq"><span class="sym">' + ic('circle-question-mark', 'ic-sm') + '</span>질문 알림 열림 - ' +
-        (tabbed ? '답할 창: <code>' + whereOfHtml(view) + '</code>' : qPane ? '<code>' + esc(qPane) + '</code>에서 답하기' : '질문이 뜬 창에서 답하기') + ' (읽기 전용): ' + esc(q.text) +
+        (tabbed ? '답할 창: <code>' + whereOfHtml(view) + '</code>' : qPane ? '<code>' + esc(qPane) + '</code>에서 답하기' : '질문이 뜬 창에서 답하기') + ' (읽기 전용): <span class="oq-t">' + esc(q.text) + '</span>' +
         ' <span class="time">' + ic('clock', 'ic-xs') + ' ' + esc(when(q.at, now)) + '</span> ' + focusBtn(fview, { live: live, focus: focus }) + '</p>' +
         (q.builtin === true ? '<p class="oq-builtin">터미널에서 답하세요 - 이 질문은 하네스 기본 질문창이라 상황판에서 닫을 수 없어요</p>' : '');
     }
@@ -510,7 +510,7 @@
     var html = '<div class="overview"><header class="sum"><p class="sumline">결정 대기 ' + open + ' · 막힘 ' + blocked +
       ' · 오래됨 ' + stale + ' · ' + ic('clock', 'ic-sm') + ' 마지막 갱신 ' + hhmm(vm.generatedAt) + '</p><p class="note">브리핑이 켜진 대화 ' +
       sessions.length + '개만 보입니다 - 설치 전부터 열려 있던 대화는 새로 열어야 나타납니다</p></header>';
-    if (!sessions.length) html += '<div class="empty"><p class="big">아직 보고 없음</p><p class="muted">• 브리핑이 켜진 대화가 작업 턴을 끝내면 여기에 카드가 생깁니다</p></div>';
+    if (!sessions.length) html += '<div class="empty">' + ic('inbox') + '<p class="big">아직 보고 없음</p><p class="muted">브리핑이 켜진 대화가 작업 턴을 끝내면 여기에 카드가 생깁니다</p></div>';
     if (!u.live && open) html += '<p class="note ro">이 페이지는 보기 전용입니다 - 답은 아무 대화창에 /decide 로, 또는 실시간 상황판에서</p>';
     groupByProject(sessions).forEach(function (grp) {
       html += '<h3 class="projh">' + ic('folder') + ' ' + esc(grp.project) + '</h3>';

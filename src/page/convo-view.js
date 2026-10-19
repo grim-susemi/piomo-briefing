@@ -315,7 +315,7 @@
     var qPane = str(q.paneId) || str(s.paneId);
     var tabbed = !!str(s.tabLabel);
     return '<p class="oq"><span class="sym">' + ic('circle-question-mark', 'ic-sm') + '</span>질문 알림 열림 - ' +
-      (tabbed ? '답할 창: <code>' + whereOfHtml(s) + '</code>' : qPane ? '<code>' + esc(qPane) + '</code>에서 답하기' : '질문이 뜬 창에서 답하기') + ' (읽기 전용): ' + esc(q.text) +
+      (tabbed ? '답할 창: <code>' + whereOfHtml(s) + '</code>' : qPane ? '<code>' + esc(qPane) + '</code>에서 답하기' : '질문이 뜬 창에서 답하기') + ' (읽기 전용): <span class="oq-t">' + esc(q.text) + '</span>' +
       ' <span class="time">' + ic('clock', 'ic-xs') + ' ' + esc(when(q.at, now)) + '</span> ' + focusBtn(s, U) + '</p>' +
       (q.builtin === true ? '<p class="oq-builtin">터미널에서 답하세요 - 이 질문은 하네스 기본 질문창이라 상황판에서 닫을 수 없어요</p>' : '');
   }

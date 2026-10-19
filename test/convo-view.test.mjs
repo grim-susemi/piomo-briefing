@@ -264,7 +264,7 @@ test('개요: 지금/다음 callout, flow chips with →, four summary cards wit
   // the open-question line is the old card's markup
   const oq = (h) => /<p class="oq">[\s\S]*?<\/p>/.exec(h)[0];
   assert.equal(oq(render(ctx, B, 'ov')), oq(oldCard(ctx, B)));
-  assert.ok(marks(oq(render(ctx, B, 'ov'))).includes('답할 창: <code>[app-window] 문서 #184</code> (읽기 전용): 문서 말투는 존댓말로 할까요?'));
+  assert.ok(marks(oq(render(ctx, B, 'ov'))).includes('답할 창: <code>[app-window] 문서 #184</code> (읽기 전용): <span class="oq-t">문서 말투는 존댓말로 할까요?</span>'));
 });
 
 test('개요: 최근 변화 open and 한 일 closed; kit rows keep their chips and every row with evidence has its path and copy in a collapsed .dt', () => {
@@ -642,8 +642,13 @@ test('no element carries an inline text-overflow; convo.css clips nothing with a
   const css = read('src/page/convo.css');
   assert.ok(!/text-overflow|ellipsis/i.test(css));
   assert.ok(!/#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\(/i.test(css), 'colours come from page.css tokens');
-  assert.match(css, /--stabs-h:\s*\d+px/, 'annotate.css sticks its tray under --stabs-h');
-  assert.match(css, /\.cv-page \{[^}]*overflow-wrap: anywhere/);
+  assert.match(css, /--stabs-h:\s*var\(--bar-h\)/, 'annotate.css shares the sub-tab geometry token');
+  assert.match(css, /height:\s*var\(--stabs-h\)/, 'the sub-tab bar consumes its shared height');
+  assert.match(read('src/page/tokens.css'), /--bar-h:\s*44px/, 'the shared bar height resolves to 44px');
+  const prose = /\.cv-page\s*\{([^}]*)\}/.exec(css);
+  assert.ok(prose, 'ordinary conversation prose rule');
+  assert.match(prose[1], /word-break:\s*keep-all/);
+  assert.match(prose[1], /overflow-wrap:\s*normal/);
   assert.match(css, /--cv-fs: var\(--fs-base\)/);
   assert.ok(!/(?<!\()max-width:\s*\d+px/.test(css), 'no fixed max-width (media queries aside): the page takes the full width');
 });
@@ -750,9 +755,12 @@ test('counts come from the rows themselves, not from summary fields', () => {
 test('mobile page padding stays within 12-16 px (convo.css max-width 599px --cv-pad-x)', async () => {
   const { readFileSync } = await import('node:fs');
   const css = readFileSync(new URL('../src/page/convo.css', import.meta.url), 'utf8');
-  const m = /@media \(max-width: 599px\) \{[^}]*--cv-pad-x:\s*(\d+)px/.exec(css);
-  assert.ok(m, 'mobile --cv-pad-x rule');
-  const px = Number(m[1]);
+  const m = /@media \(max-width: 599px\) \{[^}]*--cv-pad-x:\s*var\(--sp-3\)/.exec(css);
+  assert.ok(m, 'mobile --cv-pad-x uses the shared --sp-3 token');
+  const token = /--sp-3:\s*(\d+)px/.exec(readFileSync(new URL('../src/page/tokens.css', import.meta.url), 'utf8'));
+  assert.ok(token, '--sp-3 resolves to a pixel length');
+  const px = Number(token[1]);
+  assert.equal(px, 12, 'compact padding resolves to 12px');
   assert.ok(px >= 12 && px <= 16, 'mobile padding ' + px + 'px');
 });
 

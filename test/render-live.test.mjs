@@ -164,7 +164,8 @@ test('pageHtml inlines every page module and the first-paint model, with generat
   const order = ['g.BriefIcons = ', 'g.BriefView = ', 'g.BriefPlanView = ', 'g.BriefWorkersView = ', 'g.BriefConvo = ', 'g.BriefShell = ', 'g.BriefAlarm = ', 'g.BriefAnnotate = ', 'g.BriefPage = '].map((n) => html.indexOf(n));
   assert.ok(order.every((i) => i > 0), `all nine modules are inline: ${order}`);
   assert.deepEqual(order, [...order].sort((a, b) => a - b), 'icons.js first, page.js last');
-  for (const css of ['.plan-view', '.w-row', '#alarm-band', '.sh-shell', '.cv-page', '.ann-tray']) assert.ok(html.includes(css), css);
+  for (const css of ['.plan-view', '.w-row', '.alarm-sound', '.sh-shell', '.cv-page', '.ann-tray']) assert.ok(html.includes(css), css);
+  assert.doesNotMatch(html, /alarm-band|alarm-row|--alarm-h/, 'the page contains no removed-band markup, styles or offsets');
   assert.equal((html.match(/<script>/g) ?? []).length, 10, 'nine modules + first paint');
   assert.ok(!html.includes('</script><script>alert(1)'));
   assert.equal(pageHtml(vm, null, { mode: 'file' }).includes('omo-briefing-generation'), false);

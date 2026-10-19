@@ -600,7 +600,7 @@
     if (A) {
       hooks.afterApply.push(function (model) {
         // origin and storage come from the page itself (location / localStorage); the first call only marks what is already waiting
-        A.update(model && Array.isArray(model.waiting) ? model.waiting : [], { liveUrl: model && model.server && model.server.url });
+        A.update(model && Array.isArray(model.waiting) ? model.waiting : []);
       });
     }
   }

@@ -1,127 +1,95 @@
-/* omo-briefing conversation page (convo-view.js): the full-width page of one conversation, its header, the sub-tab bar
- * and the panels 개요 / 계획 / 작업자 / 결정 / 보고서 (board v6, path details v7). Colours and fonts are tokens.css tokens;
- * chips, decision cards, answer boxes, rows and paths keep their page.css look, so light and dark both follow page.css.
- * The tab-number colours are shell.css's --sh-hue / --sh-hue-bg. Content text wraps (overflow-wrap: anywhere): nothing
- * here clips text. --stabs-h is the sub-tab bar height; annotate.css sticks its tray right under it. */
+/* omo-briefing conversation page (convo-view.js): shared tokens and primitives for all five panels.
+ * --stabs-h is the sub-tab bar height; annotate.css sticks its tray immediately below it. */
 :root {
-  --cv-pad-y: 12px;
-  --cv-pad-x: 16px;
-  --cv-gap: 12px; /* between the blocks of a panel */
-  --cv-gap-s: 6px; /* inside a block */
-  --cv-radius: 8px;
-  --cv-fs: var(--fs-base); /* body text */
-  --cv-fs-s: var(--fs-sm); /* secondary text */
-  --cv-fs-xs: var(--fs-xs); /* counts and captions */
-  --cv-fs-h: var(--fs-md); /* section headings */
-  --cv-fs-v: var(--fs-xl); /* summary card number */
-  --cv-fs-h1: var(--fs-xl);
-  --cv-ico: 44px;
-  --stabs-h: 38px;
+  --cv-pad-y: var(--sp-4); --cv-pad-x: var(--sp-6); --cv-gap: var(--sp-3); --cv-gap-s: var(--sp-2);
+  --cv-radius: var(--r-lg); --cv-fs: var(--fs-base); --cv-fs-s: var(--fs-sm); --cv-fs-xs: var(--fs-xs);
+  --cv-fs-h: var(--fs-md); --cv-fs-v: var(--fs-xl); --cv-fs-h1: var(--fs-xl); --cv-ico: 40px; --stabs-h: var(--bar-h);
 }
-
-/* page: no side margins of its own beyond the padding; #main gives it the whole width */
-.cv-page { min-width: 0; padding: var(--cv-pad-y) var(--cv-pad-x) 40px; font-size: var(--cv-fs); line-height: 1.5; overflow-wrap: anywhere; }
-/* this page's own paragraphs (the plan and worker views keep their own spacing) */
+.cv-page { min-width: 0; padding: var(--cv-pad-y) var(--cv-pad-x) var(--sp-8); font-size: var(--cv-fs); line-height: 1.5; word-break: keep-all; overflow-wrap: normal; }
+/* Model text can carry one unbroken run (a path, an id, a long name). These surfaces break inside such a run only when it
+ * cannot fit a line; word-break stays keep-all, so Korean prose still wraps between words. */
+.cv-sub, .cv-hl, .cv-next, .cv-fs, .scard-v, .cv-page .rt, .cv-page .plan-stage-note, .cv-auto .kv, .cv-goal,
+table.t th, table.t td, .held-decs > p, .rep-t, .rep-dq, .rep-sum, .rb2 .nm, .rb2 .nt,
+.cv-page .ans-q, .cv-page .ans-opt, .cv-page .dsent { overflow-wrap: anywhere; }
 .cv-sub, .cv-cwd, .cv-hl, .cv-next, .cv-goal, .cv-empty, .cv-plink, .rep-t, .rep-dq, .rep-closed, .rep-sum, .rep-hint, .rb2 .nm, .rb2 .nt { margin: 0; }
 .cv-page [data-block].flash { box-shadow: inset 0 0 0 2px var(--accent); }
-
-/* header: tab-number icon, label, topic and plan, time, [그 창으로 이동]; then the status chips and the 📁 cwd row */
-.cv-head { display: grid; gap: var(--cv-gap-s); margin-bottom: 10px; }
-.cv-top { display: flex; align-items: center; gap: var(--cv-gap); min-width: 0; }
+.cv-head { display: grid; gap: var(--cv-gap-s); margin-bottom: var(--sp-3); }
+.cv-top { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
 .cv-ico {
-  flex: none; display: grid; place-items: center; width: var(--cv-ico); height: var(--cv-ico); border-radius: 10px;
-  background: var(--sh-hue-bg, var(--gray-bg)); color: var(--sh-hue, var(--muted)); font-size: 17px; font-weight: var(--fw-semibold); letter-spacing: -.5px;
+  flex: none; display: grid; place-items: center; width: var(--cv-ico); height: var(--cv-ico); border-radius: var(--r-lg);
+  background: var(--sh-hue-bg, var(--fill-soft)); color: var(--sh-hue, var(--muted)); font-size: var(--fs-lg); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums;
 }
 .cv-names { flex: 1; min-width: 0; }
-.cv-h1 { margin: 0; font-size: var(--cv-fs-h1); line-height: 1.3; }
-.cv-sub { display: flex; flex-wrap: wrap; gap: 0 10px; color: var(--muted); font-size: var(--cv-fs-s); }
+.cv-h1 { margin: 0; font-size: var(--cv-fs-h1); line-height: 1.3; letter-spacing: -.01em; font-weight: var(--fw-semibold); }
+.cv-sub { display: flex; flex-wrap: wrap; gap: 0 var(--sp-3); color: var(--muted); font-size: var(--cv-fs-s); }
+.cv-sub .ic, .cv-cwd .ic { width: var(--ic-sm); height: var(--ic-sm); }
 .cv-top .time, .cv-top .focusbtn { flex: none; }
-.cv-chips { gap: 4px; }
+.cv-chips { gap: var(--sp-1); }
 .cv-cwd { font-size: var(--cv-fs-s); }
-
-/* sub-tab bar: sticks to the top of #main, edge to edge */
+/* Filled pills, not accent underlines. The count remains readable over the selected fill. */
 .stabs {
-  position: sticky; top: 0; z-index: 3; display: flex; align-items: stretch; gap: 2px; height: var(--stabs-h);
-  margin: 0 calc(-1 * var(--cv-pad-x)) var(--cv-gap); padding: 0 var(--cv-pad-x); overflow-x: auto; overflow-y: hidden;
-  background: var(--bg); border-bottom: 1px solid var(--line); scrollbar-width: none;
+  position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: var(--sp-1); height: var(--stabs-h);
+  margin: 0 calc(-1 * var(--cv-pad-x)) var(--sp-4); padding: 0 var(--cv-pad-x); overflow-x: auto; overflow-y: hidden;
+  background: var(--bg); border-bottom: var(--hair) solid var(--c-line-strong); scrollbar-width: none;
 }
 .stabs .st {
-  flex: none; display: flex; align-items: center; gap: 5px; padding: 0 12px; border: 0; border-bottom: 2px solid transparent;
-  background: none; color: var(--muted); font-size: var(--cv-fs); white-space: nowrap;
+  flex: none; display: flex; align-items: center; gap: var(--sp-1); height: 30px; padding: 0 var(--sp-3);
+  border: 0; border-radius: var(--r-md); background: none; color: var(--muted); font-size: var(--cv-fs); white-space: nowrap;
+  transition: background-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
 }
-.stabs .st:hover { color: var(--fg); }
-.stabs .st.on { border-bottom-color: var(--accent); color: var(--fg); font-weight: var(--fw-medium); }
-.stabs .c { padding: 0 6px; border-radius: 9px; background: var(--gray-bg); color: var(--muted); font-size: var(--cv-fs-xs); font-weight: var(--fw-semibold); line-height: 16px; }
+.stabs .st:hover { background: var(--fill-hover); color: var(--fg); }
+.stabs .st.on { background: var(--fill-sel); color: var(--fg); font-weight: var(--fw-medium); box-shadow: inset 0 0 0 1px var(--ctl-edge); }
+.stabs .c { padding: 0 5px; border-radius: var(--r-xs); background: var(--fill-soft); color: var(--c-fg-2); font-size: var(--cv-fs-xs); font-weight: var(--fw-semibold); line-height: 18px; }
+.stabs .st.on .c { color: var(--fg); }
 .stabs .c.o { background: var(--yellow-bg); color: var(--yellow); }
-
-/* panel: the blocks stack with one gap */
 .cv-panel { display: grid; gap: var(--cv-gap); align-content: start; }
 .cv-panel > * { min-width: 0; margin: 0; }
 .cv-h3 { margin: 0; font-size: var(--cv-fs-h); }
 .cv-empty { color: var(--muted); }
-
-/* 💡 now / next and the report header: one callout look */
 .cv-now, .rep-head {
-  display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
-  border: 1px solid var(--line); border-radius: var(--cv-radius); background: var(--panel);
+  display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4);
+  border: var(--hair) solid var(--line); border-radius: var(--cv-radius); background: var(--panel); box-shadow: var(--shadow-card);
 }
-.cv-bulb { flex: none; font-size: 16px; line-height: 1.4; }
+.cv-bulb { flex: none; display: grid; place-items: center; width: var(--ic-md); height: 22px; color: var(--muted); }
+.cv-bulb .ic { width: var(--ic-md); height: var(--ic-md); vertical-align: 0; }
 .cv-nowt, .rep-ht { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .cv-hl { font-size: var(--cv-fs-h); }
 .cv-next { color: var(--muted); font-size: var(--cv-fs-s); }
-
-/* flow chips with → */
 .cv-flow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--cv-gap-s); }
-.cv-fs { padding: 1px 9px; border-radius: 4px; background: var(--gray-bg); color: var(--gray); font-size: var(--cv-fs-s); }
+.cv-fs { padding: 1px var(--sp-2); border-radius: var(--r-xs); background: var(--gray-bg); color: var(--gray); font-size: var(--cv-fs-s); }
 .cv-fs.is-done { background: var(--green-bg); color: var(--green); }
 .cv-fs.is-doing { background: var(--teal-bg); color: var(--teal); font-weight: var(--fw-medium); }
 .cv-fs.is-blocked { background: var(--red-bg); color: var(--red); }
 .cv-arr { color: var(--muted); }
-
-/* the 4 summary cards: each opens its sub-tab */
-.grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-.scard { min-width: 0; border: 1px solid var(--line); border-radius: var(--cv-radius); background: var(--panel); }
-.scard:hover { border-color: var(--accent); }
-.scard-go {
-  display: grid; align-content: start; gap: 2px; width: 100%; height: 100%; padding: 10px 12px;
-  border: 0; border-radius: inherit; background: none; color: inherit; text-align: left;
-}
-.scard-l { color: var(--muted); font-size: var(--cv-fs-s); }
-.scard-v { font-size: var(--cv-fs); }
-.scard-v b { font-size: var(--cv-fs-v); }
-
-/* collapsible sections: 최근 변화, 한 일, 보낸 피드백, 자동 정보, 📎 자료, 보류됨 */
-.cv-sec > summary, .att > summary, .held-decs > summary {
-  width: max-content; max-width: 100%; padding: 2px 6px; border-radius: 5px; cursor: pointer; font-weight: var(--fw-medium);
-}
-.cv-sec > summary:hover, .att > summary:hover, .held-decs > summary:hover { background: var(--gray-bg); }
-.cv-n { padding: 0 6px; border-radius: 9px; background: var(--gray-bg); color: var(--muted); font-size: var(--cv-fs-xs); font-weight: var(--fw-semibold); }
-.cv-sec > .rows { margin-top: 4px; padding-left: 6px; }
+.grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }
+.scard { min-width: 0; border: var(--hair) solid var(--line); border-radius: var(--cv-radius); background: var(--panel); box-shadow: var(--shadow-card); transition: background-color var(--dur) var(--ease-out); }
+.scard:hover { background: var(--fill-hover); }
+.scard-go { display: grid; align-content: start; gap: var(--sp-1); width: 100%; height: 100%; padding: var(--sp-3) var(--sp-4); border: 0; border-radius: inherit; background: none; color: inherit; text-align: left; }
+.scard-l { display: flex; align-items: center; gap: var(--sp-1); color: var(--muted); font-size: var(--cv-fs-s); }
+.scard-v { font-size: var(--cv-fs); text-wrap: pretty; }
+.scard-v b { font-size: var(--cv-fs-v); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.cv-sec > summary, .att > summary, .held-decs > summary { width: max-content; max-width: 100%; padding: 2px var(--sp-2); border-radius: var(--r-md); cursor: pointer; font-weight: var(--fw-medium); }
+.cv-sec > summary::marker, .att > summary::marker, .held-decs > summary::marker { color: var(--muted); }
+.cv-sec > summary:hover, .att > summary:hover, .held-decs > summary:hover { background: var(--fill-hover); }
+.cv-n { padding: 0 5px; border-radius: var(--r-xs); background: var(--fill-soft); color: var(--c-fg-2); font-size: var(--cv-fs-xs); font-weight: var(--fw-semibold); }
+.cv-sec > .rows { margin-top: var(--sp-1); padding-left: var(--sp-2); }
 .cv-page .rows .row { padding: 3px 0; }
-.cv-page .rt { overflow-wrap: anywhere; }
-.cv-sec > .kv, .cv-sec > .cv-empty, .held-decs > p { margin: 4px 0 0 6px; }
-/* a row's collapsed 상세 with its evidence path */
+.cv-sec > .kv, .cv-sec > .cv-empty, .held-decs > p { margin: var(--sp-1) 0 0 var(--sp-2); }
 .dt { flex-basis: 100%; margin: 0 0 2px 1.4em; color: var(--muted); font-size: var(--cv-fs-s); }
 .dt > summary { width: max-content; max-width: 100%; cursor: pointer; font-size: var(--cv-fs-xs); }
 .dt > .path { padding-left: 0; }
-/* 📎 이 대화 자료: label, full path, copy */
-.att > .path { flex-wrap: wrap; gap: 2px 8px; padding: 3px 0 3px 6px; }
+.att > .path { flex-wrap: wrap; gap: 2px var(--sp-2); padding: 3px 0 3px var(--sp-2); }
 .att .lb { flex: none; min-width: 110px; color: var(--muted); font-size: var(--cv-fs-s); }
 .att > .path code { flex: 1 1 260px; }
 .cv-note .time { flex: none; }
-
-/* 계획: the box plan view as is; the no-plan fallback goal, progress and todo table */
 .cv-fb { display: grid; gap: var(--cv-gap-s); }
 .cv-fb > .cv-h3:not(:first-child) { margin-top: var(--cv-gap-s); }
-.cv-goal { overflow-wrap: anywhere; }
-.prog { height: 6px; border-radius: 9px; background: var(--gray-bg); overflow: hidden; }
+.prog { height: 6px; border-radius: var(--r-full); background: var(--fill-soft); overflow: hidden; }
 .prog > i { display: block; height: 100%; background: var(--green); }
-.cv-plink { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
-
-/* tables: fallback todo, 결정 기록 */
-table.t { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: var(--cv-fs); }
-table.t th, table.t td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
-table.t th { color: var(--muted); font-size: var(--cv-fs-s); font-weight: var(--fw-semibold); }
+.cv-plink { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
+table.t { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: var(--cv-fs); font-variant-numeric: tabular-nums; }
+table.t th, table.t td { padding: var(--sp-2) var(--sp-3); border-bottom: var(--hair) solid var(--line); text-align: left; vertical-align: top; }
+table.t th { color: var(--muted); font-size: var(--cv-fs-s); font-weight: var(--fw-medium); }
 .cv-todo th:nth-child(1) { width: 52px; }
 .cv-todo th:nth-child(3) { width: 104px; }
 .cv-hist th:nth-child(1) { width: 60px; }
@@ -130,59 +98,43 @@ table.t th { color: var(--muted); font-size: var(--cv-fs-s); font-weight: var(--
 .ok2 { color: var(--green); }
 .doing2 { color: var(--teal); }
 .no2 { color: var(--muted); }
-
-/* 보고서: header callout, then the option images side by side */
-.rep { display: grid; gap: 10px; }
-.rep + .rep { margin-top: 8px; }
-.rep-t { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.rep { display: grid; gap: var(--sp-3); }
+.rep + .rep { margin-top: var(--sp-2); }
+.rep-t { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
 .rep-dq { color: var(--muted); font-size: var(--cv-fs-s); }
 .rep-sum { white-space: pre-wrap; }
 .rgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--cv-gap); }
-.ropt { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: var(--cv-radius); overflow: hidden; background: var(--panel); }
+.ropt { display: flex; flex-direction: column; min-width: 0; border: var(--hair) solid var(--line); border-radius: var(--cv-radius); overflow: hidden; background: var(--panel); }
 .ropt.rec { border-color: var(--green); }
 .rimg { background: var(--gray-bg); }
 .rimg img { display: block; width: 100%; height: auto; }
-.rimg-x { display: block; padding: 24px 12px; color: var(--muted); font-size: var(--cv-fs-s); text-align: center; }
-.rb2 { display: grid; gap: 4px; padding: 8px 10px; }
+.rimg-x { display: block; padding: var(--sp-6) var(--sp-3); color: var(--muted); font-size: var(--cv-fs-s); text-align: center; }
+.rb2 { display: grid; gap: var(--sp-1); padding: var(--sp-2) var(--sp-3); }
 .rb2 .nm { font-weight: var(--fw-semibold); }
 .rb2 .nt { color: var(--muted); font-size: var(--cv-fs-s); }
-/* 이걸로 고르기: the answer buttons' clothes (page.css .ans-opt) */
-.cv-pick {
-  justify-self: start; max-width: 100%; padding: 2px 10px; border: 1px solid var(--line); border-radius: 5px;
-  background: var(--panel); font-size: var(--cv-fs-s); line-height: 18px; text-align: left;
-}
-.cv-pick:hover { border-color: var(--accent); color: var(--accent); }
-.cv-pick.is-rec { border-color: var(--accent); background: var(--accent); color: var(--panel); font-weight: var(--fw-medium); }
-.cv-pick.is-rec:hover { background: color-mix(in srgb, var(--accent) 82%, var(--fg)); color: var(--panel); }
-/* 이걸로 고르기 off: the decision is answered, closed, or its answer is on the way */
-.cv-pick:disabled, .cv-pick:disabled:hover {
-  border-color: var(--line); background: var(--gray-bg); color: var(--muted); font-weight: var(--fw-regular); cursor: default;
-}
-/* the option the decision was answered with (the model's answer, never this page's own state) */
-.ropt.chosen { border-color: var(--accent); }
-.cv-chosen { background: var(--spy-bg); color: var(--fg); }
-/* where a click on an image puts a pin (annotate.js) */
+.cv-pick { justify-self: start; max-width: 100%; padding: 3px var(--sp-3); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); font-size: var(--cv-fs-s); line-height: 18px; text-align: left; }
+.cv-pick:hover { background: var(--fill-hover); }
+.cv-pick.is-rec { border-color: var(--c-primary); background: var(--c-primary); color: var(--c-on-primary); font-weight: var(--fw-medium); }
+.cv-pick.is-rec:hover { background: var(--c-fg-2); color: var(--c-on-primary); }
+.cv-pick:disabled, .cv-pick:disabled:hover { border-color: var(--line); background: var(--fill-soft); color: var(--muted); font-weight: var(--fw-regular); cursor: default; }
+.ropt.chosen { border-color: var(--c-fg-3); }
+.cv-chosen { background: var(--fill-sel); color: var(--fg); }
 .rep-hint { color: var(--muted); font-size: var(--cv-fs-xs); }
-
-.stabs .st:focus-visible, .scard-go:focus-visible, .cv-pick:focus-visible, .cv-page summary:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: -2px;
-}
-
-@media (max-width: 1099px) {
-  .rgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
+.stabs .st:focus-visible, .scard-go:focus-visible, .cv-pick:focus-visible, .cv-page summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+@media (max-width: 1099px) { .rgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 599px) {
-  :root { --cv-pad-x: 12px; --cv-ico: 36px; --cv-fs-h1: 18px; --cv-gap: 10px; }
-  .cv-top { flex-wrap: wrap; row-gap: 4px; }
-  .stabs .st { gap: 3px; padding: 0 6px; } /* all five tabs fit a 390 px phone */
-  .stabs .c { padding: 0 4px; }
-  .grid4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  :root { --cv-pad-x: var(--sp-3); --cv-ico: 36px; --cv-fs-h1: 18px; }
+  .cv-top { flex-wrap: wrap; row-gap: var(--sp-1); }
+  .cv-names { flex: 1 1 calc(100% - var(--cv-ico) - var(--sp-3)); }
+  .stabs { gap: 2px; }
+  .stabs .st { gap: 2px; padding: 0 var(--sp-1); }
+  .stabs .c { padding: 0 var(--sp-1); }
+  .grid4 { grid-template-columns: minmax(0, 1fr); }
   .rgrid { grid-template-columns: minmax(0, 1fr); }
   .att .lb { min-width: 0; }
-  /* 결정 기록: one stacked block per decision, each cell under its column name */
   .cv-hist thead { display: none; }
   .cv-hist, .cv-hist tbody, .cv-hist tr, .cv-hist td { display: block; }
-  .cv-hist tr { padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .cv-hist tr { padding: 6px 0; border-bottom: var(--hair) solid var(--line); }
   .cv-hist td { padding: 1px 0; border: 0; }
   .cv-hist td::before { content: attr(data-label) " "; color: var(--muted); font-size: var(--cv-fs-xs); }
 }

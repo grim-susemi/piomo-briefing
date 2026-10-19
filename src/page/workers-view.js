@@ -6,12 +6,13 @@
  *  measure(root) -> positions and states of [data-card], [data-worker] and [data-todo] (call before an apply).
  *  play(root, before, {reducedMotion}) -> FLIP after the apply: cards and worker rows slide 350 ms from
  *    where they were, a card that left the shown tab fades and folds for 400 ms in its old spot, a worker
- *    that just ended and a todo that just turned ✔ pop their mark. Returns {moved, left, entered, done}.
+ *    that just ended and a todo that just turned done pop their mark. Returns {moved, left, entered, done}.
  *  tick(root, now) -> rewrites only the text of [data-since] elements (1 s ticker, never a redraw).
  * `now` is a wall clock, not vm.generatedAt: page.js passes the one of the model's apply (ui.wallNow; Date.now()
- * when absent). The running pulse is the 1200 ms w-pulse animation in workers-view.css started at
- * -(now % 1200) ms, so the redraw of an apply keeps the beat instead of restarting it, and every render of
- * the same model writes the same HTML. Model strings are untrusted and always go through esc().
+ * when absent). The running pulse is the 1200 ms w-pulse animation in workers-view.css (three beats per
+ * draw, then a steady dot) started at -(now % 1200) ms, so the redraw of an apply keeps the beat instead of
+ * restarting it, and every render of the same model writes the same HTML. Model strings are untrusted and
+ * always go through esc(). Done and error marks and the elapsed clock are Lucide icons from icons.js.
  * Expansion key worker:<taskId> rides the existing data-act="exp" channel. */
 (function (g) {
   'use strict';
@@ -28,18 +29,18 @@
   var STATES = {
     running: { cls: 'w-running', mark: '', label: '진행 중' },
     waiting: { cls: 'w-waiting', mark: '○', label: '대기' },
-    done: { cls: 'w-done', mark: '✔', label: '끝' },
-    error: { cls: 'w-error', mark: '✖', label: '오류' },
+    done: { cls: 'w-done', icon: 'check', label: '끝' },
+    error: { cls: 'w-error', icon: 'x', label: '오류' },
     cancelled: { cls: 'w-cancelled', mark: '⊘', label: '취소' },
     lost: { cls: 'w-lost', mark: '⊘', label: '끊김' }
   };
   var TERMINAL = { done: 1, error: 1, cancelled: 1, lost: 1 };
   var TODO = {
-    completed: ['w-t-done', '✔'],
-    in_progress: ['w-t-doing', '●'],
-    pending: ['w-t-todo', '○'],
-    abandoned: ['w-t-dropped', '–'],
-    cancelled: ['w-t-dropped', '–']
+    completed: { cls: 'w-t-done', icon: 'check' },
+    in_progress: { cls: 'w-t-doing', mark: '●' },
+    pending: { cls: 'w-t-todo', mark: '○' },
+    abandoned: { cls: 'w-t-dropped', mark: '–' },
+    cancelled: { cls: 'w-t-dropped', mark: '–' }
   };
   var CLOSED = { completed: 1, abandoned: 1, cancelled: 1 };
 
@@ -63,6 +64,10 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c];
     });
   }
+  // a Lucide icon from the page's sprite (icons.js); '' without icons.js
+  function ic(name, cls) { var m = g.BriefIcons; return m ? m.icon(name, cls) : ''; }
+  // a state or todo mark: its icon, else its text glyph
+  function markHtml(x) { return x.icon ? ic(x.icon, 'ic-xs') : x.mark; }
   function pad(n) { return n < 10 ? '0' + n : String(n); }
   function hhmm(ms) { var d = new Date(ms); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
   function elapsed(ms) {
@@ -149,7 +154,7 @@
     var shown = items.slice(0, MAX_TODOS);
     return { items: shown, total: Math.floor(total), done: Math.floor(done), hidden: Math.max(0, Math.floor(total) - shown.length) };
   }
-  // Stable per-worker todo identity for the ✔ transition: the text (#n for repeats), not the index.
+  // Stable per-worker todo identity for the done transition: the text (#n for repeats), not the index.
   function todoKeys(items) {
     var seen = Object.create(null);
     return items.map(function (it) {
@@ -163,8 +168,8 @@
     var html = '<ul class="w-todos">';
     todo.items.forEach(function (it, i) {
       var st = own(TODO, it.status) ? it.status : 'pending';
-      html += '<li class="w-todo ' + TODO[st][0] + '" data-todo="' + e(keys[i]) + '" data-st="' + st + '">' +
-        '<span class="w-tsym" aria-hidden="true">' + TODO[st][1] + '</span><span class="w-ttext">' + e(it.text) + '</span></li>';
+      html += '<li class="w-todo ' + TODO[st].cls + '" data-todo="' + e(keys[i]) + '" data-st="' + st + '">' +
+        '<span class="w-tsym" aria-hidden="true">' + markHtml(TODO[st]) + '</span><span class="w-ttext">' + e(it.text) + '</span></li>';
     });
     if (todo.hidden) html += '<li class="w-todo-more">외 ' + todo.hidden + '개</li>';
     return html + '</ul>';
@@ -177,15 +182,16 @@
     if (stale) html += '<span class="w-dot" role="img" aria-label="' + STALE_TEXT + '" title="' + STALE_TEXT + '"></span>';
     else if (s === 'running') {
       html += '<span class="w-dot" style="animation-delay:-' + phase(now) + 'ms" role="img" aria-label="' + info.label + '" title="' + info.label + '"></span>';
-    } else html += '<span class="w-dot" role="img" aria-label="' + info.label + '" title="' + info.label + '">' + info.mark + '</span>';
+    } else html += '<span class="w-dot" role="img" aria-label="' + info.label + '" title="' + info.label + '">' + markHtml(info) + '</span>';
     html += '<span class="w-name" title="' + e(id) + '">' + e(str(w.name) || id) + '</span>';
     var tags = (str(w.kind) ? '<span class="w-tag">[' + e(w.kind) + ']</span>' : '') +
       (str(w.model) ? '<span class="w-tag w-model">[' + e(w.model) + ']</span>' : '');
     if (tags) html += '<span class="w-tags">' + tags + '</span>';
+    // the clock icon stays put: the 1 s ticker rewrites only the [data-since] text beside it
     if (TERMINAL[s]) {
-      if (start != null && end != null) html += '<span class="w-time">⏱ ' + elapsed(end - start) + '</span>';
+      if (start != null && end != null) html += '<span class="w-time">' + ic('clock', 'ic-xs') + ' ' + elapsed(end - start) + '</span>';
     } else if (start != null) {
-      html += '<span class="w-time" data-since="' + start + '">⏱ ' + elapsed(now - start) + '</span>';
+      html += '<span class="w-time">' + ic('clock', 'ic-xs') + ' <span data-since="' + start + '">' + elapsed(now - start) + '</span></span>';
     }
     var step = stepOf(w, s, stale);
     if (step) html += '<span class="w-step" title="' + e(step) + '">' + e(step) + '</span>';
@@ -352,7 +358,7 @@
       var raw = el.getAttribute('data-since');
       var since = raw ? Number(raw) : NaN;
       if (!isFinite(since)) return;
-      var text = '⏱ ' + elapsed(t - since);
+      var text = elapsed(t - since);
       if (el.textContent !== text) { el.textContent = text; n++; }
     });
     return n;

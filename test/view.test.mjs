@@ -370,8 +370,9 @@ test('page.css dresses the [그 창으로 이동] button like the answer buttons
   const focus = rules.filter((r) => /(^|, )\.focusbtn(:[a-z-]+)?($|, )/.test(r.sel));
   const base = focus.find((r) => /(^|, )\.focusbtn($|, )/.test(r.sel));
   assert.ok(base, 'the focus button has a base rule of its own, not the browser default');
+  assert.match(base.sel, /\.ans-opt, \.ans-write, \.ans-go, \.ans-cancel, \.focusbtn/, 'focus and answer controls share the same rule');
   assert.match(base.body, /padding:/, 'it is padded like the other controls');
-  assert.match(base.body, /border: 1px solid var\(--line\)/, 'the same border as the answer buttons');
+  assert.match(base.body, /border: var\(--hair\) solid var\(--ctl-edge\)/, 'the same contrast-bearing control edge as the answer buttons');
   assert.match(base.body, /background: var\(--panel\)/, 'the same surface as the answer buttons');
   assert.ok(focus.some((r) => /:hover/.test(r.sel)), 'hover looks like the other buttons');
   assert.ok(focus.some((r) => /:focus-visible/.test(r.sel)), 'keyboard focus is visible');
@@ -398,10 +399,25 @@ test('a title with no break opportunity wraps in the overview: page.css breaks t
   assert.match(marks(cards(html)[s.id]), new RegExp('<span class="title">[^<]*' + s.title + '</span>'), 'so does the card header');
   const title = cssRule('src/page/page.css', '.title');
   assert.match(title, /min-width: 0/, 'a .ch flex item may shrink below its longest word');
-  assert.match(title, /overflow-wrap: anywhere/);
+  const shared = /\.title,\s*\.overview > \.more,\s*\.cv-page \.cv-h1\s*\{([^}]*)\}/.exec(fs.readFileSync(path.join(ROOT, 'src/page/page.css'), 'utf8'));
+  assert.ok(shared, 'card titles, open buttons and conversation headings share diagnostic wrapping');
+  assert.match(shared[1], /overflow-wrap: anywhere/);
   const open = cssRule('src/page/page.css', '.overview > .more');
   assert.ok(open, 'the overview open button has a rule of its own');
-  assert.match(open, /overflow-wrap: anywhere/);
+});
+
+test('an unbroken run wraps in the decision card: page.css breaks the 대화 line and the decision prose anywhere; the prose keeps word-break keep-all, never break-all', () => {
+  const model = clone(FIXTURE);
+  const s = model.sessions.find((x) => x.tabLabel && (x.decisions || []).some((d) => !d.answered && !d.closed));
+  s.tabLabel = 'W'.repeat(120);
+  assert.match(marks(loadView().renderOverview(model, {})), new RegExp('<div class="dline from">[^<]*\\[app-window\\] ' + s.tabLabel + ' #' + s.tabNumber + ' · '), 'the decision card names its conversation by the whole tab label');
+  const css = fs.readFileSync(path.join(ROOT, 'src/page/page.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((r) => ({ sels: r[1].split(',').map((x) => x.replace(/\s+/g, ' ').trim()), body: r[2] }));
+  assert.ok(rules.some((r) => r.sels.includes('.dline.from') && /overflow-wrap: anywhere/.test(r.body)), 'the 대화 line breaks inside an unbroken label instead of widening the .decs grid item');
+  assert.ok(rules.some((r) => ['.dline.dq', '.dline.opt', '.dline.rec'].every((sel) => r.sels.includes(sel)) && /word-break: keep-all/.test(r.body) && /overflow-wrap: anywhere/.test(r.body)), 'the question, option and recommendation lines keep keep-all and break only an unbroken run anywhere');
+  for (const r of rules.filter((x) => x.sels.some((sel) => ['.decs', '.dcard', '.dline', '.dline.dq', '.dline.opt', '.dline.rec'].includes(sel)))) {
+    assert.doesNotMatch(r.body, /break-all|word-break:(?!\s*keep-all)/, r.sels.join(', ') + ': decision prose stays word-based (keep-all, never break-all)');
+  }
 });
 
 test('page.css gives .sym one icon column and no fixed width; its icons are drawn in span.sym, no emoji left there', () => {

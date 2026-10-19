@@ -65,17 +65,22 @@ test('hostile text in live rows and the plan stays escaped through the view', ()
   assert.ok(!html.includes('<img src=x'));
 });
 
-test('alarm [보기] opens the 결정 page and the alarm and generation notice stay above tabs', () => {
+test('alarms are recorded without a band; tabs precede main and the existing inbox opens decisions', () => {
   const e = makeController({ modules: ['view', 'plan-view', 'workers-view', 'convo-view', 'shell', 'alarm', 'annotate'] });
-  const m = model([card('owner', { alive: true })]);
+  const m = model([card('owner', { alive: true, decisions: [{ id: 1, question: 'Choose', options: { A: { text: 'yes' } } }] })]);
   m.waiting = [{ key: 'd1', kind: 'decision', sessionId: 'owner', text: 'Choose', at: m.generatedAt, title: 'owner' }];
   e.page.receive(m);
-  const band = e.byId['alarm-band'], wrap = e.byId.tabs.parentNode;
-  assert.equal(band.parentNode, wrap);
-  assert.ok(wrap.children.indexOf(band) < wrap.children.indexOf(e.byId.tabs));
+  const wrap = e.byId.tabs.parentNode;
+  assert.equal(e.byId['alarm-band'], null);
+  assert.equal(e.document.querySelector('.alarm-row'), null);
+  assert.equal(e.byId.main.parentNode, wrap);
+  assert.equal(wrap.children.indexOf(e.byId.main), wrap.children.indexOf(e.byId.tabs) + 1);
   assert.equal(e.status.parentNode, wrap);
-  const button = band.querySelector('[data-alarm-goto]');
-  assert.ok(button);
+  assert.ok(wrap.children.indexOf(e.status) < wrap.children.indexOf(e.byId.tabs));
+  assert.ok(Number.isFinite(JSON.parse(e.ctx.localStorage.getItem('omo-briefing.seenWaiting')).d1));
+  e.fire(e.byId.rail.querySelector('[data-sh="view"][data-key="inbox"]'), 'click');
+  const button = e.byId.side.querySelector('[data-sh="open"][data-sid="owner"][data-sub="dec"]');
+  assert.ok(button, 'the existing waiting inbox supplies decision navigation');
   e.fire(button, 'click');
   assert.equal(e.page.state.ui.active, 'owner');
   assert.equal(e.page.state.ui.sub.owner, 'dec');

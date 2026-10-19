@@ -1,131 +1,75 @@
-/* omo-briefing annotations (annotate.js): the in-place tray beside the selection, numbered marks on annotated blocks,
- * the box-drag band and the sticky tray under the sub-tabs. Colors, fonts and radii follow the page.css / tokens.css
- * tokens, so light and dark both work. --stabs-h is the height of the sub-tab bar the tray sticks under (convo.css sets it). */
-:root {
-  --ann-shadow: var(--shadow-pop);
-  --ann-tint: var(--c-accent-tint);
-  --ann-hover: color-mix(in srgb, var(--accent) 55%, transparent);
-  --ann-pin-shadow: 0 1px 3px var(--c-shadow-strong);
-}
-
-/* blocks: the 💬 button and the number badge sit inside the block, so a static block becomes their positioning box
- * (zero specificity: a block that already has its own position keeps it) */
+/* omo-briefing annotations (annotate.js). Shared page tokens, desktop popover and compact bottom sheet. */
+:root { --ann-shadow: var(--shadow-pop); --ann-tint: var(--c-accent-tint); --ann-hover: color-mix(in srgb, var(--accent) 55%, transparent); --ann-pin-shadow: 0 1px 3px var(--c-shadow-strong); }
 :where(.ann-root .ab) { position: relative; }
 .ann-root.ann-banding { user-select: none; }
-.ann-root .ab:not(.bsel):hover:not(:has(.ab:hover)) { outline: 1px dashed var(--ann-hover); outline-offset: 2px; } /* a picked block keeps its solid outline */
+.ann-root .ab:not(.bsel):hover:not(:has(.ab:hover)) { outline: 1px dashed var(--ann-hover); outline-offset: 2px; }
 .ann-root .bsel { outline: 2px solid var(--accent); outline-offset: 2px; background-image: linear-gradient(var(--ann-tint), var(--ann-tint)); }
 .ann-root .bann { box-shadow: inset 3px 0 0 var(--red); }
-.bh {
-  position: absolute; top: 2px; right: 2px; z-index: 3; display: none;
-  padding: 0 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--accent);
-  font-size: var(--fs-xs); line-height: 18px; white-space: nowrap; user-select: none;
-}
-/* only the innermost hovered block shows its button */
-.ann-root .ab:hover:not(:has(.ab:hover)) > .bh { display: block; }
-@supports not selector(:has(a)) {
-  .ann-root .ab:hover > .bh { display: block; }
-}
+.bh { position: absolute; top: 2px; right: 2px; z-index: 3; display: none; padding: 0 6px; border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); color: var(--c-fg-2); font-size: var(--fs-xs); line-height: 18px; white-space: nowrap; user-select: none; }
+.ann-root .ab:hover:not(:has(.ab:hover)) > .bh, .ann-root .ab:focus-within > .bh { display: block; }
+@supports not selector(:has(a)) { .ann-root .ab:hover > .bh { display: block; } }
 .bh:hover { border-color: var(--accent); }
-.anum {
-  position: absolute; top: -8px; left: -8px; z-index: 3; display: grid; place-items: center;
-  min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: var(--red); color: var(--panel);
-  box-shadow: 0 0 0 2px var(--bg); font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 1; user-select: none;
-}
+.anum { position: absolute; top: -8px; left: -8px; z-index: 3; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--r-full); background: var(--red); color: var(--panel); box-shadow: 0 0 0 2px var(--bg); font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 1; user-select: none; }
 mark.am { border-bottom: 2px solid var(--red); border-radius: 2px; background: var(--red-bg); color: inherit; }
-
-/* report image pins (보고서): the image box is their positioning box. A numbered pin per annotation, and the open ring of
- * the pin being written while its tray is open. A click goes through a pin to the image, so it pins that spot. */
 .ann-root .rimg { position: relative; }
 .ann-root .rimg > img { cursor: crosshair; }
-.rimg > .pin {
-  position: absolute; z-index: 2; display: grid; place-items: center; box-sizing: border-box; width: 22px; height: 22px;
-  margin: -11px 0 0 -11px; border-radius: 50%; background: var(--red); color: var(--panel);
-  box-shadow: 0 0 0 2px var(--panel), var(--ann-pin-shadow); font-size: var(--fs-sm); font-weight: var(--fw-semibold); line-height: 1;
-  pointer-events: none; user-select: none;
-}
+.rimg > .pin { position: absolute; z-index: 2; display: grid; place-items: center; box-sizing: border-box; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; background: var(--red); color: var(--panel); box-shadow: 0 0 0 2px var(--panel), var(--ann-pin-shadow); font-size: var(--fs-sm); font-weight: var(--fw-semibold); line-height: 1; pointer-events: none; user-select: none; }
 .rimg > .pin.pend { border: 2px solid var(--red); background: var(--ann-tint); }
 .band { position: fixed; z-index: 30; border: 1px solid var(--accent); background: var(--ann-tint); pointer-events: none; }
-
-/* the in-place tray: fixed, placed by annotate.js below the selection, or above it near the bottom edge */
-.pop {
-  position: fixed; z-index: 40; width: 360px; max-width: calc(100vw - 16px);
-  padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--fg);
-  box-shadow: var(--ann-shadow); font-size: var(--fs-base);
-}
-.pop .ph { color: var(--muted); font-size: var(--fs-sm); overflow-wrap: anywhere; }
-.pop .ph b { color: var(--fg); }
-.pop .pq {
-  max-height: 8.5em; margin: 6px 0; padding: 2px 8px; overflow: auto; border-left: 3px solid var(--accent);
-  color: var(--muted); font-size: var(--fs-sm); overflow-wrap: anywhere;
-}
+.pop { position: fixed; z-index: 40; width: 360px; max-width: calc(100vw - 16px); padding: var(--sp-3); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-xl); background: var(--c-pop); color: var(--fg); box-shadow: var(--ann-shadow); font-size: var(--fs-base); }
+.pop .ph { color: var(--muted); font-size: var(--fs-sm); word-break: keep-all; }
+.pop .ph b { color: var(--fg); overflow-wrap: anywhere; }
+.pop .pq { max-height: 8.5em; margin: 6px 0; padding: 2px 8px; overflow: auto; border-left: 3px solid var(--accent); color: var(--muted); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .pop .pp { margin: 0 0 6px; color: var(--muted); font-family: var(--mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
-.seg { display: flex; gap: 4px; margin: 4px 0 6px; }
-.seg button {
-  flex: 1; padding: 2px 0; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted);
-  font-size: var(--fs-sm); line-height: 18px;
-}
-.seg button.on { border-color: var(--accent); background: var(--spy-bg); color: var(--fg); font-weight: var(--fw-medium); }
-.pop textarea {
-  display: block; width: 100%; min-height: 4.4em; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px;
-  background: var(--bg); color: var(--fg); font: inherit; resize: vertical;
-}
-.pop .pb { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 6px; }
+.seg { display: flex; gap: var(--sp-1); margin: var(--sp-1) 0 var(--sp-2); }
+.seg button { flex: 1; padding: 2px 0; border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--bg); color: var(--muted); font-size: var(--fs-sm); line-height: 18px; }
+.seg button.on { background: var(--fill-sel); color: var(--fg); font-weight: var(--fw-medium); box-shadow: inset 0 0 0 1px var(--ctl-edge); }
+.pop .plabel { display: block; color: var(--muted); font-size: var(--fs-sm); }
+.pop textarea { display: block; width: 100%; min-height: 4.4em; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--ctl-edge); border-radius: var(--r-md); background: var(--bg); color: var(--fg); font: var(--fs-base)/var(--lh) var(--font-ui); resize: vertical; }
+.pop .pb { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); margin-top: var(--sp-2); }
 .pop .kb, .pop .pc { color: var(--muted); font-size: var(--fs-xs); }
 .pop .pc { font-variant-numeric: tabular-nums; }
 .pop .pc.over, .pop .perr { color: var(--red); }
 .pop .perr { margin: 6px 0 0; font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
-.pop .perr[hidden] { display: none; }
+.pop .perr[hidden], .pop .pconf[hidden] { display: none; }
 .pop .sp, .tray .sp { flex: 1; }
-
-/* buttons: the same clothes as the answer controls */
-.ann-btn {
-  padding: 2px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--fg);
-  font-size: var(--fs-sm); line-height: 18px; white-space: nowrap;
-}
-.ann-btn:hover { border-color: var(--accent); color: var(--accent); }
-.ann-btn.go { border-color: var(--accent); background: var(--accent); color: var(--panel); font-weight: var(--fw-medium); }
-.ann-btn.go:hover { background: color-mix(in srgb, var(--accent) 82%, var(--fg)); color: var(--panel); }
-.ann-btn:focus-visible, .seg button:focus-visible, .bh:focus-visible, .tlist .ti-x:focus-visible, .pop textarea:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: 2px;
-}
-
-/* the sticky tray under the sub-tabs (annotate.js trayBar). The wrapper makes no box of its own, so .tray sticks
- * within the whole page instead of within the wrapper. */
+.ann-btn { padding: 2px var(--sp-2); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); color: var(--fg); font-size: var(--fs-sm); line-height: 18px; white-space: nowrap; }
+.ann-btn:hover { background: var(--fill-hover); }
+.ann-btn.go { border-color: var(--c-primary); background: var(--c-primary); color: var(--c-on-primary); font-weight: var(--fw-medium); }
+.ann-btn.go:hover { background: var(--c-fg-2); color: var(--c-on-primary); }
+.ann-btn.danger { border-color: var(--red); color: var(--red); }
+.ann-btn.danger:hover { background: var(--red-bg); }
+.ann-btn:focus-visible, .seg button:focus-visible, .bh:focus-visible, .tlist .ti-x:focus-visible, .pop textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pconf, .ann-clear { margin-top: var(--sp-2); padding: var(--sp-2); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); }
+.pconf p, .ann-clear p { margin: 0 0 var(--sp-2); }
 .ann-tray { display: contents; }
-.tray {
-  position: sticky; top: var(--stabs-h, 40px); z-index: 2;
-  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
-  margin: 0 0 8px; padding: 6px 10px; border: 1px solid var(--accent); border-radius: 8px;
-  background: linear-gradient(var(--spy-bg), var(--spy-bg)), var(--bg); color: var(--fg); font-size: var(--fs-base); /* the tint over the page: nothing scrolled under the sticky bar shows through */
-}
+.tray { position: sticky; top: var(--stabs-h, 40px); z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); margin: 0 0 var(--sp-2); padding: var(--sp-2) var(--sp-3); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-lg); background: var(--c-pop); color: var(--fg); font-size: var(--fs-base); }
 .tray .tray-n b { color: var(--fg); }
 .tray .tray-hint { color: var(--muted); font-size: var(--fs-sm); }
-.tlist { margin: -4px 0 12px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: var(--fs-base); }
-.tlist .ti { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.tlist { margin: -4px 0 var(--sp-3); padding: var(--sp-1) var(--sp-3); border: var(--hair) solid var(--line); border-radius: var(--r-xl); background: var(--panel); font-size: var(--fs-base); }
+.tlist .ti { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-1) 0; border-bottom: var(--hair) solid var(--line); }
 .tlist .ti:last-of-type { border-bottom: 0; }
-.tlist .n {
-  flex: none; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
-  background: var(--red); color: var(--panel); font-size: var(--fs-xs); font-weight: var(--fw-semibold);
-}
-.it2 { flex: none; padding: 0 6px; border-radius: 9px; font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 18px; white-space: nowrap; }
+.tlist .n { flex: none; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--r-full); background: var(--red); color: var(--panel); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.it2 { flex: none; padding: 0 6px; border-radius: var(--r-xs); font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 18px; white-space: nowrap; }
 .it2.c { background: var(--yellow-bg); color: var(--yellow); }
 .it2.q { background: var(--teal-bg); color: var(--teal); }
 .tlist .ti-b { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .tlist .ti-w { color: var(--muted); font-size: var(--fs-sm); }
 .tlist .ti-t { display: block; }
 .tlist .ti-q { color: var(--muted); }
-.tlist .ti-x { flex: none; padding: 0 6px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: var(--fs-sm); line-height: 18px; }
+.tlist .ti-x { flex: none; padding: 0 6px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--muted); font-size: var(--fs-sm); line-height: 18px; }
 .tlist .ti-x:hover { background: var(--gray-bg); color: var(--red); }
 .ann-prev { margin: 4px 0 2px; }
 .ann-prev summary { color: var(--muted); font-size: var(--fs-sm); cursor: pointer; }
-pre.prev {
-  max-height: 260px; margin: 4px 0 0; padding: 8px 10px; overflow: auto; border: 1px solid var(--line); border-radius: 6px;
-  background: var(--bg); color: var(--fg); font-family: var(--mono); font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere;
-}
+pre.prev { max-height: 260px; margin: 4px 0 0; padding: 8px 10px; overflow: auto; border: var(--hair) solid var(--line); border-radius: var(--r-md); background: var(--bg); color: var(--fg); font-family: var(--mono); font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
 .hint { margin: 0 0 10px; color: var(--muted); font-size: var(--fs-sm); }
 .ann-msg { margin: -4px 0 10px; color: var(--red); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
 .ann-msg.ok { color: var(--teal); }
-
 @media (max-width: 599px) {
-  .tray { gap: 4px 6px; padding: 6px 8px; }
+  .pop { bottom: 0; width: 100%; max-width: 100%; max-height: calc(100dvh - env(safe-area-inset-top) - var(--sp-4)); overflow-y: auto; padding: var(--sp-4) var(--sp-4) calc(var(--sp-4) + env(safe-area-inset-bottom)); border-bottom: 0; border-radius: var(--r-xl) var(--r-xl) 0 0; }
+  .pop .seg { gap: var(--sp-2); }
+  .pop .seg button, .pop .ann-btn, .ann-clear .ann-btn { min-height: 44px; min-width: 44px; }
+  .pop .pb { gap: var(--sp-2); }
+  .pop .kb { flex-basis: 100%; }
+  .tray { gap: var(--sp-2); padding: var(--sp-2); }
 }

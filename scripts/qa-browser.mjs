@@ -409,12 +409,14 @@ const INIT_SCRIPT = `(() => {
   console.error = function (...a) { W.__errors.push('console.error: ' + a.map(String).join(' ')); return origError.apply(this, a); };
   W.addEventListener('error', (e) => W.__errors.push('error: ' + (e.message || e)));
   W.addEventListener('unhandledrejection', (e) => W.__errors.push('rejection: ' + e.reason));
-  W.__audio = { contexts: [], starts: 0 };
+  W.__audio = { contexts: [], starts: 0, resumes: [] };
   const Orig = W.AudioContext;
   if (Orig) {
     W.AudioContext = function (...a) {
       const c = new Orig(...a);
       W.__audio.contexts.push(c);
+      const resume = c.resume.bind(c);
+      c.resume = (...args) => { const p = resume(...args); W.__audio.resumes.push(p); return p; };
       const make = c.createOscillator.bind(c);
       c.createOscillator = function () {
         const o = make();
@@ -821,8 +823,8 @@ async function desktopRun() {
   await openBoard(page, url, 'desktop');
   notePids(page);
 
-  // (e) first load: what is already waiting shows in the band and the title, with no sound
-  const firstLoad = await page.eval(`({ rows: document.querySelectorAll('#alarm-band .alarm-row').length, title: document.title, starts: window.__audio.starts })`);
+  // (e) first load records alarm keys/title without a band or sound.
+  const firstLoad = await page.eval(`({ bandPresent: !!document.querySelector('#alarm-band,.alarm-row'), seen: Object.keys(JSON.parse(localStorage.getItem('omo-briefing.seenWaiting') || '{}')), title: document.title, starts: window.__audio.starts })`);
 
   // (a) 20 publications -> applied in the page
   await scenario('a', 'http page: 20 publications reach the page without a click, p95 <= 1500ms', async () => {
@@ -997,8 +999,9 @@ async function desktopRun() {
   });
 
   // (e) alarm
-  await scenario('e', 'alarm: band + title + one chime per update, none on first load / muted in 설정 / reload; blocked-autoplay path is in the mobile run', async () => {
-    assert.ok(firstLoad.rows >= 1 && firstLoad.title.startsWith('('), `first load shows the band: ${J(firstLoad)}`);
+  await scenario('e', 'alarm: no band; recorded keys/title and one chime per update, none on first load / muted in 설정 / reload; blocked-autoplay path is in the mobile run', async () => {
+    assert.equal(firstLoad.bandPresent, false, 'no band on first load');
+    assert.ok(firstLoad.seen.length >= 1 && firstLoad.title.startsWith('('), `first load records alarms/title: ${J(firstLoad)}`);
     assert.equal(firstLoad.starts, 0, 'no sound for what was already waiting');
     await scrollMainTop(page);
     const t0 = await page.eval('document.title');
@@ -1006,17 +1009,18 @@ async function desktopRun() {
     const s0 = await page.eval('window.__audio.starts');
     const one = await published(A, briefOf('상황판 점검', '새 질문 하나', { decisions: [decisionOf('첫 새 질문')] }));
     await waitApplied(page, one.seq);
-    const afterOne = await page.eval(`({ title: document.title, starts: window.__audio.starts, band: document.getElementById('alarm-band').innerText, state: window.__audio.contexts[0] && window.__audio.contexts[0].state })`);
+    const afterOne = await page.eval(`({ title: document.title, starts: window.__audio.starts, bandPresent: !!document.querySelector('#alarm-band,.alarm-row'), recorded: BriefPage.state.model.waiting.every(w => Number.isFinite(JSON.parse(localStorage.getItem('omo-briefing.seenWaiting') || '{}')[w.key])), state: window.__audio.contexts[0] && window.__audio.contexts[0].state })`);
     assert.ok(afterOne.title.startsWith(`(${n0 + 1}) `), afterOne.title);
     assert.equal(afterOne.starts - s0, 2, 'one chime = two tones');
-    assert.ok(afterOne.band.includes('답 기다림'));
+    assert.equal(afterOne.bandPresent, false);
+    assert.equal(afterOne.recorded, true, 'new alarms are recorded');
     const four = await published(A, briefOf('상황판 점검', '새 질문 넷', { decisions: ['둘', '셋', '넷', '다섯'].map((x) => decisionOf(`동시 ${x}`)) }));
     await waitApplied(page, four.seq);
     const afterFour = await page.eval(`({ title: document.title, starts: window.__audio.starts })`);
     assert.ok(afterFour.title.startsWith(`(${n0 + 5}) `), afterFour.title);
     assert.equal(afterFour.starts - s0, 4, 'four new at once ring once');
     await page.screenshot(path.join(OUT, 'desktop-alarm.png'));
-    // mute in the sidebar's 설정 view: the band stays, no sound
+    // mute in the existing sidebar Settings view: keys stay recorded, no sound
     await click(page, '#rail [data-sh="view"][data-key="settings"]');
     await click(page, '#side [data-alarm-sound]');
     assert.equal(await page.eval(`document.querySelector('#side [data-alarm-sound]').getAttribute('aria-pressed')`), 'false', 'sound off');
@@ -1025,7 +1029,7 @@ async function desktopRun() {
     const afterMute = await page.eval(`({ title: document.title, starts: window.__audio.starts, label: document.querySelector('#side [data-alarm-sound]').textContent })`);
     assert.equal(afterMute.starts - s0, 4, 'no tone while muted');
     assert.ok(afterMute.title.startsWith(`(${n0 + 6}) `) && afterMute.label.includes('꺼짐'), J(afterMute));
-    // answering one leaves the band
+    // answering one reduces the waiting title count
     const decisionId = Math.max(...readdirIds(path.join(STATE, 'decisions')));
     await A.call('command', { name: 'decide', args: `${decisionId}A` });
     await waitApplied(page, pubOf().seq);
@@ -1035,9 +1039,10 @@ async function desktopRun() {
     await click(page, '#side [data-alarm-sound]');
     assert.equal(await page.eval(`document.querySelector('#side [data-alarm-sound]').getAttribute('aria-pressed')`), 'true', 'sound on');
     await openBoard(page, url, 'desktop-reload');
-    const reloaded = await page.eval(`({ starts: window.__audio.starts, rows: document.querySelectorAll('#alarm-band .alarm-row').length, title: document.title })`);
+    const reloaded = await page.eval(`({ starts: window.__audio.starts, bandPresent: !!document.querySelector('#alarm-band,.alarm-row'), seen: Object.keys(JSON.parse(localStorage.getItem('omo-briefing.seenWaiting') || '{}')), title: document.title })`);
     assert.equal(reloaded.starts, 0, 'a reload does not ring for items seen before');
-    assert.ok(reloaded.rows >= 1);
+    assert.equal(reloaded.bandPresent, false);
+    assert.ok(reloaded.seen.length >= 1);
     await click(page, '#rail [data-sh="view"][data-key="conv"]');
     return { firstLoad, startsBefore: s0, afterOne: { title: afterOne.title, starts: afterOne.starts }, afterFour, afterMute, afterAnswer, reloaded };
   });
@@ -1465,19 +1470,19 @@ async function mobileRun() {
         const plan = document.querySelector('#main [data-plan]');
         const r = plan.getBoundingClientRect();
         const m = document.getElementById('main').getBoundingClientRect();
-        const band = document.getElementById('alarm-band');
         return { collapsed: plan.classList.contains('plan-collapsed'), anchors: plan.querySelectorAll('[data-anchor]').length,
           lines: [...plan.querySelectorAll('.plan-summary-line')].map((l) => { const b = l.getBoundingClientRect(); return { h: Math.round(b.height * 10) / 10, w: Math.round(b.width) }; }),
           top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right),
           mainTop: Math.round(m.top), mainBottom: Math.round(m.bottom), mainLeft: Math.round(m.left), mainRight: Math.round(m.right),
-          bandBottom: band && !band.hidden ? Math.round(band.getBoundingClientRect().bottom) : 0, innerWidth, innerHeight };
+          bandPresent: !!document.querySelector('#alarm-band,.alarm-row'), innerWidth, innerHeight };
       })()`);
       assert.ok(geo.collapsed, 'the plan block is folded');
       assert.equal(geo.lines.length, 2, `two summary lines: ${J(geo.lines)}`);
       assert.ok(geo.lines.every((l) => l.h > 0 && l.h <= 30), `each summary line is one text line high: ${J(geo.lines)}`);
       assert.equal(geo.anchors, 0, 'a folded plan carries no anchor');
-      assert.ok(geo.top >= Math.max(geo.bandBottom, geo.mainTop) && geo.bottom <= Math.min(geo.innerHeight, geo.mainBottom) && geo.left >= geo.mainLeft && geo.right <= geo.mainRight,
-        `the folded summary is fully inside #main, below the alarm band: ${J(geo)}`);
+      assert.equal(geo.bandPresent, false);
+      assert.ok(geo.top >= geo.mainTop && geo.bottom <= Math.min(geo.innerHeight, geo.mainBottom) && geo.left >= geo.mainLeft && geo.right <= geo.mainRight,
+        `the folded summary is fully inside #main, below tabs: ${J(geo)}`);
       await shot(page, file);
       return geo;
     };
@@ -1635,12 +1640,13 @@ async function mobileRun() {
     };
   });
 
-  await scenario('e-blocked', 'alarm when the browser blocks autoplay: hint and no tone while locked, one tap, AudioContext running, an owed chime settled (the chime after unlock is e-mobile)', async () => {
+  await scenario('e-blocked', 'alarm without a band: recorded while autoplay is blocked, no tone while locked, one tap, native AudioContext running and owed chime settled', async () => {
     await scrollMainTop(page);
     const pub = await published(B, briefOf('두 번째 대화', '모바일에서 새 질문', { decisions: [decisionOf('모바일 질문')] }));
     await waitApplied(page, pub.seq);
-    const blocked = await page.eval(`({ band: document.getElementById('alarm-band').innerText, state: window.__audio.contexts[0] ? window.__audio.contexts[0].state : 'none', starts: window.__audio.starts })`);
-    assert.ok(blocked.band.includes('소리를 켜려면 화면을 한 번 누르세요'), blocked.band);
+    const blocked = await page.eval(`({ bandPresent: !!document.querySelector('#alarm-band,.alarm-row'), recorded: BriefPage.state.model.waiting.every(w => Number.isFinite(JSON.parse(localStorage.getItem('omo-briefing.seenWaiting') || '{}')[w.key])), state: window.__audio.contexts[0] ? window.__audio.contexts[0].state : 'none', starts: window.__audio.starts })`);
+    assert.equal(blocked.bandPresent, false);
+    assert.equal(blocked.recorded, true);
     assert.equal(blocked.state, 'suspended');
     assert.equal(blocked.starts, 0, 'a locked context starts no oscillator');
     await page.screenshot(path.join(OUT, 'mobile-alarm.png'));
@@ -1656,48 +1662,49 @@ async function mobileRun() {
     assert.ok(target && !target.control, `the tap point presses nothing: ${J(target)}`);
     await clickAt(page, 8, 500);
     assert.equal(await running, 'running');
-    // A sound owed for less than 2 s is played by the resume itself, before the hint is taken out of the band: once the hint is gone
-    // the owed chime is settled and the oscillator count is a stable baseline for e-mobile.
-    await waitDom(page, `!document.querySelector('#alarm-band .alarm-unlock')`, { label: 'the unlock hint to leave the band' });
+    // Native resume handlers were attached before this subscription; no removed UI is used as a completion signal.
+    await page.eval(`new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('native resume did not settle')),6000);Promise.all(window.__audio.resumes).then(()=>{clearTimeout(timer);resolve(true)},e=>{clearTimeout(timer);reject(e)})})`);
     const unlocked = await page.eval(`({ state: window.__audio.contexts[0].state, starts: window.__audio.starts })`);
     assert.equal(unlocked.state, 'running');
     assert.ok(unlocked.starts === 0 || unlocked.starts === 2, `the owed chime is skipped (0) or one two-tone chime (2): ${unlocked.starts}`);
     await shot(page, 'mobile-e-mid.png');
     return {
-      before: blocked.state, after: 'running', hint: true, tapTarget: target, startsWhileLocked: blocked.starts, startsAfterUnlock: unlocked.starts, owedChimePlayed: unlocked.starts === 2,
+      before: blocked.state, after: 'running', bandPresent: blocked.bandPresent, recorded: blocked.recorded, tapTarget: target, startsWhileLocked: blocked.starts, startsAfterUnlock: unlocked.starts, owedChimePlayed: unlocked.starts === 2,
       captures: ['mobile-e-before.png', 'mobile-e-mid.png'],
     };
   });
 
   // (e) after the unlock: ONE genuinely new waiting decision rings exactly one two-tone chime (two native oscillator starts).
-  await scenario('e-mobile', 'mobile alarm after unlock: one new waiting decision starts exactly two oscillators, band and title follow', async () => {
+  await scenario('e-mobile', 'mobile alarm after unlock: no band; one new recorded decision starts exactly two oscillators and updates title', async () => {
     const before = await page.eval(`({ title: document.title, starts: window.__audio.starts, state: window.__audio.contexts[0] ? window.__audio.contexts[0].state : 'none',
-      hint: Boolean(document.querySelector('#alarm-band .alarm-unlock')), rows: document.querySelectorAll('#alarm-band .alarm-row').length })`);
+      bandPresent: !!document.querySelector('#alarm-band,.alarm-row'), seen: Object.keys(JSON.parse(localStorage.getItem('omo-briefing.seenWaiting') || '{}')) })`);
     assert.equal(before.state, 'running', 'e-blocked left the context unlocked');
-    assert.equal(before.hint, false, 'no unlock hint is left');
+    assert.equal(before.bandPresent, false);
+    assert.ok(before.seen.length >= 1, 'waiting alarms remain recorded');
     assert.ok(before.title.startsWith('('), `the title counts what is waiting: ${before.title}`);
     const waitingBefore = Number(before.title.slice(1, before.title.indexOf(')')));
     assert.ok(Number.isInteger(waitingBefore) && waitingBefore >= 1, `waiting count in the title: ${before.title}`);
     await scrollMainTop(page);
     const QUESTION = '모바일 소리 시험 질문';
     const titlePrefix = `(${waitingBefore + 1}) `;
-    // subscribed before the publication: the title and the band show the new decision in the same apply that rings
-    const shown = pending(waitDom(page, `document.title.startsWith(${J(titlePrefix)}) && document.getElementById('alarm-band').textContent.includes(${J(QUESTION)})`, { label: 'the new decision in the band and the title' }));
+    // subscribed before publication: recorded keys/title and chime update in the same apply
+    const shown = pending(waitDom(page, `document.title.startsWith(${J(titlePrefix)}) && !document.querySelector('#alarm-band,.alarm-row') && BriefPage.state.model.waiting.some(w => w.text === ${J(QUESTION)} && Number.isFinite(JSON.parse(localStorage.getItem('omo-briefing.seenWaiting') || '{}')[w.key]))`, { label: 'new alarm recorded and counted without a band' }));
     const pub = await published(B, briefOf('두 번째 대화', '모바일 소리 시험', { decisions: [decisionOf(QUESTION)] }));
     await shown;
     await waitApplied(page, pub.seq);
     const after = await page.eval(`({ title: document.title, starts: window.__audio.starts, state: window.__audio.contexts[0].state,
-      firstRow: document.querySelector('#alarm-band .alarm-row') ? document.querySelector('#alarm-band .alarm-row').textContent : '',
-      rows: document.querySelectorAll('#alarm-band .alarm-row').length })`);
+      bandPresent: !!document.querySelector('#alarm-band,.alarm-row'),
+      recorded: BriefPage.state.model.waiting.every(w => Number.isFinite(JSON.parse(localStorage.getItem('omo-briefing.seenWaiting') || '{}')[w.key])), seen: Object.keys(JSON.parse(localStorage.getItem('omo-briefing.seenWaiting') || '{}')) })`);
     assert.equal(after.starts - before.starts, 2, `one chime = two native oscillator starts: ${before.starts} -> ${after.starts}`);
     assert.ok(after.title.startsWith(titlePrefix), `title ${before.title} -> ${after.title}`);
-    assert.ok(after.firstRow.includes(QUESTION), `the new decision is the first band row: ${after.firstRow}`);
+    assert.equal(after.bandPresent, false);
+    assert.equal(after.recorded, true, 'the new decision is recorded');
     await shot(page, 'mobile-e-after.png');
     const settled = await page.eval('window.__audio.starts');
     assert.equal(settled, after.starts, 'no late extra tone after the chime');
     return {
       startsBefore: before.starts, startsAfter: after.starts, additionalStarts: after.starts - before.starts, settledStarts: settled,
-      titleBefore: before.title, titleAfter: after.title, bandRowsBefore: before.rows, bandRowsAfter: after.rows, firstBandRow: after.firstRow, contextState: after.state,
+      titleBefore: before.title, titleAfter: after.title, bandPresent: after.bandPresent, recordedBefore: before.seen.length, recordedAfter: after.seen.length, contextState: after.state,
       captures: ['mobile-e-before.png', 'mobile-e-mid.png', 'mobile-e-after.png'],
     };
   });
