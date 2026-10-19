@@ -1,20 +1,20 @@
 /* omo-briefing conversation page (convo-view.js): the full-width page of one conversation, its header, the sub-tab bar
- * and the panels 개요 / 계획 / 작업자 / 결정 / 보고서 (board v6, path details v7). Colours and fonts are page.css tokens;
+ * and the panels 개요 / 계획 / 작업자 / 결정 / 보고서 (board v6, path details v7). Colours and fonts are tokens.css tokens;
  * chips, decision cards, answer boxes, rows and paths keep their page.css look, so light and dark both follow page.css.
- * The tab-number colour is shell.css's --sh-hue. Content text wraps (overflow-wrap: anywhere): nothing here clips text.
- * --stabs-h is the sub-tab bar height; annotate.css sticks its tray right under it. */
+ * The tab-number colours are shell.css's --sh-hue / --sh-hue-bg. Content text wraps (overflow-wrap: anywhere): nothing
+ * here clips text. --stabs-h is the sub-tab bar height; annotate.css sticks its tray right under it. */
 :root {
   --cv-pad-y: 12px;
   --cv-pad-x: 16px;
   --cv-gap: 12px; /* between the blocks of a panel */
   --cv-gap-s: 6px; /* inside a block */
   --cv-radius: 8px;
-  --cv-fs: 13.5px; /* body text */
-  --cv-fs-s: 12px; /* secondary text */
-  --cv-fs-xs: 11px; /* counts and captions */
-  --cv-fs-h: 14px; /* section headings */
-  --cv-fs-v: 18px; /* summary card number */
-  --cv-fs-h1: 20px;
+  --cv-fs: var(--fs-base); /* body text */
+  --cv-fs-s: var(--fs-sm); /* secondary text */
+  --cv-fs-xs: var(--fs-xs); /* counts and captions */
+  --cv-fs-h: var(--fs-md); /* section headings */
+  --cv-fs-v: var(--fs-xl); /* summary card number */
+  --cv-fs-h1: var(--fs-xl);
   --cv-ico: 44px;
   --stabs-h: 38px;
 }
@@ -30,7 +30,7 @@
 .cv-top { display: flex; align-items: center; gap: var(--cv-gap); min-width: 0; }
 .cv-ico {
   flex: none; display: grid; place-items: center; width: var(--cv-ico); height: var(--cv-ico); border-radius: 10px;
-  background: var(--sh-hue, var(--gray-bg)); color: var(--sh-on-hue, var(--muted)); font-size: 17px; font-weight: 800; letter-spacing: -.5px;
+  background: var(--sh-hue-bg, var(--gray-bg)); color: var(--sh-hue, var(--muted)); font-size: 17px; font-weight: var(--fw-semibold); letter-spacing: -.5px;
 }
 .cv-names { flex: 1; min-width: 0; }
 .cv-h1 { margin: 0; font-size: var(--cv-fs-h1); line-height: 1.3; }
@@ -50,8 +50,8 @@
   background: none; color: var(--muted); font-size: var(--cv-fs); white-space: nowrap;
 }
 .stabs .st:hover { color: var(--fg); }
-.stabs .st.on { border-bottom-color: var(--accent); color: var(--fg); font-weight: 700; }
-.stabs .c { padding: 0 6px; border-radius: 9px; background: var(--gray-bg); color: var(--muted); font-size: var(--cv-fs-xs); font-weight: 600; line-height: 16px; }
+.stabs .st.on { border-bottom-color: var(--accent); color: var(--fg); font-weight: var(--fw-medium); }
+.stabs .c { padding: 0 6px; border-radius: 9px; background: var(--gray-bg); color: var(--muted); font-size: var(--cv-fs-xs); font-weight: var(--fw-semibold); line-height: 16px; }
 .stabs .c.o { background: var(--yellow-bg); color: var(--yellow); }
 
 /* panel: the blocks stack with one gap */
@@ -74,7 +74,7 @@
 .cv-flow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--cv-gap-s); }
 .cv-fs { padding: 1px 9px; border-radius: 4px; background: var(--gray-bg); color: var(--gray); font-size: var(--cv-fs-s); }
 .cv-fs.is-done { background: var(--green-bg); color: var(--green); }
-.cv-fs.is-doing { background: var(--teal-bg); color: var(--teal); font-weight: 700; }
+.cv-fs.is-doing { background: var(--teal-bg); color: var(--teal); font-weight: var(--fw-medium); }
 .cv-fs.is-blocked { background: var(--red-bg); color: var(--red); }
 .cv-arr { color: var(--muted); }
 
@@ -92,10 +92,10 @@
 
 /* collapsible sections: 최근 변화, 한 일, 보낸 피드백, 자동 정보, 📎 자료, 보류됨 */
 .cv-sec > summary, .att > summary, .held-decs > summary {
-  width: max-content; max-width: 100%; padding: 2px 6px; border-radius: 5px; cursor: pointer; font-weight: 700;
+  width: max-content; max-width: 100%; padding: 2px 6px; border-radius: 5px; cursor: pointer; font-weight: var(--fw-medium);
 }
 .cv-sec > summary:hover, .att > summary:hover, .held-decs > summary:hover { background: var(--gray-bg); }
-.cv-n { padding: 0 6px; border-radius: 9px; background: var(--gray-bg); color: var(--muted); font-size: var(--cv-fs-xs); font-weight: 600; }
+.cv-n { padding: 0 6px; border-radius: 9px; background: var(--gray-bg); color: var(--muted); font-size: var(--cv-fs-xs); font-weight: var(--fw-semibold); }
 .cv-sec > .rows { margin-top: 4px; padding-left: 6px; }
 .cv-page .rows .row { padding: 3px 0; }
 .cv-page .rt { overflow-wrap: anywhere; }
@@ -121,7 +121,7 @@
 /* tables: fallback todo, 결정 기록 */
 table.t { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: var(--cv-fs); }
 table.t th, table.t td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
-table.t th { color: var(--muted); font-size: var(--cv-fs-s); font-weight: 600; }
+table.t th { color: var(--muted); font-size: var(--cv-fs-s); font-weight: var(--fw-semibold); }
 .cv-todo th:nth-child(1) { width: 52px; }
 .cv-todo th:nth-child(3) { width: 104px; }
 .cv-hist th:nth-child(1) { width: 60px; }
@@ -144,7 +144,7 @@ table.t th { color: var(--muted); font-size: var(--cv-fs-s); font-weight: 600; }
 .rimg img { display: block; width: 100%; height: auto; }
 .rimg-x { display: block; padding: 24px 12px; color: var(--muted); font-size: var(--cv-fs-s); text-align: center; }
 .rb2 { display: grid; gap: 4px; padding: 8px 10px; }
-.rb2 .nm { font-weight: 700; }
+.rb2 .nm { font-weight: var(--fw-semibold); }
 .rb2 .nt { color: var(--muted); font-size: var(--cv-fs-s); }
 /* 이걸로 고르기: the answer buttons' clothes (page.css .ans-opt) */
 .cv-pick {
@@ -152,15 +152,15 @@ table.t th { color: var(--muted); font-size: var(--cv-fs-s); font-weight: 600; }
   background: var(--panel); font-size: var(--cv-fs-s); line-height: 18px; text-align: left;
 }
 .cv-pick:hover { border-color: var(--accent); color: var(--accent); }
-.cv-pick.is-rec { border-color: var(--accent); background: var(--accent); color: var(--panel); font-weight: 700; }
+.cv-pick.is-rec { border-color: var(--accent); background: var(--accent); color: var(--panel); font-weight: var(--fw-medium); }
 .cv-pick.is-rec:hover { background: color-mix(in srgb, var(--accent) 82%, var(--fg)); color: var(--panel); }
 /* 이걸로 고르기 off: the decision is answered, closed, or its answer is on the way */
 .cv-pick:disabled, .cv-pick:disabled:hover {
-  border-color: var(--line); background: var(--gray-bg); color: var(--muted); font-weight: 400; cursor: default;
+  border-color: var(--line); background: var(--gray-bg); color: var(--muted); font-weight: var(--fw-regular); cursor: default;
 }
 /* the option the decision was answered with (the model's answer, never this page's own state) */
 .ropt.chosen { border-color: var(--accent); }
-.cv-chosen { background: var(--spy-bg); color: var(--accent); }
+.cv-chosen { background: var(--spy-bg); color: var(--fg); }
 /* where a click on an image puts a pin (annotate.js) */
 .rep-hint { color: var(--muted); font-size: var(--cv-fs-xs); }
 

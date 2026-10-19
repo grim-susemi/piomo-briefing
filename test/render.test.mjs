@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { fork, spawnSync } from 'node:child_process';
 import vm from 'node:vm';
 import { openStore } from '../src/store.mjs';
-import { buildViewModel, renderPage, withReports, MAX_VM_BYTES, OMITTED_CHIP } from '../src/render.mjs';
+import { buildViewModel, renderPage, pageHtml, withReports, MAX_VM_BYTES, OMITTED_CHIP } from '../src/render.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CHILD = join(HERE, 'helpers', 'render-child.mjs');
@@ -826,4 +826,16 @@ describe('sessions[].reports', () => {
     assert.equal(res.ok, true);
     assert.ok(fs.statSync(join(store.root, 'data.js')).size <= MAX_VM_BYTES, 'published data.js over the cap');
   });
+});
+
+test('tokens.css is the first stylesheet chunk of the page: the later sheets read its tokens; no weight above 600', () => {
+  const vm = JSON.parse(fs.readFileSync(join(HERE, 'fixtures', 'view-model-board.json'), 'utf8'));
+  const html = pageHtml(vm, 7, { mode: 'file' });
+  const styles = [...html.matchAll(/<style>\n([\s\S]*?)\n<\/style>/g)].map((m) => m[1]);
+  assert.equal(styles.length, 1, 'the page inlines one stylesheet');
+  const sheet = (name) => fs.readFileSync(join(HERE, '..', 'src', 'page', name), 'utf8');
+  const order = ['tokens.css', 'page.css', 'plan-view.css', 'workers-view.css', 'alarm.css', 'shell.css', 'convo.css', 'annotate.css'];
+  assert.equal(styles[0], order.map(sheet).join('\n'), 'tokens.css first, then the sheets in their old order');
+  assert.match(sheet('tokens.css'), /^:root \{\n  color-scheme: light dark;/m, 'the tokens follow the light and the dark scheme');
+  assert.doesNotMatch(styles[0], /font-weight:\s*(?:[7-9]00|bold)/, 'weights 400 / 500 / 600 only');
 });

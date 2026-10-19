@@ -1,46 +1,42 @@
 /* omo-briefing shell (shell.js): the left icon rail, the one switchable sidebar and the top tab bar (board v5).
- * Tokens: board-rail-tabs-v5.html :root mapped onto page.css, so the light default and the dark scheme both follow
- * page.css (--bg and --line are page.css's own). --sw is the sidebar width; shell.js sync() keeps it on .sh-shell.
- * Colour literals live only in this block: the tab-number palette (white numbers stay >= 4.5:1) and the peek shadow. */
+ * Its variables name tokens.css tokens, so light and dark both follow prefers-color-scheme (--bg and --line are
+ * page.css's own). --sw is the sidebar width; shell.js sync() keeps it on .sh-shell. No colour literal in this file:
+ * the tab-number palette (--tabhue-N, the number's hue, and --tabhue-N-bg, its tint) is tokens.css's too. */
 :root {
-  --rail: var(--gray-bg);
-  --side: var(--panel);
-  --hov: color-mix(in srgb, var(--fg) 8%, transparent);
-  --sel: var(--spy-bg);
-  --tx: var(--fg);
-  --tx2: var(--muted);
-  --tx3: color-mix(in srgb, var(--muted) 65%, var(--panel));
-  --acc: var(--accent);
+  --rail: var(--c-rail);
+  --side: var(--c-side);
+  --hov: var(--fill-hover);
+  --sel: var(--fill-sel);
+  --tx: var(--c-fg);
+  --tx2: var(--c-fg-2);
+  --tx3: var(--c-fg-4);
+  --acc: var(--c-accent);
   --sw: 260px;
   --sh-rail-w: 52px;
   --sh-bar-h: 40px;
   --sh-edge-w: 10px;
-  --sh-strip: var(--gray-bg);
-  --sh-shade: 0 8px 30px rgb(0 0 0 / 35%);
-  --sh-on-hue: #fff;
-  --tabhue-0: #b23434; --tabhue-1: #a0672e; --tabhue-2: #777722; --tabhue-3: #538025;
-  --tabhue-4: #278627; --tabhue-5: #268455; --tabhue-6: #258080; --tabhue-7: #3473b2;
-  --tabhue-8: #3434b2; --tabhue-9: #7334b2; --tabhue-10: #b234b2; --tabhue-11: #b23473;
+  --sh-strip: var(--c-main);
+  --sh-shade: var(--shadow-pop);
 }
-.sh-h0 { --sh-hue: var(--tabhue-0); }
-.sh-h1 { --sh-hue: var(--tabhue-1); }
-.sh-h2 { --sh-hue: var(--tabhue-2); }
-.sh-h3 { --sh-hue: var(--tabhue-3); }
-.sh-h4 { --sh-hue: var(--tabhue-4); }
-.sh-h5 { --sh-hue: var(--tabhue-5); }
-.sh-h6 { --sh-hue: var(--tabhue-6); }
-.sh-h7 { --sh-hue: var(--tabhue-7); }
-.sh-h8 { --sh-hue: var(--tabhue-8); }
-.sh-h9 { --sh-hue: var(--tabhue-9); }
-.sh-h10 { --sh-hue: var(--tabhue-10); }
-.sh-h11 { --sh-hue: var(--tabhue-11); }
+.sh-h0 { --sh-hue: var(--tabhue-0); --sh-hue-bg: var(--tabhue-0-bg); }
+.sh-h1 { --sh-hue: var(--tabhue-1); --sh-hue-bg: var(--tabhue-1-bg); }
+.sh-h2 { --sh-hue: var(--tabhue-2); --sh-hue-bg: var(--tabhue-2-bg); }
+.sh-h3 { --sh-hue: var(--tabhue-3); --sh-hue-bg: var(--tabhue-3-bg); }
+.sh-h4 { --sh-hue: var(--tabhue-4); --sh-hue-bg: var(--tabhue-4-bg); }
+.sh-h5 { --sh-hue: var(--tabhue-5); --sh-hue-bg: var(--tabhue-5-bg); }
+.sh-h6 { --sh-hue: var(--tabhue-6); --sh-hue-bg: var(--tabhue-6-bg); }
+.sh-h7 { --sh-hue: var(--tabhue-7); --sh-hue-bg: var(--tabhue-7-bg); }
+.sh-h8 { --sh-hue: var(--tabhue-8); --sh-hue-bg: var(--tabhue-8-bg); }
+.sh-h9 { --sh-hue: var(--tabhue-9); --sh-hue-bg: var(--tabhue-9-bg); }
+.sh-h10 { --sh-hue: var(--tabhue-10); --sh-hue-bg: var(--tabhue-10-bg); }
+.sh-h11 { --sh-hue: var(--tabhue-11); --sh-hue-bg: var(--tabhue-11-bg); }
 
 /* frame: rail | sidebar | (tab bar over the page) */
 .sh-shell { position: relative; display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
 .sh-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .sh-main { flex: 1; min-height: 0; overflow: auto; }
 .sh-wrap > .live-status, .sh-wrap > .live-link, .sh-wrap > .alarm-band { flex: none; }
-.trimmed-note { flex: none; margin: 0; padding: 4px 12px; color: var(--muted); font-size: 12px; }
+.trimmed-note { flex: none; margin: 0; padding: 4px 12px; color: var(--muted); font-size: var(--fs-sm); }
 .trimmed-note[hidden] { display: none; }
 .sh-main .overview { padding: 10px; }
 .sh-main .overview .card { margin-bottom: 10px; }
@@ -55,15 +51,15 @@
   border: 0; border-radius: 8px; background: none; color: var(--tx2); font-size: 17px; line-height: 1;
 }
 .sh-rb:hover, .sh-rb:focus-visible { background: var(--hov); color: var(--tx); }
-.sh-shell[data-side="open"] .sh-rb.on, .sh-shell[data-peek="true"] .sh-rb.on { background: var(--sel); color: var(--acc); }
+.sh-shell[data-side="open"] .sh-rb.on, .sh-shell[data-peek="true"] .sh-rb.on { background: var(--sel); color: var(--tx); }
 .sh-n {
   position: absolute; top: 2px; right: 1px; min-width: 16px; padding: 0 4px; border-radius: 9px;
-  background: var(--yellow); color: var(--panel); font-size: 10px; font-weight: 700; line-height: 14px; text-align: center;
+  background: var(--yellow); color: var(--panel); font-size: var(--fs-2xs); font-weight: var(--fw-semibold); line-height: 14px; text-align: center;
 }
 .sh-tip {
   display: none; position: absolute; z-index: 20; left: calc(100% + 6px); top: 50%; transform: translateY(-50%);
   padding: 2px 8px; border-radius: 5px; background: var(--tx); color: var(--panel);
-  font-size: 12px; line-height: 18px; white-space: nowrap; pointer-events: none;
+  font-size: var(--fs-sm); line-height: 18px; white-space: nowrap; pointer-events: none;
 }
 .sh-rb:hover .sh-tip, .sh-rb:focus-visible .sh-tip { display: block; }
 .sh-rsp { flex: 1; }
@@ -88,55 +84,55 @@
 .sh-rz { position: absolute; z-index: 3; top: 0; right: -3px; bottom: 0; width: 6px; cursor: col-resize; }
 .sh-rz:hover, .sh-shell.is-resizing .sh-rz { background: color-mix(in srgb, var(--acc) 35%, transparent); }
 .sh-shell.is-resizing { cursor: col-resize; user-select: none; }
-.sh-head { flex: none; display: flex; align-items: center; gap: 6px; height: var(--sh-bar-h); padding: 0 6px 0 12px; font-weight: 700; }
+.sh-head { flex: none; display: flex; align-items: center; gap: 6px; height: var(--sh-bar-h); padding: 0 6px 0 12px; font-weight: var(--fw-semibold); }
 .sh-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .sh-ib, .sh-back, .sh-topen, .sh-tadd { border: 0; border-radius: 5px; background: none; color: var(--tx2); }
 .sh-ib:hover, .sh-back:hover, .sh-topen:hover, .sh-tadd:hover { background: var(--hov); color: var(--tx); }
 .sh-ib { flex: none; padding: 2px 6px; }
-.sh-back { display: none; margin: 0 8px 6px; padding: 2px 4px; font-size: 13px; text-align: left; }
+.sh-back { display: none; margin: 0 8px 6px; padding: 2px 4px; font-size: var(--fs-sm); text-align: left; }
 .sh-shell[data-view="archive"] .sh-back { display: block; }
 .sh-srch {
   display: none; flex: none; align-items: center; gap: 6px; margin: 2px 10px 6px; padding: 0 8px;
-  border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--tx2); font-size: 12px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--tx2); font-size: var(--fs-sm);
 }
 .sh-srch:focus-within { border-color: var(--acc); }
 .sh-shell[data-view="conv"] .sh-srch, .sh-shell[data-view="archive"] .sh-srch { display: flex; }
-.sh-q { flex: 1; min-width: 0; height: 26px; padding: 0; border: 0; background: none; color: var(--tx); font: inherit; font-size: 13px; outline: none; }
+.sh-q { flex: 1; min-width: 0; height: 26px; padding: 0; border: 0; background: none; color: var(--tx); font: inherit; font-size: var(--fs-base); outline: none; }
 .sh-flt { display: none; flex: none; flex-wrap: wrap; gap: 4px; margin: 0 10px 6px; }
 .sh-shell[data-view="conv"] .sh-flt { display: flex; }
-.sh-chip { padding: 0 8px; border: 0; border-radius: 9px; background: var(--gray-bg); color: var(--tx2); font-size: 12px; line-height: 20px; white-space: nowrap; }
+.sh-chip { padding: 0 8px; border: 0; border-radius: 9px; background: var(--gray-bg); color: var(--tx2); font-size: var(--fs-sm); line-height: 20px; white-space: nowrap; }
 .sh-chip:hover { color: var(--tx); }
-.sh-chip.on { background: var(--sel); color: var(--acc); font-weight: 700; }
+.sh-chip.on { background: var(--sel); color: var(--tx); font-weight: var(--fw-medium); }
 .sh-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; padding-bottom: 12px; }
 
 /* sections and rows */
 .sh-sec { margin-top: 8px; }
 .sh-sh {
   display: flex; align-items: center; gap: 4px; width: calc(100% - 12px); height: 26px; margin: 0 6px; padding: 0 6px;
-  border: 0; border-radius: 5px; background: none; color: var(--tx2); font-size: 12px; font-weight: 700; text-align: left;
+  border: 0; border-radius: 5px; background: none; color: var(--tx2); font-size: var(--fs-sm); font-weight: var(--fw-medium); text-align: left;
 }
 .sh-sh:hover { background: var(--hov); }
-.sh-cnt { font-weight: 400; }
-.sh-ch { font-size: 10px; color: var(--tx2); }
+.sh-cnt { font-weight: var(--fw-regular); }
+.sh-ch { font-size: var(--fs-2xs); color: var(--tx2); }
 .sh-nav { padding: 0 6px; }
-.sh-empty { margin: 4px 12px; color: var(--tx2); font-size: 12px; }
+.sh-empty { margin: 4px 12px; color: var(--tx2); font-size: var(--fs-sm); }
 .sh-row { display: flex; align-items: center; min-height: 28px; border-radius: 5px; color: var(--tx); }
 .sh-row:hover, .sh-row:focus-within { background: var(--hov); }
 .sh-row.sel { background: var(--sel); }
-.sh-row.sel .sh-t { color: var(--acc); font-weight: 600; }
+.sh-row.sel .sh-t { color: var(--tx); font-weight: var(--fw-semibold); }
 .sh-tg {
   flex: none; width: 16px; height: 20px; padding: 0; border: 0; border-radius: 3px; background: none;
-  color: var(--tx3); font-size: 10px; line-height: 20px; text-align: center;
+  color: var(--tx3); font-size: var(--fs-2xs); line-height: 20px; text-align: center;
 }
 button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 .sh-go {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; min-height: 28px; padding: 0 4px;
-  border: 0; background: none; color: inherit; font-size: 13px; text-align: left;
+  border: 0; background: none; color: inherit; font-size: var(--fs-base); text-align: left;
 }
 .sh-gone .sh-go { cursor: default; }
 /* the only ellipsis in the sidebar: one-line row titles, each with its full text in a title attribute */
 .sh-t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.sh-sub { margin-left: 5px; color: var(--tx2); font-size: 12px; }
+.sh-sub { margin-left: 5px; color: var(--tx2); font-size: var(--fs-sm); }
 .sh-gone .sh-t { color: var(--tx2); font-style: italic; }
 .sh-fav { display: none; flex: none; padding: 2px 6px; border: 0; border-radius: 4px; background: none; color: var(--tx2); }
 .sh-fav:hover { color: var(--tx); }
@@ -144,61 +140,61 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 .sh-row:hover .sh-fav, .sh-row:focus-within .sh-fav { display: block; }
 .sh-row:hover .sh-bdg, .sh-row:focus-within .sh-bdg { display: none; }
 .sh-kids { padding-left: 16px; }
-.sh-kid .sh-go { min-height: 26px; font-size: 12.5px; }
+.sh-kid .sh-go { min-height: 26px; font-size: var(--fs-sm); }
 .sh-ki { flex: none; width: 20px; text-align: center; }
 .sh-prev { opacity: .65; }
 .sh-ico {
   flex: none; display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 3px; border-radius: 4px;
-  background: var(--gray-bg); color: var(--tx2); font-size: 10.5px; font-weight: 700; letter-spacing: -.3px; line-height: 1;
+  background: var(--gray-bg); color: var(--tx2); font-size: var(--fs-2xs); font-weight: var(--fw-semibold); letter-spacing: -.3px; line-height: 1;
 }
-.sh-ico-n { background: var(--sh-hue, var(--gray)); color: var(--sh-on-hue); }
+.sh-ico-n { background: var(--sh-hue-bg, var(--gray-bg)); color: var(--sh-hue, var(--tx2)); } /* the number in its hue on that hue's tint */
 /* row and tab badges wear page.css's semantic chip tints (a solid fill would swallow the yellow 🔔) */
 .sh-bdg {
-  flex: none; padding: 0 6px; border-radius: 9px; background: var(--yellow-bg); color: var(--yellow);
-  font-size: 11px; font-weight: 700; line-height: 16px; white-space: nowrap;
+  flex: none; padding: 0 6px; border-radius: 9px; background: var(--yellow-bg); color: var(--c-amber-text);
+  font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 16px; white-space: nowrap;
 }
 .sh-bdg-r { background: var(--red-bg); color: var(--red); }
 .sh-bdg-g { background: var(--green-bg); color: var(--green); }
-.sh-bdg-q { background: var(--spy-bg); color: var(--acc); }
+.sh-bdg-q { background: var(--spy-bg); color: var(--tx); }
 
 /* 📥 inbox, 🗂 plans: item cards with the conversation's colour on the left */
 .sh-ptabs { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; gap: 2px; padding: 0 8px 6px; background: var(--side); }
-.sh-pt { padding: 3px 6px; border: 0; border-radius: 5px; background: none; color: var(--tx2); font-size: 12.5px; white-space: nowrap; }
+.sh-pt { padding: 3px 6px; border: 0; border-radius: 5px; background: none; color: var(--tx2); font-size: var(--fs-sm); white-space: nowrap; }
 .sh-pt:hover { color: var(--tx); }
-.sh-pt.on { background: var(--hov); color: var(--tx); font-weight: 700; }
+.sh-pt.on { background: var(--hov); color: var(--tx); font-weight: var(--fw-medium); }
 .sh-it {
   display: flex; align-items: flex-start; gap: 9px; width: calc(100% - 12px); margin: 0 6px 2px; padding: 8px;
   border: 0; border-left: 3px solid var(--sh-hue, var(--line)); border-radius: 6px; background: none; color: var(--tx); text-align: left;
 }
 .sh-it:hover { background: var(--hov); }
 .sh-itb { flex: 1; min-width: 0; display: grid; gap: 1px; }
-.sh-k { color: var(--tx2); font-size: 12px; overflow-wrap: anywhere; }
-.sh-iq { font-size: 13px; overflow-wrap: anywhere; }
-.sh-w { color: var(--tx2); font-size: 11.5px; overflow-wrap: anywhere; }
-.sh-ans { color: var(--green); font-weight: 600; }
+.sh-k { color: var(--tx2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.sh-iq { font-size: var(--fs-base); overflow-wrap: anywhere; }
+.sh-w { color: var(--tx2); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.sh-ans { color: var(--green); font-weight: var(--fw-semibold); }
 /* 수신함 보류 / 다시 열기 (server page): beside the item button, never inside it */
 .sh-iw { margin-bottom: 2px; }
 .sh-iw > .sh-it { margin-bottom: 0; }
 .sh-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0 6px 0 17px; }
-.sh-act { padding: 2px 8px; border: 1px solid var(--line); border-radius: 5px; background: none; color: var(--tx2); font-size: 12px; }
+.sh-act { padding: 2px 8px; border: 1px solid var(--line); border-radius: 5px; background: none; color: var(--tx2); font-size: var(--fs-sm); }
 .sh-act:hover { background: var(--hov); color: var(--tx); }
-.sh-hq { flex-basis: 100%; font-size: 12px; overflow-wrap: anywhere; }
-.sh-err { color: var(--red); font-size: 12px; overflow-wrap: anywhere; }
+.sh-hq { flex-basis: 100%; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.sh-err { color: var(--red); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 
 /* 🏠 home counts, ⚙ settings */
 .sh-home { padding-top: 2px; }
 .sh-hr {
   display: flex; align-items: center; gap: 7px; width: 100%; min-height: 28px; padding: 0 6px;
-  border: 0; border-radius: 5px; background: none; color: var(--tx); font-size: 13px; text-align: left;
+  border: 0; border-radius: 5px; background: none; color: var(--tx); font-size: var(--fs-base); text-align: left;
 }
 .sh-hr:hover { background: var(--hov); }
 .sh-hl { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.sh-num { font-weight: 700; }
+.sh-num { font-weight: var(--fw-semibold); }
 .sh-set { padding: 4px 12px; }
-.sh-seth { margin: 10px 0 4px; color: var(--tx2); font-size: 12px; font-weight: 700; }
+.sh-seth { margin: 10px 0 4px; color: var(--tx2); font-size: var(--fs-sm); font-weight: var(--fw-medium); }
 .sh-setr { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; }
-.sh-hint { color: var(--tx2); font-size: 11px; }
-.sh-legend { margin: 0; font-size: 12px; } /* page.css .legend-list: no bullets, 3px grid gap */
+.sh-hint { color: var(--tx2); font-size: var(--fs-xs); }
+.sh-legend { margin: 0; font-size: var(--fs-sm); } /* page.css .legend-list: no bullets, 3px grid gap */
 .sh-legend li { overflow-wrap: anywhere; }
 
 /* tab bar */
@@ -210,14 +206,14 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 .sh-shell[data-side="closed"] .sh-topen { display: block; }
 .tb { display: flex; align-items: center; flex: 0 1 220px; min-width: 72px; height: 32px; border-radius: 7px 7px 0 0; color: var(--tx2); }
 .tb:hover { background: var(--hov); }
-.tb.on { background: var(--bg); color: var(--tx); }
+.tb.on { background: var(--sel); color: var(--tx); } /* the strip is the page surface now: the selected tab is the grey fill */
 .tb-go {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 100%; padding: 0 2px 0 8px;
-  border: 0; background: none; color: inherit; font-size: 13px; white-space: nowrap;
+  border: 0; background: none; color: inherit; font-size: var(--fs-base); white-space: nowrap;
 }
 /* the only ellipsis in the tab bar: the tab title; the full title is the tab's title attribute */
 .tt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.tb-pin { font-size: 10px; }
+.tb-pin { font-size: var(--fs-2xs); }
 .tb-x { flex: none; margin-right: 4px; padding: 0 4px; border: 0; border-radius: 3px; background: none; color: inherit; line-height: 18px; opacity: 0; }
 .tb:hover .tb-x, .tb.on .tb-x, .tb-x:focus-visible { opacity: .7; }
 .tb-x:hover { background: var(--hov); opacity: 1; }

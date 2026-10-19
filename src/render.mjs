@@ -888,7 +888,8 @@ function dataJsText(vm) {
 
 const attrEscape = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-const PAGE_CSS = ['page.css', 'plan-view.css', 'workers-view.css', 'alarm.css', 'shell.css', 'convo.css', 'annotate.css'];
+// tokens.css first: the design tokens every later sheet names.
+const PAGE_CSS = ['tokens.css', 'page.css', 'plan-view.css', 'workers-view.css', 'alarm.css', 'shell.css', 'convo.css', 'annotate.css'];
 // view.js first, then the block renderers it calls into, then alarm.js, then page.js which wires them together.
 const PAGE_JS = ['view.js', 'plan-view.js', 'workers-view.js', 'convo-view.js', 'shell.js', 'alarm.js', 'annotate.js', 'page.js'];
 

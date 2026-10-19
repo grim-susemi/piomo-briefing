@@ -638,7 +638,7 @@ test('no element carries an inline text-overflow; convo.css clips nothing with a
   assert.ok(!/#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\(/i.test(css), 'colours come from page.css tokens');
   assert.match(css, /--stabs-h:\s*\d+px/, 'annotate.css sticks its tray under --stabs-h');
   assert.match(css, /\.cv-page \{[^}]*overflow-wrap: anywhere/);
-  assert.match(css, /--cv-fs: 13\.5px/);
+  assert.match(css, /--cv-fs: var\(--fs-base\)/);
   assert.ok(!/(?<!\()max-width:\s*\d+px/.test(css), 'no fixed max-width (media queries aside): the page takes the full width');
 });
 

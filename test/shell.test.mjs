@@ -823,18 +823,18 @@ test('sideFrame is rendered once from state alone; sync keeps its title, chips, 
   assert.equal(input.value, 'typing', 'a focused search box is never overwritten');
 });
 
-test('shell.css: mockup tokens mapped onto page.css, colour literals only in the token block, ellipsis only on titles', () => {
+test('shell.css: mockup tokens mapped onto tokens.css, colour literals only in the token block, ellipsis only on titles', () => {
   const css = read('src/page/shell.css').replace(/\/\*[\s\S]*?\*\//g, '');
   const root = /:root\s*\{[^}]*\}/.exec(css)[0];
   for (const t of ['--rail', '--side', '--hov', '--sel', '--tx', '--tx2', '--tx3', '--acc', '--sw']) assert.match(root, new RegExp('\\s' + t + ':'), t);
   for (const t of ['--rail', '--side', '--hov', '--sel', '--tx', '--tx2', '--tx3', '--acc']) {
     const value = new RegExp('^' + t + ':\\s*([^;]*);').exec(root.slice(root.indexOf(t + ':')))[1];
-    assert.match(value, /var\(--(?:gray-bg|panel|fg|spy-bg|muted|accent)\)/, t + ' maps onto page.css');
+    assert.match(value, /var\(--(?:c-rail|c-side|fill-hover|fill-sel|c-fg|c-fg-2|c-fg-4|c-accent)\)/, t + ' maps onto tokens.css');
     assert.doesNotMatch(value, /#[0-9a-f]|\brgba?\(|\bhsla?\(/i, t);
   }
   const rest = css.replace(root, '');
   assert.doesNotMatch(rest, /#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/);
   assert.deepEqual(all(rest, /([^{}]+)\{[^}]*text-overflow:\s*ellipsis/g).map((s) => s.trim()), ['.sh-t', '.tt']);
-  for (let i = 0; i < 12; i++) assert.match(css, new RegExp('\\.sh-h' + i + ' \\{ --sh-hue: var\\(--tabhue-' + i + '\\); \\}'));
+  for (let i = 0; i < 12; i++) assert.match(css, new RegExp('\\.sh-h' + i + ' \\{ --sh-hue: var\\(--tabhue-' + i + '\\); --sh-hue-bg: var\\(--tabhue-' + i + '-bg\\); \\}'));
   assert.match(css, /@media \(max-width: 899px\)/);
 });
