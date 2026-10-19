@@ -3,9 +3,13 @@
 .rbk { margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-4); border: var(--hair) solid var(--c-line); border-radius: var(--r-lg); background: var(--c-elev); box-shadow: var(--shadow-card); }
 .rbk-t { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--sp-2); font-size: var(--fs-md); font-weight: var(--fw-semibold); }
 .rbk-m { color: var(--c-fg-3); font-size: var(--fs-sm); font-weight: var(--fw-regular); }
-.rbk-t, .rbk-kvl :is(dt, dd), .bar-l, .bar-n, .fs-t, .rbk-chk label, .cmpc-h { min-width: 0; overflow-wrap: anywhere; }
+.rbk-t, .rbk-kvl :is(dt, dd), .bar-l, .bar-n, .fs-t, .rbk-chk label, .cmpc-h { min-width: 0; overflow-wrap: break-word; }
 .rbk-scroll { min-width: 0; overflow-x: auto; }
 .rbk table.t { table-layout: auto; }
+/* convo.css gives table.t cells overflow-wrap: anywhere, which drops min-content to one letter, so this auto layout squeezed
+ * columns until a word split from its particle (B-F3-01). break-word keeps every word in min-content: a run breaks only when
+ * it cannot fit a line. The comparison table and every block text above get the same (B-18-01). */
+.rbk table.t :is(th, td) { word-break: keep-all; overflow-wrap: break-word; }
 .rbk-tbl :is(th, td) { min-width: 5em; }
 .rbk .num { text-align: right; }
 .rbk td.num { white-space: nowrap; }
@@ -66,8 +70,7 @@
   .cmpc { display: grid; gap: var(--sp-2) 0; padding: var(--sp-3); border: var(--hair) solid var(--c-line-strong); border-radius: var(--r-lg); }
   .cmpc.rec { border-color: var(--c-green); box-shadow: inset 0 0 0 1px var(--c-green); }
   .cmpc-h { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0; font-weight: var(--fw-semibold); }
-  .cmpc .rbk-kvl { gap: var(--sp-1) var(--sp-3); }
+  .cmpc .rbk-kvl { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1) var(--sp-3); }
   .cmpc dt { min-width: 84px; }
   .rbk .cv-pick { width: 100%; min-height: var(--hit); text-align: center; }
 }
-@media (max-width: 359px) { .cmpc .rbk-kvl { grid-template-columns: 1fr; } }

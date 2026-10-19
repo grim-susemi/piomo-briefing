@@ -31,6 +31,11 @@
 //   (k) blocks page only: the maximal report is drawn in full (the six kinds in order, every table row and cell, bar, key,
 //       step, checklist box, compare row and pick; no omission chip, no trimmed model) and the input decision's form is in
 //       the state the shot claims (empty; one refusal message per field; confirmed with the maximal values); its target on screen
+//   (l) blocks page, the table shot only: no word (a run of non-space characters) of a report-table or comparison cell or
+//       comparison card (the page also carries SHORT_CMP, a schema-valid comparison of ten-letter Korean words) is split across
+//       line boxes unless it is wider than the widest line its cell can have: a table column can widen up to the table's
+//       scroll box, a record's text column below 600 px cannot (Range client rects per word; B-F3-01, visual-qa C5: a
+//       Korean particle never ends up on a line of its own)
 // Blocks page (todo 12): the same fixture plus test/fixtures/report-blocks-max.mjs, served in server mode by the real board
 //   server (src/server.mjs, ports OMO_BRIEFING_PORT_BASE (47400) .. +9, never the live board's 47317-47326) because only a
 //   live page draws the input form and the compare's picks. Conversation A gains the report blocks-max (all six kinds at
@@ -42,8 +47,9 @@
 //   valid values (the field grid's top, its end, and the confirm row). Nothing is ever sent: an /answer POST to that
 //   server fails the run.
 // Self-tests (every viewport): each of (a), (b), (c), (i) and (f) is made to fail on purpose once (a block wider than #main,
-//   a clipped headline, a shifted #main, a reintroduced band, a console.error) and must recover, and (k) once on the blocks
-//   page (the table's last row taken out); a check that cannot fail fails the run.
+//   a clipped headline, a shifted #main, a reintroduced band, a console.error) and must recover, and (k) and (l) once on the
+//   blocks page (the table's last row taken out; the first table cell set to word-break: break-all); a check that cannot fail
+//   fails the run.
 // --inject-overflow: the negative run (never part of the normal one). Before every 개요 shot the first visible text span of a
 //   개요 row gets width:120px; white-space:nowrap; overflow:hidden (plus flex:0 0 120px: that span is a flex item whose
 //   flex-basis would otherwise override the width). Check (b) must name it; the run exits 1.
@@ -123,6 +129,16 @@ if (!Number.isInteger(PORT_BASE) || PORT_BASE < 1024 || PORT_BASE + 9 > 65535 ||
   console.error(`OMO_BRIEFING_PORT_BASE=${process.env.OMO_BRIEFING_PORT_BASE}: needs 10 ports in 1024-65535 outside the live board's ${LIVE_BOARD.join('-')}`);
   process.exit(2);
 }
+// check (l): the gate's B-18-01 comparison (ten-letter Korean words ending in a particle), linked to the open #97
+const SHORT_CMP = { id: 'short-korean', title: '검증 비교', summary: '시스템 구성을 비교합니다.', status: '참고', images: [], decisionId: null,
+  blocks: [{ kind: 'compare', title: '시스템 구성 비교', decision: 97, rows: [
+    { label: '데이터베이스검증표와', A: '보고서자동화시스템과', B: '사용자입력처리기준과', C: '보고서자료검증결과와' },
+    { label: '보고서자동화시스템과', A: '데이터베이스검증표와', B: '보고서자료검증결과와', C: '사용자입력처리기준과' }] },
+    // B-18B-01: the original long-sentence phone fixture (its card values strand 와/과 if the phone cards go two-column)
+    { kind: 'compare', title: '보고서 검증 방식 비교', decision: 97, rows: [
+      { label: '자료검증', A: '보고서자료검증결과와 추가 안내', B: '사용자입력처리기준과 추가 안내', C: '표시자료정합성검증과 추가 안내' },
+      { label: '연결검증', A: '성능측정결과비교와 추가 안내', B: '변경사항검토기준과 추가 안내', C: '요청자료처리결과와 추가 안내' },
+      { label: '결과정리', A: '자료처리완료결과와 추가 안내', B: '보고서자료검증결과와 추가 안내', C: '사용자입력처리기준과 추가 안내' }] }] };
 const blkSel = (n) => `#main [data-block="rep/${MAX_REPORT_ID}/blk/${n}"]`;
 
 // ------------------------------------------------------------------ the fixture the page shows
@@ -186,7 +202,7 @@ function blocksModel(base) {
     questionPrompt: false, answer: null, receipt: null });
   const report = maxReport({ decision: BLK_LINKED });
   A.reports = [{ id: report.id, title: report.title, summary: report.summary, at: A.lastBriefAt, decisionId: null, status: '참고', images: [], blocks: report.blocks },
-    ...A.reports.slice(0, 2)];
+    { ...SHORT_CMP, at: A.lastBriefAt }, ...A.reports.slice(0, 1)];
   vm.waiting = waitingOf(vm);
   if (vm.waiting.map((w) => w.key).join() !== `d${BLK_LINKED},d${BLK_DECISION}`) throw new Error(`blocks page waiting: ${J(vm.waiting)}`);
   const b = report.blocks;
@@ -505,6 +521,60 @@ function pageLib() {
     return { flipped: before.pass && !!broken && broken.pass === false && after.pass, before: before.pass, broken: broken ? broken.pass : null, after: after.pass,
       brokenProblems: broken ? broken.problems : null };
   };
+  // (l) every word (a run of non-space characters) of a report-table cell stays on one line unless it is wider than the
+  // widest line its cell can have. A table column can widen up to the table's scroll box (.rbk-scroll), so a squeezed column
+  // is no excuse (B-F3-01 split 그래프|와 in a 52 px column); below 600 px a record's text sits in a grid column that cannot
+  // widen: the room its lines have. A word's Range client rects are its line fragments.
+  qa.checkL = () => {
+    const r1 = (v) => Math.round(v * 10) / 10;
+    const cells = [...document.querySelectorAll('#main :is(table.rbk-tbl, table.rbk-cmp) :is(th, td), #main .rbk-cmpc :is(.cmpc-h, dt, dd)')].filter(visible);
+    const failures = [];
+    let words = 0, wider = 0;
+    for (const cell of cells) {
+      const cs = getComputedStyle(cell);
+      const px = (p) => parseFloat(cs.getPropertyValue(p)) || 0;
+      const right = cell.getBoundingClientRect().left + cell.clientLeft + cell.clientWidth - px('padding-right');
+      const tw = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+      for (let n = tw.nextNode(); n; n = tw.nextNode()) {
+        const range = document.createRange();
+        range.selectNodeContents(n);
+        const starts = [...range.getClientRects()].filter((x) => x.width > 0).map((x) => x.left);
+        if (!starts.length) continue;
+        // a comparison card's line is the card's content box, never the grid column its own layout squeezed (B-18B-01)
+        const card = cell.closest('.cmpc'), ccs = card && getComputedStyle(card);
+        const room = cs.display === 'table-cell'
+          ? cell.closest('.rbk-scroll').clientWidth - px('padding-left') - px('padding-right') - px('border-left-width') - px('border-right-width')
+          : card ? card.clientWidth - parseFloat(ccs.paddingLeft) - parseFloat(ccs.paddingRight)
+          : right - Math.min(...starts);
+        for (const m of n.data.matchAll(/\S+/g)) {
+          words++;
+          range.setStart(n, m.index);
+          range.setEnd(n, m.index + m[0].length);
+          const rects = [...range.getClientRects()].filter((x) => x.width > 0).sort((a, b) => a.top - b.top);
+          let lines = rects.length ? 1 : 0;
+          for (let i = 1; i < rects.length; i++) if (rects[i].top - rects[i - 1].top > Math.min(rects[i].height, rects[i - 1].height) / 2) lines++;
+          const width = rects.reduce((s, x) => s + x.width, 0);
+          if (width > room + 0.5) { wider++; continue; }
+          if (lines > 1) failures.push({ cell: cssPath(cell), word: m[0], lines, width: r1(width), room: r1(room), overflowWrap: cs.overflowWrap, wordBreak: cs.wordBreak });
+        }
+      }
+    }
+    const pass = cells.length > 0 && words > 0 && !failures.length;
+    return { result: pass ? 'pass' : 'fail', pass, cells: cells.length, words, wider, split: failures.length, failures: failures.slice(0, 40) };
+  };
+  // (l) made to fail once: the first table cell may break between any two letters (word-break: break-all), measured, put back
+  qa.selfTestL = () => {
+    const before = qa.checkL();
+    const cell = document.querySelector('#main table.rbk-tbl tbody td');
+    let broken = null;
+    if (cell) {
+      const old = cell.getAttribute('style');
+      try { cell.style.cssText += ';word-break:break-all'; broken = qa.checkL(); } finally { if (old === null) cell.removeAttribute('style'); else cell.setAttribute('style', old); }
+    }
+    const after = qa.checkL();
+    return { flipped: !!broken && broken.pass === false && broken.split > before.split && after.pass === before.pass && after.split === before.split,
+      before: before.pass, broken: broken ? broken.pass : null, after: after.pass, split: [before.split, broken ? broken.split : null, after.split] };
+  };
   // scrolls #main so the element (or its `up` ancestor) sits just under the sticky sub-tab bar ('top') or at the bottom
   qa.showBlock = (sel, edge, up) => {
     const main = document.getElementById('main');
@@ -676,6 +746,7 @@ async function shot(vp, n, state, o = {}) {
   if (o.d !== undefined) extra.d = await ev(`__qa.checkD(${J(o.d)})`);
   if (o.g) extra.g = await ev('__qa.checkG()');
   if (o.k) extra.k = await ev(`__qa.checkK(${J(o.k)})`);
+  if (o.l) extra.l = await ev('__qa.checkL()');
   await ev('1'); // every CDP event sent before this reply is in errLog now
   const fresh = errLog.slice(errCursor);
   errCursor = errLog.length;
@@ -699,6 +770,7 @@ function culpritsOf(k, c) {
   if (k === 'a') return { document: c.document, regions: (c.regions || []).filter((r) => r.pass === false).map((r) => ({ name: r.name, scrollWidth: r.scrollWidth, clientWidth: r.clientWidth, culprits: r.culprits })), culprits: c.culprits };
   if (k === 'b') return c.failures.map((f) => ({ selector: f.selector, simple: f.simple, scrollWidth: f.scrollWidth, clientWidth: f.clientWidth, text: f.text }));
   if (k === 'f') return { console: c.console, page: c.page, pageErrorMark: c.pageErrorMark };
+  if (k === 'l') return { split: c.split, wider: c.wider, words: c.failures.slice(0, 8).map((f) => `${f.word} ${f.width}/${f.room}px ${f.cell.split(' > ').slice(-2).join(' > ')}`) };
   return c;
 }
 
@@ -942,10 +1014,11 @@ async function runBlocks(vp) {
       if (scheme === SCHEMES[0]) {
         const st = results.selfTests[vp.name] || (results.selfTests[vp.name] = { shell: { flipped: false, note: 'the shell states never reached their self-test' } });
         st.k = await ev(`__qa.selfTestK(${J(kRep(blkSel(0)))})`);
+        st.l = await ev('__qa.selfTestL()');
       }
       for (const [i, kind] of BLOCK_KINDS.entries()) {
         const at = await ev(`__qa.showBlock(${J(blkSel(i))}, 'top')`);
-        await next(`blk-${scheme}-${kind}`, { k: kRep(blkSel(i)), note: { at } });
+        await next(`blk-${scheme}-${kind}`, { k: kRep(blkSel(i)), l: kind === 'table', note: { at } });
       }
       const lastRow = `${blkSel(0)} tbody tr:last-child`;
       const end = await ev(`__qa.showBlock(${J(lastRow)}, 'bottom')`);
