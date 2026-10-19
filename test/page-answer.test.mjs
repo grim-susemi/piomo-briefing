@@ -9,6 +9,7 @@ import { makeController } from './fixtures/controller-dom.mjs';
 import { openStore } from '../src/store.mjs';
 import { applyBoardAnswer } from '../src/decide.mjs';
 import { buildViewModel, withReports } from '../src/render.mjs';
+import { decisionFields, decisionValues } from './fixtures/decision-fields.mjs';
 
 // http: + token = the page the board server serves (src/render.mjs pageHtml, server mode); file: = the file page.
 // the page's scripts in render.mjs PAGE_JS order: icons.js first, so the confirm rows and chips carry their icons
@@ -199,6 +200,100 @@ function memoryStorage() {
   const m = new Map();
   return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, removeItem: (k) => { m.delete(k); }, size: () => m.size };
 }
+
+function fieldEnv() {
+  const e = makeEnv();
+  e.page.receive(answerModel(1, { 12: { fields: decisionFields(), options: {}, recommend: '' } }));
+  return e;
+}
+function editField(e, id, value) {
+  const selector = '[data-field="' + id + '"]' + (id === 'theme' ? '[value="' + value + '"]' : '');
+  const input = e.app.querySelector(selector);
+  assert.ok(input, selector);
+  input.value = String(value);
+  input.focus();
+  e.app.listeners.input({ target: input });
+  return e.document.activeElement;
+}
+function fillFields(e) { for (const [id, value] of Object.entries(decisionValues())) editField(e, id, value); }
+
+test('typed fields: confirmation quotes every value, any edit invalidates it, send uses only its confirmed snapshot', async () => {
+  const e = fieldEnv();
+  fillFields(e);
+  press(e, 'ans-fields', 12);
+  const confirmed = e.page.state.ui.answers['12'].confirm;
+  assert.equal(e.app.querySelectorAll('[data-ans="12"] .ans-go').length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(confirmed.values)), decisionValues());
+  for (const value of Object.values(decisionValues())) assert.ok(decHtml(e, 12).includes(String(value)));
+  editField(e, 'side_width', 999);
+  assert.equal(e.page.state.ui.answers['12'].confirm, null);
+  assert.equal(e.app.querySelector('[data-act="ans-send"][data-id="12"]'), null);
+  assert.match(e.app.querySelector('#field-12-dc-side_width-error').textContent, /400/);
+  assert.equal(posts(e).length, 0);
+  editField(e, 'side_width', 280);
+  press(e, 'ans-fields', 12);
+  // A non-DOM mutation after confirmation must not replace the quoted, confirmed values on the wire.
+  e.page.state.ui.answers['12'].values.side_width = '999';
+  press(e, 'ans-send', 12);
+  assert.deepEqual(JSON.parse(posts(e)[0].opts.body), { id: 12, sessionId: 's-a1', values: decisionValues() });
+  posts(e)[0].resolve(reply(200, { ok: true })); await settle();
+  assert.equal(posts(e).length, 1);
+  assert.equal(e.page.state.ui.answers['12'].phase, 'sent');
+  assert.deepEqual(e.errors, []);
+});
+
+test('typed fields: server refusal renders the exact field reason next to its control', async () => {
+  const e = fieldEnv(); fillFields(e);
+  press(e, 'ans-fields', 12); press(e, 'ans-send', 12);
+  posts(e)[0].resolve(reply(400, { ok: false, code: 'BAD_VALUES', fieldErrors: { side_width: '200..400 범위로 입력해 주세요' } }));
+  await settle();
+  assert.equal(e.page.state.ui.answers['12'].confirm, null);
+  assert.equal(e.app.querySelector('#field-12-dc-side_width').getAttribute('aria-invalid'), 'true');
+  assert.equal(e.app.querySelector('#field-12-dc-side_width-error').textContent, '200..400 범위로 입력해 주세요');
+  assert.deepEqual(e.errors, []);
+});
+
+for (const [id, value] of [['name', '고친 이름'], ['side_width', '300'], ['theme', '어둡게'], ['layout', '넓게']]) {
+  test('typed fields: re-render retains operated ' + id + ' control after confirmation invalidation', () => {
+    const e = fieldEnv(); fillFields(e); press(e, 'ans-fields', 12);
+    const current = e.app.querySelector('[data-field="' + id + '"]' + (id === 'theme' ? '[value="' + value + '"]' : ''));
+    if (id === 'name') {
+      current.selectionStart = 2; current.selectionEnd = 3; current.selectionDirection = 'forward';
+      // The tiny DOM has no selection API; supply the native behavior on each replacement.
+      const proto = Object.getPrototypeOf(current), old = proto.setSelectionRange;
+      proto.setSelectionRange = function (start, end, direction) { this.selectionStart = start; this.selectionEnd = end; this.selectionDirection = direction; };
+      try {
+        const focused = editField(e, id, value);
+        assert.equal(focused.getAttribute('data-field'), id);
+        assert.equal(focused.selectionStart, 2); assert.equal(focused.selectionEnd, 3);
+      } finally { if (old) proto.setSelectionRange = old; else delete proto.setSelectionRange; }
+    } else {
+      const focused = editField(e, id, value);
+      assert.equal(focused.getAttribute('data-field'), id);
+      if (id === 'theme') assert.equal(focused.getAttribute('value'), value);
+    }
+    assert.equal(e.page.state.ui.answers['12'].confirm, null);
+    assert.notEqual(e.document.activeElement.getAttribute('data-act'), 'ans-send');
+    assert.deepEqual(e.errors, []);
+  });
+}
+
+test('typed fields: hostile labels and options stay text, numbers retain their full exponent representation', () => {
+  const e = fieldEnv();
+  const fields = [
+    { id: 'n', label: '<img onerror=alert(1)>', kind: 'number', min: -Number.MAX_VALUE, max: Number.MAX_VALUE, step: Number.MAX_VALUE },
+    { id: 'theme', label: '테마', kind: 'choice', options: ['<img onerror=alert(1)>', '</option><script>x</script>'] },
+  ];
+  e.page.receive(answerModel(2, { 12: { fields, options: {}, recommend: '' } })); e.advance(600);
+  editField(e, 'n', String(Number.MAX_VALUE));
+  editField(e, 'theme', '<img onerror=alert(1)>');
+  press(e, 'ans-fields', 12);
+  assert.match(decHtml(e, 12), /1\.7976931348623157e\+308/);
+  assert.equal(e.app.querySelector('.ans-fields img'), null);
+  assert.equal(e.app.querySelector('.ans-fields script'), null);
+  assert.match(e.app.querySelector('.ans-fields').textContent, /<img onerror=alert\(1\)>/);
+  assert.ok(e.app.querySelector('.ans-fields').textContent.includes('</option><script>x</script>'));
+});
 
 test('hold and reopen use the existing token-bearing answer transport without sending a choice', async () => {
   const e = makeEnv();

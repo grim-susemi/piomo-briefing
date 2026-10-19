@@ -681,6 +681,8 @@ export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
         answer: ans ? { option: str(ans.option), text: str(ans.text), at: isNum(ans.at) ? ans.at : null } : null, // text = a board reply
         receipt: rc && rc.proven !== false ? { kind: str(rc.kind), mode: str(rc.mode), deliveredAt: isNum(rc.deliveredAt) ? rc.deliveredAt : null, proven: true } : null, // unproven (admitted, not yet confirmed) is not shown as a delivery proof
       };
+      if (d.fields !== undefined) out.fields = d.fields;
+      if (ans && ans.values !== undefined) out.answer.values = ans.values;
       // C-HOLD 4: held = {at}, emitted only for a held decision (absent = null), so open decisions spend no bytes on it
       if (closures.get(d.id)?.reason === 'held') out.held = { at: isNum(closures.get(d.id).at) ? closures.get(d.id).at : null };
       if (d.source === 'ask' && hostAlive && arr(meta.askLive).includes(d.id) && !ans && !closures.has(d.id)) out.askLive = true;

@@ -11,6 +11,7 @@ import { RULE_MARKER, RULE_TEXT, replyOverBudget } from '../src/rule.mjs';
 import { makeFakePi, makeCtx, assistant, toolCall, lines } from './helpers/fake-pi.mjs';
 import { tempDir } from './helpers/temp.mjs';
 import { reportBlocks } from './fixtures/report-blocks.mjs';
+import { decisionFields } from './fixtures/decision-fields.mjs';
 import { openStore } from '../src/store.mjs';
 
 const CHILD = fileURLToPath(new URL('./helpers/ext-child.mjs', import.meta.url));
@@ -66,6 +67,17 @@ const decision = (over = {}) => ({
 });
 const readJson = (p) => JSON.parse(readFileSync(p, 'utf8'));
 const textOfResult = (r) => r.content.map((b) => b.text).join('\n');
+
+test('brief: input fields persist unchanged and /decide returns board link without an answer', async t => {
+  const s = lead(t);
+  await s.start();
+  await s.brief(goodBrief({ decisions: [{ question: '설정 값', reason: '직접 입력', blocks: false, fields: decisionFields() }] }));
+  const stored = readJson(join(s.stateDir, 'decisions', '000001.json'));
+  assert.deepEqual(stored.fields, decisionFields());
+  await s.host.commands.get('decide').handler('1', s.ctx);
+  assert.equal(existsSync(join(s.stateDir, 'answers', '000001.json')), false);
+  assert.ok(JSON.stringify(s.notes).includes(s.pagePath));
+});
 
 // ---------------------------------------------------------------- lead gate
 
@@ -156,6 +168,8 @@ for (const action of ['option', 'hold']) {
     await ready;
     assert.deepEqual(s.meta().askLive, [1]);
     await assert.rejects(s.brief(goodBrief({ decisions: [decision()] })), /질문창이 열려 있음/);
+    await assert.rejects(s.brief(goodBrief({ decisions: [{ question: '입력', reason: '직접 입력', blocks: false, fields: decisionFields() }] })));
+    assert.equal(existsSync(join(s.stateDir, 'decisions', '000002.json')), false);
     assert.equal(applyBoardAnswer(openStore(s.stateDir), {
       id: 1, sessionId: s.sid, ...(action === 'option' ? { option: 'B' } : { action: 'hold' }),
     }, s.now()).ok, true);

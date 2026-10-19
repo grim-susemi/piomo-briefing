@@ -15,6 +15,74 @@ const isObj = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
 const blockText = (maxLength, minLength = 1) => ({ type: 'string', minLength, maxLength });
 const blockObject = (properties, required = Object.keys(properties)) => ({ type: 'object', additionalProperties: false, properties, required });
 const blockArray = (items, minItems, maxItems) => ({ type: 'array', items, minItems, maxItems });
+const fieldBase = { id: { ...blockText(24), pattern: '^[a-z0-9_-]+$' }, label: blockText(40) };
+export const DECISION_FIELDS_SCHEMA = blockArray({ oneOf: [
+  blockObject({ ...fieldBase, kind: { const: 'text' }, maxLen: { type: 'integer', minimum: 1, maximum: 200 } }),
+  blockObject({ ...fieldBase, kind: { const: 'number' }, min: { type: 'number' }, max: { type: 'number' }, step: { type: 'number', exclusiveMinimum: 0 } }),
+  blockObject({ ...fieldBase, kind: { const: 'choice' }, options: { ...blockArray(blockText(40), 2, 6), uniqueItems: true } }),
+] }, 1, 4);
+
+function checkDecisionFields(errors, path, fields) {
+  if (!checkBlockArray(errors, path, fields, 1, 4)) return;
+  const ids = new Set();
+  for (const [i, f] of fields.entries()) {
+    const p = `${path}[${i}]`;
+    if (!isObj(f)) { errors.push(`${p}: 필드 객체 필요`); continue; }
+    if (typeof f.id !== 'string' || !/^[a-z0-9_-]{1,24}$/.test(f.id)) errors.push(`${p}.id: 형식 필요(a-z0-9_- 1..24자)`);
+    else if (ids.has(f.id)) errors.push(`${p}.id: 중복(${f.id})`);
+    else ids.add(f.id);
+    checkStr(errors, `${p}.label`, f.label, { max: 40 });
+    const spec = DECISION_FIELDS_SCHEMA.items.oneOf.find(s => s.properties.kind.const === f.kind);
+    if (!spec) { errors.push(`${p}.kind: 허용 값 text|number|choice 필요`); continue; }
+    checkBlockKeys(errors, p, f, Object.keys(spec.properties));
+    if (f.kind === 'text' && (!Number.isInteger(f.maxLen) || f.maxLen < 1 || f.maxLen > 200)) errors.push(`${p}.maxLen: 1..200 정수 필요`);
+    if (f.kind === 'number') {
+      for (const k of ['min', 'max', 'step']) if (typeof f[k] !== 'number' || !Number.isFinite(f[k])) errors.push(`${p}.${k}: 유한한 숫자 필요`);
+      if (f.max < f.min) errors.push(`${p}.max: min 이상 필요`);
+      if (f.step <= 0) errors.push(`${p}.step: 0보다 큰 숫자 필요`);
+    }
+    if (f.kind === 'choice' && checkBlockArray(errors, `${p}.options`, f.options, 2, 6)) {
+      const seen = new Set();
+      for (const [j, option] of f.options.entries()) {
+        checkStr(errors, `${p}.options[${j}]`, option, { max: 40 });
+        if (seen.has(option)) errors.push(`${p}.options[${j}]: 중복 선택지`);
+        seen.add(option);
+      }
+    }
+  }
+}
+
+// Decimal arithmetic avoids rejecting 0.3 on a 0.1 grid and stays exact for exponent-form finite numbers.
+function onStep(value, min, step) {
+  const parts = [value, min, step].map(n => {
+    const [mantissa, exponent = '0'] = String(n).toLowerCase().split('e');
+    const [whole, fraction = ''] = mantissa.split('.');
+    return { n: BigInt(whole + fraction), exponent: Number(exponent) - fraction.length };
+  });
+  const exponent = Math.min(...parts.map(p => p.exponent));
+  const [v, m, s] = parts.map(p => p.n * 10n ** BigInt(p.exponent - exponent));
+  return (v - m) % s === 0n;
+}
+
+export function decisionValueErrors(fields, values) {
+  const errors = Object.create(null);
+  if (!Array.isArray(fields) || !isObj(values)) return { _: '입력 필드가 있는 결정과 값 객체가 필요해요' };
+  const specs = [];
+  checkDecisionFields(specs, 'fields', fields);
+  if (specs.length) return { _: '저장된 입력 필드 형식이 올바르지 않아요' };
+  for (const key of Object.keys(values)) if (!fields.some(f => f.id === key)) errors[key] = '알 수 없는 필드예요';
+  for (const f of fields) {
+    const v = Object.hasOwn(values, f.id) ? values[f.id] : undefined;
+    if (f.kind === 'text' && (typeof v !== 'string' || !v.trim() || len(v) > f.maxLen)) errors[f.id] = `1..${f.maxLen}자로 입력해 주세요`;
+    if (f.kind === 'number') {
+      if (typeof v !== 'number' || !Number.isFinite(v)) errors[f.id] = '숫자를 입력해 주세요';
+      else if (v < f.min || v > f.max) errors[f.id] = `${f.min}..${f.max} 범위로 입력해 주세요`;
+      else if (!onStep(v, f.min, f.step)) errors[f.id] = `${f.min}부터 ${f.step} 간격으로 입력해 주세요`;
+    }
+    if (f.kind === 'choice' && (typeof v !== 'string' || !f.options.includes(v))) errors[f.id] = '선택지 중 하나를 골라 주세요';
+  }
+  return errors;
+}
 export const REPORT_BLOCK_SCHEMA = blockArray({ oneOf: [
   blockObject({ kind: { const: 'table' }, title: blockText(80, 0),
     columns: blockArray(blockText(40), 1, 8),
@@ -236,7 +304,12 @@ export function checkDecision(errors, path, d, fns, sessionId) {
   checkStr(errors, path + '.question', d.question, { min: 1, max: 100 });
   if (d.state !== undefined && !['open', 'answered'].includes(d.state)) errors.push(`${path}.state: 허용 값 open|answered 필요`);
   if (d.state === 'answered') checkStr(errors, path + '.answer', d.answer, { min: 1, max: 500 });
-  checkDecisionOptions(errors, path, d);
+  if (d.fields !== undefined) {
+    checkDecisionFields(errors, `${path}.fields`, d.fields);
+    if (d.options !== undefined || d.recommend !== undefined) errors.push(`${path}.fields: 선택지 결정과 입력 필드는 함께 쓸 수 없음`);
+    checkStr(errors, path + '.reason', d.reason, { min: 1, max: 100 });
+    if (typeof d.blocks !== 'boolean') errors.push(`${path}.blocks: 불리언 필요`);
+  } else checkDecisionOptions(errors, path, d);
 }
 
 // reports? 0..3 (C-REPORT 1). Only the contract keys are kept; image files are read later by importImage.

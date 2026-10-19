@@ -31,7 +31,7 @@ import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { execFile as nodeExecFile, execFileSync as nodeExecFileSync } from 'node:child_process';
-import { validateBrief, REPORT_BLOCK_SCHEMA } from './src/schema.mjs';
+import { validateBrief, REPORT_BLOCK_SCHEMA, DECISION_FIELDS_SCHEMA } from './src/schema.mjs';
 import { openStore } from './src/store.mjs';
 import { collectAuto } from './src/collect.mjs';
 import { applyDecide, applyBoardAnswer, applyBoardAnnotation, formatDecideResult } from './src/decide.mjs';
@@ -134,8 +134,11 @@ export const BRIEF_SCHEMA = {
           recommend: { type: 'string', enum: ['A', 'B', 'C'] },
           reason: { type: 'string' },
           blocks: { type: 'boolean' },
+          fields: DECISION_FIELDS_SCHEMA,
         },
-        required: ['question', 'options', 'recommend', 'reason', 'blocks'],
+        required: ['question', 'reason', 'blocks'],
+        oneOf: [{ required: ['options', 'recommend'], not: { required: ['fields'] } },
+          { required: ['fields'], not: { anyOf: [{ required: ['options'] }, { required: ['recommend'] }] } }],
       },
     },
     close_decisions: {
@@ -188,6 +191,7 @@ const BRIEF_DESCRIPTION = [
   '상황판(브라우저 페이지)을 갱신하는 보고 도구. HTML은 코드가 만든다. 도구를 쓴 턴은 마지막 답 전에 한 번 호출한다.',
   '한도(유니코드 글자 수): title 1..40, headline 1..100(목표 달성 기준 한 문장), next 0..100, changes 0..8개·done 0..12개(text 1..100),',
   'decisions 0..4개(question 1..100, options A·B(·C){text 1..60, consequence 1..80}, recommend, reason 1..100, blocks),',
+  '입력 결정은 options·recommend 대신 fields 1..4개{id a-z0-9_- 1..24 고유,label 1..40,kind text(maxLen 1..200 정수)|number(유한한 min<=max,step>0)|choice(options 2..6개 고유 문자열 1..40)}. 값은 상황판에서 확인 후 전송하며 /decide는 상황판 링크를 안내한다.',
   '질문 도구에서 받은 답은 state: answered, answer: 답 내용(1..500)으로 기록한다. state 생략은 open.',
   'close_decisions {id, reason: superseded|withdrawn}, flow 0..8개(label 1..20, state).',
   'reports 0..3개(id a-z0-9_- 1..64, title 1..80, summary 0..1000, decision(열린 결정 번호) 또는 decisionIndex(이번 decisions[] 위치 0..3) 중 하나,',
@@ -516,7 +520,7 @@ export function createBriefingExtension(opts = {}) {
     // success). The page token never reaches these hooks; the request body carries no secret.
     const BOARD_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
     const TAB_ID = /^w\d+:t[0-9A-Za-z]+$/;
-    const ANSWER_STATUS = { NOT_FOUND: 404, SESSION_MISMATCH: 409, CLOSED: 409, HELD: 409, ANSWERED: 409, BAD_OPTION: 400, BAD_TEXT: 400, BAD_REQUEST: 400, NO_ANNOTATION_SUPPORT: 409, REQUEST_ID_CONFLICT: 409, IO_ERROR: 500 };
+    const ANSWER_STATUS = { NOT_FOUND: 404, SESSION_MISMATCH: 409, CLOSED: 409, HELD: 409, ANSWERED: 409, BAD_OPTION: 400, BAD_TEXT: 400, BAD_VALUES: 400, BAD_REQUEST: 400, NO_ANNOTATION_SUPPORT: 409, REQUEST_ID_CONFLICT: 409, IO_ERROR: 500 };
     const FOCUS_TIMEOUT_MS = 3000;
     const FOCUS_GUARD_MS = 4000; // the reply is sent even if execFile never calls back
     const boardReply = (status, code) => ({ status, json: code ? { ok: false, code } : { ok: true } });
@@ -551,6 +555,7 @@ export function createBriefingExtension(opts = {}) {
       }
       // `detail` (log-only, may hold a file path) goes to the recorded diagnostic, never into the reply
       if (res.code === 'IO_ERROR' || ANSWER_STATUS[res.code] === undefined) return answerFault(body, res.detail);
+      if (res.code === 'BAD_VALUES') return { status: 400, json: { ok: false, code: res.code, fieldErrors: res.fieldErrors } };
       return boardReply(ANSWER_STATUS[res.code], res.code);
     }
 
@@ -738,6 +743,7 @@ export function createBriefingExtension(opts = {}) {
           d.id = store.allocDecisionId({
             sessionId: sid, question: d.question, options: d.options, recommend: d.recommend,
             reason: d.reason, blocks: d.blocks, createdAt: t, source: 'brief',
+            ...(d.fields !== undefined ? { fields: d.fields } : {}),
           });
           if (d.state !== 'answered') created.push(d);
         }
@@ -864,7 +870,11 @@ export function createBriefingExtension(opts = {}) {
         return;
       }
       const result = applyDecide(store, text, sid, nowFn());
-      const line = formatDecideResult(result);
+      let line = formatDecideResult(result);
+      if (result.errors.some(e => e.code === 'FIELDS_REQUIRED')) {
+        const served = await ensureServer();
+        line += ` - 상황판: ${served?.url || pagePath}`;
+      }
       // the decide source: read errors set its entry, a command without any clears it; saved before the one publish
       const readErrors = result.readErrors ?? [];
       const changed = readErrors.length > 0

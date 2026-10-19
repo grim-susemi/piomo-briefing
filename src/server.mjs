@@ -48,12 +48,13 @@ const MAX_BODY_BYTES = 4096;
 const MAX_ANSWER_BYTES = 65536;
 const BODY_TIMEOUT_MS = 2000;
 const WRITE_TIMEOUT_MS = 10000; // after this a still-running write callback is answered 504; it keeps the write slot until it settles
-const ANSWER_KEYS = new Set(['id', 'sessionId', 'option', 'text', 'action']);
+const ANSWER_KEYS = new Set(['id', 'sessionId', 'option', 'text', 'values', 'action']);
 const ANNOTATION_KEYS = new Set(['kind', 'sessionId', 'requestId', 'text']);
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ANSWER_OPTIONS = new Set(['A', 'B', 'C']);
 const WRITE_TIMED_OUT = Symbol('write timed out');
 const LEGACY_TOO_LARGE = Symbol('legacy body too large');
+const DUPLICATE_KEY = Symbol('duplicate JSON key');
 const UTF8 = new TextDecoder('utf-8', { fatal: true });
 const SECURE = {
   'Cache-Control': 'no-store',
@@ -62,6 +63,35 @@ const SECURE = {
   'X-Content-Type-Options': 'nosniff',
 };
 const SOCKET_DISCONNECT_CODES = new Set(['ECONNRESET', 'EPIPE']);
+
+// JSON.parse checks the grammar first. Walk its raw tokens without recursion so a repeated member cannot be
+// hidden by last-wins parsing, string contents, escaped quotes, or alternate Unicode spellings of a key.
+// Each object owns its key set; the field context follows containers below the top-level values member.
+function duplicateAnswerKey(text) {
+  const stack = [];
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i], parent = stack.at(-1);
+    if (c === '{' || c === '[') {
+      stack.push({ keys: c === '{' ? new Set() : null, key: null,
+        inValues: stack.length === 1 && parent.key === 'values',
+        field: parent?.field ?? (parent?.inValues ? parent.key : null) });
+    } else if (c === '}' || c === ']') {
+      stack.pop();
+    } else if (c === '"') {
+      const start = i++;
+      while (text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
+      const end = i + 1;
+      let next = end;
+      while (/\s/.test(text[next] || '')) next++;
+      if (text[next] !== ':') continue; // a string value never contributes a member name
+      const key = JSON.parse(text.slice(start, end));
+      if (parent.keys.has(key)) return { field: parent.field ?? (parent.inValues ? key : null) };
+      parent.keys.add(key);
+      parent.key = key;
+    }
+  }
+  return null;
+}
 
 export function createBoardServer(options) {
   const {
@@ -322,8 +352,11 @@ export function createBoardServer(options) {
     if (!Number.isSafeInteger(b.id) || b.id <= 0 || typeof b.sessionId !== 'string') return false;
     const hasOption = Object.hasOwn(b, 'option');
     const hasText = Object.hasOwn(b, 'text');
-    if (Object.hasOwn(b, 'action')) return !hasOption && !hasText && (b.action === 'hold' || b.action === 'reopen');
-    if (hasOption === hasText) return false;
+    const hasValues = Object.hasOwn(b, 'values');
+    if (Object.hasOwn(b, 'action')) return !hasOption && !hasText && !hasValues && (b.action === 'hold' || b.action === 'reopen');
+    if (Number(hasOption) + Number(hasText) + Number(hasValues) !== 1) return false;
+    // The callback validates these keys and values against the stored decision, never the client's field spec.
+    if (hasValues) return b.values !== null && typeof b.values === 'object' && !Array.isArray(b.values);
     return hasOption ? ANSWER_OPTIONS.has(b.option) : typeof b.text === 'string';
   }
   function validFocus(b) {
@@ -332,15 +365,20 @@ export function createBoardServer(options) {
   }
   // The parsed body when it is a JSON object with exactly the keys the route allows, else null.
   function parseWriteBody(buf, pathname) {
-    let value;
+    let value, text;
     try {
-      value = JSON.parse(UTF8.decode(buf));
+      text = UTF8.decode(buf);
+      value = JSON.parse(text);
     } catch {
       if (pathname === '/answer' && buf.length > MAX_BODY_BYTES) return LEGACY_TOO_LARGE;
       return null; // malformed JSON / UTF-8 is a 400 for the caller, not a server fault
     }
     if (pathname === '/answer' && value?.kind !== 'annotation' && buf.length > MAX_BODY_BYTES) return LEGACY_TOO_LARGE;
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+    if (pathname === '/answer') {
+      const duplicate = duplicateAnswerKey(text);
+      if (duplicate) return { [DUPLICATE_KEY]: duplicate };
+    }
     return (pathname === '/answer' ? validAnswer(value) : validFocus(value)) ? value : null;
   }
 
@@ -394,6 +432,12 @@ export function createBoardServer(options) {
       const body = parseWriteBody(got.buf, pathname);
       if (body === LEGACY_TOO_LARGE) {
         json(res, 413, { ok: false, code: 'TOO_LARGE' });
+        return;
+      }
+      if (body?.[DUPLICATE_KEY]) {
+        const { field } = body[DUPLICATE_KEY];
+        json(res, 400, { ok: false, code: 'DUPLICATE_KEY',
+          ...(field === null ? {} : { fieldErrors: { [field]: '같은 입력 항목을 두 번 보낼 수 없어요' } }) });
         return;
       }
       if (!body) {

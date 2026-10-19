@@ -245,7 +245,7 @@ test('개요: 지금/다음 callout, flow chips with →, four summary cards wit
   const running = A.live.workers.filter((w) => w.state === 'running' && !w.stale).length;
   assert.deepEqual(card('plan'), ['[list-todo] 계획', '4/8 · briefing-board-redesign']);
   assert.deepEqual(card('wk'), ['[users] 작업자', `${A.live.workers.length} · ${running}명 진행 중`]);
-  assert.deepEqual(card('dec'), ['[bell] 결정', '2 대기 · 3 답함']);
+  assert.deepEqual(card('dec'), ['[bell] 결정', '2 대기 · 4 답함']);
   assert.deepEqual(card('rep'), ['[file-text] 보고서', '3 · ' + A.reports[0].title]);
   assert.equal(cls(p, 'grid4').length, 1);
   // open decision cards with answer boxes (dec/<id>), after the sent lines of answers not yet delivered
@@ -255,11 +255,11 @@ test('개요: 지금/다음 callout, flow chips with →, four summary cards wit
     assert.equal(cls(el, 'dcard').length, 1);
     assert.equal(attrs(el, 'data-ans', String(id)).length, 1, 'answer box #' + id);
   }
-  assert.deepEqual(cls(p, 'dsent').map((e) => e.attrs['data-block']), ['dec/91', 'dec/94']);
+  assert.deepEqual(cls(p, 'dsent').map((e) => e.attrs['data-block']), ['dec/91', 'dec/94', 'dec/100']);
   const html = render(ctx, A, 'ov');
   assert.ok(html.includes(kit.sentLine(A.decisions.find((d) => d.id === 91)).replace(/^<p/, '<p data-block="dec/91"')));
   // #90 was delivered: it shows again only while this page follows its own send
-  assert.deepEqual(cls(parse(render(ctx, A, 'ov', { answers: { 90: { phase: 'sent' } } })), 'dsent').map((e) => e.attrs['data-block']), ['dec/90', 'dec/91', 'dec/94']);
+  assert.deepEqual(cls(parse(render(ctx, A, 'ov', { answers: { 90: { phase: 'sent' } } })), 'dsent').map((e) => e.attrs['data-block']), ['dec/90', 'dec/91', 'dec/94', 'dec/100']);
   assert.ok(flat(p).includes('질문창으로 옮김 · 여기서 답할 것 없음'));
   // the open-question line is the old card's markup
   const oq = (h) => /<p class="oq">[\s\S]*?<\/p>/.exec(h)[0];
@@ -429,13 +429,14 @@ test('결정: open cards, 보류됨 with 다시 열기, and the 결정 기록 ta
   const table = cls(p, 'cv-hist')[0];
   assert.deepEqual(els(table, (e) => e.tag === 'th').map(text), ['#', '질문', '내 답', '결과', '전달']);
   const rows = els(table, (e) => e.tag === 'tr' && e.attrs['data-block']);
-  assert.deepEqual(rows.map((r) => r.attrs['data-block']), ['dec/90', 'dec/91', 'dec/94']);
+  assert.deepEqual(rows.map((r) => r.attrs['data-block']), ['dec/90', 'dec/91', 'dec/94', 'dec/100']);
   assert.deepEqual(rows.map((r) => r.kids.map(shown)), [
     ['#90', '알림 띠는 어디에 둘까요?', 'A · 탭 바 위', '레일과 사이드바를 가리지 않음', A.decisions[0].delivery.replace('⏱', '[clock]')],
     ['#91', '사이드바 기본 폭은?', '답글 “260으로 하되 끌어서 바꿀 수 있게 해 줘”', '-', '대기: 작업이 끝나면 전달'],
     ['#94', '시안 v7 주석 창 위치', '답글 “고른 곳 아래, 넘치면 위로”', '-', '질문창에서 답 받음'],
+    ['#100', '사이드바 입력 값', '너비=280', '-', '대기: 작업이 끝나면 전달'],
   ]);
-  assert.deepEqual(rows.map((r) => cls(r, 'chip')[0].attrs.class), ['chip s-done', 'chip x-stale', 'chip x-info']);
+  assert.deepEqual(rows.map((r) => cls(r, 'chip')[0].attrs.class), ['chip s-done', 'chip x-stale', 'chip x-info', 'chip x-stale']);
   assert.ok(flat(p).includes('질문창으로 옮김 · 여기서 답할 것 없음'));
   // a delivery proof without a delivery string, an answer without one
   const s = clone(A);

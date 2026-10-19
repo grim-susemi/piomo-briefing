@@ -109,6 +109,39 @@ h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
 .ans-state { color: var(--teal); }
 .ans-state::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: middle; animation: ans-pulse 1s ease-in-out 6 alternate; }
 .ans-err { color: var(--red); }
+.ans-fields { display: grid; gap: var(--sp-3); min-width: 0; }
+.ans-field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: var(--sp-3); min-width: 0; }
+.ans-field { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--sp-1); min-width: 0; }
+.ans-field .ans-hint { overflow-wrap: anywhere; }
+.ans-feedback { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.ans-feedback > * { grid-area: 1 / 1; overflow-wrap: anywhere; word-break: keep-all; }
+.ans-feedback-size { visibility: hidden; pointer-events: none; user-select: none; font-weight: var(--fw-semibold); }
+.ans-feedback.is-invalid > .ans-hint { visibility: hidden; }
+.ans-error-phrase { display: inline-block; max-width: 100%; vertical-align: top; }
+.ans-field label, .ans-field legend, .ans-values { overflow-wrap: anywhere; word-break: keep-all; }
+.ans-field > label, .ans-field legend { font-weight: var(--fw-medium); }
+.ans-field fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.ans-field legend { padding: 0 0 var(--sp-1); }
+.ans-field input:not([type="radio"]), .ans-field select { width: 100%; min-width: 0; max-width: 100%; min-height: 36px; padding: var(--sp-2); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); color: var(--fg); font: inherit; font-variant-numeric: tabular-nums; }
+.ans-field input::placeholder { color: var(--muted); opacity: 1; }
+.ans-field input:focus-visible, .ans-field select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ans-field [aria-invalid="true"] { border-color: var(--red); }
+.ans-choices { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.ans-choices label { display: flex; align-items: center; gap: var(--sp-2); min-height: 36px; max-width: 100%; padding: var(--sp-1) var(--sp-2); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); cursor: pointer; }
+.ans-choices input { flex: 0 0 auto; accent-color: var(--fg); }
+.ans-choices label:hover { background: var(--fill-hover); }
+.ans-choices label:has(input:checked) { background: var(--fill-sel); }
+.ans-choices label:active { background: var(--fill-press); }
+.ans-field input:not([type="radio"]):hover, .ans-field select:hover { border-color: var(--c-fg-3); }
+.ans-values { font-weight: var(--fw-regular); }
+.ans-values > span { display: inline-block; max-width: 100%; white-space: pre-wrap; vertical-align: top; }
+.ans-value { display: inline-block; max-width: 100%; vertical-align: top; }
+.ans-prompt { display: inline-block; }
+@media (max-width: 600px) {
+  .ans-fields { font-size: 17px; }
+  .ans-fields .ans-hint { font-size: 15px; }
+  .ans-field input:not([type="radio"]), .ans-field select, .ans-choices label, .ans-box:has(.ans-fields) button { min-height: 44px; }
+}
 .focus-res { font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
 .focus-res.ok { color: var(--teal); }
 .focus-res.err { color: var(--red); }

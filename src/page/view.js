@@ -219,6 +219,12 @@
     var conf = obj(a.confirm);
     var canReply = arr(s.answerKinds).indexOf('text') >= 0;
     var at = ' data-id="' + key + '" data-where="' + esc(where) + '"';
+    if (Array.isArray(d.fields)) {
+      html += fieldsBox(d, a, at, key, where);
+      if (conf) html += confirmRow(key, s, conf, where);
+      if (str(a.error)) html += '<p class="ans-err" role="alert">' + esc(a.error) + '</p>';
+      return html + '</div>';
+    }
     html += '<div class="ans-opts" role="group" aria-label="#' + key + ' 답 고르기">';
     ['A', 'B', 'C'].forEach(function (k) {
       var o = obj(own(opts, k));
@@ -243,6 +249,53 @@
     return html + '</div>';
   }
 
+  function fieldsBox(d, a, at, key, where) {
+    var values = obj(a.values) || {}, errors = obj(a.fieldErrors) || {};
+    var html = '<div class="ans-fields" role="group" aria-label="입력 값"><div class="ans-field-grid">';
+    function feedbackText(message) {
+      return esc(message).replace(/(범위로 입력해 주세요|간격으로 입력해 주세요|입력해 주세요|골라 주세요|보낼 수 없어요)/g,
+        '<span class="ans-error-phrase">$1</span>');
+    }
+    arr(d.fields).forEach(function (f) {
+      var id = 'field-' + key + '-' + where + '-' + f.id, error = str(own(errors, f.id));
+      var value = own(values, f.id), text = value == null ? '' : String(value);
+      var attrs = at + ' data-field="' + esc(f.id) + '" aria-describedby="' + esc(id) + '-hint' +
+        (error ? ' ' + esc(id) + '-error' : '') + '" aria-invalid="' + !!error + '"';
+      html += '<div class="ans-field">';
+      if (f.kind === 'choice' && arr(f.options).length <= 3) {
+        html += '<fieldset><legend>' + esc(f.label) + '</legend><div class="ans-choices">';
+        arr(f.options).forEach(function (option, i) {
+          html += '<label><input type="radio" name="' + esc(id) + '" id="' + esc(id) + '-' + i + '" value="' + esc(option) + '"' + attrs +
+            (text === option ? ' checked' : '') + '><span>' + esc(option) + '</span></label>';
+        });
+        html += '</div></fieldset>';
+      } else {
+        html += '<label for="' + esc(id) + '">' + esc(f.label) + '</label>';
+        if (f.kind === 'choice') {
+          html += '<select id="' + esc(id) + '"' + attrs + '><option value="">선택해 주세요</option>';
+          arr(f.options).forEach(function (option) { html += '<option value="' + esc(option) + '"' + (text === option ? ' selected' : '') + '>' + esc(option) + '</option>'; });
+          html += '</select>';
+        } else html += '<input id="' + esc(id) + '" type="' + (f.kind === 'number' ? 'number' : 'text') + '"' + attrs +
+          (f.kind === 'number' ? ' inputmode="decimal" min="' + esc(String(f.min)) + '" max="' + esc(String(f.max)) + '" step="' + esc(String(f.step)) + '"'
+            : ' maxlength="' + esc(f.maxLen * 2) + '"') + ' value="' + esc(text) + '" placeholder="' +
+          esc(f.kind === 'number' ? String(f.min) + '..' + String(f.max) : f.label + ' 입력') + '">';
+      }
+      // Reserve the largest wrapped message in this field's current font and width, even before an error exists.
+      // Hidden sizing text is not an announcement or a description; the visible hint/error share its grid cell.
+      var messages = ['같은 입력 항목을 두 번 보낼 수 없어요'];
+      if (f.kind === 'number') messages.push('숫자를 입력해 주세요', f.min + '..' + f.max + ' 범위로 입력해 주세요',
+        f.min + '부터 ' + f.step + ' 간격으로 입력해 주세요');
+      else messages.push(f.kind === 'text' ? '1..' + f.maxLen + '자로 입력해 주세요' : '선택지 중 하나를 골라 주세요');
+      html += '<div class="ans-feedback' + (error ? ' is-invalid' : '') + '">' + messages.map(function (message) {
+        return '<span class="ans-feedback-size" aria-hidden="true">' + feedbackText(message) + '</span>';
+      }).join('') + '<span class="ans-hint" id="' + esc(id) + '-hint">' +
+        esc(f.kind === 'number' ? String(f.min) + '..' + String(f.max) + ' · 간격 ' + String(f.step) : f.kind === 'text' ? '최대 ' + f.maxLen + '자' : '하나를 골라 주세요') + '</span>' +
+        (error ? '<p class="ans-err" role="alert" id="' + esc(id) + '-error">' + feedbackText(error) + '</p>' : '') + '</div></div>';
+    });
+    return html + '</div><div class="ans-acts"><button type="button" class="' + (a.confirm ? 'ans-cancel' : 'ans-go') + '" data-act="ans-fields"' + at + '>입력 확인</button>' +
+      '<button type="button" class="ans-write" data-act="ans-hold"' + at + '>보류</button></div></div>';
+  }
+
   // The pending confirm: '<tab> 대화에 <b>B</b>를 보낼까요?' (or the reply's first 40 characters), with 보내기 and 취소 for decision
   // id. answerBox draws it under the A/B/C buttons; convo-view.js draws the same row in a report's picked option (이걸로 고르기).
   function confirmRow(id, s, conf, where) {
@@ -253,10 +306,13 @@
         '<button type="button" class="ans-cancel" data-act="ans-cancel"' + at + '>취소</button></span></div>';
     }
     var reply = typeof conf.text === 'string';
+    var values = obj(conf.values);
     return '<div class="ans-confirm" role="group" aria-label="보내기 확인"><span class="ans-q">' + whereOfHtml(s) + ' 대화에 ' +
-      (reply ? '답글을 보낼까요? <q class="ans-quote">' + esc(cut(conf.text, 40)) + '</q>' : '<b>' + esc(conf.option) + '</b>를 보낼까요?') + '</span>' +
+      (values ? '<span class="ans-prompt">이 값을 보낼까요?</span> <span class="ans-values">' + arr(conf.labels).map(function (f, i) {
+        return '<span>' + (i ? ' · ' : '') + '<b>' + esc(f.label) + '</b> = <span class="ans-value">' + esc(String(own(values, f.id))) + '</span></span>';
+      }).join('') + '</span>' : reply ? '답글을 보낼까요? <q class="ans-quote">' + esc(cut(conf.text, 40)) + '</q>' : '<b>' + esc(conf.option) + '</b>를 보낼까요?') + '</span>' +
       '<span class="ans-acts"><button type="button" class="ans-go" data-act="ans-send"' + at + '>보내기</button>' +
-      '<button type="button" class="ans-cancel" data-act="ans-cancel"' + at + '>취소</button></span></div>';
+      '<button type="button" class="ans-cancel" data-act="ans-cancel"' + at + '>' + (values ? '고치기' : '취소') + '</button></span></div>';
   }
 
   // Answered decisions the server page keeps on the card: every answer without a delivery proof yet, plus the ones this page
@@ -274,6 +330,7 @@
     var opt = str(a.option), reply = str(a.text);
     var o = opt ? obj(own(obj(d.options) || {}, opt)) : null;
     var what = opt ? '답 ' + esc(opt) + (o && str(o.text) ? ' · ' + esc(o.text) : '')
+      : obj(a.values) ? '입력: ' + arr(d.fields).map(function (f) { return esc(f.label) + '=' + esc(String(own(a.values, f.id))); }).join(', ')
       : reply ? '답글 <q class="ans-quote">' + esc(cut(reply, 40)) + '</q>' : '답 받음';
     return '<p class="dsent"><span class="sym">' + ic('circle-check', 'ic-sm') + '</span><span>#' + esc(d.id) + ' ' + what + '</span>' +
       '<span class="chip ' + (obj(d.receipt) ? 's-done' : 'x-busy') + '">' + timed(str(d.delivery) || '전달 기다림') + '</span></p>';
@@ -302,6 +359,7 @@
     var opts = obj(d.options) || {};
     var rec = recOf(d);
     var answer = '/decide ' + id + rec;
+    var fields = Array.isArray(d.fields);
     var box = answerBox(d, owner, ui, 'dc');
     var html = '<div class="dcard' + (d.blocks ? ' blocks' : '') + (box ? ' can-answer' : '') + '" data-decision="' + esc(id) + '">' +
       '<div class="dline dq">#' + esc(id) + ' <span class="tag">[' + esc(s.workName || s.title) + ']</span> <b>' + esc(d.question) + '</b>' +
@@ -311,11 +369,11 @@
       if (!o) return;
       html += '<div class="dline opt' + (k === rec ? ' rec-opt' : '') + '"><b>' + k + ':</b> ' + esc(o.text) + ' <span class="arrow">=&gt;</span> ' + esc(o.consequence) + '</div>';
     });
-    html += '<div class="dline rec">추천: ' + esc(rec || '-') + ' - ' + esc(d.reason) + '</div>' +
+    html += '<div class="dline rec">' + (fields ? '입력 안내: ' : '추천: ' + esc(rec || '-') + ' - ') + esc(d.reason) + '</div>' +
       '<div class="dline from">대화: ' + whereLabelHtml(s, 'ic-xs') + '</div>' +
       '<div class="dline when">' + ic('clock', 'ic-xs') + ' ' + esc(when(d.createdAt, s.__now)) + '</div>' + box +
       (d.askLive === true ? '<p class="ask-live">터미널에도 같은 질문이 열려 있어요 - 어느 쪽에서 답해도 둘 다 닫혀요</p>' : '') +
-      (box ? '<div class="dline ans">답: <code>' + esc(answer) + '</code> ' + copyBtn(answer) + ' <span class="ans-hint">· ' + ANY_CHAT + '</span></div>'
+      (fields ? '<div class="dline ans">입력 값은 실시간 상황판에서 확인\u00a0후\u00a0보내세요</div>' : box ? '<div class="dline ans">답: <code>' + esc(answer) + '</code> ' + copyBtn(answer) + ' <span class="ans-hint">· ' + ANY_CHAT + '</span></div>'
         : '<div class="dline ans">답: ' + esc(answer) + ' ' + copyBtn(answer) + '</div>') +
       '</div><!--dcard-->';
     return html;

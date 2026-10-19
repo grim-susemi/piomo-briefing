@@ -265,6 +265,31 @@
           "questionPrompt": false,
           "answer": null,
           "receipt": null
+        },
+        {
+          "id": 100,
+          "sessionId": "01a14957-2b1c-7a00-9c33-5e1f00a1b185",
+          "question": "사이드바 입력 값",
+          "options": {},
+          "recommend": "",
+          "reason": "직접 입력",
+          "blocks": false,
+          "fields": [
+            { "id": "width", "label": "너비", "kind": "number", "min": 200, "max": 400, "step": 20 }
+          ],
+          "createdAt": 1792203000000,
+          "source": "brief",
+          "answered": true,
+          "closed": false,
+          "questionPrompt": false,
+          "answer": {
+            "option": "",
+            "text": "",
+            "values": { "width": 280 },
+            "at": 1792203100000
+          },
+          "receipt": null,
+          "delivery": "대기: 작업이 끝나면 전달"
         }
       ],
       "notes": [

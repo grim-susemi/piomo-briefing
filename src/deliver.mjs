@@ -30,6 +30,7 @@ import * as nodeFs from 'node:fs';
 import { join } from 'node:path';
 import { setError, clearError } from './errors.mjs';
 import { holdText } from './ask-bridge.mjs';
+import { decisionValueErrors } from './schema.mjs';
 
 export const DELIVERY_TYPE = 'session_control_delivery';
 const pad6 = (n) => String(n).padStart(6, '0');
@@ -250,6 +251,12 @@ export function createDeliverer(deps) {
         out.push({ id: n, kind: 'annotation', text: ans.text, ans });
         continue;
       }
+      if (ans.values !== undefined || decision.fields !== undefined) {
+        if (ans.id !== n || ans.option !== undefined || ans.text !== undefined
+          || Object.keys(decisionValueErrors(decision.fields, ans.values)).length) { invalid.add(n); bad.push(n); continue; }
+        out.push({ id: n, kind: 'values', fields: decision.fields, ans });
+        continue;
+      }
       if (ans.text !== undefined && ans.option === undefined) {
         // the owner's own words: a non-empty string once control characters are gone
         if (ans.id !== n || typeof ans.text !== 'string' || cleanInline(ans.text, 500) === '') { invalid.add(n); bad.push(n); continue; }
@@ -369,7 +376,9 @@ export function createDeliverer(deps) {
       }
       if (!idleNow()) { busySeen.add(c.id); holds.set(c.id, 'busy'); continue; }
       const mode = reason === 'session_start' ? 'on-resume' : busySeen.has(c.id) ? 'after-turn' : 'immediate';
-      const text = c.kind === 'annotation' ? annotationText(c.ans) : c.kind === 'text'
+      const text = c.kind === 'values' ? `[결정] #${c.id} 입력: ` + c.fields.map(f =>
+        `${cleanInline(f.label, 40)}=${cleanInline(c.ans.values[f.id], 200)}`).join(', ')
+        : c.kind === 'annotation' ? annotationText(c.ans) : c.kind === 'text'
         ? replyText({ id: c.id, text: c.text, at: c.ans.at })
         : deliveryText({ id: c.id, option: c.option, optionText: c.optionText, title: senderTitle(c.ans.fromSessionId), at: c.ans.at });
       if (session) {

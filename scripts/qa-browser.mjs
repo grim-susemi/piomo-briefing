@@ -51,6 +51,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { launch, isPidAlive, listProfilePids } from './cdp.mjs';
 import { openStore } from '../src/store.mjs';
 import { renderPage } from '../src/render.mjs';
+import { decisionFields, decisionValues } from '../test/fixtures/decision-fields.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const LEAD_FLAG = '--lead';
@@ -1366,6 +1367,47 @@ async function desktopRun() {
     return { report: 'blocks-demo', drawn, tick: { key, ticked, reRendered, reloaded, tickWindow, requestsSeen: requests.length, requestsCarryingTick: carrying.length },
       compare: { decisionId, confirmRow: confirm, answerFile: `answers/${pad6(decisionId)}.json`, answer: { id: ans.id, option: ans.option, fromSessionId: ans.fromSessionId }, chosen }, captures };
   });
+  await scenario('input-decision', 'typed fields: confirm 280 -> keyboard edit 999 clears confirmation; guarded refusal writes nothing; valid confirmed values deliver once', async () => {
+    const pub = await published(A, briefOf('상황판 점검', '입력 결정', {
+      decisions: [{ question: '보드 설정 값을 정해 주세요', reason: '입력한 값으로 설정', blocks: false, fields: decisionFields() }],
+    }));
+    await waitApplied(page, pub.seq);
+    await showPage(page, 'lead-A', 'ov');
+    const id = await page.eval(`BriefPage.state.model.sessions.find(s=>s.id==='lead-A').decisions.find(d=>Array.isArray(d.fields)&&!d.answered).id`);
+    const scope = `#main [data-ans="${id}"]`;
+    const edit = async (field, text) => {
+      await page.eval(`(document.querySelector(${J(scope + ` [data-field="${field}"]`)}).focus(),true)`);
+      await key(page, 'a', 'KeyA', 65, CTRL); await typeText(page, String(text));
+    };
+    await edit('name', '보드'); await edit('side_width', 280);
+    await page.eval(`(document.querySelector(${J(scope + ' input[value="밝게"]')}).click(),true)`);
+    await page.eval(`(() => {const s=document.querySelector(${J(scope + ' select')});s.value='자동';s.dispatchEvent(new Event('input',{bubbles:true}));return true;})()`);
+    await jsClick(page, scope + ' [data-act="ans-fields"]');
+    await edit('side_width', 999);
+    const invalid = await page.eval(`({confirm:BriefPage.state.ui.answers['${id}'].confirm,focused:document.activeElement.getAttribute('data-field'),error:document.querySelector(${J(scope + ' .ans-err')}).textContent,send:!!document.querySelector(${J(scope + ' [data-act="ans-send"]')})})`);
+    assert.equal(invalid.confirm, null); assert.equal(invalid.focused, 'side_width'); assert.equal(invalid.send, false);
+    const before = answerListing();
+    const refused = await httpPost(`${url}answer`, { headers: writeHeaders(await boardToken(page), new URL(url).origin),
+      body: { id, sessionId: 'lead-A', values: { ...decisionValues(), side_width: 999 } } });
+    assert.equal(refused.status, 400); assert.equal(refused.json.code, 'BAD_VALUES');
+    assert.match(refused.json.fieldErrors.side_width, /400/); assert.deepEqual(answerListing(), before);
+    await edit('side_width', 280);
+    await jsClick(page, scope + ' [data-act="ans-fields"]');
+    const confirm = await page.eval(`document.querySelector(${J(scope + ' .ans-confirm')}).textContent`);
+    for (const value of Object.values(decisionValues())) assert.ok(confirm.includes(String(value)));
+    const answerFile = path.join(answersDir(), `${pad6(id)}.json`);
+    const written = pending(until(answersDir(), () => existsSync(answerFile) ? readJson(answerFile) : null, 'typed answer'));
+    await jsClick(page, scope + ' [data-act="ans-send"]');
+    const answer = await written;
+    assert.deepEqual(answer.values, decisionValues());
+    const receiptFile = path.join(STATE, 'receipts', `${pad6(id)}.json`);
+    const receipt = await until(STATE, () => existsSync(receiptFile) ? readJson(receiptFile) : null, 'typed receipt', 15000, { recursive: true });
+    assert.equal(receipt.proven, true);
+    const ledger = await A.call('deliveries');
+    const admitted = ledger.admitted.filter(d => d.delivery_id === `d${id}`);
+    assert.equal(admitted.length, 1); assert.match(admitted[0].text, /사이드바 너비=280/);
+    return { id, invalid, refused: { status: refused.status, body: refused.json, answersUnchanged: true }, confirm, answer, receipt, admitted };
+  });
   return { page, url };
 }
 
@@ -2110,7 +2152,7 @@ try {
 }
 
 const cleanupResult = await cleanup();
-const scenarioIds = ['a', 'b', 'c', 'd', 'e', 'f', 'annotation-delivered', 'pick-writes-answer', 'legacy-501-bad-text', 'forged-origin-403', 'unknown-asset-404', 'blocks', 'i', 'g', 'h', 'file-no-send', 'j', 'k'];
+const scenarioIds = ['a', 'b', 'c', 'd', 'e', 'f', 'annotation-delivered', 'pick-writes-answer', 'legacy-501-bad-text', 'forged-origin-403', 'unknown-asset-404', 'blocks', 'input-decision', 'i', 'g', 'h', 'file-no-send', 'j', 'k'];
 const extra = ['m-fit', 'f-mobile', 'plan-fold-mobile', 'c-mobile', 'd-mobile', 'e-blocked', 'e-mobile', 'g-mobile', 'blocks-mobile'];
 const allPass = !fatal
   && scenarioIds.every((id) => results[id] && results[id].pass)

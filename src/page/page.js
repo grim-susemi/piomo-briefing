@@ -271,7 +271,7 @@
   var CONTROLS = 'button,input,textarea,select,summary,a[href],[tabindex]';
   function focusKey(el) {
     var names = ['id', 'name', 'type', 'data-sh', 'data-act', 'data-key', 'data-sid', 'data-sub', 'data-id', 'data-dec',
-      'data-opt', 'data-where', 'data-draft', 'data-session', 'data-copy'];
+      'data-opt', 'data-where', 'data-draft', 'data-field', 'data-session', 'data-copy'];
     var key = [el.tagName];
     names.forEach(function (n) { key.push(el.getAttribute(n)); });
     if (el.getAttribute('type') === 'radio' || el.getAttribute('type') === 'checkbox') key.push(el.getAttribute('value'));
@@ -749,6 +749,14 @@
       a.open = !a.open;
       a.confirm = null;
       a.error = '';
+    } else if (act === 'ans-fields') {
+      var foundFields = findDecision(Number(key));
+      if (!foundFields || !Array.isArray(foundFields.d.fields)) return;
+      var checked = fieldValues(foundFields.d.fields, a.values || {});
+      a.fieldErrors = checked.errors;
+      a.confirm = Object.keys(checked.errors).length ? null : { values: checked.values,
+        labels: foundFields.d.fields.map(function (f) { return { id: f.id, label: f.label }; }) };
+      a.error = '';
     } else if (act === 'ans-text') {
       var text = a.draft.trim();
       if (text) { a.confirm = { text: text }; a.error = ''; } else a.error = ANSWER_TEXT.empty;
@@ -773,6 +781,23 @@
   // typing never re-renders (that would drop the focus): the draft goes to the state, the counter is set in place
   function onInput(ev) {
     var t = ev && ev.target;
+    var field = t && t.getAttribute && t.getAttribute('data-field');
+    if (field) {
+      var fieldKey = t.getAttribute('data-id');
+      if (!validKey(fieldKey)) return;
+      var fieldAnswer = answerState(fieldKey);
+      if (fieldAnswer.phase) return;
+      var fieldDecision = findDecision(Number(fieldKey));
+      if (!fieldDecision || !Array.isArray(fieldDecision.d.fields) || !fieldDecision.d.fields.some(function (f) { return f.id === field; })) return;
+      var draftValues = fieldAnswer.values || (fieldAnswer.values = Object.create(null));
+      draftValues[field] = String(t.value == null ? '' : t.value);
+      var wasConfirmed = !!fieldAnswer.confirm;
+      fieldAnswer.confirm = null;
+      fieldAnswer.error = '';
+      if (wasConfirmed || fieldAnswer.fieldErrors) fieldAnswer.fieldErrors = fieldValues(fieldDecision.d.fields, draftValues).errors;
+      render(); // region() preserves this exact field/radio value and the text selection, never Send.
+      return;
+    }
     var key = t && typeof t.getAttribute === 'function' ? t.getAttribute('data-draft') : null;
     if (!validKey(key)) return;
     var a = answerState(key);
@@ -780,6 +805,28 @@
     var box = typeof t.closest === 'function' ? t.closest('.ans-reply') : null;
     var count = box ? box.querySelector('.ans-count') : null;
     if (count) count.textContent = a.draft.length + '/' + REPLY_MAX;
+  }
+
+  function fieldValues(fields, draft) {
+    var values = Object.create(null), errors = Object.create(null);
+    fields.forEach(function (f) {
+      var raw = Object.prototype.hasOwnProperty.call(draft, f.id) ? draft[f.id] : '';
+      var value = String(raw);
+      if (f.kind === 'number') {
+        value = value.trim() === '' ? NaN : Number(value);
+        if (!isFinite(value)) errors[f.id] = '숫자를 입력해 주세요';
+        else if (value < f.min || value > f.max) errors[f.id] = f.min + '..' + f.max + ' 범위로 입력해 주세요';
+        else {
+          var q = (value - f.min) / f.step;
+          if (isFinite(q) && Math.abs(q - Math.round(q)) > Math.min(1e-7, Number.EPSILON * Math.max(1, Math.abs(q)) * 4))
+            errors[f.id] = f.min + '부터 ' + f.step + ' 간격으로 입력해 주세요';
+        }
+      } else if (f.kind === 'text') {
+        if (!value.trim() || Array.from(value).length > f.maxLen) errors[f.id] = '1..' + f.maxLen + '자로 입력해 주세요';
+      } else if (f.options.indexOf(value) < 0) errors[f.id] = '선택지 중 하나를 골라 주세요';
+      values[f.id] = value;
+    });
+    return { values: values, errors: errors };
   }
 
   function sendAnswer(key, a) {
@@ -795,7 +842,8 @@
       return;
     }
     var body = { id: Number(key), sessionId: found.sessionId };
-    if (typeof c.option === 'string') body.option = c.option; else body.text = c.text;
+    if (c.values) body.values = c.values;
+    else if (typeof c.option === 'string') body.option = c.option; else body.text = c.text;
     a.sentOption = typeof c.option === 'string' ? c.option : '';
     a.phase = 'sending';
     a.error = '';
@@ -841,6 +889,11 @@
       a.error = '';
       a.draft = '';
       a.open = false;
+    } else if (res.status === 400 && code === 'BAD_VALUES') {
+      a.phase = '';
+      a.confirm = null;
+      a.fieldErrors = res.json.fieldErrors || {};
+      a.error = '입력 값을 확인해 주세요';
     } else if (res.status === 403 && !reloadedFor403 && rememberForReload()) {
       reloadedFor403 = true;
       g.location.reload(); // the board moved to another process (new token): the reloaded page carries the new one

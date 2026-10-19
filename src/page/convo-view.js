@@ -483,7 +483,9 @@
       list.map(function (d) {
         var a = obj(d.answer) || {}, opt = str(a.option), reply = str(a.text);
         var o = opt ? obj(own(obj(d.options) || {}, opt)) : null;
-        var mine = opt ? opt + (o && str(o.text) ? ' · ' + str(o.text) : '') : reply ? '답글 “' + reply + '”' : '답 받음';
+        var mine = opt ? opt + (o && str(o.text) ? ' · ' + str(o.text) : '')
+          : obj(a.values) ? arr(d.fields).map(function (f) { return str(f.label) + '=' + String(own(a.values, f.id)); }).join(', ')
+          : reply ? '답글 “' + reply + '”' : '답 받음';
         return '<tr' + blockAttr(decBlock(d)) + '><td data-label="#">#' + esc(d.id) + '</td><td data-label="질문">' + esc(d.question) + '</td>' +
           '<td data-label="내 답" class="ok2">' + esc(mine) + '</td><td data-label="결과">' + esc(o && str(o.consequence) ? o.consequence : '-') + '</td>' +
           '<td data-label="전달">' + deliveryChip(d.delivery, d.receipt) + '</td></tr>';

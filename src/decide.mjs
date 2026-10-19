@@ -19,6 +19,7 @@ import * as nodeFs from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isPidAlive } from './store.mjs';
+import { decisionValueErrors } from './schema.mjs';
 
 const TRANSIENT_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
 const FIRST_DELAY_MS = 2;
@@ -134,6 +135,10 @@ export function applyDecide(store, text, fromSessionId, now = Date.now(), opts =
     }
     if (ans) {
       if (!alreadyAnswered.includes(it.id)) alreadyAnswered.push(it.id);
+      continue;
+    }
+    if (rec.fields !== undefined) {
+      errors.push({ token: it.token, code: 'FIELDS_REQUIRED', reason: '입력 결정은 상황판에서 값을 채워 주세요' });
       continue;
     }
     const option = it.option ?? rec.recommend;
@@ -363,10 +368,11 @@ export function applyAskAnswer(store, request, now = Date.now(), opts = {}) {
 }
 
 function applyDecisionAnswer(store, request, sender, now, opts) {
-  const { id, sessionId, option, text } = request !== null && typeof request === 'object' ? request : {};
+  const { id, sessionId, option, text, values } = request !== null && typeof request === 'object' ? request : {};
   const hasOption = option !== undefined;
   const hasText = text !== undefined;
-  if (!Number.isSafeInteger(id) || id <= 0 || typeof sessionId !== 'string' || sessionId === '' || hasOption === hasText) {
+  const hasValues = values !== undefined;
+  if (!Number.isSafeInteger(id) || id <= 0 || typeof sessionId !== 'string' || sessionId === '' || Number(hasOption) + Number(hasText) + Number(hasValues) !== 1) {
     return boardFail('BAD_REQUEST');
   }
   let fields = null;
@@ -387,6 +393,11 @@ function applyDecisionAnswer(store, request, sender, now, opts) {
     if (store.readRecord(answerRel(id))) return boardFail('ANSWERED');
   } catch (err) {
     return boardFail('IO_ERROR', String(err?.message ?? err));
+  }
+  if (hasValues || rec.fields !== undefined) {
+    const fieldErrors = decisionValueErrors(rec.fields, values);
+    if (Object.keys(fieldErrors).length) return { ok: false, code: 'BAD_VALUES', fieldErrors };
+    fields = { values: structuredClone(values) };
   }
   if (hasOption) {
     const choices = rec.options;
@@ -414,9 +425,9 @@ function applyDecisionAnswer(store, request, sender, now, opts) {
 // Hold/reopen use the same exclusive claim as answers. A held closure is not an answer. Reopen renames that
 // closure to decision-closures/<id>.<n>.released.json (write-once records are never mutated in place, and the
 // snapshot reads only <id>.json), so the question is open again without a fabricated reply or a message.
-function applyBoardAction(store, { id, sessionId, action, option, text }, at, opts) {
+function applyBoardAction(store, { id, sessionId, action, option, text, values }, at, opts) {
   if (!Number.isSafeInteger(id) || id <= 0 || typeof sessionId !== 'string' || !sessionId
-    || !['hold', 'reopen'].includes(action) || option !== undefined || text !== undefined) return boardFail('BAD_REQUEST');
+    || !['hold', 'reopen'].includes(action) || option !== undefined || text !== undefined || values !== undefined) return boardFail('BAD_REQUEST');
   const fs = opts.fs ?? nodeFs;
   let claimed = false;
   try {
