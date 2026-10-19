@@ -96,6 +96,9 @@ h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
 .ans-confirm { padding: var(--sp-2) var(--sp-3); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); }
 .ans-q { flex: 1 1 240px; min-width: 0; font-weight: var(--fw-semibold); }
 .ans-quote { color: var(--muted); font-weight: var(--fw-regular); }
+/* The board twin of the .cv-page answer rule in convo.css: a tab label, an option or a quoted reply with no break opportunity
+ * breaks there instead of widening the decision card; keep-all still makes Korean break between words. */
+.ans-q, .ans-quote, .ans-opt, .dsent { overflow-wrap: anywhere; }
 .ans-reply { display: grid; gap: 4px; }
 .ans-text { width: 100%; min-height: 4.4em; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); color: var(--fg); font: inherit; resize: vertical; }
 .ans-hint { color: var(--muted); font-size: var(--fs-xs); }

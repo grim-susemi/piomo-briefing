@@ -420,6 +420,28 @@ test('an unbroken run wraps in the decision card: page.css breaks the 대화 lin
   }
 });
 
+test('an unbroken run wraps in the board answer controls: page.css breaks the confirm question, its quoted reply, the option buttons and the sent line anywhere outside .cv-page too; never break-all', () => {
+  const m = clone(FIXTURE);
+  const long = 'W'.repeat(120);
+  m.sessions.find((x) => x.id === 's-a1').decisions.find((d) => d.id === 12).options.A.text = long;
+  Object.assign(m.sessions.find((x) => x.id === 's-b2').decisions.find((d) => d.id === 11), { receipt: null, delivery: '대기: 작업이 끝나면 전달', answer: { option: '', text: long, at: 1 } });
+  const html = loadView().renderOverview(m, { tab: 'wait', live: true, answers: { 12: { confirm: { text: long } } } });
+  assert.match(html, /<span class="ans-q">(?:(?!<\/span>)[^])*<q class="ans-quote">W{40}…<\/q><\/span>/, 'the board confirm row quotes the reply inside .ans-q');
+  assert.match(html, /<button type="button" class="ans-opt[^"]*"[^>]*><b>A<\/b> · W{120}/, 'an .ans-opt button carries the whole option text');
+  assert.match(html, /<p class="dsent">(?:(?!<\/p>)[^])*<q class="ans-quote">W{40}…<\/q>/, 'the board sent line quotes the reply');
+  const css = fs.readFileSync(path.join(ROOT, 'src/page/page.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((r) => ({ sels: r[1].split(',').map((x) => x.replace(/\s+/g, ' ').trim()), body: r[2] }));
+  for (const sel of ['.ans-q', '.ans-quote', '.ans-opt', '.dsent']) {
+    assert.ok(rules.some((r) => r.sels.includes(sel) && /overflow-wrap: anywhere/.test(r.body)), sel + ' breaks inside an unbroken run on the board too (the twin of the .cv-page rule in convo.css) instead of widening the decision card');
+  }
+  for (const file of fs.readdirSync(path.join(ROOT, 'src/page')).filter((f) => f.endsWith('.css'))) {
+    const text = fs.readFileSync(path.join(ROOT, 'src/page', file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const r of text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (/\.(?:ans-box|ans-opts|ans-confirm|ans-q|ans-quote|ans-opt|dsent)(?![\w-])/.test(r[1])) assert.doesNotMatch(r[2], /break-all|word-break:(?!\s*keep-all)/, file + ' ' + r[1].replace(/\s+/g, ' ').trim() + ': answer text stays word-based (keep-all, never break-all)');
+    }
+  }
+});
+
 test('page.css gives .sym one icon column and no fixed width; its icons are drawn in span.sym, no emoji left there', () => {
   for (const file of ['src/page/page.css', 'src/page/convo.css']) {
     const css = fs.readFileSync(path.join(ROOT, file), 'utf8');
