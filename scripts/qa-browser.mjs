@@ -34,6 +34,14 @@
 //   h  the file:// page applies a publication within 2.5 s and offers the live link
 //   file-no-send  the file:// page has no send: Markdown 복사 only, no write token, no answer buttons
 //   j  /brief off: 브리핑 꺼짐
+//   blocks-max          (todo 12) lead-B's report with all six kinds at their schema limits (test/fixtures/report-blocks-max.mjs)
+//                       drawn in full with the model untrimmed; the first and the last checklist item ticked survive a
+//                       re-render and a reload, and no request carries them
+//   input-invalid-page  (todo 12) an input decision at its field limits refused on the board: one invalid value per field
+//                       -> four field messages, no confirm row, no request, nothing written, nothing delivered
+//   input-max-once      (todo 12) the same kind of decision typed at its limits, confirmed and sent: one POST, one answer
+//                       record, and the conversation's fake pi receives exactly ONE message carrying every value in full;
+//                       no other lead receives anything, before or after a re-render, a reload and forced delivery scans
 //   k  no console error or page exception in any run, no failure inside a lead's fake host
 // 390x844 run (default autoplay policy; connected before each trigger; script clicks only until e-blocked's one tap):
 //   m-fit, f-mobile, plan-fold-mobile, c-mobile, d-mobile, e-blocked, e-mobile, g-mobile (captures mobile-<scenario>-*.png)
@@ -50,8 +58,10 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { launch, isPidAlive, listProfilePids } from './cdp.mjs';
 import { openStore } from '../src/store.mjs';
-import { renderPage } from '../src/render.mjs';
+import { MAX_VM_BYTES, renderPage } from '../src/render.mjs';
 import { decisionFields, decisionValues } from '../test/fixtures/decision-fields.mjs';
+import { BLOCK_KINDS, MAX_REPORT_ID, maxReport, maxCompareDecision, maxDecisionFields, maxFieldValues, invalidFieldValues, invalidFieldErrors } from '../test/fixtures/report-blocks-max.mjs';
+import { cleanInline } from '../src/deliver.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const LEAD_FLAG = '--lead';
@@ -107,6 +117,8 @@ async function leadMain([stateDir, sid, cwd, base]) {
     plan: async (m) => textOf(await host.tool('plan_brief').execute('qa', m.input, undefined, undefined, ctx)),
     rpc: async (m) => { for (const fn of [...listeners]) fn({ name: 'omo.task.updated', data: m.data }); return true; },
     command: async (m) => { await host.commands.get(m.name).handler(m.args ?? '', ctx); return opened.at(-1) ?? null; },
+    // one delivery scan of this conversation now: the extension's input handler wakes its deliverer, which runs synchronously
+    wake: async () => { await host.emit('input', { text: '', source: 'extension' }, ctx); return session.calls.length; },
     deliveries: async () => ({
       admitted: session.calls.map((c) => ({ delivery_id: c.delivery_id, sender: c.sender, deliverAs: c.deliverAs, text: c.text })),
       ledger: session.listAdmittedDeliveries(),
@@ -1408,6 +1420,262 @@ async function desktopRun() {
     assert.equal(admitted.length, 1); assert.match(admitted[0].text, /사이드바 너비=280/);
     return { id, invalid, refused: { status: refused.status, body: refused.json, answersUnchanged: true }, confirm, answer, receipt, admitted };
   });
+
+  // ---- todo 12: the maximal fixture (every block list and string, every field id/label/option at its schema limit)
+  await scenario('blocks-max', '보고서 블록 at their schema limits (lead-B): six kinds drawn in full, model untrimmed under the cap; the first and the last checklist tick survive a re-render and a reload and are never sent', async () => {
+    // the compare's decision is withdrawn again at the end (also when this scenario fails): an open decision would file lead-B
+    // under 나를 기다림, and d-mobile needs it to finish under 끝남 (the same reason d answers lead-B's decision from b)
+    let compareId = null;
+    let closedSeq = null;
+    const withdraw = async () => {
+      if (!Number.isInteger(compareId) || closedSeq !== null) return;
+      closedSeq = (await published(B, briefOf('두 번째 대화', '보고서 블록 최대 크기 확인 끝', { close_decisions: [{ id: compareId, reason: 'withdrawn' }] }))).seq;
+    };
+    try {
+      const brief = briefOf('두 번째 대화', '보고서 블록 최대 크기', { decisions: [maxCompareDecision()], reports: [maxReport({ decisionIndex: 0 })] });
+      const pub = await published(B, brief);
+      await waitApplied(page, pub.seq);
+      await showPage(page, 'lead-B', 'rep');
+      const dataJsBytes = statSync(path.join(STATE, 'data.js')).size;
+      const stored = await page.eval(`(() => { const s = BriefPage.state.model.sessions.find((x) => x.id === 'lead-B'); const r = s && (s.reports || []).find((x) => x.id === ${J(MAX_REPORT_ID)});
+        return { trimmed: BriefPage.state.model.trimmed === undefined ? null : BriefPage.state.model.trimmed, chips: s ? s.chips : null, blocks: r ? r.blocks : null,
+          omitted: JSON.stringify(BriefPage.state.model).includes('표·그래프 생략') }; })()`);
+      const decisionId = stored.blocks && stored.blocks[5] ? stored.blocks[5].decision : null;
+      assert.ok(Number.isInteger(decisionId), `the compare links the brief's decision: ${decisionId}`);
+      compareId = decisionId;
+      const expected = maxReport({ decisionIndex: 0 }).blocks.map((b) => (b.kind === 'compare' ? (({ decisionIndex, ...rest }) => ({ ...rest, decision: decisionId }))(b) : b));
+      assert.ok(dataJsBytes <= MAX_VM_BYTES, `data.js ${dataJsBytes} B <= ${MAX_VM_BYTES}`);
+      assert.deepEqual([stored.trimmed, stored.omitted], [null, false], 'the cap left the model alone');
+      assert.deepEqual(stored.blocks, expected, 'every block reached the page as published (nothing cut or dropped)');
+      const b = expected;
+      const want = { kinds: BLOCK_KINDS, tableHead: b[0].columns.length, tableRows: b[0].rows.length, tableCells: b[0].rows.length * b[0].columns.length,
+        bars: b[1].items.length, barRects: b[1].items.filter((i) => i.value > 0).length, kv: [b[2].items.length, b[2].items.length], steps: b[3].steps.length,
+        flowSvg: 0, checks: b[4].items.length, compareRows: b[5].rows.length, compareOptions: 3, recommended: ['C'], picks: 3, sideways: 0 };
+      const drawn = await page.eval(`(() => {
+        const r = document.querySelector('#main [data-block="rep/${MAX_REPORT_ID}"]');
+        const figs = r ? [...r.querySelectorAll('figure.rbk')] : [];
+        const n = (i, s) => (figs[i] ? figs[i].querySelectorAll(s).length : -1);
+        const main = document.getElementById('main');
+        return { kinds: figs.map((f) => ([...f.classList].find((c) => /^rbk-(table|bars|kv|flow|checklist|compare)$/.test(c)) || '').slice(4)),
+          tableHead: n(0, 'thead th'), tableRows: n(0, 'tbody tr'), tableCells: n(0, 'tbody td'), bars: n(1, 'li.bar-r'), barRects: n(1, 'rect.bar-v'),
+          kv: [n(2, 'dl.rbk-kvl > dt'), n(2, 'dl.rbk-kvl > dd')], steps: n(3, 'ol.flow-steps > li'), flowSvg: n(3, '.flowbox svg'),
+          checks: n(4, 'input[type="checkbox"][data-check-key]'), compareRows: n(5, 'table.rbk-cmp tbody tr'), compareOptions: n(5, 'table.rbk-cmp thead th.opt'),
+          recommended: figs[5] ? [...figs[5].querySelectorAll('table.rbk-cmp th.opt.rec .k')].map((k) => k.textContent) : null,
+          picks: n(5, 'table.rbk-cmp tfoot .cv-pick:not([disabled])'), sideways: Math.max(0, main.scrollWidth - main.clientWidth - 1, document.documentElement.scrollWidth - innerWidth - 1) };
+      })()`);
+      assert.deepEqual(drawn, want);
+
+      // two ticks: the first item's box and the last item's row text (a 32-character id), both kept through a re-render and a reload
+      const chk = `#main [data-block="rep/${MAX_REPORT_ID}/blk/4"]`;
+      const keys = [b[4].items[0], b[4].items.at(-1)].map((it) => `omo-briefing.check.lead-B.${MAX_REPORT_ID}.${it.id}`);
+      const requests = [];
+      const onRequest = (p) => requests.push({ method: p.request.method, url: p.request.url, post: p.request.postData || '' });
+      page.client.listeners.set('Network.requestWillBeSent', [...(page.client.listeners.get('Network.requestWillBeSent') || []), onRequest]);
+      await page.client.send('Network.enable');
+      const tickState = `(() => ({ checked: ${J(keys)}.map((k) => { const i = document.querySelector(${J(chk)} + ' input[data-check-key="' + k + '"]'); return !!i && i.checked; }),
+        stored: ${J(keys)}.map((k) => localStorage.getItem(k)), meta: document.querySelector(${J(chk + ' .rbk-m')}).textContent }))()`;
+      let ticked, reRendered, reloaded, tickWindow;
+      try {
+        await click(page, `${chk} input[data-check-key="${keys[0]}"]`);
+        await click(page, `${chk} label:has(> input[data-check-key="${keys[1]}"]) > span`);
+        ticked = await waitDom(page, `(() => { const s = ${tickState}; return s.checked.every(Boolean) && s.stored.every((v) => v === '1') ? s : null; })()`, { label: 'both ticks stored under their keys' });
+        tickWindow = requests.map((r) => `${r.method} ${new URL(r.url).pathname}`);
+        await showPage(page, 'lead-B', 'ov');
+        await showPage(page, 'lead-B', 'rep');
+        reRendered = await page.eval(tickState);
+        await openBoard(page, url, 'desktop');
+        await showPage(page, 'lead-B', 'rep');
+        reloaded = await page.eval(tickState);
+    } finally {
+      page.client.listeners.set('Network.requestWillBeSent', (page.client.listeners.get('Network.requestWillBeSent') || []).filter((f) => f !== onRequest));
+      await page.client.send('Network.disable');
+    }
+    const expectTick = { checked: [true, true], stored: ['1', '1'], meta: `2/${b[4].items.length} 확인 · 이 브라우저에만\u00a0저장` };
+    assert.deepEqual([ticked, reRendered, reloaded], [expectTick, expectTick, expectTick]);
+    const carrying = requests.filter((r) => keys.some((k) => `${r.url} ${r.post}`.includes(k.split('.').pop())) || /omo-briefing\.check/.test(`${r.url} ${r.post}`));
+    assert.deepEqual(carrying, [], 'no request carries a tick');
+    assert.deepEqual(tickWindow.filter((r) => !r.startsWith('GET ')), [], `the ticks themselves send nothing: ${J(tickWindow)}`);
+    await mouse(page, 'mouseMoved', 8, 760);
+    await waitDom(page, `!document.querySelector('#main .flash')`, { label: 'the change glow over' });
+    const captures = [];
+    for (const [name, sel] of [['desktop-blocks-max-1.png', `#main [data-block="rep/${MAX_REPORT_ID}/blk/0"]`], ['desktop-blocks-max-2.png', chk]]) {
+      await page.eval(`(() => { document.querySelector(${J(sel)}).scrollIntoView({ block: 'start' }); document.getElementById('main').scrollBy(0, -110); return true; })()`);
+      await frames(page);
+      await page.screenshot(path.join(OUT, name));
+      captures.push(name);
+    }
+    await withdraw();
+    await waitApplied(page, closedSeq);
+    const leftOpen = await page.eval(`BriefPage.state.model.sessions.find((s) => s.id === 'lead-B').decisions.filter((d) => !d.answered && !d.closed).map((d) => d.id)`);
+    assert.deepEqual(leftOpen, [], 'lead-B is left without an open decision');
+    return { report: MAX_REPORT_ID, session: 'lead-B', decisionId, dataJsBytes, maxVmBytes: MAX_VM_BYTES, drawn, tick: { keys, ticked, reRendered, reloaded, tickWindow, requestsSeen: requests.length },
+      withdrawn: { id: compareId, seq: closedSeq }, captures };
+    } finally {
+      await withdraw().catch((err) => console.error(`blocks-max: withdrawing #${compareId} failed: ${(err && err.message) || err}`));
+    }
+  });
+
+  // the decision's box on 개요 and real typing into its fields (focus, Ctrl+A, the text as one input event)
+  const fieldsBoxOf = (id) => `#main [data-ans="${id}"]`;
+  const typeField = async (sel, text) => {
+    await page.eval(`(document.querySelector(${J(sel)}).focus(), true)`);
+    await key(page, 'a', 'KeyA', 65, CTRL);
+    await typeText(page, String(text));
+    const v = await page.eval(`document.querySelector(${J(sel)}).value`);
+    if (v !== String(text)) throw new Error(`typed into ${sel}: ${J(v)} instead of ${J(String(text))}`);
+  };
+  const fieldState = (id, fields) => page.eval(`(() => {
+    const box = document.querySelector(${J(fieldsBoxOf(id))});
+    const st = BriefPage.state.ui.answers && BriefPage.state.ui.answers[${J(String(id))}];
+    return { box: !!box, errors: Object.fromEntries(${J(fields.map((f) => f.id))}.map((f) => { const e = box && box.querySelector('[id$="-' + f + '-error"]'); return [f, e ? e.textContent : null]; })),
+      invalid: ${J(fields.map((f) => f.id))}.filter((f) => box && [...box.querySelectorAll('[data-field="' + f + '"]')].every((c) => c.getAttribute('aria-invalid') === 'true')),
+      confirm: !!(box && box.querySelector('.ans-confirm')), send: !!(box && box.querySelector('[data-act="ans-send"]')),
+      confirmed: st && st.confirm && st.confirm.values ? JSON.parse(JSON.stringify(st.confirm.values)) : null, phase: st ? st.phase : null };
+  })()`);
+  const publishFields = async (question) => {
+    const pub = await published(A, briefOf('상황판 점검', question, { decisions: [{ question, reason: '한도까지 채운 입력 칸', blocks: false, fields: maxDecisionFields() }] }));
+    await waitApplied(page, pub.seq);
+    await showPage(page, 'lead-A', 'ov');
+    const id = await page.eval(`BriefPage.state.model.sessions.find((s) => s.id === 'lead-A').decisions.find((d) => d.question === ${J(question)} && !d.answered).id`);
+    assert.ok(Number.isInteger(id), `the decision is on the page: ${id}`);
+    return id;
+  };
+  // every message the fake pi hosts admitted after `base`, without the deliveries of answers that existed before the scenario
+  const leadCalls = async () => ({ A: (await A.call('deliveries')).admitted, B: (await B.call('deliveries')).admitted });
+  const earlierKeys = () => new Set(answerListing().map((n) => n.replace(/\.json$/, '')).map((k) => (/^\d+$/.test(k) ? `d${Number(k)}` : k)));
+  const newCalls = (base, now, earlier) => Object.fromEntries(Object.entries(now).map(([lead, list]) => [lead, list.slice(base[lead].length).filter((d) => !earlier.has(d.delivery_id))]));
+  const watchPosts = () => {
+    const list = [];
+    const fn = (p) => { if (p.request.method !== 'GET') list.push(`${p.request.method} ${new URL(p.request.url).pathname}`); };
+    page.client.listeners.set('Network.requestWillBeSent', [...(page.client.listeners.get('Network.requestWillBeSent') || []), fn]);
+    return { list, enable: () => page.client.send('Network.enable'),
+      stop: async () => { page.client.listeners.set('Network.requestWillBeSent', (page.client.listeners.get('Network.requestWillBeSent') || []).filter((f) => f !== fn)); await page.client.send('Network.disable'); } };
+  };
+
+  await scenario('input-invalid-page', '입력 결정 at its field limits refused on the board: 201 characters, off the step grid and no choice -> four field messages, no confirm row, no request, nothing written, nothing delivered', async () => {
+    const fields = maxDecisionFields();
+    const id = await publishFields('최대 입력 결정: 잘못된 값은 보드에서 멈춰야 합니다');
+    const box = fieldsBoxOf(id);
+    const earlier = earlierKeys();
+    const listing = answerListing();
+    const base = await leadCalls();
+    const posts = watchPosts();
+    let refused, again, control;
+    try {
+      await posts.enable();
+      const bad = invalidFieldValues(fields);
+      await typeField(`${box} [data-field="${fields[0].id}"]`, bad[fields[0].id]);
+      await typeField(`${box} [data-field="${fields[1].id}"]`, bad[fields[1].id]); // both choices stay unchosen
+      await click(page, `${box} [data-act="ans-fields"]`);
+      refused = await fieldState(id, fields);
+      // the keyboard path: Enter on the focused 입력 확인 activates it once (counted) and refuses the same way
+      await page.eval(`(window.__fieldPresses = 0, document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest(${J(box + ' [data-act="ans-fields"]')})) window.__fieldPresses++; }, true), document.querySelector(${J(box + ' [data-act="ans-fields"]')}).focus(), true)`);
+      await page.client.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' });
+      await page.client.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+      again = { ...(await fieldState(id, fields)), presses: await page.eval('window.__fieldPresses') };
+      await frames(page);
+      await page.eval(`(document.querySelector(${J(box)}).closest('.cv-dc, .dcard').scrollIntoView({ block: 'start' }), document.getElementById('main').scrollBy(0, -110), true)`);
+      await frames(page);
+      await page.screenshot(path.join(OUT, 'desktop-input-invalid.png'));
+      await A.call('wake');
+      await B.call('wake');
+      // control: the same form takes the maximal valid values (the refusal was about the values), then 취소 leaves it unsent
+      const good = maxFieldValues(fields);
+      await typeField(`${box} [data-field="${fields[0].id}"]`, good[fields[0].id]);
+      await typeField(`${box} [data-field="${fields[1].id}"]`, good[fields[1].id]);
+      await page.eval(`(() => { const s = document.querySelector(${J(`${box} [data-field="${fields[2].id}"]`)}); s.focus(); return true; })()`);
+      await key(page, 'End', 'End', 35); await key(page, 'Enter', 'Enter', 13);
+      await page.eval(`([...document.querySelectorAll(${J(`${box} [data-field="${fields[3].id}"]`)})].pop().focus(), true)`);
+      await key(page, ' ', 'Space', 32);
+      await click(page, `${box} [data-act="ans-fields"]`);
+      control = await fieldState(id, fields);
+      await click(page, `${box} [data-act="ans-cancel"]`); // 고치기: back to the form, nothing sent
+    } finally {
+      await posts.stop();
+    }
+    const want = invalidFieldErrors(fields);
+    assert.equal(again.presses, 1, 'Enter pressed 입력 확인 once');
+    for (const st of [refused, again]) {
+      assert.deepEqual(st.errors, want, 'one board message per field');
+      assert.deepEqual(st.invalid, fields.map((f) => f.id), 'every control is marked invalid');
+      assert.deepEqual([st.confirm, st.send, st.confirmed, st.phase], [false, false, null, ''], 'no confirm row, no send');
+    }
+    assert.deepEqual([control.confirm, control.send, control.confirmed && Object.values(control.confirmed)], [true, true, Object.values(maxFieldValues(fields))], 'the same form confirms valid values');
+    assert.deepEqual(posts.list, [], 'no request left the page');
+    assert.deepEqual(answerListing(), listing, 'nothing was written');
+    const after = newCalls(base, await leadCalls(), earlier);
+    assert.deepEqual([after.A, after.B], [[], []], 'nothing was delivered');
+    return { id, typed: invalidFieldValues(fields), refused, keyboardAgain: again, control: { confirm: control.confirm, confirmed: control.confirmed }, posts: posts.list, answersUnchanged: true, capture: 'desktop-input-invalid.png' };
+  });
+
+  await scenario('input-max-once', '입력 결정 at its field limits sent once: one POST, one answer record, and the conversation\'s fake pi receives exactly ONE message with every value in full; no other lead gets anything, before or after a re-render, a reload and forced delivery scans', async () => {
+    const fields = maxDecisionFields();
+    const id = await publishFields('최대 입력 결정: 네 값을 한 번만 보내요');
+    const box = fieldsBoxOf(id);
+    const values = maxFieldValues(fields);
+    const earlier = earlierKeys();
+    const base = await leadCalls();
+    const posts = watchPosts();
+    const answerFile = path.join(answersDir(), `${pad6(id)}.json`);
+    const receiptFile = path.join(STATE, 'receipts', `${pad6(id)}.json`);
+    let confirm, sent, answer, receipt, scans, history;
+    try {
+      await posts.enable();
+      await typeField(`${box} [data-field="${fields[0].id}"]`, values[fields[0].id]);
+      await typeField(`${box} [data-field="${fields[1].id}"]`, values[fields[1].id]);
+      await page.eval(`(document.querySelector(${J(`${box} [data-field="${fields[2].id}"]`)}).focus(), true)`);
+      await key(page, 'End', 'End', 35); await key(page, 'Enter', 'Enter', 13);
+      await page.eval(`([...document.querySelectorAll(${J(`${box} [data-field="${fields[3].id}"]`)})].pop().focus(), true)`);
+      await key(page, ' ', 'Space', 32);
+      await click(page, `${box} [data-act="ans-fields"]`);
+      confirm = await fieldState(id, fields);
+      assert.deepEqual([confirm.confirm, confirm.send, confirm.confirmed && Object.values(confirm.confirmed)], [true, true, Object.values(values)], `confirmed: ${J(confirm)}`);
+      await page.eval(`(document.querySelector(${J(box)}).closest('.cv-dc, .dcard').scrollIntoView({ block: 'start' }), document.getElementById('main').scrollBy(0, -110), true)`);
+      await frames(page);
+      await page.screenshot(path.join(OUT, 'desktop-input-max-confirm.png'));
+      const written = pending(until(answersDir(), () => (existsSync(answerFile) ? readJson(answerFile) : null), `answers/${pad6(id)}.json`));
+      const sentState = pending(page.eval(`new Promise((resolve, reject) => {
+        const done = () => { const a = BriefPage.state.ui.answers[${J(String(id))}]; return a && a.phase === 'sent'; };
+        const mo = new MutationObserver(() => { if (done()) { mo.disconnect(); clearTimeout(t); resolve(true); } });
+        const t = setTimeout(() => { mo.disconnect(); reject(new Error('the send never settled')); }, 12000);
+        mo.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
+        if (done()) { mo.disconnect(); clearTimeout(t); resolve(true); }
+      })`));
+      const p = await point(page, `${box} [data-act="ans-send"]`);
+      await clickAt(page, p.x, p.y);
+      await clickAt(page, p.x, p.y); // a double press: the page must still send once
+      answer = await written;
+      sent = await sentState;
+      receipt = await until(STATE, () => (existsSync(receiptFile) ? readJson(receiptFile) : null), `receipts/${pad6(id)}.json`, 15_000, { recursive: true });
+      scans = [await A.call('wake'), await B.call('wake')];
+      await showPage(page, 'lead-A', 'dec');
+      await openBoard(page, url, 'desktop');
+      await showPage(page, 'lead-A', 'dec');
+      history = await waitDom(page, `(() => { const tr = [...document.querySelectorAll('#main .cv-hist tbody tr')].find((x) => (x.querySelector('[data-label="#"]') || {}).textContent === '#${id}');
+        const mine = tr && tr.querySelector('[data-label="내 답"]'); return mine ? { mine: mine.textContent, delivery: tr.querySelector('[data-label="전달"]').textContent, form: !!document.querySelector(${J(box + ' [data-field]')}) } : null; })()`, { label: 'the answered decision in the history' });
+      scans.push(await A.call('wake'), await B.call('wake'));
+      await page.eval(`(() => { const tr = [...document.querySelectorAll('#main .cv-hist tbody tr')].find((x) => (x.querySelector('[data-label="#"]') || {}).textContent === '#${id}'); tr.scrollIntoView({ block: 'center' }); return true; })()`);
+      await frames(page);
+      await page.screenshot(path.join(OUT, 'desktop-input-max-sent.png'));
+    } finally {
+      await posts.stop();
+    }
+    assert.equal(sent, true);
+    assert.deepEqual(posts.list, ['POST /answer'], 'one POST for a double press');
+    assert.deepEqual([answer.id, answer.fromSessionId, answer.values], [id, 'board', values], 'one answer record with every value');
+    assert.equal(receipt.proven, true);
+    const calls = newCalls(base, await leadCalls(), earlier);
+    const text = `[결정] #${id} 입력: ` + fields.map((f) => `${cleanInline(f.label, 40)}=${cleanInline(values[f.id], 200)}`).join(', ');
+    assert.deepEqual(calls.B, [], 'no other conversation received anything');
+    assert.deepEqual(calls.A.map((d) => d.delivery_id), [`d${id}`], 'the conversation received exactly one message');
+    assert.equal(calls.A[0].text, text);
+    for (const f of fields) assert.ok(calls.A[0].text.includes(`${f.label}=${values[f.id]}`), `${f.id} arrived in full`);
+    assert.equal(history.form, false, 'the answered decision has no form left');
+    for (const v of Object.values(values)) assert.ok(history.mine.includes(String(v)), `the history shows ${String(v).slice(0, 20)}`);
+    return { id, confirm: confirm.confirmed, posts: posts.list, answer: { id: answer.id, values: answer.values }, receipt: { proven: receipt.proven, kind: receipt.kind },
+      delivered: calls.A.map((d) => ({ delivery_id: d.delivery_id, chars: [...d.text].length, text: d.text })), otherLeads: calls.B, scansAfter: scans, history,
+      captures: ['desktop-input-max-confirm.png', 'desktop-input-max-sent.png'] };
+  });
   return { page, url };
 }
 
@@ -1520,7 +1788,8 @@ const MOBILE_CAPTURES = [
   'mobile-blocks-dark-1', 'mobile-blocks-dark-2', 'mobile-blocks-light-1', 'mobile-blocks-light-2',
 ].map((n) => `${n}.png`);
 const DESKTOP_CAPTURES = ['desktop-state.png', 'desktop-annotation-sent.png', 'desktop-report-pick.png', 'desktop-file-page.png',
-  'desktop-blocks-pick.png', 'desktop-blocks-dark-1.png', 'desktop-blocks-dark-2.png', 'desktop-blocks-light-1.png', 'desktop-blocks-light-2.png'];
+  'desktop-blocks-pick.png', 'desktop-blocks-dark-1.png', 'desktop-blocks-dark-2.png', 'desktop-blocks-light-1.png', 'desktop-blocks-light-2.png',
+  'desktop-blocks-max-1.png', 'desktop-blocks-max-2.png', 'desktop-input-invalid.png', 'desktop-input-max-confirm.png', 'desktop-input-max-sent.png'];
 
 // Fresh workers of lead-B for d-mobile (lead-A's workers are already finished and its process is gone).
 const MOBILE_WORKERS = [
@@ -2152,7 +2421,8 @@ try {
 }
 
 const cleanupResult = await cleanup();
-const scenarioIds = ['a', 'b', 'c', 'd', 'e', 'f', 'annotation-delivered', 'pick-writes-answer', 'legacy-501-bad-text', 'forged-origin-403', 'unknown-asset-404', 'blocks', 'input-decision', 'i', 'g', 'h', 'file-no-send', 'j', 'k'];
+const scenarioIds = ['a', 'b', 'c', 'd', 'e', 'f', 'annotation-delivered', 'pick-writes-answer', 'legacy-501-bad-text', 'forged-origin-403', 'unknown-asset-404', 'blocks', 'input-decision',
+  'blocks-max', 'input-invalid-page', 'input-max-once', 'i', 'g', 'h', 'file-no-send', 'j', 'k'];
 const extra = ['m-fit', 'f-mobile', 'plan-fold-mobile', 'c-mobile', 'd-mobile', 'e-blocked', 'e-mobile', 'g-mobile', 'blocks-mobile'];
 const allPass = !fatal
   && scenarioIds.every((id) => results[id] && results[id].pass)

@@ -66,7 +66,7 @@ test('hostile text in live rows and the plan stays escaped through the view', ()
 });
 
 test('alarms are recorded without a band; tabs precede main and the existing inbox opens decisions', () => {
-  const e = makeController({ modules: ['view', 'plan-view', 'workers-view', 'convo-view', 'shell', 'alarm', 'annotate'] });
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'workers-view', 'convo-view', 'shell', 'alarm', 'annotate'] });
   const m = model([card('owner', { alive: true, decisions: [{ id: 1, question: 'Choose', options: { A: { text: 'yes' } } }] })]);
   m.waiting = [{ key: 'd1', kind: 'decision', sessionId: 'owner', text: 'Choose', at: m.generatedAt, title: 'owner' }];
   e.page.receive(m);

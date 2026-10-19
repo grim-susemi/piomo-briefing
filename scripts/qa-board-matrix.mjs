@@ -28,9 +28,22 @@
 //   (h) a rail click changes #side only: #main and #tabs HTML are identical before and after the click
 //   (i) no alarm band; tabs precede main while waiting keys/title remain recorded
 //   (j) the selected rail destination stays filled, with the sidebar open, closed or overlaying at every viewport
+//   (k) blocks page only: the maximal report is drawn in full (the six kinds in order, every table row and cell, bar, key,
+//       step, checklist box, compare row and pick; no omission chip, no trimmed model) and the input decision's form is in
+//       the state the shot claims (empty; one refusal message per field; confirmed with the maximal values); its target on screen
+// Blocks page (todo 12): the same fixture plus test/fixtures/report-blocks-max.mjs, served in server mode by the real board
+//   server (src/server.mjs, ports OMO_BRIEFING_PORT_BASE (47400) .. +9, never the live board's 47317-47326) because only a
+//   live page draws the input form and the compare's picks. Conversation A gains the report blocks-max (all six kinds at
+//   their schema limits; its compare links the open A/B/C decision #97) and the open input decision #101 (four fields at
+//   their limits); #98 is closed on that page only (superseded by #101), so check (i) keeps its two waiting alarms. Its
+//   data.js text must stay <= MAX_VM_BYTES (the renderer's cap never runs on it). States, each in light and in dark
+//   (prefers-color-scheme): every block at the top of #main, the table's last row, then on 결정 the input decision empty,
+//   after one invalid value per field (201 characters, off the step grid, no choice made) and confirmed with the maximal
+//   valid values (the field grid's top, its end, and the confirm row). Nothing is ever sent: an /answer POST to that
+//   server fails the run.
 // Self-tests (every viewport): each of (a), (b), (c), (i) and (f) is made to fail on purpose once (a block wider than #main,
-//   a clipped headline, a shifted #main, a reintroduced band, a console.error) and must recover; a check that cannot fail
-//   fails the run.
+//   a clipped headline, a shifted #main, a reintroduced band, a console.error) and must recover, and (k) once on the blocks
+//   page (the table's last row taken out); a check that cannot fail fails the run.
 // --inject-overflow: the negative run (never part of the normal one). Before every 개요 shot the first visible text span of a
 //   개요 row gets width:120px; white-space:nowrap; overflow:hidden (plus flex:0 0 120px: that span is a flex item whose
 //   flex-basis would otherwise override the width). Check (b) must name it; the run exits 1.
@@ -44,9 +57,12 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import net from 'node:net';
 import { launch, isPidAlive, listProfilePids } from './cdp.mjs';
-import { pageHtml } from '../src/render.mjs';
+import { MAX_VM_BYTES, pageHtml } from '../src/render.mjs';
+import { createBoardServer } from '../src/server.mjs';
 import { waitingItems } from '../src/waiting.mjs';
+import { BLOCK_KINDS, MAX_REPORT_ID, maxReport, maxDecisionFields, maxFieldValues, invalidFieldValues, invalidFieldErrors } from '../test/fixtures/report-blocks-max.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FIXTURE_FILE = path.join(ROOT, 'test/fixtures/view-model-board.json');
@@ -94,6 +110,20 @@ const PAIRS = {
   'rep-pin': ['v6-sub-rep-pins'],
 };
 const INJECT_CSS = 'width:120px;white-space:nowrap;overflow:hidden;flex:0 0 120px';
+// the blocks page (todo 12)
+const SCHEMES = ['light', 'dark'];
+const BLK_STATES = [...BLOCK_KINDS, 'table-end', 'input', 'input-invalid', 'input-invalid-end', 'input-confirm'];
+const BLK_DECISION = 101; // the next id after the committed fixture's #100
+const BLK_LINKED = 97; // the open A/B/C decision the compare links
+const BLK_SUPERSEDED = 98; // closed on the blocks page only
+const BLK_TOKEN = 'qa-board-matrix-blocks';
+const LIVE_BOARD = [47317, 47326];
+const PORT_BASE = Number(process.env.OMO_BRIEFING_PORT_BASE || 47400);
+if (!Number.isInteger(PORT_BASE) || PORT_BASE < 1024 || PORT_BASE + 9 > 65535 || (PORT_BASE <= LIVE_BOARD[1] && PORT_BASE + 9 >= LIVE_BOARD[0])) {
+  console.error(`OMO_BRIEFING_PORT_BASE=${process.env.OMO_BRIEFING_PORT_BASE}: needs 10 ports in 1024-65535 outside the live board's ${LIVE_BOARD.join('-')}`);
+  process.exit(2);
+}
+const blkSel = (n) => `#main [data-block="rep/${MAX_REPORT_ID}/blk/${n}"]`;
 
 // ------------------------------------------------------------------ the fixture the page shows
 
@@ -117,14 +147,7 @@ function matrixModel() {
     blockSources: Object.fromEntries(Object.entries(C.blockSources).map(([k, v]) => [k, { paths: v.paths.map(swap) }])),
   });
   vm.sessions.push(D);
-  // waiting alarms, computed by the renderer's module (answered/closed ones excluded); no band is rendered
-  const decisions = vm.sessions.flatMap((s) => s.decisions.map((d) => ({ ...d, sessionId: d.sessionId || s.id })));
-  vm.waiting = waitingItems({
-    sessions: vm.sessions.map((s) => ({ sid: s.id, meta: { title: s.title, tabLabel: s.tabLabel, tabNumber: s.tabNumber, paneId: s.paneId }, briefs: [{ data: { brief: { title: s.title } } }] })),
-    decisions,
-    answers: decisions.filter((d) => d.answered).map((d) => ({ id: d.id })),
-    closures: decisions.filter((d) => d.closed).map((d) => ({ id: d.id })),
-  });
+  vm.waiting = waitingOf(vm);
   if (vm.waiting.length !== 2) throw new Error(`expected the 2 open decisions in vm.waiting, got ${J(vm.waiting)}`);
   return {
     vm,
@@ -132,6 +155,57 @@ function matrixModel() {
       waiting: { why: 'check (i) proves no band while 2 real waiting alarms remain recorded; the committed fixture has waiting: []', items: vm.waiting },
       longTitleSession: { why: 'the plan\'s 300-character title without spaces (check (b) and (a))', id: LONG_ID, clonedFrom: C.id, title: LONG_TITLE, titleLength: [...LONG_TITLE].length },
     },
+  };
+}
+
+// waiting alarms, computed by the renderer's module (answered/closed ones excluded); no band is rendered
+function waitingOf(vm) {
+  const decisions = vm.sessions.flatMap((s) => s.decisions.map((d) => ({ ...d, sessionId: d.sessionId || s.id })));
+  return waitingItems({
+    sessions: vm.sessions.map((s) => ({ sid: s.id, meta: { title: s.title, tabLabel: s.tabLabel, tabNumber: s.tabNumber, paneId: s.paneId }, briefs: [{ data: { brief: { title: s.title } } }] })),
+    decisions,
+    answers: decisions.filter((d) => d.answered).map((d) => ({ id: d.id })),
+    closures: decisions.filter((d) => d.closed).map((d) => ({ id: d.id })),
+  });
+}
+
+// The blocks page's model: the matrix model with conversation A's report blocks-max (newest of its three reports, as
+// render.mjs reportsView keeps three) and the open input decision #101; #98 closed (superseded by #101) on this page only.
+function blocksModel(base) {
+  const vm = structuredClone(base);
+  vm.seq = base.seq + 1;
+  const A = vm.sessions[0];
+  const linked = A.decisions.find((d) => d.id === BLK_LINKED);
+  const superseded = A.decisions.find((d) => d.id === BLK_SUPERSEDED);
+  if (!linked || linked.answered || linked.closed || !linked.options.C || !superseded || superseded.answered || superseded.closed
+    || vm.sessions.some((s) => s.decisions.some((d) => d.id === BLK_DECISION))) throw new Error('the committed fixture no longer has open #97 (A/B/C) and #98, or already has #101');
+  superseded.closed = true;
+  const fields = maxDecisionFields();
+  A.decisions.push({ id: BLK_DECISION, sessionId: A.id, question: '최대 크기 입력 결정: 네 칸을 모두 한도까지 채워 주세요', options: {}, recommend: '',
+    reason: '값을 확인하고 대화에 한 번만 보내요', blocks: false, fields, createdAt: A.lastBriefAt, source: 'brief', answered: false, closed: false,
+    questionPrompt: false, answer: null, receipt: null });
+  const report = maxReport({ decision: BLK_LINKED });
+  A.reports = [{ id: report.id, title: report.title, summary: report.summary, at: A.lastBriefAt, decisionId: null, status: '참고', images: [], blocks: report.blocks },
+    ...A.reports.slice(0, 2)];
+  vm.waiting = waitingOf(vm);
+  if (vm.waiting.map((w) => w.key).join() !== `d${BLK_LINKED},d${BLK_DECISION}`) throw new Error(`blocks page waiting: ${J(vm.waiting)}`);
+  const b = report.blocks;
+  const expect = {
+    report: { report: report.id, drawn: { kinds: BLOCK_KINDS, tableHead: b[0].columns.length, tableRows: b[0].rows.length, tableCells: b[0].rows.length * b[0].columns.length,
+      bars: b[1].items.length, barRects: b[1].items.filter((i) => i.value > 0).length, kv: [b[2].items.length, b[2].items.length],
+      steps: b[3].steps.length, flowSvg: 0, checks: b[4].items.length, compareRows: b[5].rows.length, compareOptions: 3, cards: 3,
+      recommended: [linked.recommend], picks: 3 } },
+    input: { decision: BLK_DECISION, fields: fields.map((f) => ({ id: f.id, ...(f.kind === 'text' ? { tag: 'input:text', controls: 1, attrs: f.maxLen * 2 }
+      : f.kind === 'number' ? { tag: 'input:number', controls: 1, attrs: [f.min, f.max, f.step].join('|') }
+        : f.options.length > 3 ? { tag: 'select:select-one', controls: 1, attrs: f.options.length + 1 } : { tag: 'input:radio', controls: f.options.length, attrs: null }) })),
+    errors: invalidFieldErrors(fields), values: maxFieldValues(fields) },
+  };
+  return {
+    vm, fields, expect,
+    additions: { why: 'todo 12: a report with all six block kinds at their schema limits and an input decision at its field limits',
+      report: { session: A.id, id: report.id, kinds: b.map((x) => x.kind), compareLinks: BLK_LINKED, drawn: expect.report.drawn },
+      inputDecision: { id: BLK_DECISION, fields }, superseded: { id: BLK_SUPERSEDED, closed: true, why: 'check (i) needs exactly 2 waiting alarms: #97 and #101' },
+      reportsKept: A.reports.map((r) => r.id), waiting: vm.waiting.map((w) => w.key) },
   };
 }
 
@@ -369,6 +443,80 @@ function pageLib() {
     const pass = selected.length === 1 && selected[0].alpha > 0;
     return { result: pass ? 'pass' : 'fail', pass, selected };
   };
+  // (k) the blocks page: x = {part: 'report', report, drawn, target} | {part: 'input', state, decision, fields, errors, values, target}
+  qa.checkK = (x) => {
+    const main = document.getElementById('main');
+    const mr = main.getBoundingClientRect();
+    const problems = [];
+    const t = main.querySelector(x.target);
+    const tr = t ? t.getBoundingClientRect() : null;
+    if (!tr || !(tr.height > 0 && tr.bottom > mr.top + 1 && tr.top < mr.bottom - 1)) problems.push('target not on screen: ' + x.target);
+    const omitted = ['표·그래프 생략', '용량 때문에 일부 생략'].filter((s) => main.textContent.includes(s));
+    const trimmed = BriefPage.state.model.trimmed;
+    if (omitted.length || trimmed !== undefined) problems.push('trimmed: ' + JSON.stringify({ omitted, trimmed }));
+    let drawn;
+    if (x.part === 'report') {
+      const rep = main.querySelector('[data-block="rep/' + x.report + '"]');
+      const figs = rep ? [...rep.querySelectorAll('figure.rbk')] : [];
+      const n = (i, s) => (figs[i] ? figs[i].querySelectorAll(s).length : -1);
+      drawn = {
+        kinds: figs.map((f) => ([...f.classList].find((c) => /^rbk-(table|bars|kv|flow|checklist|compare)$/.test(c)) || '').slice(4)),
+        tableHead: n(0, 'thead th'), tableRows: n(0, 'tbody tr'), tableCells: n(0, 'tbody td'), bars: n(1, 'li.bar-r'), barRects: n(1, 'rect.bar-v'),
+        kv: [n(2, 'dl.rbk-kvl > dt'), n(2, 'dl.rbk-kvl > dd')], steps: n(3, 'ol.flow-steps > li'), flowSvg: n(3, '.flowbox svg'),
+        checks: n(4, 'input[type="checkbox"][data-check-key]'), compareRows: n(5, 'table.rbk-cmp tbody tr'), compareOptions: n(5, 'table.rbk-cmp thead th.opt'),
+        cards: n(5, '.cmpc'), recommended: figs[5] ? [...figs[5].querySelectorAll('table.rbk-cmp th.opt.rec .k')].map((k) => k.textContent) : null,
+        picks: n(5, 'table.rbk-cmp tfoot .cv-pick'),
+      };
+      for (const k of Object.keys(x.drawn)) if (JSON.stringify(drawn[k]) !== JSON.stringify(x.drawn[k])) problems.push(k + ': ' + JSON.stringify(drawn[k]) + ' != ' + JSON.stringify(x.drawn[k]));
+    } else {
+      const box = main.querySelector('[data-ans="' + x.decision + '"]');
+      const fields = !box ? [] : x.fields.map((f) => {
+        const ctl = [...box.querySelectorAll('[data-field="' + f.id + '"]')], c = ctl[0], err = box.querySelector('[id$="-' + f.id + '-error"]');
+        return { id: f.id, tag: c ? c.tagName.toLowerCase() + ':' + c.type : null, controls: ctl.length,
+          attrs: !c ? null : c.tagName === 'SELECT' ? c.options.length : c.type === 'number' ? [c.min, c.max, c.step].join('|') : c.type === 'text' ? c.maxLength : null,
+          invalid: ctl.length > 0 && ctl.every((e) => e.getAttribute('aria-invalid') === 'true'), error: err ? err.textContent : null };
+      });
+      const st = BriefPage.state.ui.answers && BriefPage.state.ui.answers[String(x.decision)];
+      drawn = { fields, confirm: !!(box && box.querySelector('.ans-confirm')), send: !!(box && box.querySelector('.ans-confirm [data-act="ans-send"]')),
+        values: st && st.confirm && st.confirm.values ? JSON.parse(JSON.stringify(st.confirm.values)) : null };
+      if (!box) problems.push('no answer box for #' + x.decision);
+      x.fields.forEach((f, i) => {
+        const d = fields[i] || {};
+        for (const k of ['tag', 'controls', 'attrs']) if (d[k] !== f[k]) problems.push(f.id + ' ' + k + ': ' + JSON.stringify(d[k]) + ' != ' + JSON.stringify(f[k]));
+        const want = x.state === 'input-invalid' ? x.errors[f.id] : null;
+        if (d.error !== want || d.invalid !== (want !== null)) problems.push(f.id + ' refusal: ' + JSON.stringify([d.error, d.invalid]) + ' != ' + JSON.stringify(want));
+      });
+      const confirmed = x.state === 'input-confirm';
+      if (drawn.confirm !== confirmed || drawn.send !== confirmed) problems.push('confirm row: ' + JSON.stringify([drawn.confirm, drawn.send]));
+      if (confirmed && JSON.stringify(Object.keys(x.values).map((k) => drawn.values && drawn.values[k])) !== JSON.stringify(Object.values(x.values))) problems.push('confirmed values: ' + JSON.stringify(drawn.values));
+    }
+    return { result: problems.length ? 'fail' : 'pass', pass: !problems.length, part: x.part, state: x.state || null, target: x.target, problems, drawn, omitted, trimmed: trimmed === undefined ? null : trimmed };
+  };
+  // (k) made to fail once: the table's last row taken out, measured, put back
+  qa.selfTestK = (x) => {
+    const before = qa.checkK(x);
+    const row = document.querySelector('#main [data-block="rep/' + x.report + '/blk/0"] tbody tr:last-child');
+    let broken = null;
+    if (row) {
+      const parent = row.parentNode, next = row.nextSibling;
+      try { row.remove(); broken = qa.checkK(x); } finally { parent.insertBefore(row, next); }
+    }
+    const after = qa.checkK(x);
+    return { flipped: before.pass && !!broken && broken.pass === false && after.pass, before: before.pass, broken: broken ? broken.pass : null, after: after.pass,
+      brokenProblems: broken ? broken.problems : null };
+  };
+  // scrolls #main so the element (or its `up` ancestor) sits just under the sticky sub-tab bar ('top') or at the bottom
+  qa.showBlock = (sel, edge, up) => {
+    const main = document.getElementById('main');
+    let el = document.querySelector(sel);
+    if (el && up && el.closest(up)) el = el.closest(up);
+    if (!el) return null;
+    const m = main.getBoundingClientRect(), bar = main.querySelector('.stabs');
+    const r = el.getBoundingClientRect();
+    main.scrollTop += edge === 'bottom' ? r.bottom - (m.bottom - 12) : r.top - (m.top + (bar ? bar.getBoundingClientRect().height : 0) + 12);
+    const a = el.getBoundingClientRect();
+    return { scrollTop: Math.round(main.scrollTop), top: Math.round(a.top), bottom: Math.round(a.bottom), maxScroll: main.scrollHeight - main.clientHeight };
+  };
   qa.measure = (allow) => ({ a: qa.checkA(), b: qa.checkB(allow), c: qa.checkC(), i: qa.checkI(), j: qa.checkJ(), pageError: !!document.getElementById('page-error'), errors: qa.errors.splice(0) });
   // --inject-overflow: the first visible text span of a 개요 row
   qa.inject = (css) => {
@@ -433,6 +581,9 @@ let errCursor = 0;
 let phase = 'build';
 let page = null;
 let model = null;
+let blk = null; // the blocks page: {vm, fields, expect, additions, url, port, dataJsBytes}
+let boardServer = null;
+const blkAnswers = []; // /answer bodies that reached the blocks page's server (must stay empty)
 
 const send = (method, params) => page.client.send(method, params);
 const ev = (expr) => page.eval(expr);
@@ -524,6 +675,7 @@ async function shot(vp, n, state, o = {}) {
   const extra = {};
   if (o.d !== undefined) extra.d = await ev(`__qa.checkD(${J(o.d)})`);
   if (o.g) extra.g = await ev('__qa.checkG()');
+  if (o.k) extra.k = await ev(`__qa.checkK(${J(o.k)})`);
   await ev('1'); // every CDP event sent before this reply is in errLog now
   const fresh = errLog.slice(errCursor);
   errCursor = errLog.length;
@@ -752,6 +904,84 @@ async function runViewport(vp, A, B, D) {
   await next('rep-pin', { note: { pin } });
 }
 
+// real typing into a board field: focus, Ctrl+A, the text inserted as one input event; the field must then hold it
+async function typeInto(sel, value) {
+  if (!(await ev(`(() => { const el = document.querySelector(${J(sel)}); if (!el) return false; el.focus(); return document.activeElement === el; })()`))) throw new Error('cannot focus ' + sel);
+  await key('a', 'KeyA', 65, 2);
+  await send('Input.insertText', { text: String(value) });
+  await settle();
+  const v = await ev(`(document.querySelector(${J(sel)}) || {}).value`);
+  if (v !== String(value)) throw new Error(`typed into ${sel}: ${J(v)} instead of ${J(String(value))}`);
+}
+
+// The blocks page in light and dark: each block of blocks-max at the top of #main, the table's last row, then on 결정 the
+// input decision empty, after one invalid value per field, and confirmed with the maximal values (never sent).
+async function runBlocks(vp) {
+  phase = 'build';
+  const A = blk.vm.sessions[0];
+  const box = `#main [data-ans="${BLK_DECISION}"]`;
+  const field = (f) => `${box} [data-field="${f.id}"]`;
+  const [textF, numberF, selectF, radioF] = blk.fields;
+  const kRep = (target) => ({ ...blk.expect.report, part: 'report', target });
+  const kIn = (state, target = box) => ({ ...blk.expect.input, part: 'input', state, target });
+  let n = 20; // after the viewport's 20 shell states
+  const next = (state, o) => shot(vp, ++n, state, o);
+  const showCard = async () => { await park(); return ev(`__qa.showBlock(${J(box)}, 'top', '.dcard')`); };
+  try {
+    for (const scheme of SCHEMES) {
+      await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
+      errCursor = errLog.length;
+      await page.goto(blk.url);
+      await ev('(localStorage.clear(), sessionStorage.clear(), true)'); // a fresh page: default prefs, no drafts
+      await page.goto('about:blank');
+      await page.goto(blk.url);
+      const info = await ev("({ seq: BriefPage.state.seq, transport: BriefPage.transport(), live: BriefPage.state.ui.live, dark: matchMedia('(prefers-color-scheme: dark)').matches, innerWidth })");
+      if (info.seq !== blk.vm.seq || info.transport !== 'http' || info.dark !== (scheme === 'dark') || info.innerWidth !== vp.width) throw new Error('unexpected blocks page: ' + J(info));
+      await ev(`(BriefPage.open(${J(A.id)}, 'rep'), true)`);
+      await park();
+      if (scheme === SCHEMES[0]) {
+        const st = results.selfTests[vp.name] || (results.selfTests[vp.name] = { shell: { flipped: false, note: 'the shell states never reached their self-test' } });
+        st.k = await ev(`__qa.selfTestK(${J(kRep(blkSel(0)))})`);
+      }
+      for (const [i, kind] of BLOCK_KINDS.entries()) {
+        const at = await ev(`__qa.showBlock(${J(blkSel(i))}, 'top')`);
+        await next(`blk-${scheme}-${kind}`, { k: kRep(blkSel(i)), note: { at } });
+      }
+      const lastRow = `${blkSel(0)} tbody tr:last-child`;
+      const end = await ev(`__qa.showBlock(${J(lastRow)}, 'bottom')`);
+      await next(`blk-${scheme}-table-end`, { k: kRep(lastRow), note: { at: end } });
+
+      await click('#main .stabs [data-sub="dec"]');
+      await next(`blk-${scheme}-input`, { k: kIn('input'), note: { at: await showCard() } });
+      const bad = invalidFieldValues(blk.fields);
+      await typeInto(field(textF), bad[textF.id]);
+      await typeInto(field(numberF), bad[numberF.id]); // the two choices stay unchosen
+      await click(`${box} [data-act="ans-fields"]`);
+      await next(`blk-${scheme}-input-invalid`, { k: kIn('input-invalid'), note: { typed: bad, at: await showCard() } });
+      const lastError = `${box} [id$="-${radioF.id}-error"]`; // the end of the field grid: the radio group's message
+      await next(`blk-${scheme}-input-invalid-end`, { k: kIn('input-invalid', lastError), note: { at: await ev(`__qa.showBlock(${J(lastError)}, 'bottom')`) } });
+      const good = maxFieldValues(blk.fields);
+      await typeInto(field(textF), good[textF.id]);
+      await typeInto(field(numberF), good[numberF.id]);
+      if (!(await ev(`(document.querySelector(${J(field(selectF))}).focus(), true)`))) throw new Error('no select');
+      await key('End', 'End', 35);
+      await key('Enter', 'Enter', 13);
+      await settle();
+      if (!(await ev(`(() => { const r = [...document.querySelectorAll(${J(field(radioF))})].pop(); r.focus(); return document.activeElement === r; })()`))) throw new Error('no radio');
+      await key(' ', 'Space', 32);
+      await settle();
+      const chosen = await ev(`({ select: document.querySelector(${J(field(selectF))}).value, radio: ([...document.querySelectorAll(${J(field(radioF))})].find((r) => r.checked) || {}).value || null })`);
+      if (chosen.select !== good[selectF.id] || chosen.radio !== good[radioF.id]) throw new Error('the keyboard did not choose the last options: ' + J(chosen));
+      await click(`${box} [data-act="ans-fields"]`);
+      await park();
+      const row = `${box} .ans-confirm`; // the confirm row with every value and 보내기, at the bottom edge
+      await next(`blk-${scheme}-input-confirm`, { k: kIn('input-confirm', row), note: { at: await ev(`__qa.showBlock(${J(row)}, 'bottom')`) } });
+    }
+  } finally {
+    await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: '' }] });
+  }
+}
+
 async function runMockups(vp) {
   phase = 'mockup';
   for (const m of MOCKUPS) {
@@ -833,6 +1063,18 @@ try {
   fs.writeFileSync(path.join(STATE, 'index.html'), pageHtml(model, model.gen, { mode: 'file' }));
   fs.writeFileSync(path.join(STATE, 'data.js'), `/* seq:${model.seq} */\nwindow.__briefData && window.__briefData(${J(model).replace(/</g, '\\u003c')});\n`);
   for (const m of MOCKUPS) if (!fs.existsSync(path.join(MOCKUP_DIR, m.file))) throw new Error('mockup missing: ' + path.join(MOCKUP_DIR, m.file));
+  // the blocks page: its model measured as the renderer's data.js text (C-CAP2 never trims it), served live by the board server
+  const b = blocksModel(model);
+  const blkBytes = Buffer.byteLength(`/* seq:${b.vm.seq} */\nwindow.__briefData && window.__briefData(${J(b.vm).replace(/</g, '\\u003c')});\n`);
+  if (blkBytes > MAX_VM_BYTES) throw new Error(`the blocks page model is ${blkBytes} B, over MAX_VM_BYTES ${MAX_VM_BYTES}: the renderer would trim it`);
+  const referenced = new Set(b.vm.sessions.flatMap((s) => s.reports.flatMap((r) => r.images.map((i) => i.src.replace(/^assets\//, '')))));
+  boardServer = createBoardServer({ portBase: PORT_BASE, portCount: 10, generation: b.vm.gen, token: BLK_TOKEN,
+    getPage: () => pageHtml(b.vm, b.vm.gen, { mode: 'server', token: BLK_TOKEN }), getViewModel: () => b.vm,
+    assetsDir: path.join(STATE, 'assets'), assetAllowed: (name) => referenced.has(name),
+    onAnswer: async (body) => { blkAnswers.push(body); return { status: 409, json: { ok: false, code: 'QA_MATRIX_NEVER_SENDS' } }; } });
+  const { port } = await boardServer.start();
+  blk = { ...b, url: `http://127.0.0.1:${port}/`, port, dataJsBytes: blkBytes };
+  fixtureInfo.additions.blocksPage = { ...b.additions, served: blk.url, mode: 'server', dataJsBytes: blkBytes, maxVmBytes: MAX_VM_BYTES };
 
   chromeTempBefore = new Set(chromeTempNames());
   page = await launch({ width: 1440, height: 900 });
@@ -853,6 +1095,12 @@ try {
       results.fatal.push({ viewport: vp.name, error: String(err && err.stack || err) });
       console.error(`FATAL ${vp.name}: ${err && err.stack || err}`);
     }
+    try {
+      await runBlocks(vp);
+    } catch (err) {
+      results.fatal.push({ viewport: vp.name, part: 'blocks page', error: String(err && err.stack || err) });
+      console.error(`FATAL blocks page ${vp.name}: ${err && err.stack || err}`);
+    }
     await runMockups(vp);
     chrome.pids = [...new Set([...chrome.pids, page.pid, ...listProfilePids(page.profileDir)])].sort((x, y) => x - y); // every process seen
   }
@@ -871,6 +1119,18 @@ if (page) {
   }
   chrome.aliveAfterClose = chrome.pids.filter((pid) => isPidAlive(pid));
   chrome.profileRemoved = !fs.existsSync(chrome.profileDir);
+}
+const boardServerState = { port: blk ? blk.port : null, closed: null, closeError: null, answerPosts: blkAnswers.length };
+if (boardServer) {
+  try { await boardServer.close(); } catch (err) { boardServerState.closeError = String(err && err.message || err); }
+  if (blk) {
+    boardServerState.closed = await new Promise((resolve) => {
+      const s = net.connect({ host: '127.0.0.1', port: blk.port });
+      s.setTimeout(3000, () => { s.destroy(); resolve(false); });
+      s.once('connect', () => { s.destroy(); resolve(false); });
+      s.once('error', (err) => resolve(err.code === 'ECONNREFUSED'));
+    });
+  }
 }
 const chromeTemp = { removed: [], left: [] };
 if (chromeTempBefore && chrome.browserPid) {
@@ -895,8 +1155,9 @@ for (const c of all) {
 }
 const selfOk = VIEWPORTS.every((vp) => results.selfTests[vp.name] && Object.values(results.selfTests[vp.name]).every((t) => t.flipped === true));
 const mockOk = results.mockups.length === VIEWPORTS.length * MOCKUPS.reduce((n, m) => n + m.shots.length, 0) && results.mockups.every((m) => m.file && !m.error);
-const cleanupOk = !!page && !chrome.closeError && chrome.aliveAfterClose.length === 0 && chrome.profileRemoved && !chromeTemp.left.length && Object.values(tempDirs).every((v) => v === 'removed');
-const expectedShots = VIEWPORTS.length * 20;
+const cleanupOk = !!page && !chrome.closeError && chrome.aliveAfterClose.length === 0 && chrome.profileRemoved && !chromeTemp.left.length && Object.values(tempDirs).every((v) => v === 'removed')
+  && boardServerState.closed === true && !boardServerState.closeError;
+const expectedShots = VIEWPORTS.length * (20 + SCHEMES.length * BLK_STATES.length);
 const failing = all.filter((c) => !c.pass);
 results.summary = {
   shots: { build: results.shots.length, buildExpected: expectedShots, mockup: results.mockups.filter((m) => m.file).length, total: results.shots.length + results.mockups.filter((m) => m.file).length },
@@ -906,7 +1167,7 @@ results.summary = {
   selfTestsFlipped: selfOk, mockupsComplete: mockOk, cleanupClean: cleanupOk,
 };
 results.finishedAt = new Date().toISOString();
-const pass = !fatal && !results.fatal.length && results.shots.length === expectedShots && !failing.length && selfOk && mockOk && cleanupOk;
+const pass = !fatal && !results.fatal.length && results.shots.length === expectedShots && !failing.length && selfOk && mockOk && cleanupOk && !blkAnswers.length;
 const doc = {
   pass,
   mode: INJECT ? 'inject-overflow (negative run)' : 'normal',
@@ -919,6 +1180,7 @@ const doc = {
   viewports: VIEWPORTS.map((v) => v.name),
   summary: results.summary,
   chrome: { ...chrome, launched: 1, maxConcurrent: 1, tempFolders: chromeTemp },
+  boardServer: { ...boardServerState, portBase: PORT_BASE, url: blk ? blk.url : null, answerBodies: blkAnswers },
   tempDirs,
   mockupDir: MOCKUP_DIR,
   mockupErrors,
@@ -929,6 +1191,6 @@ const doc = {
 };
 fs.writeFileSync(path.join(OUT, 'result.json'), JSON.stringify(doc, null, 2) + '\n');
 fs.writeFileSync(path.join(OUT, 'contact.html'), contactHtml());
-console.log(`${results.summary.shots.build} build + ${results.summary.shots.mockup} mockup shots; checks ${results.summary.checks.pass} pass / ${results.summary.checks.fail} fail; self-tests ${selfOk ? 'flipped' : 'NOT all flipped'}; chrome pids ${chrome.pids.join(',')} alive after close: ${J(chrome.aliveAfterClose)}; temp ${J(tempDirs)}`);
+console.log(`${results.summary.shots.build} build + ${results.summary.shots.mockup} mockup shots; checks ${results.summary.checks.pass} pass / ${results.summary.checks.fail} fail; self-tests ${selfOk ? 'flipped' : 'NOT all flipped'}; chrome pids ${chrome.pids.join(',')} alive after close: ${J(chrome.aliveAfterClose)}; temp ${J(tempDirs)}; board server ${J(boardServerState)}`);
 console.log(pass ? 'ALL PASS' : 'FAILED');
 process.exit(pass ? 0 : 1);

@@ -140,7 +140,7 @@ export function memoryStorage() {
   return { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), size: () => m.size };
 }
 export function makeController({ protocol = 'http:', token = 'tok-1', generation = null, sessionStorage = memoryStorage(),
-  localStorage = memoryStorage(), abort = false, modules = ['view', 'plan-view', 'convo-view', 'shell', 'annotate'], configure } = {}) {
+  localStorage = memoryStorage(), abort = false, modules = ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'annotate'], configure } = {}) {
   let clock = 1000;
   let uuid = 0;
   const timers = [], intervals = [], fetches = [], errors = [], reloads = [], sources = [], rendered = [], scrolls = [];

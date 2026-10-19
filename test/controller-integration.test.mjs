@@ -14,6 +14,8 @@ const model = (seq, s = session(), extra = {}) => ({ seq, generatedAt: 0, sessio
 const note = { blocks: ['change/1/0'], sub: 'ov', text: 'same row', snip: 'same row', intent: '고쳐줘', comment: 'fix', paths: ['C:/project/evidence.txt'] };
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const posts = e => e.fetches.filter(f => f.url === '/answer');
+// a delivery line as the page draws it (icons.js loaded, as the page does): its stopwatch is the clock icon
+const delivered = hhmm => new RegExp('전달됨 <svg class="ic ic-xs" aria-hidden="true" focusable="false"><use href="#i-clock"></use></svg>' + hhmm);
 const reply = (r, status, json) => r.resolve({ status, json: async () => json });
 function click(e, selector) {
   const t = e.document.querySelector(selector);
@@ -57,7 +59,7 @@ test('regions: seq-only refresh and sidebar search keep main, input, resize hand
 });
 
 test('conversation refresh glow and worker measurements use stable block and session identities', () => {
-  const e = makeController({ modules: ['view', 'plan-view', 'workers-view', 'convo-view', 'shell', 'annotate'] });
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'workers-view', 'convo-view', 'shell', 'annotate'] });
   const s = session({ live: { workers: [{ id: 'st_a', name: 'Worker', state: 'running', startedAt: 0, updatedAt: 0 }] } });
   e.page.receive(model(1, s)); e.page.open('s1', 'wk');
   const snap = e.ctx.BriefWorkersView.measure(e.byId.main);
@@ -230,7 +232,7 @@ test('annotation send success uses token and immutable UUID, clears only after s
   assert.equal(e.byId.main.querySelector('[data-open-key="cv:s1:notes"]').open, true);
   assert.doesNotMatch(e.byId.main.textContent, /전달됨/);
   e.advance(600); e.page.receive(model(2, session({ notes: [{ key: 'a-id', at: 1, preview: 'stored', delivery: '전달됨 ⏱10:00' }] })));
-  assert.match(e.byId.main.textContent, /전달됨 ⏱10:00/);
+  assert.match(e.byId.main.innerHTML, delivered('10:00'));
   assert.deepEqual(e.errors, []);
 });
 
@@ -265,7 +267,7 @@ test('annotation banner clears only on its matching delivered receipt and stays 
   assert.ok(banner(), 'admission without proof still waits');
   receiveNotes(4, [{ key, at: 1, preview: 'stored', delivery: '전달됨 ⏱10:01' }]);
   assert.equal(banner(), null, 'the matching proven receipt clears the banner');
-  assert.match(e.byId.main.textContent, /전달됨 ⏱10:01/);
+  assert.match(e.byId.main.innerHTML, delivered('10:01'));
   click(e, '[data-act="ans-pick"]');
   assert.equal(banner(), null, 'later decision actions cannot restore a stale banner');
   assert.deepEqual(e.errors, []);
