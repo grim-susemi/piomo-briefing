@@ -234,7 +234,7 @@ test('개요: 지금/다음 callout, flow chips with →, four summary cards wit
   assert.equal(flat(cls(now, 'cv-next')[0]), '다음: ' + A.next);
   const flow = block(p, 'flow');
   assert.deepEqual(cls(flow, 'cv-fs').map((f) => [text(f), f.attrs.class]), A.flow.map((f) => [f.label, 'cv-fs is-' + f.state]));
-  assert.deepEqual(cls(flow, 'cv-arr').map(text), Array(A.flow.length - 1).fill('→'));
+  assert.deepEqual(cls(flow, 'cv-arr').map(shown), Array(A.flow.length - 1).fill('[arrow-right]'));
   const card = (k) => {
     const el = block(p, 'card/' + k);
     const go = els(el, (e) => e.tag === 'button')[0];
@@ -304,6 +304,28 @@ test('개요: 최근 변화 open and 한 일 closed; kit rows keep their chips a
   assert.deepEqual([chip('change/12/0', 'a-candidate'), chip('change/12/2', 'a-none')], [1, 1]);
 });
 
+test('overview flow direction slots are decorative Lucide SVGs and labels retain literal arrows', () => {
+  const ctx = load(), s = clone(A);
+  s.flow[0].label = 'label → literal ▾';
+  const flow = block(parse(render(ctx, s, 'ov')), 'flow');
+  assert.equal(text(cls(flow, 'cv-fs')[0]), s.flow[0].label);
+  const arrows = cls(flow, 'cv-arr');
+  assert.equal(arrows.length, s.flow.length - 1);
+  for (const arrow of arrows) {
+    assert.equal(arrow.attrs['aria-hidden'], 'true');
+    assert.equal(text(arrow), '');
+    const svg = els(arrow, e => e.tag === 'svg');
+    assert.equal(svg.length, 1);
+    assert.equal(svg[0].attrs['aria-hidden'], 'true');
+    assert.equal(svg[0].attrs.focusable, 'false');
+    assert.deepEqual(els(svg[0], e => e.tag === 'use').map(e => e.attrs.href), ['#i-arrow-right']);
+  }
+  s.flow = [s.flow[0]];
+  assert.equal(cls(block(parse(render(ctx, s, 'ov')), 'flow'), 'cv-arr').length, 0);
+  s.flow = [];
+  assert.equal(attrs(parse(render(ctx, s, 'ov')), 'data-block', 'flow').length, 0);
+});
+
 test('개요: 보낸 피드백 lists notes[] with their delivery strings; 이 대화 자료 lists the attachments in C-VM order with copy', () => {
   const ctx = load();
   const p = panel(parse(render(ctx, A, 'ov')));
@@ -369,7 +391,7 @@ test('계획 without a plan: work name as goal, progress bar and the todo table 
   const rows = els(table, (e) => e.tag === 'tr' && e.attrs['data-block']);
   assert.deepEqual(rows.map((r) => r.attrs['data-block']), B.todo.items.map((_, i) => 'plan/todo/' + i));
   assert.deepEqual(rows.map((r) => r.kids.map(shown)), [
-    ['1', '열기 절', '[check] 완료'], ['2', '화면 구성 표', '[check] 완료'], ['3', '화면 구성 절', '● 진행 중'], ['4', '주석 보내기 절', '○ 남음'], ['5', '옛 목차 지우기', '– 취소'],
+    ['1', '열기 절', '[check] 완료'], ['2', '화면 구성 표', '[check] 완료'], ['3', '화면 구성 절', '[clock] 진행 중'], ['4', '주석 보내기 절', '[list-todo] 남음'], ['5', '옛 목차 지우기', '[x] 취소'],
   ]);
   assert.ok(flat(p).includes('외 2개'));
   assert.equal(cls(p, 'plan-host').length, 0);

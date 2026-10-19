@@ -1860,12 +1860,28 @@ async function mobileRun() {
       const lanes = [...document.querySelectorAll('#main .plan-lane')];
       const tops = lanes.map((l) => l.getBoundingClientRect().top + main.scrollTop);
       return { count: lanes.length, stacked: tops.every((t, i) => i === 0 || t > tops[i - 1]),
-        arrow: getComputedStyle(lanes[0], '::after').content,
+        arrows: lanes.map((lane) => [...lane.querySelectorAll('.plan-lane-arrow')].map((arrow) => {
+          const svgs = arrow.querySelectorAll('svg'), svg = svgs[0], uses = svg ? svg.querySelectorAll('use') : [], use = uses[0];
+          const box = arrow.getBoundingClientRect(), iconBox = svg && svg.getBoundingClientRect(), style = getComputedStyle(arrow), iconStyle = svg && getComputedStyle(svg);
+          const matrix = new DOMMatrix(style.transform === 'none' ? undefined : style.transform);
+          return { real: svgs.length === 1 && uses.length === 1 && svg.namespaceURI === 'http://www.w3.org/2000/svg',
+            decorative: arrow.getAttribute('aria-hidden') === 'true' && svg && svg.getAttribute('aria-hidden') === 'true' && svg.getAttribute('focusable') === 'false',
+            href: use && use.getAttribute('href'), symbol: !!document.querySelector('#icon-sprite symbol#i-arrow-right'),
+            visible: box.width > 0 && box.height > 0 && iconBox && iconBox.width > 0 && iconBox.height > 0 && style.display !== 'none' && style.visibility === 'visible' && Number(style.opacity) > 0 && iconStyle.display !== 'none' && iconStyle.visibility === 'visible' && Number(iconStyle.opacity) > 0,
+            rotated: Math.abs(matrix.a) < 1e-6 && Math.abs(matrix.b - 1) < 1e-6 && Math.abs(matrix.c + 1) < 1e-6 && Math.abs(matrix.d) < 1e-6 };
+        })),
         overflowX: document.documentElement.scrollWidth > innerWidth + 1 || main.scrollWidth > main.clientWidth + 1 };
     })()`);
     assert.equal(shape.count, 4);
     assert.ok(shape.stacked, 'lanes are stacked top to bottom');
-    assert.ok(shape.arrow.includes('↓'), `arrow ${shape.arrow}`);
+    shape.arrows.forEach((arrows, i) => {
+      assert.equal(arrows.length, i < shape.count - 1 ? 1 : 0, 'one SVG connector per non-final lane');
+      for (const arrow of arrows) {
+        assert.ok(arrow.real && arrow.decorative && arrow.symbol && arrow.visible, 'real visible decorative SVG with a sprite symbol');
+        assert.equal(arrow.href, '#i-arrow-right');
+        assert.ok(arrow.rotated, 'phone connector is rotated 90 degrees');
+      }
+    });
     assert.equal(shape.overflowX, false, 'no sideways scroll');
     const anchors = await page.eval(`[...document.querySelectorAll('#main [data-anchor]')].map((e) => e.getAttribute('data-anchor'))`);
     assert.equal(new Set(anchors).size, anchors.length);
@@ -1935,12 +1951,28 @@ async function mobileRun() {
         const lanes = [...document.querySelectorAll('#main .plan-lane')];
         const top0 = root.getBoundingClientRect().top;
         return { count: lanes.length, offsets: lanes.map((l) => Math.round((l.getBoundingClientRect().top - top0) * 10) / 10),
-          arrow: getComputedStyle(lanes[0], '::after').content,
+          arrows: lanes.map((lane) => [...lane.querySelectorAll('.plan-lane-arrow')].map((arrow) => {
+            const svgs = arrow.querySelectorAll('svg'), svg = svgs[0], uses = svg ? svg.querySelectorAll('use') : [], use = uses[0];
+            const box = arrow.getBoundingClientRect(), iconBox = svg && svg.getBoundingClientRect(), style = getComputedStyle(arrow), iconStyle = svg && getComputedStyle(svg);
+            const matrix = new DOMMatrix(style.transform === 'none' ? undefined : style.transform);
+            return { real: svgs.length === 1 && uses.length === 1 && svg.namespaceURI === 'http://www.w3.org/2000/svg',
+              decorative: arrow.getAttribute('aria-hidden') === 'true' && svg && svg.getAttribute('aria-hidden') === 'true' && svg.getAttribute('focusable') === 'false',
+              href: use && use.getAttribute('href'), symbol: !!document.querySelector('#icon-sprite symbol#i-arrow-right'),
+              visible: box.width > 0 && box.height > 0 && iconBox && iconBox.width > 0 && iconBox.height > 0 && style.display !== 'none' && style.visibility === 'visible' && Number(style.opacity) > 0 && iconStyle.display !== 'none' && iconStyle.visibility === 'visible' && Number(iconStyle.opacity) > 0,
+              rotated: Math.abs(matrix.a) < 1e-6 && Math.abs(matrix.b - 1) < 1e-6 && Math.abs(matrix.c + 1) < 1e-6 && Math.abs(matrix.d) < 1e-6 };
+          })),
           overflowX: document.documentElement.scrollWidth > innerWidth + 1 || main.scrollWidth > main.clientWidth + 1 };
       })()`);
       assert.equal(shape.count, 4);
       assert.ok(shape.offsets.every((t, i) => i === 0 || t > shape.offsets[i - 1]), 'lanes are stacked top to bottom');
-      assert.ok(shape.arrow.includes('↓'), `arrow ${shape.arrow}`);
+      shape.arrows.forEach((arrows, i) => {
+        assert.equal(arrows.length, i < shape.count - 1 ? 1 : 0, 'one SVG connector per non-final lane');
+        for (const arrow of arrows) {
+          assert.ok(arrow.real && arrow.decorative && arrow.symbol && arrow.visible, 'real visible decorative SVG with a sprite symbol');
+          assert.equal(arrow.href, '#i-arrow-right');
+          assert.ok(arrow.rotated, 'phone connector is rotated 90 degrees');
+        }
+      });
       assert.equal(shape.overflowX, false, 'no sideways scroll');
       return { anchors: anchors.length, offsets: shape.offsets };
     };

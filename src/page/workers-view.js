@@ -28,19 +28,19 @@
   var STALE_TEXT = '응답 없음 10분';
   var STATES = {
     running: { cls: 'w-running', mark: '', label: '진행 중' },
-    waiting: { cls: 'w-waiting', mark: '○', label: '대기' },
+    waiting: { cls: 'w-waiting', icon: 'clock', label: '대기' },
     done: { cls: 'w-done', icon: 'check', label: '끝' },
     error: { cls: 'w-error', icon: 'x', label: '오류' },
-    cancelled: { cls: 'w-cancelled', mark: '⊘', label: '취소' },
-    lost: { cls: 'w-lost', mark: '⊘', label: '끊김' }
+    cancelled: { cls: 'w-cancelled', icon: 'x', label: '취소' },
+    lost: { cls: 'w-lost', icon: 'x', label: '끊김' }
   };
   var TERMINAL = { done: 1, error: 1, cancelled: 1, lost: 1 };
   var TODO = {
     completed: { cls: 'w-t-done', icon: 'check' },
-    in_progress: { cls: 'w-t-doing', mark: '●' },
-    pending: { cls: 'w-t-todo', mark: '○' },
-    abandoned: { cls: 'w-t-dropped', mark: '–' },
-    cancelled: { cls: 'w-t-dropped', mark: '–' }
+    in_progress: { cls: 'w-t-doing', icon: 'clock' },
+    pending: { cls: 'w-t-todo', icon: 'list-todo' },
+    abandoned: { cls: 'w-t-dropped', icon: 'x' },
+    cancelled: { cls: 'w-t-dropped', icon: 'x' }
   };
   var CLOSED = { completed: 1, abandoned: 1, cancelled: 1 };
 
@@ -66,7 +66,7 @@
   }
   // a Lucide icon from the page's sprite (icons.js); '' without icons.js
   function ic(name, cls) { var m = g.BriefIcons; return m ? m.icon(name, cls) : ''; }
-  // a state or todo mark: its icon, else its text glyph
+  // a state or todo mark uses the same sprite as the surrounding controls
   function markHtml(x) { return x.icon ? ic(x.icon, 'ic-xs') : x.mark; }
   function pad(n) { return n < 10 ? '0' + n : String(n); }
   function hhmm(ms) { var d = new Date(ms); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
@@ -199,7 +199,7 @@
     if (todo) {
       var key = 'worker:' + id, open = !!own(expanded, key);
       html += '<button type="button" class="more w-todo-btn" data-act="exp" data-key="' + e(key) + '" aria-expanded="' + (open ? 'true' : 'false') + '">' +
-        (open ? '▴' : '▾') + ' 투두 ' + todo.done + '/' + todo.total + '</button>';
+        ic(open ? 'chevron-down' : 'chevron-right', 'ic-xs') + ' 투두 ' + todo.done + '/' + todo.total + '</button>';
       if (open) html += todoList(todo, e);
     }
     return html + '</li>';

@@ -159,7 +159,7 @@
 
   function row(kind, item) {
     var it = obj(item) || {};
-    var sym = kind === 'done' ? ic('check', 'ic-sm') : '•';
+    var sym = ic(kind === 'done' ? 'check' : 'plus', 'ic-sm');
     var html = '<li class="row ' + kind + '"><span class="sym">' + sym + '</span><span class="rt">' + esc(it.text) + '</span>' +
       truthChip(it) + appliedChip(it);
     var ev = str(it.evidence);
@@ -170,7 +170,7 @@
   function moreBtn(key, hidden, expanded) {
     if (!hidden) return '';
     return '<button type="button" class="more" data-act="exp" data-key="' + esc(key) + '" aria-expanded="' + (expanded ? 'true' : 'false') + '">' +
-      (expanded ? '▴ 접기' : '▾ 외 ' + hidden + '개') + '</button>';
+      ic(expanded ? 'chevron-down' : 'chevron-right', 'ic-xs') + ' ' + (expanded ? '접기' : '외 ' + hidden + '개') + '</button>';
   }
 
   // recommended option: the decision's recommend when that option exists, else A when it exists
@@ -416,7 +416,7 @@
     var html = '<div class="detail">';
     var done = arr(s.done);
     html += '<p class="lbl">' + ic('check') + ' 끝낸 일 ' + done.length + '개</p>';
-    html += done.length ? '<ul class="rows">' + done.map(function (d) { return row('done', d); }).join('') + '</ul>' : '<p class="muted">• 아직 없음</p>';
+    html += done.length ? '<ul class="rows">' + done.map(function (d) { return row('done', d); }).join('') + '</ul>' : '<p class="muted">' + ic('info', 'ic-sm') + ' 아직 없음</p>';
     if (str(s.next)) html += '<p class="kv"><span class="sym">' + ic('arrow-right', 'ic-sm') + '</span>다음: ' + esc(s.next) + '</p>';
     var steps = arr(s.flow).filter(obj).slice(0, FLOW_MAX);
     if (steps.length) html += '<p class="lbl">' + ic('arrow-right') + ' 단계 흐름</p><div class="flowbox">' + flowSvg(steps, false) + flowSvg(steps, true) + '</div>';
@@ -424,10 +424,10 @@
     if (auto) {
       var w = obj(auto.workers) || {};
       html += '<p class="lbl">' + ic('settings') + ' 자동 정보 <span class="muted">(절차 진행, 목표 달성 아님)</span></p>' +
-        '<p class="kv"><span class="sym">•</span>작업: [' + esc(s.workName || '-') + '] · 단계 ' + esc(auto.stage || '-') + '</p>' +
-        '<p class="kv"><span class="sym">•</span>todo 현재: ' + esc(auto.todoCurrent || '-') + ' · 다음: ' + esc(auto.todoNext || '-') +
+        '<p class="kv"><span class="sym">' + ic('target', 'ic-sm') + '</span>작업: [' + esc(s.workName || '-') + '] · 단계 ' + esc(auto.stage || '-') + '</p>' +
+        '<p class="kv"><span class="sym">' + ic('list-todo', 'ic-sm') + '</span>todo 현재: ' + esc(auto.todoCurrent || '-') + ' · 다음: ' + esc(auto.todoNext || '-') +
         ' · ' + esc(num(auto.todoDone) == null ? '-' : auto.todoDone) + '/' + esc(num(auto.todoTotal) == null ? '-' : auto.todoTotal) + '</p>' +
-        '<p class="kv"><span class="sym">•</span>작업자 실행 ' + esc(num(w.running) || 0) + ' · 완료 ' + esc(num(w.done) || 0) + ' · 오류 ' + esc(num(w.error) || 0) + '</p>';
+        '<p class="kv"><span class="sym">' + ic('users', 'ic-sm') + '</span>작업자 실행 ' + esc(num(w.running) || 0) + ' · 완료 ' + esc(num(w.done) || 0) + ' · 오류 ' + esc(num(w.error) || 0) + '</p>';
     }
     arr(s.decisions).filter(function (d) { return obj(d) && d.answered; }).forEach(function (d) {
       var rc = obj(d.receipt);
@@ -527,7 +527,7 @@
     }
     var kx = 'detail:' + n.id, ox = !!own(expanded, kx);
     html += '<button type="button" class="detail-btn" data-act="exp" data-key="' + esc(kx) + '" aria-expanded="' + (ox ? 'true' : 'false') + '">' +
-      (ox ? '▴ 자세히 닫기' : '▾ 자세히') + '</button>';
+      ic(ox ? 'chevron-down' : 'chevron-right', 'ic-xs') + ' ' + (ox ? '자세히 닫기' : '자세히') + '</button>';
     if (ox) html += detail(s, now);
     return html + '</article>';
   }

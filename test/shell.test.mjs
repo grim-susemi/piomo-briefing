@@ -511,9 +511,9 @@ test('the other sidebar views: 수신함 groups, 계획, 홈 counts, 닫힌 창 
   assert.deepEqual(items(view('inbox', 'done')), ['e-done', 'p185']);
   html = view('inbox', 'ans');
   assert.deepEqual(kinds(html), ['상황판제작 · #90', '끝난 설치 작업 · #80']);
-  assert.match(html, /사이드바 기본 폭\? <span class="sh-ans">→ A · 260px<\/span>/);
+  assert.match(html, /사이드바 기본 폭\? <span class="sh-ans"><svg[^>]*><use href="#i-arrow-right"><\/use><\/svg> A · 260px<\/span>/);
   assert.deepEqual(all(marks(html), /class="sh-w">([^<]*)</g), ['5분 전 · 전달됨 [clock]11:58', '전달 중'], 'the delivery text\'s stopwatch is the clock icon');
-  assert.match(html, /설치할까\? <span class="sh-ans">→ 답글 “내일 해 줘”<\/span>/);
+  assert.match(html, /설치할까\? <span class="sh-ans"><svg[^>]*><use href="#i-arrow-right"><\/use><\/svg> 답글 “내일 해 줘”<\/span>/);
   html = view('plans');
   assert.deepEqual(items(html), ['a185', 'd012']);
   assert.deepEqual(all(html, /class="sh-iq">([^<]*)</g), ['briefing-board-redesign · 2/3', 'docs-plan · 1/4']);

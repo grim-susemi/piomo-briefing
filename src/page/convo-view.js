@@ -65,10 +65,10 @@
   // native todo statuses (= workers-view.js TODO): class and text of the fallback table's 상태 cell
   var TODO_STATE = {
     completed: ['ok2', '완료', 'check'], // [class, text, icon]
-    in_progress: ['doing2', '● 진행 중'],
-    pending: ['no2', '○ 남음'],
-    abandoned: ['no2', '– 취소'],
-    cancelled: ['no2', '– 취소']
+    in_progress: ['doing2', '진행 중', 'clock'],
+    pending: ['no2', '남음', 'list-todo'],
+    abandoned: ['no2', '취소', 'x'],
+    cancelled: ['no2', '취소', 'x']
   };
   var REPORT_STATUS = { '결정 기다림': 's-needs_decision', '답함': 's-done', '참고': 'x-info' };
   var CLOSED = '이미 답했거나 닫힌 결정'; // = page.js ANSWER_TEXT.closed
@@ -293,7 +293,7 @@
     return '<div class="cv-flow" data-block="flow" role="list" aria-label="단계 흐름">' + steps.map(function (f) {
       var st = own(FLOW_STATE, f.state) ? f.state : 'todo';
       return '<span class="cv-fs is-' + st + '" role="listitem" title="' + FLOW_STATE[st] + '">' + esc(f.label) + '</span>';
-    }).join('<span class="cv-arr" aria-hidden="true">→</span>') + '</div>';
+    }).join('<span class="cv-arr" aria-hidden="true">' + ic('arrow-right', 'ic-xs') + '</span>') + '</div>';
   }
   function summaryCards(s, counts) {
     var sid = esc(str(s.id));
@@ -423,10 +423,10 @@
     if (!auto) return '';
     var w = obj(auto.workers) || {};
     return '<details class="cv-sec cv-auto"' + openAttr(U, str(s.id), 'auto', false) + '><summary>' + ic('settings', 'ic-sm') + ' 자동 정보 <span class="muted">(절차 진행, 목표 달성 아님)</span></summary>' +
-      '<p class="kv"><span class="sym">•</span>작업: [' + esc(s.workName || '-') + '] · 단계 ' + esc(auto.stage || '-') + '</p>' +
-      '<p class="kv"><span class="sym">•</span>todo 현재: ' + esc(auto.todoCurrent || '-') + ' · 다음: ' + esc(auto.todoNext || '-') +
+      '<p class="kv"><span class="sym">' + ic('target', 'ic-sm') + '</span>작업: [' + esc(s.workName || '-') + '] · 단계 ' + esc(auto.stage || '-') + '</p>' +
+      '<p class="kv"><span class="sym">' + ic('list-todo', 'ic-sm') + '</span>todo 현재: ' + esc(auto.todoCurrent || '-') + ' · 다음: ' + esc(auto.todoNext || '-') +
       ' · ' + esc(num(auto.todoDone) == null ? '-' : auto.todoDone) + '/' + esc(num(auto.todoTotal) == null ? '-' : auto.todoTotal) + '</p>' +
-      '<p class="kv"><span class="sym">•</span>작업자 실행 ' + esc(num(w.running) || 0) + ' · 완료 ' + esc(num(w.done) || 0) + ' · 오류 ' + esc(num(w.error) || 0) + '</p></details>';
+      '<p class="kv"><span class="sym">' + ic('users', 'ic-sm') + '</span>작업자 실행 ' + esc(num(w.running) || 0) + ' · 완료 ' + esc(num(w.done) || 0) + ' · 오류 ' + esc(num(w.error) || 0) + '</p></details>';
   }
   function planPanel(s, U, now) {
     var pv = g.BriefPlanView, plan = obj(s.plan), link = obj(s.planLink);

@@ -123,7 +123,7 @@ test('stale row says 응답 없음 10분 and stops pulsing even when the step te
   const fresh = clone(live); fresh.workers.find(w => w.id === 'st_01a14080').stale = false; const back = rows(render(fresh)).find(x => x.id === 'st_01a14080'); assert.equal(back.cls, 'w-running'); assert.ok(back.html.includes('animation-delay'));
 });
 test('info-waiting row (id + name only, from noteWorkers) shows 정보 대기 without a timer', () => {
-  const [r] = rows(render({ workers: [{ id: 'st_new1', name: '방금 띄운 작업자', state: 'waiting' }] })); assert.equal(r.cls, 'w-waiting'); assert.ok(r.html.includes('방금 띄운 작업자')); assert.ok(r.html.includes('정보 대기')); assert.ok(!r.html.includes('data-since')); assert.ok(r.html.includes('○')); assert.equal(load().view.summary({ workers: [{ id: 'st_new1', state: 'waiting' }] }), '작업자 1 · 진행 0 · 끝 0 · 대기 1');
+  const [r] = rows(render({ workers: [{ id: 'st_new1', name: '방금 띄운 작업자', state: 'waiting' }] })); assert.equal(r.cls, 'w-waiting'); assert.ok(r.html.includes('방금 띄운 작업자')); assert.ok(r.html.includes('정보 대기')); assert.ok(!r.html.includes('data-since')); assert.ok(r.html.includes(use('clock'))); assert.equal(load().view.summary({ workers: [{ id: 'st_new1', state: 'waiting' }] }), '작업자 1 · 진행 0 · 끝 0 · 대기 1');
 });
 test('summary line numbers', () => {
   const { view } = load(); assert.equal(view.summary(LIVE1), '작업자 3 · 진행 1 · 끝 1 · 오류 1'); assert.equal(view.summary(LIVE2), '작업자 6 · 진행 1 · 끝 0 · 응답 없음 1 · 대기 2 · 취소 1 · 끊김 1'); assert.equal(view.summary(LIVE1.workers), '작업자 3 · 진행 1 · 끝 1 · 오류 1'); assert.equal(view.summary(null), ''); assert.ok(render(LIVE1).includes('<p class="w-sum">작업자 3 · 진행 1 · 끝 1 · 오류 1</p>'));
@@ -135,7 +135,7 @@ test('todo list: collapsed toggle shows done/total; expanded shows check, filled
   const collapsed = rows(render(LIVE1))[0].html; assert.ok(collapsed.includes('data-act="exp" data-key="worker:st_01a14094"')); assert.ok(collapsed.includes('aria-expanded="false"')); assert.ok(collapsed.includes('투두 4/7')); assert.ok(!collapsed.includes('class="w-todos"'));
   const open = rows(render(LIVE1, NOW, { 'worker:st_01a14094': true }))[0].html; assert.ok(open.includes('aria-expanded="true"')); const items = open.split('<li class="w-todo ').slice(1); assert.equal(items.length, 7);
   assert.equal(items.filter(i => i.startsWith('w-t-done')).length, 3); assert.equal(items.filter(i => i.startsWith('w-t-doing')).length, 1); assert.equal(items.filter(i => i.startsWith('w-t-todo')).length, 2); assert.equal(items.filter(i => i.startsWith('w-t-dropped')).length, 1);
-  assert.equal(count(open, /<use href="#i-check"><\/use>/g), 3); assert.equal(count(open, /class="w-tsym" aria-hidden="true">●</g), 1); assert.equal(count(open, /class="w-tsym" aria-hidden="true">○</g), 2); assert.ok(items.find(i => i.startsWith('w-t-doing')).includes('workers-view.js 작성'));
+  assert.equal(count(open, /<use href="#i-check"><\/use>/g), 3); assert.equal(count(open, /class="w-tsym" aria-hidden="true"><svg[^>]*><use href="#i-clock"/g), 1); assert.equal(count(open, /class="w-tsym" aria-hidden="true"><svg[^>]*><use href="#i-list-todo"/g), 2); assert.ok(items.find(i => i.startsWith('w-t-doing')).includes('workers-view.js 작성'));
   assert.ok(!rows(render(LIVE1, NOW, { 'worker:st_01a14094': true }))[1].html.includes('w-todos')); assert.ok(!rows(render(LIVE1))[1].html.includes('투두'));
 });
 test('todo list keeps at most 30 items and counts the rest; rows stop at 20 workers', () => {
@@ -153,7 +153,7 @@ test('tick rewrites only [data-since] text, never innerHTML, and keeps finished 
   const win = makeWin(), { root } = makeBoard(win); fill(win, root, [{ id: 's-w1', live: LIVE1 }, { id: 's-w2', live: LIVE2 }]); const stepBefore = root.querySelectorAll('[data-worker]').map(r => r.textContent), elements = root.querySelectorAll('[data-worker]'); assert.equal(win.BriefWorkersView.tick(root, NOW + 65000), 4);
   const since = root.querySelectorAll('[data-since]'); assert.deepEqual(since.map(el => el.textContent), ['4분 17초', '1분 50초', '1시간 03분', '1분 13초']); assert.equal(win.htmlWrites, 0); assert.ok(win.textWrites.every(el => el.hasAttribute('data-since'))); assert.ok(root.querySelectorAll('[data-worker]').every((el, i) => el === elements[i]));
   const after = root.querySelectorAll('[data-worker]').map(r => r.textContent); stepBefore.forEach((text, i) => { if (!elements[i].querySelectorAll('[data-since]').length) assert.equal(after[i], text); }); assert.ok(after.some(t => t.includes('12분 30초')) && after.some(t => t.includes('8분 00초')));
-  assert.equal(root.querySelectorAll('[href]').filter(e => e.getAttribute('href') === '#i-clock').length, 7, 'tick preserves the separate clock icons');
+  assert.equal(root.querySelectorAll('[href]').filter(e => e.getAttribute('href') === '#i-clock').length, 9, 'tick preserves the elapsed-time and waiting-state clock icons');
   win.textWrites.length = 0; assert.equal(win.BriefWorkersView.tick(root, NOW + 65000), 0); assert.equal(win.textWrites.length, 0); since[0].setAttribute('data-since', 'garbage'); assert.equal(win.BriefWorkersView.tick(root, NOW + 70000), 2); assert.ok(!since[0].textContent.includes('NaN'));
 });
 test('play: FLIP moves rows by their position difference (running first, finished sinks) and pops the marks', () => {

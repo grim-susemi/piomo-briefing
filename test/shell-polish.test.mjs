@@ -279,3 +279,30 @@ test('polish: the wide layout keeps its sidebar as it was: nothing goes inert an
   assert.equal(e.page.state.ui.peek, true);
   assert.deepEqual(e.errors, []);
 });
+
+test('polish: plan disclosure clicks keep their keys, state, labels and SVGs through open and close', () => {
+  const e = env(), s = fixture.sessions[0], id = s.plan.planId;
+  e.page.receive(fixture); e.page.open(s.id, 'plan');
+  const button = key => e.byId.main.querySelector('[data-key="' + key + id + '"]');
+  const check = (key, open) => {
+    const b = button(key);
+    assert.ok(b, key);
+    assert.equal(b.getAttribute('data-act'), 'exp');
+    assert.equal(b.getAttribute('aria-expanded'), String(open));
+    assert.equal(b.querySelector('use')?.getAttribute('href'), '#i-chevron-' + (open ? 'down' : 'right'));
+  };
+  check('plan:', true);
+  for (const [key, list] of [['plan-tasks:', '.plan-other-tasks'], ['plan-out:', '.plan-out-list']]) {
+    if (key === 'plan-tasks:') { check(key, true); e.fire(button(key), 'click'); }
+    check(key, false);
+    e.fire(button(key), 'click'); check(key, true);
+    assert.equal(e.byId.main.querySelector(list).hasAttribute('hidden'), false);
+    e.fire(button(key), 'click'); check(key, false);
+    assert.equal(e.byId.main.querySelector(list).hasAttribute('hidden'), true);
+  }
+  e.fire(button('plan:'), 'click'); check('plan:', false);
+  assert.equal(e.byId.main.querySelector('.plan-lanes'), null);
+  e.fire(button('plan:'), 'click'); check('plan:', true);
+  assert.ok(e.byId.main.querySelector('.plan-lanes'));
+  assert.deepEqual(e.errors, []);
+});

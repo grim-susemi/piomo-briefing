@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pageHtml } from '../src/render.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PRODUCT = process.env.OMO_POLISH_TEST_ROOT || ROOT;
 const SOURCE = fs.readFileSync(path.join(PRODUCT, 'src/page/plan-view.js'), 'utf8');
@@ -37,14 +38,14 @@ function expectedAnchors(plan) {
 test('fixture supplies four waves, twelve tasks, three question states and one stopped task', () => { assert.equal(FIXTURE.waves.length, 4); assert.equal(FIXTURE.tasks.length, 12); assert.deepEqual(FIXTURE.questions.map(q => q.state).sort(), ['answered', 'default', 'open']); assert.equal(FIXTURE.tasks.filter(t => t.state === 'stopped').length, 1); });
 test('classic script loads by itself and does not need a DOM', () => { const context = {}; vm.runInNewContext(SOURCE, context); const link = context.BriefPlanView.renderLink(FIXTURE); assert.equal(typeof link, 'string'); assert.ok(link.length > 0); });
 test('four lanes show their own tasks and only the first unfinished lane is current', () => {
-  const html = render(); assert.equal(count(html, /data-plan-wave="/g), 4); assert.equal(count(html, /class="plan-now"/g), 1); const lanes = html.split('<section class="plan-lane').slice(1); assert.equal(lanes.length, 4); assert.ok(!lanes[0].includes('class="plan-now"')); assert.ok(lanes[1].includes('data-plan-wave="2"')); assert.ok(lanes[1].includes('class="plan-now"')); for (const lane of lanes) assert.equal(count(lane.split('</section>')[0], /class="plan-box /g), 3); assert.ok(html.includes('←2·3'));
+  const html = render(); assert.equal(count(html, /data-plan-wave="/g), 4); assert.equal(count(html, /class="plan-now"/g), 1); const lanes = html.split('<section class="plan-lane').slice(1); assert.equal(lanes.length, 4); assert.ok(!lanes[0].includes('class="plan-now"')); assert.ok(lanes[1].includes('data-plan-wave="2"')); assert.ok(lanes[1].includes('class="plan-now"')); for (const lane of lanes) assert.equal(count(lane.split('</section>')[0], /class="plan-box /g), 3); assert.ok(html.includes(load().icon('arrow-left', 'ic-xs') + '2·3'));
 });
 test('all-done plans have no current lane and changing progress advances the lane', () => { const plan = clone(FIXTURE); plan.tasks.forEach(t => { if (t.wave === 2) t.state = 'done'; }); let html = render(plan); assert.ok(html.split('data-plan-wave="3"')[1].split('</section>')[0].includes('class="plan-now"')); plan.tasks.forEach(t => { t.state = 'done'; }); html = render(plan); assert.equal(count(html, /class="plan-now"/g), 0); });
 test('fully expanded HTML has every element and field anchor exactly once with the public format', () => {
   const html = render(FIXTURE, expanded(FIXTURE, true)), actual = anchors(html); assert.equal(actual.length, new Set(actual).size); assert.deepEqual(actual.slice().sort(), expectedAnchors(FIXTURE).sort()); for (const a of actual) assert.match(a, /^p[0-9a-f]{12}\/(goal|is|comp|wave|task|q|out)\/[^/]+(?:\/(label|what|done|text|answer))?$/); assert.ok(!html.includes('class="plan-other-tasks" hidden')); assert.ok(!html.includes('class="plan-out-list" hidden'));
 });
 test('collapsed HTML is exactly two summary lines, has no duplicate anchors, and uses the exp channel', () => {
-  const html = render(FIXTURE, {}); assert.equal(html.split('\n').length, 2); assert.equal(count(html, /class="plan-summary-line"/g), 2); assert.equal(count(html, /<br\b/g), 0); assert.equal(anchors(html).length, new Set(anchors(html)).size); assert.equal(anchors(html).length, 0); assert.ok(html.includes('data-act="exp" data-key="plan:' + FIXTURE.planId + '"')); assert.ok(html.includes('aria-expanded="false"')); assert.ok(html.includes('1' + load().icon('check', 'ic-xs') + ' 2● 3○ 4○')); assert.ok(html.includes('4/12')); assert.ok(!html.includes('plan-lanes')); assert.doesNotMatch(SOURCE, /\p{Extended_Pictographic}/u);
+  const html = render(FIXTURE, {}); assert.equal(html.split('\n').length, 2); assert.equal(count(html, /class="plan-summary-line"/g), 2); assert.equal(count(html, /<br\b/g), 0); assert.equal(anchors(html).length, new Set(anchors(html)).size); assert.equal(anchors(html).length, 0); assert.ok(html.includes('data-act="exp" data-key="plan:' + FIXTURE.planId + '"')); assert.ok(html.includes('aria-expanded="false"')); assert.ok(html.includes('1' + load().icon('check', 'ic-xs') + ' 2' + load().icon('clock', 'ic-xs') + ' 3' + load().icon('list-todo', 'ic-xs') + ' 4' + load().icon('list-todo', 'ic-xs'))); assert.ok(html.includes('4/12')); assert.ok(!html.includes('plan-lanes')); assert.doesNotMatch(SOURCE, /\p{Extended_Pictographic}/u);
 });
 test('execution-session link is one line, navigates to the owner and has no anchors', () => { const { view } = load(), html = view.renderLink({ ...clone(FIXTURE), target: 'c-owner-0', tab: 'run' }); assert.equal(html.split('\n').length, 1); assert.equal(count(html, /data-anchor/g), 0); assert.ok(html.includes('data-goto="c-owner-0"')); assert.ok(html.includes('data-tab="run"')); assert.ok(!html.includes('data-act="exp"')); });
 test('open Q&A row sorts first and copies the decision id and recommendation', () => { const html = render(), rows = html.split('<tr class="plan-question ').slice(1); assert.equal(rows.length, 3); assert.ok(rows[0].startsWith('is-open"')); assert.ok(rows[0].includes('data-decision="15"')); assert.ok(rows[0].includes('data-copy="/decide 15A"')); assert.ok(rows.some(row => row.includes('소유자 A'))); assert.ok(rows.some(row => row.includes('class="chip x-info plan-default"'))); const plan = clone(FIXTURE); plan.questions.find(q => q.state === 'open').recommend = 'B'; assert.ok(render(plan).includes('data-copy="/decide 15B"')); });
@@ -80,5 +81,42 @@ test('every plan copy button uses only an SVG icon and its visible label, never 
     const body = button.replace(/^<button\b[^>]*>/, '').replace(/<\/button>$/, '');
     assert.match(body, /^<svg\b[^>]*aria-hidden="true"[^>]*><use href="#i-copy"><\/use><\/svg> <span data-copy-label>복사<\/span>$/);
     assert.equal(body.replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/g, '').replace(/<span data-copy-label>복사<\/span>/g, '').trim(), '', 'no non-SVG icon glyph outside the label');
+  }
+});
+
+test('plan disclosures use real sprite chevrons for every combination of expansion keys', () => {
+  const sprite = pageHtml({ sessions: [] }, 7, { mode: 'file' });
+  for (const open of [false, true]) for (const more of [false, true]) for (const out of [false, true]) {
+    const state = { ['plan:' + FIXTURE.planId]: open, ['plan-tasks:' + FIXTURE.planId]: more, ['plan-out:' + FIXTURE.planId]: out };
+    const buttons = render(FIXTURE, state).match(/<button\b[^>]*class="more plan-toggle"[^>]*>[\s\S]*?<\/button>/g) || [];
+    assert.equal(buttons.length, open ? 3 : 1);
+    for (const [i, button] of buttons.entries()) {
+      const expanded = [open, more, out][i], name = expanded ? 'chevron-down' : 'chevron-right';
+      assert.match(button, new RegExp('data-act="exp" data-key="(?:plan|plan-tasks|plan-out):' + FIXTURE.planId + '" aria-expanded="' + expanded + '"'));
+      assert.ok(button.includes(load().icon(name, 'ic-xs')), name + ': ' + button);
+      assert.ok(sprite.includes('<symbol id="i-' + name + '"'), name + ' resolves to the real sprite');
+      assert.doesNotMatch(button.replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/g, ''), /[▴▾]/);
+    }
+  }
+});
+
+test('plan dependency, mobile, lane and status icon slots are SVGs without rewriting model arrows', () => {
+  const plan = clone(FIXTURE), { icon } = load();
+  plan.tasks[0].label = 'label → literal';
+  plan.tasks[0].what = 'what ▾ literal';
+  plan.tasks[0].done = 'done ⇒ literal';
+  plan.goal = 'goal ← literal';
+  const html = render(plan, expanded(plan, true));
+  for (const [slot, name, n] of [['plan-deps', 'arrow-left', plan.tasks.filter(t => t.deps.length).length], ['plan-mobile-arrow', 'arrow-right', plan.tasks.length], ['plan-lane-arrow', 'arrow-right', plan.waves.length - 1]]) {
+    const slots = html.match(new RegExp('<span class="' + slot + '"[^>]*>[\\s\\S]*?<\\/span>', 'g')) || [];
+    assert.equal(slots.length, n, slot);
+    for (const value of slots) assert.ok(value.includes(icon(name, 'ic-xs')), value);
+  }
+  for (const value of [plan.tasks[0].label, plan.tasks[0].what, plan.tasks[0].done, plan.goal]) assert.ok(html.includes(value), value);
+  const cells = html.match(/<td class="plan-task-state">[\s\S]*?<\/td>/g) || [];
+  assert.equal(cells.length, plan.tasks.length);
+  for (const cell of cells) {
+    assert.match(cell, /<svg\b[^>]*aria-hidden="true"[^>]*><use href="#i-(check|clock|list-todo)"><\/use><\/svg>/);
+    assert.doesNotMatch(cell.replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/g, ''), /[●○]/);
   }
 });

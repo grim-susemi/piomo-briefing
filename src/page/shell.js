@@ -581,7 +581,7 @@
     var when = ago(it.at, c.now);
     return '<button type="button" class="sh-it' + hueClass(s, c) + '" data-sh="open" data-sid="' + esc(s.id) + '" data-sub="' + it.sub + '">' +
       icon(s, c, true) + '<span class="sh-itb"><span class="sh-k">' + esc(nameOf(s)) + ' · ' + esc(it.kind) + '</span>' +
-      '<span class="sh-iq">' + esc(it.text || '(내용 없음)') + (it.answer ? ' <span class="sh-ans">' + esc(it.answer) + '</span>' : '') + '</span>' +
+      '<span class="sh-iq">' + esc(it.text || '(내용 없음)') + (it.answer ? ' <span class="sh-ans">' + ic('arrow-right', 'ic-xs') + ' ' + esc(it.answer.slice(2)) + '</span>' : '') + '</span>' +
       (when || it.note ? '<span class="sh-w">' + timed([when, it.note].filter(Boolean).join(' · ')) + '</span>' : '') + '</span></button>';
   }
   function empty(text) { return '<p class="sh-empty">' + esc(text) + '</p>'; }

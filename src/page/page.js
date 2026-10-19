@@ -91,7 +91,8 @@
       badge.id = 'new-badge';
       badge.className = 'new-badge';
       badge.hidden = true;
-      badge.textContent = '● 새 내용 - 선택·입력이 끝나면 반영';
+      badge.setAttribute('aria-label', '● 새 내용 - 선택·입력이 끝나면 반영');
+      badge.innerHTML = (g.BriefIcons ? g.BriefIcons.icon('refresh-cw', 'ic-xs') : '') + ' 새 내용 - 선택·입력이 끝나면 반영';
       doc.body.appendChild(badge);
     }
     statusEl = doc.getElementById('live-status');
@@ -398,7 +399,10 @@
     var ok = state.transport === 'file' && typeof url === 'string' && /^http:\/\/(127\.0\.0\.1|localhost):\d+\//.test(url);
     linkEl.hidden = !ok;
     linkEl.setAttribute('style', 'display:' + (ok ? 'block' : 'none') + ';text-align:center;font:13px sans-serif;padding:4px');
-    if (ok) { linkEl.href = url; linkEl.textContent = '실시간 보기 열기 → ' + url; }
+    if (ok) {
+      linkEl.href = url; linkEl.setAttribute('aria-label', '실시간 보기 열기 → ' + url);
+      linkEl.innerHTML = '실시간 보기 열기 ' + (g.BriefIcons ? g.BriefIcons.icon('arrow-right', 'ic-xs') : '') + ' ' + esc(url);
+    }
   }
 
   function show(model) {

@@ -15,7 +15,7 @@
 .plan-component-text { display: block; margin-top: 2px; color: var(--muted); overflow-wrap: anywhere; }
 .plan-lanes { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(170px, 1fr); gap: 22px; overflow-x: auto; padding: 2px 1px 8px; }
 .plan-lane { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 6px; background: var(--panel); }
-.plan-lane:not(:last-child)::after { content: "→"; position: absolute; top: 6px; right: -19px; color: var(--muted); }
+.plan-lane-arrow { position: absolute; top: 6px; right: -19px; color: var(--muted); line-height: 1; }
 .plan-lane.is-current { border-color: var(--teal); }
 .plan-wave-head { margin: 0 0 5px; font-size: 12px; overflow-wrap: anywhere; }
 .plan-now { display: inline-block; padding: 0 4px; border-radius: 4px; background: var(--teal-bg); color: var(--teal); font-size: 11px; }
@@ -58,7 +58,7 @@
 
 @media (max-width: 599px) {
   .plan-lanes { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: minmax(0, 1fr); gap: 22px; overflow-x: visible; padding-bottom: 2px; }
-  .plan-lane:not(:last-child)::after { content: "↓"; top: auto; bottom: -20px; right: calc(50% - 6px); }
+  .plan-lane-arrow { top: auto; bottom: -20px; right: calc(50% - 6px); transform: rotate(90deg); }
   .plan-boxes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .plan-head .time { margin-left: 0; }
   .plan-task-table, .plan-task-table tbody { display: block; }
