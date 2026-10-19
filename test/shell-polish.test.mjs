@@ -146,14 +146,16 @@ test('polish: copy success, failure, repeat and reset keep the SVG and restore f
   assert.deepEqual(e.errors, []);
 });
 
-test('polish: text-only copy buttons (plan path, plan question) show success and failure, then restore their own text', async () => {
+test('polish: plan path and question copy buttons keep their SVG through success, failure, repeat and reset', async () => {
   const e = env(), s = fixture.sessions[0];
   e.page.receive(fixture); e.page.open(s.id, 'plan');
   const settle = () => new Promise(resolve => setImmediate(resolve));
   for (const selector of ['.plan-path [data-copy]', '.plan-question [data-copy]']) {
     const button = e.byId.main.querySelector(selector);
     assert.ok(button, selector);
-    assert.equal(button.querySelector('use, [data-copy-label]'), null, selector + ' has no icon/label children');
+    const icon = button.querySelector('svg'), use = button.querySelector('use'), label = button.querySelector('[data-copy-label]');
+    assert.ok(icon && use && label, selector + ' has an SVG icon and a separate label');
+    assert.equal(use.getAttribute('href'), '#i-copy');
     const original = button.textContent;
     e.ctx.navigator.clipboard.writeText = async text => { e.ctx.copied = text; };
     delete e.document.execCommand;
@@ -162,21 +164,29 @@ test('polish: text-only copy buttons (plan path, plan question) show success and
     assert.equal(e.ctx.copied, button.getAttribute('data-copy'), selector);
     const success = button.textContent;
     assert.match(success, /복사됨/, selector + ' success is visible');
+    assert.equal(button.querySelector('svg'), icon, selector + ' preserves the SVG node on success');
+    assert.equal(use.getAttribute('href'), '#i-check');
     e.advance(1000); e.fire(button, 'click');
     await settle();
     e.advance(200);
     assert.equal(button.textContent, success, selector + ': the first reset cannot clear the second result');
+    assert.equal(use.getAttribute('href'), '#i-check');
     e.advance(1000);
     assert.equal(button.textContent, original, selector + ': a repeat restores the original text, not the feedback');
+    assert.equal(use.getAttribute('href'), '#i-copy');
     e.ctx.navigator.clipboard.writeText = () => Promise.reject(new Error('denied'));
     e.document.execCommand = () => { e.document.activeElement = e.document.body; return false; };
     e.fire(button, 'click');
     await settle();
     assert.match(button.textContent, /복사 실패/, selector + ' failure is visible');
+    assert.equal(button.querySelector('svg'), icon, selector + ' preserves the SVG node on failure');
+    assert.equal(use.getAttribute('href'), '#i-x');
     assert.notEqual(button.textContent, success, selector + ' failure differs from success');
     assert.equal(e.document.activeElement, button, selector + ' keeps focus after the legacy fallback');
     e.advance(1200);
     assert.equal(button.textContent, original, selector + ' restores after failure');
+    assert.equal(button.querySelector('svg'), icon, selector + ' preserves the SVG node after restoration');
+    assert.equal(use.getAttribute('href'), '#i-copy');
   }
   assert.deepEqual(e.errors, []);
 });

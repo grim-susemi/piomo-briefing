@@ -66,7 +66,19 @@ test('server page: view.js gives the plan row the same controls as the decision 
   const row = ui => context.BriefView.renderOverview(model, { expanded: { ['plan:' + FIXTURE.planId]: true }, ...ui }).split('<tr class="plan-question is-open"')[1].split('</tr>')[0], live = row({ live: true }); assert.equal(count(live, /data-act="ans-pick" data-opt="[AB]" data-id="15" data-where="plan"/g), 2); assert.equal(count(live, /data-act="ans-reply" data-id="15" data-where="plan"/g), 1); assert.ok(row({ live: true, answers: { 15: { confirm: { option: 'B' } } } }).includes('class="ans-confirm"')); assert.equal(count(row({}), /data-act="ans-/g), 0); model.sessions[0].decisions[0].answered = true; assert.equal(count(row({ live: true }), /data-act="ans-/g), 0);
 });
 test('plan copy buttons (path, open question) keep their visible text and name themselves 복사, so copy feedback never renames them (A6-01)', () => {
-  const buttons = render().match(/<button[^>]*class="copy"[^>]*>[^<]*<\/button>/g) || [];
+  const buttons = render().match(/<button[^>]*class="copy"[^>]*>[\s\S]*?<\/button>/g) || [];
   assert.equal(buttons.length, 2);
-  for (const b of buttons) assert.match(b, /^<button type="button" class="copy" data-copy="[^"]+" aria-label="복사" title="복사">⧉ 복사<\/button>$/);
+  for (const b of buttons) {
+    assert.ok(b.includes('aria-label="복사" title="복사">'));
+    assert.ok(b.endsWith(load().icon('copy') + ' <span data-copy-label>복사</span></button>'));
+  }
+});
+test('every plan copy button uses only an SVG icon and its visible label, never a text icon glyph', () => {
+  const buttons = render(FIXTURE, expanded(FIXTURE, true)).match(/<button\b[^>]*class="copy"[^>]*>[\s\S]*?<\/button>/g) || [];
+  assert.equal(buttons.length, 2, 'path and recommendation copy controls are both covered');
+  for (const button of buttons) {
+    const body = button.replace(/^<button\b[^>]*>/, '').replace(/<\/button>$/, '');
+    assert.match(body, /^<svg\b[^>]*aria-hidden="true"[^>]*><use href="#i-copy"><\/use><\/svg> <span data-copy-label>복사<\/span>$/);
+    assert.equal(body.replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/g, '').replace(/<span data-copy-label>복사<\/span>/g, '').trim(), '', 'no non-SVG icon glyph outside the label');
+  }
 });
