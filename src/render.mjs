@@ -223,6 +223,7 @@ function reportsView(list, decisions) {
       decisionId: d ? d.id : null,
       status,
       images,
+      ...(r.blocks !== undefined ? { blocks: structuredClone(r.blocks) } : {}),
     };
   });
 }

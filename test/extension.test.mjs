@@ -10,6 +10,7 @@ import { createBriefingExtension, isChildSessionFile, defaultStateDir } from '..
 import { RULE_MARKER, RULE_TEXT, replyOverBudget } from '../src/rule.mjs';
 import { makeFakePi, makeCtx, assistant, toolCall, lines } from './helpers/fake-pi.mjs';
 import { tempDir } from './helpers/temp.mjs';
+import { reportBlocks } from './fixtures/report-blocks.mjs';
 import { openStore } from '../src/store.mjs';
 
 const CHILD = fileURLToPath(new URL('./helpers/ext-child.mjs', import.meta.url));
@@ -1200,6 +1201,55 @@ function testPng(w, h) {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), ihdr]);
 }
 const listDir = (p) => (existsSync(p) ? readdirSync(p).sort() : []);
+
+test('report blocks: fake-pi accepts all kinds, resolves compare ids and publishes the untrimmed data', async (t) => {
+  const s = lead(t);
+  await s.start();
+  const blocks = reportBlocks();
+  blocks[2].items[0].value = '<img onerror> </svg> **text** https://example.test color:red';
+  const result = await s.brief(goodBrief({
+    decisions: [decision()], reports: [{ id: 'blocks', title: '블록 보고', images: [], blocks }],
+  }));
+  const id = result.details.newDecisionIds[0];
+  const expected = structuredClone(blocks);
+  expected[5].decision = id;
+  delete expected[5].decisionIndex;
+  const saved = readJson(join(s.stateDir, 'sessions', s.sid, 'reports.json'));
+  assert.deepEqual(saved[0].blocks, expected);
+  const { buildViewModel, withReports } = await import('../src/render.mjs');
+  const store = openStore(s.stateDir);
+  const view = buildViewModel(withReports(store, store.readSnapshot()), s.now()).sessions.find(v => v.id === s.sid);
+  assert.deepEqual(view.reports[0].blocks, expected);
+  expected[0].rows[0][0] = 'mutated';
+  assert.equal(saved[0].blocks[0].rows[0][0], blocks[0].rows[0][0]);
+  const published = readFileSync(join(s.stateDir, 'data.js'), 'utf8');
+  assert.ok(published.includes('"kind":"table"'));
+  assert.ok(!published.includes('<img onerror>'), 'the data script escapes hostile markup');
+});
+
+test('report blocks: fake-pi refuses an oversized table before any brief, report or decision is written', async (t) => {
+  const s = lead(t);
+  await s.start();
+  const blocks = reportBlocks();
+  blocks[0].rows[0][0] = '가'.repeat(121);
+  await assert.rejects(s.brief(goodBrief({
+    decisions: [decision()], reports: [{ id: 'blocks', title: '거절', images: [], blocks }],
+  })), /reports\[0\]\.blocks\[0\]\.rows\[0\]\[0\]: 120자 초과\(121\)/);
+  assert.deepEqual(listDir(join(s.stateDir, 'sessions', s.sid, 'briefs')), []);
+  assert.deepEqual(listDir(join(s.stateDir, 'decisions')), []);
+  assert.equal(existsSync(join(s.stateDir, 'sessions', s.sid, 'reports.json')), false);
+});
+
+test('report blocks: fake-pi refuses a sparse block before allocating any durable records', async (t) => {
+  const s = lead(t);
+  await s.start();
+  await assert.rejects(s.brief(goodBrief({
+    decisions: [decision()], reports: [{ id: 'blocks', title: '거절', images: [], blocks: new Array(1) }],
+  })), /reports\[0\]\.blocks\[0\]: 블록 객체 필요/);
+  assert.deepEqual(listDir(join(s.stateDir, 'sessions', s.sid, 'briefs')), []);
+  assert.deepEqual(listDir(join(s.stateDir, 'decisions')), []);
+  assert.equal(existsSync(join(s.stateDir, 'sessions', s.sid, 'reports.json')), false);
+});
 
 test('reports: decisionIndex resolves to the allocated id; images are stored by hash; reports.json is the snapshot', async (t) => {
   const s = lead(t);

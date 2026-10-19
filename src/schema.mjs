@@ -12,6 +12,121 @@ const REPORT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const OPTION_KEYS = ['A', 'B', 'C'];
 const isObj = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
 
+const blockText = (maxLength, minLength = 1) => ({ type: 'string', minLength, maxLength });
+const blockObject = (properties, required = Object.keys(properties)) => ({ type: 'object', additionalProperties: false, properties, required });
+const blockArray = (items, minItems, maxItems) => ({ type: 'array', items, minItems, maxItems });
+export const REPORT_BLOCK_SCHEMA = blockArray({ oneOf: [
+  blockObject({ kind: { const: 'table' }, title: blockText(80, 0),
+    columns: blockArray(blockText(40), 1, 8),
+    rows: blockArray(blockArray({ anyOf: [blockText(120, 0), { type: 'number' }] }, 1, 8), 1, 30) }, ['kind', 'columns', 'rows']),
+  blockObject({ kind: { const: 'bars' }, title: blockText(80, 0), unit: blockText(8, 0),
+    items: blockArray(blockObject({ label: blockText(40), value: { type: 'number', minimum: 0 } }), 1, 20) }, ['kind', 'items']),
+  blockObject({ kind: { const: 'kv' }, title: blockText(80, 0),
+    items: blockArray(blockObject({ key: blockText(40), value: blockText(200, 0) }), 1, 20) }, ['kind', 'items']),
+  blockObject({ kind: { const: 'flow' }, title: blockText(80, 0),
+    steps: blockArray(blockObject({ label: blockText(40), state: { type: 'string', enum: FLOW_STATES } }, ['label']), 2, 10) }, ['kind', 'steps']),
+  blockObject({ kind: { const: 'checklist' }, title: blockText(80, 0),
+    items: blockArray(blockObject({ id: { ...blockText(32), pattern: '^[a-z0-9_-]+$' }, text: blockText(120) }), 1, 20) }, ['kind', 'items']),
+  { ...blockObject({ kind: { const: 'compare' }, title: blockText(80, 0),
+    decision: { type: 'integer', minimum: 1 }, decisionIndex: { type: 'integer', minimum: 0, maximum: 3 },
+    rows: blockArray(blockObject({ label: blockText(40), A: blockText(80, 0), B: blockText(80, 0), C: blockText(80, 0) }, ['label', 'A', 'B']), 1, 10) }, ['kind', 'rows']),
+    oneOf: [{ required: ['decision'] }, { required: ['decisionIndex'] }] },
+] }, 0, 6);
+
+function checkBlockKeys(errors, path, obj, keys) {
+  for (const key of Object.keys(obj)) if (!keys.includes(key)) errors.push(`${path}.${key}: 허용 필드 아님`);
+}
+
+function checkBlockArray(errors, path, value, min, max) {
+  if (!Array.isArray(value)) { errors.push(`${path}: 배열 필요(${min}..${max})`); return false; }
+  if (value.length < min) errors.push(`${path}: ${min}개 이상 필요(현재 ${value.length})`);
+  if (value.length > max) errors.push(`${path}: ${max}개 초과(${value.length})`);
+  return true;
+}
+
+function checkBlockDecision(errors, path, b, v, fns) {
+  const hasId = b.decision !== undefined, hasIndex = b.decisionIndex !== undefined;
+  if (hasId && hasIndex) { errors.push(`${path}.decisionIndex: decision과 decisionIndex 중 하나만`); return; }
+  if (!hasId && !hasIndex) { errors.push(`${path}.decision: decision 또는 decisionIndex 필요`); return; }
+  let id, linkPath;
+  if (hasId) {
+    linkPath = `${path}.decision`;
+    const before = errors.length;
+    checkId(errors, linkPath, b.decision, fns);
+    if (errors.length !== before) return;
+    id = b.decision;
+  } else {
+    linkPath = `${path}.decisionIndex`;
+    const k = b.decisionIndex;
+    if (!Number.isInteger(k) || k < 0 || k > 3) { errors.push(`${linkPath}: 0..3 정수 필요`); return; }
+    const d = Array.isArray(v.decisions) ? v.decisions[k] : undefined;
+    if (!isObj(d)) { errors.push(`${linkPath}: decisions[${k}] 없음`); return; }
+    if (d.state === 'answered') { errors.push(`${linkPath}: 열린 결정 아님`); return; }
+    id = d.id;
+    if (id === undefined) return; // a new open decision allocated by this brief
+    const before = errors.length;
+    checkId(errors, linkPath, id, fns);
+    if (errors.length !== before) return;
+  }
+  let open = false;
+  if (typeof fns.decisionOpen === 'function') { try { open = !!fns.decisionOpen(id); } catch { open = false; } }
+  if ((Array.isArray(v.close_decisions) && v.close_decisions.some(d => d?.id === id))
+    || (Array.isArray(v.decisions) && v.decisions.some(d => d?.id === id && d.state === 'answered'))) open = false;
+  if (!open) errors.push(`${linkPath}: 열린 결정 아님(${id})`);
+}
+
+function checkReportBlocks(errors, path, blocks, v, fns) {
+  if (!checkBlockArray(errors, path, blocks, 0, 6)) return;
+  const ids = new Set(); // checklist storage is keyed by session/report/item, not block index
+  for (const [n, b] of blocks.entries()) {
+    const p = `${path}[${n}]`;
+    if (!isObj(b)) { errors.push(`${p}: 블록 객체 필요`); continue; }
+    const spec = REPORT_BLOCK_SCHEMA.items.oneOf.find(s => s.properties.kind.const === b.kind);
+    if (!spec) { errors.push(`${p}.kind: 허용 값 table|bars|kv|flow|checklist|compare 필요`); continue; }
+    checkBlockKeys(errors, p, b, Object.keys(spec.properties));
+    if (b.title !== undefined) checkStr(errors, `${p}.title`, b.title, { min: 0, max: 80 });
+    if (b.kind === 'table') {
+      if (checkBlockArray(errors, `${p}.columns`, b.columns, 1, 8)) {
+        for (const [i, c] of b.columns.entries()) checkStr(errors, `${p}.columns[${i}]`, c, { max: 40 });
+      }
+      if (checkBlockArray(errors, `${p}.rows`, b.rows, 1, 30)) for (const [i, row] of b.rows.entries()) {
+        const rp = `${p}.rows[${i}]`;
+        if (!Array.isArray(row)) { errors.push(`${rp}: 행 배열 필요`); continue; }
+        if (Array.isArray(b.columns) && row.length !== b.columns.length) errors.push(`${rp}: 열 ${b.columns.length}개와 같은 셀 수 필요(현재 ${row.length})`);
+        for (const [j, cell] of row.entries()) {
+          if (typeof cell === 'number' && Number.isFinite(cell)) continue;
+          if (typeof cell === 'string') checkStr(errors, `${rp}[${j}]`, cell, { min: 0, max: 120 });
+          else errors.push(`${rp}[${j}]: 문자열 또는 유한한 숫자 필요`);
+        }
+      }
+      continue;
+    }
+    if (b.kind === 'bars' && b.unit !== undefined) checkStr(errors, `${p}.unit`, b.unit, { min: 0, max: 8 });
+    if (b.kind === 'compare') checkBlockDecision(errors, p, b, v, fns);
+    const key = b.kind === 'flow' ? 'steps' : b.kind === 'compare' ? 'rows' : 'items';
+    const max = b.kind === 'flow' || b.kind === 'compare' ? 10 : 20;
+    if (!checkBlockArray(errors, `${p}.${key}`, b[key], b.kind === 'flow' ? 2 : 1, max)) continue;
+    for (const [i, item] of b[key].entries()) {
+      const ip = `${p}.${key}[${i}]`;
+      if (!isObj(item)) { errors.push(`${ip}: 항목 객체 필요`); continue; }
+      const itemSpec = spec.properties[key].items;
+      checkBlockKeys(errors, ip, item, Object.keys(itemSpec.properties));
+      for (const [field, rule] of Object.entries(itemSpec.properties)) {
+        if (rule.type === 'string' && (item[field] !== undefined || itemSpec.required.includes(field))) {
+          checkStr(errors, `${ip}.${field}`, item[field], { min: rule.minLength ?? 1, max: rule.maxLength });
+        }
+      }
+      if (b.kind === 'bars' && (typeof item.value !== 'number' || !Number.isFinite(item.value) || item.value < 0)) errors.push(`${ip}.value: 0 이상의 유한한 숫자 필요`);
+      if (b.kind === 'flow' && item.state !== undefined && !FLOW_STATES.includes(item.state)) errors.push(`${ip}.state: 허용 값 done|doing|todo|blocked 필요`);
+      if (b.kind === 'checklist') {
+        if (typeof item.id !== 'string' || !/^[a-z0-9_-]{1,32}$/.test(item.id)) errors.push(`${ip}.id: 형식 필요(a-z0-9_- 1..32자)`);
+        else if (ids.has(item.id)) errors.push(`${ip}.id: 이 보고서 안에서 중복(${item.id})`);
+        else ids.add(item.id);
+      }
+    }
+  }
+}
+
 function strField(errors, obj, path, { min = 1, max }) {
   const v = obj?.[path.split('.').pop()];
   return checkStr(errors, path, v, { min, max });
@@ -139,6 +254,7 @@ function checkReports(errors, v, fns) {
     else ids.add(r.id);
     checkStr(errors, `${p}.title`, r.title, { min: 1, max: 80 });
     if (r.summary !== undefined) checkStr(errors, `${p}.summary`, r.summary, { min: 0, max: 1000 });
+    if (r.blocks !== undefined) checkReportBlocks(errors, `${p}.blocks`, r.blocks, v, fns);
     let optionKeys = null; // options of the linked decision; null = no decision linked (or it could not be checked)
     const hasDecision = r.decision !== undefined;
     const hasIndex = r.decisionIndex !== undefined;
@@ -194,6 +310,7 @@ function checkReports(errors, v, fns) {
     if (hasDecision) out.decision = r.decision;
     if (hasIndex) out.decisionIndex = r.decisionIndex;
     out.images = images;
+    if (r.blocks !== undefined) out.blocks = r.blocks;
     return out;
   });
 }

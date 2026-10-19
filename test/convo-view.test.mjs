@@ -108,7 +108,7 @@ test('fixture: every C-VM, C-NOTE and C-REPORT field, and one PNG, JPEG and WebP
   for (const n of A.notes) assert.deepEqual(Object.keys(n).sort(), ['at', 'delivery', 'key', 'preview']);
   assert.deepEqual(A.reports.map((r) => r.status).sort(), ['결정 기다림', '답함', '참고'].sort());
   for (const r of A.reports) {
-    assert.deepEqual(Object.keys(r).sort(), ['at', 'decisionId', 'id', 'images', 'status', 'summary', 'title']);
+    assert.deepEqual(Object.keys(r).sort(), ['at', ...(r.blocks !== undefined ? ['blocks'] : []), 'decisionId', 'id', 'images', 'status', 'summary', 'title']);
     for (const im of r.images) assert.deepEqual(Object.keys(im).sort(), ['alt', 'h', 'option', 'path', 'src', 'w']);
   }
   const files = fs.readdirSync(ASSET_DIR).sort();

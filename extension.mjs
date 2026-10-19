@@ -31,7 +31,7 @@ import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { execFile as nodeExecFile, execFileSync as nodeExecFileSync } from 'node:child_process';
-import { validateBrief } from './src/schema.mjs';
+import { validateBrief, REPORT_BLOCK_SCHEMA } from './src/schema.mjs';
 import { openStore } from './src/store.mjs';
 import { collectAuto } from './src/collect.mjs';
 import { applyDecide, applyBoardAnswer, applyBoardAnnotation, formatDecideResult } from './src/decide.mjs';
@@ -167,6 +167,7 @@ export const BRIEF_SCHEMA = {
           summary: { type: 'string' },
           decision: { type: 'number' },
           decisionIndex: { type: 'number' },
+          blocks: REPORT_BLOCK_SCHEMA,
           images: {
             type: 'array',
             items: {
@@ -191,6 +192,11 @@ const BRIEF_DESCRIPTION = [
   'close_decisions {id, reason: superseded|withdrawn}, flow 0..8개(label 1..20, state).',
   'reports 0..3개(id a-z0-9_- 1..64, title 1..80, summary 0..1000, decision(열린 결정 번호) 또는 decisionIndex(이번 decisions[] 위치 0..3) 중 하나,',
   '  images 0..6개{path: C:/ 절대경로 PNG·JPEG·WebP ≤8MiB ≤8192px, alt 1..200, option A|B|C(연결된 결정의 선택지)}). 생략하면 이전 보고서 유지, []는 비움.',
+  'reports[].blocks 0..6개, 공통 title? 0..80: table{columns 1..8개 문자열 1..40, rows 1..30개 같은 열 수의 셀(문자열 0..120|유한한 숫자)},',
+  'bars{unit? 0..8, items 1..20개{label 1..40,value 유한한 숫자>=0}}, kv{items 1..20개{key 1..40,value 0..200}},',
+  'flow{steps 2..10개{label 1..40,state? done|doing|todo|blocked}}, checklist{items 1..20개{id a-z0-9_- 1..32 보고서 안 고유,text 1..120}},',
+  'compare{decision(열린 결정 번호) 또는 decisionIndex(이번 decisions[] 0..3) 정확히 하나,rows 1..10개{label 1..40,A 0..80,B 0..80,C? 0..80}}.',
+  '블록은 데이터만 받음: HTML·마크다운·URL·스타일은 텍스트 값으로만 보존하며 실행·변환하지 않음. 알 수 없는 필드와 한도 초과는 잘라내지 않고 정확한 경로로 거절.',
   '각 changes/done 항목에는 truth(evidence|reported|unverified)와 applied(candidate|live|none)가 반드시 있다.',
   'truth=evidence는 C:/ 로 시작하는 절대경로 evidence가 있을 때만. 기존 열린 결정을 유지하려면 decisions[].id에 번호를 넣는다.',
   '한도를 넘으면 거절되고 필드명과 한도가 돌아오니 줄여서 다시 호출한다.',
@@ -756,6 +762,11 @@ export function createBriefingExtension(opts = {}) {
           summary: r.summary ?? '',
           decisionId: r.decision ?? (r.decisionIndex !== undefined ? brief.decisions[r.decisionIndex].id : null),
           at: t,
+          ...(r.blocks !== undefined ? { blocks: r.blocks.map((b) => {
+            if (b.kind !== 'compare' || b.decisionIndex === undefined) return b;
+            const { decisionIndex, ...block } = b;
+            return { ...block, decision: brief.decisions[decisionIndex].id };
+          }) } : {}),
           images: r.images.map((img, j) => {
             const a = imported.get(`${i}.${j}`);
             return { sha: a.sha, ext: a.ext, mime: a.mime, bytes: a.bytes, w: a.w, h: a.h, path: img.path, alt: img.alt, option: img.option ?? null };
