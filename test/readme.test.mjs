@@ -12,6 +12,7 @@ const LINE_CAP = 130;
 const MIN_SECTIONS = 8; // structure only: section wording is never pinned (the plan forbids prose pins)
 const EXTENSION = readFileSync(join(REPO, 'extension.mjs'), 'utf8');
 const INSTALL = readFileSync(join(REPO, 'scripts', 'install.mjs'), 'utf8');
+const ALARM = readFileSync(join(REPO, 'src/page/alarm.js'), 'utf8');
 
 function walk(dir) {
   const out = [];
@@ -68,6 +69,7 @@ function check(text) {
   const numbered = lines.map((l) => /^## (\d+)\. /.exec(l)).filter(Boolean).map((m) => Number(m[1]));
   if (numbered.length < MIN_SECTIONS) problems.push(`sections ${numbered.length} < ${MIN_SECTIONS}`);
   else if (numbered.some((n, i) => n !== i + 1)) problems.push(`sections are not numbered 1..${numbered.length}: ${numbered.join(',')}`);
+  for (const id of [2, 5, 7]) if (!numbered.includes(id)) problems.push(`missing section ${id}`);
 
   for (const m of text.matchAll(/(?<![\p{L}\p{N}_:.\/-])\/([a-z][a-z-]*)(?: (on|off|path)\b)?/gu)) {
     if (!REGISTERED.has(m[1])) problems.push(`unregistered command /${m[1]}`);
@@ -124,13 +126,13 @@ function check(text) {
   if (!addrPorts.includes(DEFAULT_PORT_BASE)) problems.push(`the default board port ${DEFAULT_PORT_BASE} is not named`);
 
   const LIVE_FACTS = [
-    ['🔔', ['🔔']],
+    ['bell', ["ic('bell')"]],
     ['bell-off', ['bell-off']],
     ['server.json', ['server.json']],
   ];
   for (const [shown, code] of LIVE_FACTS) {
     if (!text.includes(shown)) problems.push(`missing live-board fact: ${shown}`);
-    else for (const c of code) if (!SOURCE.includes(c)) problems.push(`not in code: ${c}`);
+    else for (const c of code) if (!(shown === 'bell' ? ALARM : SOURCE).includes(c)) problems.push(`not in code: ${c}`);
   }
   return problems;
 }
@@ -159,7 +161,7 @@ test('negative: the live address, sound toggle and server record line are enforc
   const noPorts = text.replace(/127\.0\.0\.1:\d+/g, '127.0.0.1:1');
   assert.ok(check(noPorts).includes(`the default board port ${DEFAULT_PORT_BASE} is not named`));
   assert.ok(check(text.replace('47326', '47400')).some((p) => p.startsWith('port 47400 outside')));
-  assert.ok(check(text.replace(/🔔/g, '')).includes('missing live-board fact: 🔔'));
+  assert.ok(check(text.replace(/\bbell\b/g, '')).includes('missing live-board fact: bell'));
   assert.ok(check(text.replace(/bell-off/g, '')).includes('missing live-board fact: bell-off'));
   assert.ok(check(text.replace(/server\.json/g, 'records.json')).includes('missing live-board fact: server.json'));
 });

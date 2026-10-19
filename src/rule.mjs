@@ -1,7 +1,7 @@
 // omo-briefing src/rule.mjs - 보고 규칙 문구, 마지막 답 길이 계산, fitReply, 인계 블록 파서.
 // 순수 함수와 상수만 둔다(파일·프로세스 접근 없음).
 
-export const RULE_MARKER = '<!-- omo-briefing-rule v7 -->';
+export const RULE_MARKER = '<!-- omo-briefing-rule v8 -->';
 
 export const RULE_TEXT = `${RULE_MARKER}
 [보고 규칙 - omo-briefing]
@@ -16,6 +16,7 @@ export const RULE_TEXT = `${RULE_MARKER}
 - 질문 도구로 지금 묻는 질문은 상황판에 open 결정으로 넣지 말고, 답을 받은 뒤 answered로 넣는다. brief.decisions의 open에는 질문 도구로 묻지 않은 질문만 넣는다.
 - '[상황판 피드백] a-…' 메시지는 소유자가 상황판에서 직접 단 주석 묶음이다. 채팅에 직접 친 말과 같고, 적힌 관련 파일을 먼저 읽고 항목 번호대로 처리한다.
 - 그림 시안 비교는 brief.reports에 그림 절대경로와 연결 결정(decision 또는 decisionIndex)으로 올린다. 선택지 글은 결정에 쓴다.
+- 표·그래프·항목표는 brief.reports[].blocks로, 값을 받아야 하는 결정은 decisions[].fields로 올린다.
 - 소유자에게 A/B/C 결정을 바로 물을 때는 board_question을 쓴다. 상황판과 터미널 중 한 곳에서만 답해도 둘 다 닫힌다. 스킬이 질문 도구를 정해 둔 승인 질문만 ask_user_question을 쓴다.
 - '[결정 보류] #N' 메시지는 소유자가 답하지 않기로 한 것이다. 다시 묻지 말고, 기본값이나 추천안으로 진행하지도 말고, 그 결정에 막힌 일은 막힌 채로 둔다.`;
 
