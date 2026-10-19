@@ -5,7 +5,7 @@
 // usage: node scripts/qa-answer.mjs --out <dir> [--prefix task-11-]
 //   <dir>/<prefix>*.png        desktop 1280x900 (choice B) and mobile 390x844 (reply), before / confirm / after, file page
 //   --summary <file> (default <dir>/<prefix>result.json)  per check pass/fail with the measured values; forgery = { attempts: 3, writes }
-// Checks: tab label on card + waiting band; click B -> confirm -> 보내기 -> answers/<id>.json + live state on the card; reply typed
+// Checks: tab label + window SVG on card and confirmation; click B -> confirm -> 보내기 -> answers/<id>.json + live state on the card; reply typed
 // and sent; a page on another origin (no-cors fetch + form POST), and a file:// copy of the page (no-cors fetch + CORS fetch with
 // the leaked token) leave answers/ unchanged; the file page has no answer buttons and shows the read-only notice; then the
 // conversation's last open decision is answered and its card + delivery line must stay on the tab the owner is looking at.
@@ -188,8 +188,11 @@ async function openLive(page, url, openDecisions) {
 
 const identity = (page) => page.eval(`(() => {
   const c = document.querySelector(${J(card)});
+  const title = c && c.querySelector('.ch .title');
   return {
     cardText: c ? c.textContent.replace(/\\s+/g, ' ').slice(0, 300) : null,
+    titleText: title ? title.textContent.trim() : null,
+    windowIcon: !!(title && title.querySelector('svg use[href="#i-app-window"]')),
     bandPresent: !!document.querySelector('#alarm-band,.alarm-row'),
     seenKeys: Object.keys(JSON.parse(localStorage.getItem('omo-briefing.seenWaiting') || '{}')),
     focusButtons: [...document.querySelectorAll(${J(card + ' .focusbtn')})].length,
@@ -211,6 +214,7 @@ async function answerFlow(page, id, how, label) {
     await click(page, `${dcard(id)} .ans-go[data-act="ans-text"]`);
   }
   const confirmText = await waitFor(page, `(() => { const el = document.querySelector(${J(dcard(id) + ' .ans-confirm')}); return el ? el.textContent : null; })()`, 'confirm row');
+  const confirmWindowIcon = await page.eval(`!!document.querySelector(${J(dcard(id) + ' .ans-confirm .ans-q svg use[href="#i-app-window"]')})`);
   await shot(page, `${label}-confirm`, card);
   await recordStates(page, id);
   const sentAt = Date.now();
@@ -220,7 +224,7 @@ async function answerFlow(page, id, how, label) {
   const sentLine = await waitFor(page, `(() => { const el = [...document.querySelectorAll(${J(card + ' .dsent')})].find((x) => x.textContent.includes('#${id} ')); return el ? { text: el.textContent, chip: el.querySelector('.chip') ? el.querySelector('.chip').textContent : '' } : null; })()`, `sent line for #${id}`);
   const seen = await page.eval('window.__seen');
   await shot(page, `${label}-after`, card);
-  return { confirmText, answerFiles: file, answer, msToFile: Date.now() - sentAt, sentLine, seen, counter: how.counter ?? null };
+  return { confirmText, confirmWindowIcon, answerFiles: file, answer, msToFile: Date.now() - sentAt, sentLine, seen, counter: how.counter ?? null };
 }
 
 // ------------------------------------------------------------------ main
@@ -266,7 +270,7 @@ try {
   await check('identity-desktop', 'card/focus retain herdr identity and alarms are recorded without a band (desktop 1280x900)', async () => {
     const id = await identity(page);
     assert.equal(desktopSize, '1280x900');
-    assert.ok(id.cardText.includes('🗂 수리 #181'), `card text: ${id.cardText}`);
+    assert.ok(id.titleText.startsWith('수리 #181 · ') && id.windowIcon, `card identity: ${J(id)}`);
     assert.equal(id.bandPresent, false);
     const plain = await page.eval(`document.querySelector('[data-card="qa-plain"]').textContent`);
     assert.ok(plain.includes('창 w1:pR9 · 탭 정보 없는 대화'), 'card without a herdr tab falls back to the pane');
@@ -280,7 +284,7 @@ try {
 
   await check('click-option-desktop', 'click B -> confirm names the tab -> 보내기 -> answers file + live state on the card (desktop)', async () => {
     const r = await answerFlow(page, idOpt, { option: 'B' }, 'desktop');
-    assert.ok(r.confirmText.includes('🗂 수리 #181') && r.confirmText.includes('B'), `confirm: ${r.confirmText}`);
+    assert.ok(r.confirmText.includes('수리 #181') && r.confirmWindowIcon && r.confirmText.includes('B'), `confirm: ${J(r)}`);
     assert.deepEqual({ id: r.answer.id, option: r.answer.option, from: r.answer.fromSessionId }, { id: idOpt, option: 'B', from: 'board' });
     assert.equal(r.seen[0], '보내는 중…', `first state ${J(r.seen)}`);
     assert.match(r.sentLine.chip, /전달|대기/, 'delivery state on the card');
@@ -295,7 +299,7 @@ try {
   await check('identity-mobile', 'card retains herdr identity and alarms remain recorded without a band (mobile 390x844)', async () => {
     const id = await identity(page);
     assert.equal(mobileSize, '390x844');
-    assert.ok(id.cardText.includes('🗂 수리 #181'));
+    assert.ok(id.titleText.startsWith('수리 #181 · ') && id.windowIcon, `card identity: ${J(id)}`);
     assert.equal(id.bandPresent, false);
     assert.ok(id.seenKeys.includes('d' + idText));
     const overflow = await page.eval('document.documentElement.scrollWidth - innerWidth');
@@ -307,7 +311,7 @@ try {
 
   await check('reply-mobile', 'type a reply -> 보내기 -> confirm -> 보내기 -> answers file holds the text verbatim (mobile)', async () => {
     const r = await answerFlow(page, idText, { text: REPLY }, 'mobile');
-    assert.ok(r.confirmText.includes('🗂 수리 #181') && r.confirmText.includes('답글'), `confirm: ${r.confirmText}`);
+    assert.ok(r.confirmText.includes('수리 #181') && r.confirmWindowIcon && r.confirmText.includes('답글'), `confirm: ${J(r)}`);
     assert.deepEqual({ id: r.answer.id, text: r.answer.text, from: r.answer.fromSessionId }, { id: idText, text: REPLY, from: 'board' });
     assert.equal(r.seen[0], '보내는 중…', `first state ${J(r.seen)}`);
     assert.ok(r.sentLine.text.includes('<b>굵게</b>'), 'reply shown as text, not markup');
@@ -376,8 +380,8 @@ try {
   results.forgery = { attempts: 3, writes: snapshotDiff(baseline, after).writes, requests: forgery, decisionStillOpen: !Object.keys(after).some((n) => Number(n.slice(0, 6)) === idForge) };
 
   // ---- the forgery target is the conversation's LAST open decision: answering it files the conversation under 진행 중 in the
-  // next model; the owner, still looking at 나를 기다림, must keep seeing the card and its live delivery line (IS-6)
-  await check('last-decision-desktop', 'answer the last open decision: after the model moves the conversation, its card and delivery line stay on the shown tab (desktop)', async () => {
+  // next model; the owner, still looking at the overview, must keep seeing the card and its live delivery line (IS-6)
+  await check('last-decision-desktop', 'answer the last open decision: after the model moves the conversation, its card and delivery line stay on the overview (desktop)', async () => {
     assert.equal(results.forgery.decisionStillOpen, true, 'forgery target still open before the real answer');
     await openLive(page, url, 1);
     const modelTab = `(window.BriefPage.state.model.sessions.find((s) => s.id === ${J(SID)}) || {}).tab`;
@@ -389,10 +393,12 @@ try {
     const surface = await page.eval(`(() => {
       const c = document.querySelector(${J(card)});
       const line = c && [...c.querySelectorAll('.dsent')].find((x) => x.textContent.includes('#${idForge} '));
-      return { shownTab: document.querySelector('.app').getAttribute('data-tab'), cardShown: !!c, line: line ? line.textContent.replace(/\\s+/g, ' ').trim() : '', chip: line && line.querySelector('.chip') ? line.querySelector('.chip').textContent : '' };
+      return { shownView: document.querySelector('[data-shell]').getAttribute('data-view'), activeSession: window.BriefPage.state.ui.active, overviewShown: !!document.querySelector('#main > .overview'), cardShown: !!c, line: line ? line.textContent.replace(/\\s+/g, ' ').trim() : '', chip: line && line.querySelector('.chip') ? line.querySelector('.chip').textContent : '' };
     })()`);
     await shot(page, 'desktop-last-model', card);
-    assert.equal(surface.shownTab, 'wait', 'the owner was not moved off 나를 기다림');
+    assert.equal(surface.shownView, 'conv', 'the owner stays in the conversation view');
+    assert.equal(surface.activeSession, null, 'no conversation was opened on the owner');
+    assert.equal(surface.overviewShown, true, 'the owner stays on the overview');
     assert.equal(surface.cardShown, true, `answered card still on the screen after the model moved it to ${tabAfter}`);
     assert.match(surface.chip, /전달|대기/, `delivery state on the card: ${J(surface)}`);
     assert.equal(r.seen[0], '보내는 중…', `first state ${J(r.seen)}`);
