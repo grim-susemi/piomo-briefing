@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { fork, spawnSync } from 'node:child_process';
 import vm from 'node:vm';
 import { openStore } from '../src/store.mjs';
+import { validateBrief } from '../src/schema.mjs';
 import { buildViewModel, renderPage, pageHtml, withReports, MAX_VM_BYTES, OMITTED_CHIP } from '../src/render.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -827,6 +828,195 @@ describe('sessions[].reports', () => {
     const res = renderPage(store, NOW, { sleep: () => {}, isAlive: () => false });
     assert.equal(res.ok, true);
     assert.ok(fs.statSync(join(store.root, 'data.js')).size <= MAX_VM_BYTES, 'published data.js over the cap');
+  });
+
+  test('C-CAP2 blocks: six maximal blocks at N-1, N, N+1 preserve reports before wholesale removal', (t) => {
+    const text = (n) => '<'.repeat(n); // worst-case script escaping: six bytes per code point
+    const blocks = [
+      { kind: 'table', title: text(80), columns: Array(8).fill(text(40)), rows: Array.from({ length: 30 }, () => Array(8).fill(text(120))) },
+      { kind: 'bars', title: text(80), unit: text(8), items: Array.from({ length: 20 }, () => ({ label: text(40), value: Number.MAX_VALUE })) },
+      { kind: 'kv', title: text(80), items: Array.from({ length: 20 }, () => ({ key: text(40), value: text(200) })) },
+      { kind: 'flow', title: text(80), steps: Array.from({ length: 10 }, () => ({ label: text(40), state: 'blocked' })) },
+      { kind: 'checklist', title: text(80), items: Array.from({ length: 20 }, (_, i) => ({ id: `i${i}`.padEnd(32, 'a'), text: text(120) })) },
+      { kind: 'compare', title: text(80), decisionIndex: 0, rows: Array.from({ length: 10 }, () => ({ label: text(40), A: text(80), B: text(80), C: text(80) })) },
+    ];
+    const checked = validateBrief({
+      title: 'maximal', status: 'done', headline: 'h', changes: [], done: [], next: '',
+      decisions: [{ question: 'q', options: { A: opt('a', 'a'), B: opt('b', 'b'), C: opt('c', 'c') }, recommend: 'A', reason: 'r', blocks: false }],
+      reports: [{ id: 'max', title: 'maximal report', summary: 'retained summary', images: [], blocks }],
+    });
+    assert.equal(checked.ok, true, JSON.stringify(checked.errors));
+    const store = openStore(join(tempRoot(t), 'state'));
+    for (const [sid, age, status] of [['old', 3, 'done'], ['new', 2, 'done'], ['live', 1, 'in_progress']]) {
+      meta(store, sid, { lastActivityAt: NOW - age * MIN });
+      brief(store, sid, 1, NOW - age * MIN, { title: sid, headline: 'h', status });
+      store.replace(`sessions/${sid}/reports.json`, [{
+        id: 'max', title: 'maximal report', summary: 'retained summary', at: NOW - age * MIN,
+        decisionId: sid === 'old' ? 1 : null, images: [img({ path: '' })],
+        blocks: sid === 'live' ? [{ kind: 'kv', items: [{ key: 'k', value: 'v' }] }] : blocks,
+      }]);
+    }
+    decision(store, { id: 1, sessionId: 'old', question: 'answered', createdAt: NOW - 4 * MIN });
+    store.writeNew('answers/000001.json', { id: 1, option: 'A', values: { kept: 'history' }, at: NOW - MIN });
+    const fields = Array.from({ length: 4 }, (_, i) => ({
+      id: `field_${i}`, label: text(40), kind: 'choice', options: Array.from({ length: 6 }, (_, k) => `${k}${text(39)}`),
+    }));
+    decision(store, { id: 2, sessionId: 'live', question: 'open inputs', fields, createdAt: NOW - MIN });
+    const snapshot = withReports(store, store.readSnapshot());
+    snapshot.published = { seq: 1 };
+    snapshot.readErrors = [{ rel: '' }]; // inert, byte-exact padding, not a session's read error
+    const options = { isAlive: () => false, stateDir: store.root };
+    const dataText = (model) => `/* seq:${model.seq} */\nwindow.__briefData && window.__briefData(${JSON.stringify(model)
+      .replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')});\n`;
+    const bytes = (model) => Buffer.byteLength(dataText(model));
+    const base = buildViewModel(snapshot, NOW, options);
+    const baseBytes = bytes(base);
+    assert.ok(baseBytes < MAX_VM_BYTES, 'untrimmed fixture has room for exact boundary padding');
+    assert.equal(base.sessions.find((s) => s.id === 'old').tab, '끝남');
+    const afterBlocks = structuredClone(base);
+    const blockSavings = [];
+    for (const sid of ['old', 'new']) {
+      const before = bytes(afterBlocks);
+      const s = afterBlocks.sessions.find((s) => s.id === sid);
+      delete s.reports[0].blocks;
+      s.chips.push('표·그래프 생략 6개');
+      const saved = before - bytes(afterBlocks);
+      assert.ok(saved > 0, 'each block-only trim step is strictly smaller, including its chip');
+      blockSavings.push(saved);
+      t.diagnostic(`STEP block-only ${sid}: before=${before} after=${bytes(afterBlocks)} removed=${saved}`);
+    }
+    const withoutFields = structuredClone(base);
+    delete withoutFields.sessions.find((s) => s.id === 'live').decisions[0].fields;
+    assert.ok(bytes(base) > bytes(withoutFields), 'field bytes are included in the exact model count');
+    t.diagnostic(`COUNT fields=${bytes(base) - bytes(withoutFields)} blocks-with-chips=${blockSavings.join('+')}`);
+    const N = MAX_VM_BYTES;
+    for (const delta of [-1, 0, 1]) {
+      const input = structuredClone(snapshot);
+      input.readErrors[0].rel = 'p'.repeat(N + delta - baseBytes);
+      const raw = structuredClone(base);
+      raw.readErrors = [input.readErrors[0].rel];
+      assert.equal(bytes(raw), N + delta);
+      store.readSnapshot = () => structuredClone(input);
+      assert.equal(renderPage(store, NOW, { ...options, sleep: () => {} }).ok, true);
+      const published = fs.readFileSync(join(store.root, 'data.js'), 'utf8');
+      const result = JSON.parse(published.slice(published.lastIndexOf('window.__briefData(') + 'window.__briefData('.length, published.lastIndexOf(');')));
+      const old = result.sessions.find((s) => s.id === 'old');
+      assert.ok(old.reports.length === 1, 'PRESERVATION: report must not be removed wholesale');
+      const expected = structuredClone(base.sessions.find((s) => s.id === 'old').reports[0]);
+      if (delta > 0) {
+        delete expected.blocks;
+        assert.ok(old.chips.includes('표·그래프 생략 6개'), 'PRESERVATION: omission chip must be present');
+        assert.ok(!old.chips.includes(OMITTED_CHIP), 'block-only trimming precedes wholesale report removal');
+        assert.ok(Buffer.byteLength(published) < N + delta, 'the block-only step actually reduces bytes');
+      }
+      assert.deepEqual(old.reports[0], expected, 'id, title, summary, images and decision link survive');
+      for (const sid of ['new', 'live']) {
+        assert.deepEqual(result.sessions.find((s) => s.id === sid).reports, base.sessions.find((s) => s.id === sid).reports,
+          'newer finished and unfinished blocks remain whole');
+      }
+      assert.deepEqual(result.sessions.find((s) => s.id === 'live').decisions[0].fields, fields, 'OPEN fields are untouchable');
+      assert.deepEqual(old.decisions[0].answer, base.sessions.find((s) => s.id === 'old').decisions[0].answer, 'answered history survives');
+      assert.ok(Buffer.byteLength(published) <= N);
+      assert.ok(Buffer.byteLength(JSON.stringify(result)) <= N);
+      t.diagnostic(`BOUNDARY N${delta < 0 ? '-1' : delta > 0 ? '+1' : ''}: raw=${N + delta} data.js=${Buffer.byteLength(published)} JSON=${Buffer.byteLength(JSON.stringify(result))} removed=${N + delta - Buffer.byteLength(published)}`);
+    }
+    const input = structuredClone(snapshot);
+    const overflow = blockSavings.reduce((a, b) => a + b, 0) + 1;
+    input.readErrors[0].rel = 'p'.repeat(N + overflow - baseBytes);
+    store.readSnapshot = () => structuredClone(input);
+    assert.equal(renderPage(store, NOW, { ...options, sleep: () => {} }).ok, true);
+    const script = fs.readFileSync(join(store.root, 'data.js'), 'utf8');
+    const result = JSON.parse(script.slice(script.lastIndexOf('window.__briefData(') + 'window.__briefData('.length, script.lastIndexOf(');')));
+    const old = result.sessions.find((s) => s.id === 'old');
+    assert.deepEqual(old.reports, [], 'pass 2 still removes whole reports when the block-only pass cannot fit');
+    assert.ok(old.chips.includes(OMITTED_CHIP));
+    assert.ok(result.sessions.find((s) => s.id === 'new').reports.length === 1, 'wholesale removal stops as soon as it fits');
+    assert.deepEqual(result.sessions.find((s) => s.id === 'live').reports, base.sessions.find((s) => s.id === 'live').reports);
+    assert.deepEqual(result.sessions.find((s) => s.id === 'live').decisions[0].fields, fields, 'OPEN fields survive the fallback too');
+    assert.ok(Buffer.byteLength(script) <= N);
+    assert.ok(N + 1 > Buffer.byteLength(script), 'the wholesale fallback also strictly shrinks');
+    t.diagnostic(`STEP wholesale old after block-only steps: before=${N + 1} after=${Buffer.byteLength(script)} removed=${N + 1 - Buffer.byteLength(script)}`);
+  });
+});
+
+describe('C-CAP2 block protections', () => {
+  const wire = (m) => `/* seq:${m.seq} */\nwindow.__briefData && window.__briefData(${JSON.stringify(m).replace(/</g, '\\u003c')});\n`;
+  const size = (m) => Buffer.byteLength(wire(m));
+  const block = { kind: 'kv', items: Array.from({ length: 20 }, () => ({ key: '<'.repeat(40), value: '<'.repeat(200) })) };
+  const card = (sid, counts, age = 1) => ({
+    sid, meta: { lastActivityAt: NOW - age * MIN },
+    briefs: [{ data: { at: NOW - age * MIN, brief: { title: sid, status: 'done', headline: 'h', changes: [], done: [], next: '' } } }],
+    reports: counts.map((count, i) => ({ id: `r${i}`, title: `report ${i}`, summary: 'kept', images: [],
+      blocks: Array.from({ length: count }, () => structuredClone(block)) })),
+  });
+  const snapshot = (sessions, seq = 1) => ({ sessions, decisions: [], readErrors: [{ rel: '' }], published: { seq }, maxMtime: 0 });
+  function publish(t, input, target, isAlive = () => false) {
+    const store = openStore(join(tempRoot(t), 'state'));
+    const baseline = buildViewModel(input, NOW, { isAlive });
+    const padded = structuredClone(input);
+    padded.readErrors[0].rel = 'p'.repeat(target - size(baseline));
+    const firstCap = buildViewModel(padded, NOW, { isAlive });
+    store.readSnapshot = () => structuredClone(padded);
+    assert.equal(renderPage(store, NOW, { isAlive, sleep: () => {} }).ok, true);
+    const source = store.readText('data.js');
+    const model = JSON.parse(source.slice(source.lastIndexOf('window.__briefData(') + 'window.__briefData('.length, source.lastIndexOf(');')));
+    assert.ok(Buffer.byteLength(source) <= MAX_VM_BYTES);
+    return { model, baseline, firstCap };
+  }
+
+  for (const alive of [true, false]) {
+    test(`B01: prior done brief with running worker, alive=${alive}`, (t) => {
+      const running = card('running', [6], 3), finished = card('finished', [6], 2);
+      Object.assign(running.meta, { running: true, pid: 99, hostPid: 99,
+        auto: { live: { workers: [{ id: 'st_live', name: 'worker', state: 'running', step: 'working' }] } } });
+      const { model, baseline, firstCap } = publish(t, snapshot([running, finished]), MAX_VM_BYTES + 1, () => alive);
+      const live = model.sessions.find((s) => s.id === 'running');
+      const neighbour = model.sessions.find((s) => s.id === 'finished');
+      assert.equal(live.alive, alive);
+      assert.equal(live.tab, '끝남', 'latest brief still says done');
+      assert.deepEqual(live.live, baseline.sessions.find((s) => s.id === 'running').live, 'running details remain before legacy passes');
+      assert.equal(live.reports[0].blocks?.length, alive ? 6 : undefined, 'B01: alive blocks are protected; dead finished blocks are eligible');
+      assert.equal(neighbour.reports[0].blocks?.length, alive ? undefined : 6, 'eligible neighbour is trimmed instead of an alive card');
+      firstCap.seq = model.seq;
+      assert.equal(wire(model), wire(firstCap), 'second cap call on the same published model is idempotent');
+    });
+  }
+
+  for (const [counts, overflow, omitted] of [
+    [[6, 6], 200000, 12],
+    [[6, 2, 3], 300000, 11],
+    [[6, 2, 3], 200000, 8],
+    [[6, 2, 3], 1, 6],
+    [[0, 6, 2], 1, 6],
+  ]) {
+    test(`B02: ${counts.join('/')} blocks, overflow ${overflow}, advertises only ${omitted} omitted`, (t) => {
+      const { model, firstCap } = publish(t, snapshot([card('finished', counts)]), MAX_VM_BYTES + overflow);
+      const s = model.sessions[0];
+      assert.equal(s.reports.length, counts.length, 'all report metadata survives');
+      const dropped = counts.reduce((n, count, i) => n + (s.reports[i].blocks ? 0 : count), 0);
+      assert.equal(dropped, omitted);
+      assert.deepEqual(s.chips.filter((c) => c.startsWith('표·그래프 생략 ')), [`표·그래프 생략 ${omitted}개`], 'B02: marker counts every dropped block once');
+      firstCap.seq = model.seq;
+      assert.equal(wire(model), wire(firstCap), 'second cap call does not recount already omitted blocks');
+      t.diagnostic(`COUNT ${counts.join('/')}: dropped=${dropped} advertised=${omitted} data.js=${size(model)}`);
+    });
+  }
+
+  test('B02: final sequence cap reentry updates six to twelve across a digit boundary', (t) => {
+    const input = snapshot([card('finished', [6, 6])], 9);
+    const before = buildViewModel(input, NOW, { isAlive: () => false });
+    const after = structuredClone(before);
+    delete after.sessions[0].reports[0].blocks;
+    after.sessions[0].chips.push('표·그래프 생략 6개');
+    const saving = size(before) - size(after);
+    const { model, firstCap } = publish(t, input, MAX_VM_BYTES + saving);
+    assert.equal(size(firstCap), MAX_VM_BYTES, 'the first cap call stops exactly at the byte limit');
+    assert.equal(firstCap.sessions[0].reports[1].blocks.length, 6, 'only the first report was trimmed before final seq');
+    assert.equal(model.seq, 10, 'final seq adds two wire bytes and invokes the cap again');
+    assert.equal(model.sessions[0].reports[1].blocks, undefined);
+    assert.deepEqual(model.sessions[0].chips.filter((c) => c.startsWith('표·그래프 생략 ')), ['표·그래프 생략 12개'],
+      'B02: both cap calls share the omitted count, including the extra marker digit');
+    t.diagnostic(`REENTRY first=${size(firstCap)} final=${size(model)} marker=12`);
   });
 });
 

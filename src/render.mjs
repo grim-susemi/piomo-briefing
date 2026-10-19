@@ -50,6 +50,7 @@ export const OMITTED_CHIP = '용량 때문에 일부 생략';
 // C-CAP2 bookkeeping on the model objects (symbols are never serialized)
 const CAP_TOUCHED = Symbol('capTouched');
 const CAP_NO_COUNTER = Symbol('capNoCounter');
+const CAP_BLOCKS = Symbol('capBlocks');
 const CAP_KEYS = ['briefPath', 'sessionFile', 'todo', 'attachments', 'blockSources'];
 // render.lock files this process created but could not verify/remove at release (nonce by lock path): a live pid is never
 // reclaimed by the stale rule, so the owner itself removes a nonce-verified leftover of its own.
@@ -417,6 +418,8 @@ function skeletonPlan(planId, files, status, ownerMeta) {
 // Keeps the written bytes under MAX_VM_BYTES (C-CAP2). Passes in order, each over finished conversations first, then
 // oldest first, stopping as soon as the model fits:
 // 1. blockSources of finished conversations -> {} (parent rule, no chip);
+// 1b. non-live finished conversations' report blocks -> one "표·그래프 생략 n개" card chip with the total omitted count,
+//     oldest first, only when smaller; keep report metadata/links; alive or unfinished cards wait for existing drops.
 // 2. the existing drops: live/plan details, then reports (with their rep/* sources), each marked by OMITTED_CHIP - a drop is
 //    applied to a card only when it saves more bytes than the chip it adds, so no pass ever makes a card bigger;
 // 3. todo.items -> [] (count added to todo.more; their plan/todo/* sources go too); 4. remaining blockSources -> {};
@@ -430,6 +433,7 @@ function skeletonPlan(planId, files, status, ownerMeta) {
 // minus some of its legacy details: it fits whenever the accepted renderer's output fits.
 // Paths are dropped whole, never cut. Every pass tracks the size exactly (value and key bytes); every stop is confirmed
 // on the real text. Measured on the escaped data.js text (every '<' is six bytes there), never smaller than /data.json.
+// Report blocks and decision fields are included in that exact count; OPEN decision fields are never trimmed.
 function capSize(vm) {
   const exact = () => Buffer.byteLength(dataJsText(vm));
   let size = exact();
@@ -457,9 +461,25 @@ function capSize(vm) {
     if (fit()) return;
     replace(s, 'blockSources', {});
   }
+  const chipCost = (s, chip = OMITTED_CHIP) => (s.chips.includes(chip) ? 0 : bytes(chip) + (s.chips.length ? 1 : 0));
+  // pass 1b: preserve finished reports before pass 2 can remove them wholesale.
+  for (const s of vm.sessions.filter((x) => x.tab === '끝남' && x.alive === false).sort(byAge)) {
+    for (const r of s.reports) {
+      if (fit()) return;
+      if (!Array.isArray(r.blocks) || r.blocks.length === 0) continue;
+      const omitted = s[CAP_BLOCKS] ?? { count: 0, index: s.chips.length };
+      const count = omitted.count + r.blocks.length;
+      const chip = `표·그래프 생략 ${count}개`;
+      const cost = omitted.count ? bytes(chip) - bytes(s.chips[omitted.index]) : bytes(chip) + (s.chips.length ? 1 : 0);
+      if (keyBytes(r, 'blocks') <= cost) continue;
+      del(r, 'blocks');
+      s.chips[omitted.index] = chip;
+      s[CAP_BLOCKS] = { count, index: omitted.index }; // not serialized; survives the final-seq cap call
+      size += cost;
+    }
+  }
   // pass 2: the existing drops with their chip. A drop is applied to a card only when it saves more bytes than the chip
   // it adds (a tiny live row is smaller than the chip): no drop ever makes a card bigger.
-  const chipCost = (s) => (s.chips.includes(OMITTED_CHIP) ? 0 : bytes(OMITTED_CHIP) + (s.chips.length ? 1 : 0));
   const legacy = [
     [(s) => s.live !== undefined || s.plan !== undefined, (s) => keyBytes(s, 'live') + keyBytes(s, 'plan'), (s) => { delete s.live; delete s.plan; }],
     [(s) => Array.isArray(s.reports) && s.reports.length > 0,
