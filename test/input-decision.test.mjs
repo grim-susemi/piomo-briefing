@@ -26,6 +26,19 @@ test('input fields: all kinds accepted without legacy options, preserving field 
   assert.equal(r.ok, true, r.errors.join('\n'));
   assert.deepEqual(r.normalized.decisions[0].fields, decisionFields());
 });
+test('input fields: compare linked to a same-brief typed decision is refused at its link path', () => {
+  for (const id of [undefined, 7]) {
+    const b = brief(decisionFields());
+    if (id !== undefined) b.decisions[0].id = id;
+    b.reports = [{ id: 'compare', title: 'Comparison', blocks: [
+      { kind: 'compare', decisionIndex: 0, rows: [{ label: 'Cost', A: 'a', B: 'b', C: 'c' }] },
+    ] }];
+    const r = validateBrief(b, { sessionId: 'owner', decisionOwner: () => 'owner', decisionOpen: () => true });
+    assert.equal(r.ok, false);
+    assert.equal(r.normalized, null);
+    assert.ok(r.errors.some(e => e.startsWith('reports[0].blocks[0].decisionIndex: ')), JSON.stringify(r.errors));
+  }
+});
 
 test('input fields: inclusive limits preserve Unicode and safe-integer/exponent numbers without rounding', () => {
   const fields = [

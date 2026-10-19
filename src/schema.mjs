@@ -130,6 +130,7 @@ function checkBlockDecision(errors, path, b, v, fns) {
     const d = Array.isArray(v.decisions) ? v.decisions[k] : undefined;
     if (!isObj(d)) { errors.push(`${linkPath}: decisions[${k}] 없음`); return; }
     if (d.state === 'answered') { errors.push(`${linkPath}: 열린 결정 아님`); return; }
+    if (!isObj(d.options)) { errors.push(`${linkPath}: 선택지 결정 필요`); return; }
     id = d.id;
     if (id === undefined) return; // a new open decision allocated by this brief
     const before = errors.length;

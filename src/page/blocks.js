@@ -74,7 +74,7 @@
   // 이걸로 고르기 shows the decision answer box's own confirm row (view.js confirmRow)
   function compare(b, r, c) {
     var d = typeof c.decision === 'function' ? obj(c.decision(b.decision)) : null, o = d ? obj(d.options) || {} : {}, rows = arr(b.rows).filter(obj);
-    var keys = ['A', 'B', 'C'].filter(function (k) { return d ? !!obj(own(o, k)) : rows.some(function (x) { return typeof own(x, k) === 'string'; }); });
+    var keys = ['A', 'B', 'C'].filter(function (k) { return !!obj(own(o, k)) || rows.some(function (x) { return typeof own(x, k) === 'string'; }); });
     var rec = d ? (obj(own(o, d.recommend)) ? d.recommend : obj(o.A) ? 'A' : '') : ''; // = view.js recOf
     var chosen = d && d.answered === true && obj(d.answer) ? str(d.answer.option) : '', ps = d && c.pick ? c.pick(d) : null;
     function mark(k) { return (k === rec ? ' rec' : '') + (k === chosen ? ' chosen' : ''); }
@@ -83,7 +83,7 @@
         (k === chosen ? ' <span class="chip cv-chosen">' + (g.BriefIcons ? g.BriefIcons.icon('check') : '') + ' 고른 안</span>' : '');
     }
     function pick(k) {
-      return ps ? '<button type="button" class="cv-pick' + (k === rec ? ' is-rec' : '') + '" data-act="ans-pick" data-dec="' + d.id + '" data-opt="' + k + '" data-where="blk" aria-pressed="' +
+      return ps && obj(own(o, k)) ? '<button type="button" class="cv-pick' + (k === rec ? ' is-rec' : '') + '" data-act="ans-pick" data-dec="' + d.id + '" data-opt="' + k + '" data-where="blk" aria-pressed="' +
         (ps.picked === k) + '"' + (ps.open ? '' : ' disabled' + (ps.closed ? ' title="이미 답했거나 닫힌 결정"' : '')) + '>이걸로 고르기</button>' : '';
     }
     function td(k, v) { return '<td' + (k === rec ? ' class="rec">' : '>') + v + '</td>'; }

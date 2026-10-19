@@ -252,6 +252,29 @@ test('compare: 이걸로 고르기 shows the decision answer box\'s own confirm 
     ['연결된 결정' + NBSP + '없음', 0, ['항목', 'A', 'B']]);
 });
 
+test('compare: supplied cells survive typed, fewer-option and missing decisions in table and phone cards; only real options get picks', () => {
+  const ctx = load();
+  for (const variant of ['typed', 'two-options', 'missing', 'all-options']) {
+    const s = session([{ kind: 'compare', decision: 97, rows: [
+      { label: 'first', A: 'keep-A', B: 'keep-B' },
+      { label: 'second', A: 'second-A', B: 'second-B', C: 'keep-C' },
+    ] }]);
+    const d = s.decisions.find(d => d.id === 97);
+    if (variant === 'typed') { d.fields = [{ id: 'name', label: 'Name', kind: 'text', maxLen: 20 }]; d.options = {}; }
+    if (variant === 'two-options') delete d.options.C;
+    if (variant === 'missing') s.decisions = s.decisions.filter(d => d.id !== 97);
+    const f = fig(render(ctx, s), 0);
+    const table = cls(f, 'rbk-cmp')[0], cards = cls(f, 'cmpc');
+    assert.deepEqual(tags(tags(table, 'tbody')[0], 'td').map(text),
+      ['keep-A', 'keep-B', '', 'second-A', 'second-B', 'keep-C'], variant + ': every table cell');
+    assert.deepEqual(cards.map(c => tags(c, 'dd').map(text)),
+      [['keep-A', 'second-A'], ['keep-B', 'second-B'], ['', 'keep-C']], variant + ': every phone cell');
+    const options = els(f, e => e.attrs['data-act'] === 'ans-pick').map(e => e.attrs['data-opt']);
+    const expected = variant === 'all-options' ? ['A', 'B', 'C'] : variant === 'two-options' ? ['A', 'B'] : [];
+    assert.deepEqual(options, [...expected, ...expected], variant + ': only existing options can be picked');
+  }
+});
+
 test('checklist: ticks come from ctx.checked by their exact key; a malformed report id or a missing session id cannot be ticked', () => {
   const ctx = load();
   const asked = [];

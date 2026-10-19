@@ -174,6 +174,16 @@ test('report blocks: compare requires exactly one owned open decision or valid c
   refuse([sample('compare')], p + '[0].decisionIndex', { decisions: [{ ...decision(), id: 7 }] }, { decisionOpen: () => false });
   refuse([{ ...b, decision: 7 }], p + '[0].decision', { close_decisions: [{ id: 7, reason: 'withdrawn' }] });
 });
+test('report blocks: compare preserves row letters absent from a same-brief decision without trimming', () => {
+  const two = decision();
+  const b = sample('compare');
+  for (const C of ['', 'keep-C']) for (const d of [two, { ...two, id: 7 }]) {
+    b.rows = [{ label: 'first', A: 'a', B: 'b' }, { label: 'second', A: 'a', B: 'b', C }];
+    const result = run([b], { decisions: [d] });
+    assert.equal(result.ok, true, JSON.stringify(result.errors));
+    assert.deepEqual(result.normalized.reports[0].blocks, [b]);
+  }
+});
 function decisionWithAnswer() { return { ...decision(), state: 'answered', answer: '답함' }; }
 
 test('report blocks: hostile text is preserved as data and unknown executable fields are refused', () => {
