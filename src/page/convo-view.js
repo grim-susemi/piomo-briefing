@@ -17,7 +17,7 @@
  * test/convo-view.test.mjs compares both).
  * Blocks (C-BLOCK): every annotatable element carries data-block built from model data only: head, now, flow,
  * card/<plan|wk|dec|rep>, change/<briefSeq>/<i>, done/<briefSeq>/<i>, dec/<id>, plan/todo/<i>, wk/<workerId>,
- * rep/<reportId>[/img/<n>], note/<key>, att/<n> (indexes count from 0 in the model's own arrays). Plan elements keep
+ * rep/<reportId>[/img/<n>|/blk/<n>], note/<key>, att/<n> (indexes count from 0 in the model's own arrays). Plan elements keep
  * plan-view's data-anchor. An id whose model part is missing or malformed is left off, never made up.
  * The C-VM fields (alive, briefSeq, todo, attachments, ...) and notes/reports may be missing (an older model): whatever
  * needs them is left out. A <details> takes its open state from ui.expanded['cv:<sessionId>:<part>'] when that is a
@@ -578,6 +578,9 @@
       if (obj(im)) cells.push(imageCell(s, d, im, okId ? 'rep/' + rid + '/img/' + n : '', ps, chosen));
     });
     if (cells.length) html += '<div class="rgrid">' + cells.join('') + '</div>';
+    var B = g.BriefBlocks;
+    if (B) html += B.render(r, { session: s, checked: U.checked, linked: d,
+      decision: function (id) { return findDecision(s, id); }, pick: function (x) { return pickOf(x, U); } });
     return html + '</section>';
   }
   function reportsPanel(s, U, now) {
@@ -598,7 +601,7 @@
     var u = obj(ui) || {};
     var now = toMs(obj(ctx) ? ctx.now : null);
     var U = { live: u.live === true, answers: obj(u.answers) || {}, expanded: obj(u.expanded) || {}, focus: obj(u.focus), wallNow: num(u.wallNow),
-      decision: ctx && typeof ctx.decision === 'function' ? ctx.decision : null };
+      decision: ctx && typeof ctx.decision === 'function' ? ctx.decision : null, checked: ctx && typeof ctx.checked === 'function' ? ctx.checked : null };
     var sid = str(s.id), sub = subOf(u, sid), panelId = 'cvp-' + safeId(sid);
     var counts = countsOf(s);
     var body = sub === 'plan' ? planPanel(s, U, now) : sub === 'wk' ? workersPanel(s, U) : sub === 'dec' ? decisionsPanel(s, U, now)

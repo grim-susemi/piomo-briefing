@@ -813,6 +813,9 @@ const moveProbeFor = (page, scope, moverId, { freeze = false } = {}) => pending(
 })`));
 const finishFrozen = (page) => page.eval('(() => { (window.__frozen || []).forEach((a) => a.finish()); window.__frozen = []; return true; })()');
 const workerRows = (scope) => `[...document.querySelectorAll(${J(`${scope} [data-worker]`)})].map((r) => r.getAttribute('data-worker'))`;
+// a schema-valid long compare row (a 35-character label, a 43-character value): published by 'blocks', measured on the phone
+// by 'blocks-mobile' (the label track stays bounded, the value keeps a readable width)
+const LONG_ROW = { label: '보안 검토와 운영 정책 및 유지 보수 계획의 요구사항 충족 여부', A: '기존 운영 절차를 유지하면서 보안 검토를 마치고 안전하게 배포할 수 있습니다.', B: '새 운영 절차를 작성해야 합니다.' };
 
 async function desktopRun() {
   const page = await launchTracked({ width: 1440, height: 900, extraArgs: [NO_AUTOPLAY_FLAG] }, 'desktop');
@@ -1240,6 +1243,129 @@ async function desktopRun() {
     assert.equal(`assets/${sha}.png`, src, 'the bytes hash to the asset name');
     return { unknown: { path: `/assets/${unknown}`, status: miss.status }, malformed: { path: '/assets/not-a-hash.png', status: bad.status }, referenced: { path: `/${src}`, status: hit.status, type: hit.headers['content-type'], nosniff: hit.headers['x-content-type-options'], bytes: hit.bytes.length } };
   });
+
+  // 보고서 블록 (todo 8): the six kinds drawn natively with hostile strings as text; a checklist tick kept in this browser only
+  // (localStorage, never sent) through a re-render and a reload; the compare's 이걸로 고르기 through the decision's own confirm row
+  await scenario('blocks', '보고서 블록: six kinds as native table/SVG/dl/ol with hostile strings as text; a checklist tick survives re-render and reload and is never sent; the compare picks B through the confirm row and writes answers/<id>.json', async () => {
+    const H = '<img src=x onerror="window.__blkXss=1"></svg>javascript:alert(1)';
+    const pub = await published(A, briefOf('상황판 점검', '보고서 블록', {
+      decisions: [{ question: '아이콘 세트를 무엇으로 할까요?', options: { A: { text: 'Lucide (ISC)', consequence: '약 11 KB' }, B: { text: 'Tabler (MIT)', consequence: '약 17 KB' } },
+        recommend: 'A', reason: '가장 작고 라이선스가 단순함', blocks: false }],
+      reports: [{ id: 'blocks-demo', title: '보고서 블록 예시', summary: H, decisionIndex: 0, blocks: [
+        { kind: 'compare', title: '아이콘 세트 비교', decisionIndex: 0, rows: [{ label: '30개 크기', A: '약 10.9 KB', B: '약 17.1 KB' }, { label: H.slice(0, 40), A: H, B: 'MIT' }, LONG_ROW] },
+        { kind: 'bars', title: '상황판 한 페이지의 무게', unit: 'KB', items: [{ label: '데이터(뷰 모델)', value: 467.7 }, { label: H.slice(0, 40), value: 0.1 + 0.2 }] },
+        { kind: 'table', title: H, columns: ['항목', '지금', '차이표 행'], rows: [['홈 위치', '네 번째 칸', 2], [H, '</svg>', 13]] },
+        { kind: 'kv', title: '정한 값', items: [{ key: '아이콘', value: 'Lucide (ISC)' }, { key: H.slice(0, 40), value: H }] },
+        { kind: 'flow', title: '진행 단계', steps: [{ label: '조사', state: 'done' }, { label: '</svg><b>', state: 'doing' }, { label: '검증' }] },
+        { kind: 'checklist', title: '시안에서 볼 것', items: [{ id: 'themes', text: '어둡게·밝게 둘 다 읽기 편하다' }, { id: 'hostile', text: H }] },
+      ] }],
+    }));
+    await waitApplied(page, pub.seq);
+    await showPage(page, 'lead-A', 'rep');
+    const blk = (n) => `#main [data-block="rep/blocks-demo/blk/${n}"]`;
+    const drawn = await page.eval(`(() => {
+      const r = document.querySelector('#main [data-block="rep/blocks-demo"]');
+      const qa = (n, s) => [...r.querySelectorAll('[data-block="rep/blocks-demo/blk/' + n + '"] ' + s)];
+      return {
+        figures: [...r.querySelectorAll('figure.rbk')].map((f) => [f.getAttribute('data-block'), [...f.classList].filter((c) => /^rbk/.test(c)).join(' ')]), // annotate.js adds ab, a new block flashes
+        recommended: qa(0, 'table.rbk-cmp th.opt.rec .k').map((k) => k.textContent),
+        bars: qa(1, 'li.bar-r').map((li) => [li.querySelectorAll('svg.bar-s rect.bar-v').length, li.querySelector('.bar-n').textContent]),
+        tableNumbers: qa(2, 'table.rbk-tbl td.num').map((td) => td.textContent),
+        kv: qa(3, 'dl.rbk-kvl > dt').length,
+        flowSvg: qa(4, '.flowbox svg text').map((t) => t.textContent), flowSteps: qa(4, 'ol.flow-steps > li').length,
+        checkKeys: qa(5, 'input[type=checkbox]').map((i) => i.getAttribute('data-check-key')),
+        xss: window.__blkXss === 1, imgs: r.querySelectorAll('img').length, scripts: r.querySelectorAll('script').length,
+        onAttributes: [...r.querySelectorAll('*')].filter((e) => [...e.attributes].some((a) => /^on/i.test(a.name))).length,
+        jsUrls: r.querySelectorAll('[href^="javascript:"], [src^="javascript:"]').length,
+        otherSvg: [...r.querySelectorAll('svg')].map((s) => s.getAttribute('class') || '').filter((c) => !/^(bar-s|flow flow-wide|ic\\b)/.test(c)),
+        hostileAsText: (r.textContent.match(/<img src=x onerror=/g) || []).length,
+        sideways: document.getElementById('main').scrollWidth - document.getElementById('main').clientWidth,
+      };
+    })()`);
+    assert.deepEqual(drawn.figures, ['compare', 'bars', 'table', 'kv', 'flow', 'checklist'].map((k, n) => [`rep/blocks-demo/blk/${n}`, `rbk rbk-${k}`]));
+    assert.deepEqual(drawn.recommended, ['A'], 'the linked decision recommends A');
+    assert.deepEqual(drawn.bars, [[1, '467.7 KB'], [1, '0.3 KB']]);
+    assert.deepEqual(drawn.tableNumbers, ['2', '13']);
+    assert.equal(drawn.kv, 2);
+    assert.deepEqual(drawn.flowSvg, ['조사', '</svg><b>', '검증'], 'a hostile step label is SVG text');
+    assert.equal(drawn.flowSteps, 3);
+    assert.deepEqual(drawn.checkKeys, ['themes', 'hostile'].map((id) => `omo-briefing.check.lead-A.blocks-demo.${id}`));
+    assert.deepEqual([drawn.xss, drawn.imgs, drawn.scripts, drawn.onAttributes, drawn.jsUrls, drawn.otherSvg], [false, 0, 0, 0, 0, []], J(drawn));
+    assert.ok(drawn.hostileAsText >= 8, `the hostile string shows as text: ${drawn.hostileAsText}`);
+    assert.ok(drawn.sideways <= 1, `no sideways scroll in #main: ${drawn.sideways}`);
+
+    // the tick: stored under its key, and no request carries it (tick, re-render, reload)
+    const key = 'omo-briefing.check.lead-A.blocks-demo.themes';
+    const box = `${blk(5)} input[data-check-key="${key}"]`;
+    const requests = [];
+    const onRequest = (p) => requests.push({ method: p.request.method, url: p.request.url, post: p.request.postData || '' });
+    page.client.listeners.set('Network.requestWillBeSent', [...(page.client.listeners.get('Network.requestWillBeSent') || []), onRequest]);
+    await page.client.send('Network.enable');
+    const tickState = `(() => { const i = document.querySelector(${J(box)}); return { checked: !!i && i.checked, stored: localStorage.getItem(${J(key)}), meta: document.querySelector(${J(blk(5) + ' .rbk-m')}).textContent }; })()`;
+    let ticked, reRendered, reloaded, tickWindow;
+    try {
+      await click(page, box);
+      ticked = await waitDom(page, `(() => { const s = ${tickState}; return s.checked && s.stored === '1' ? s : null; })()`, { label: 'the tick stored under its key' });
+      tickWindow = requests.map((r) => `${r.method} ${new URL(r.url).pathname}`);
+      await showPage(page, 'lead-A', 'ov'); // #main drawn anew without the report
+      await showPage(page, 'lead-A', 'rep');
+      reRendered = await page.eval(tickState);
+      await openBoard(page, url, 'desktop');
+      await showPage(page, 'lead-A', 'rep');
+      reloaded = await page.eval(tickState);
+    } finally {
+      page.client.listeners.set('Network.requestWillBeSent', (page.client.listeners.get('Network.requestWillBeSent') || []).filter((f) => f !== onRequest));
+      await page.client.send('Network.disable');
+    }
+    const carrying = requests.filter((r) => /omo-briefing\.check|themes/.test(`${r.url} ${r.post}`));
+    const expected = { checked: true, stored: '1', meta: '1/2 확인 · 이 브라우저에만\u00a0저장' };
+    assert.deepEqual([ticked, reRendered, reloaded], [expected, expected, expected]);
+    assert.deepEqual(tickWindow.filter((r) => !r.startsWith('GET ')), [], `the tick itself sends nothing: ${J(tickWindow)}`);
+    assert.deepEqual(carrying, [], 'no request carries the tick');
+
+    // the compare: the linked decision's options, 이걸로 고르기 B -> the decision's confirm row under the compare -> 보내기
+    const decisionId = await page.eval(`(() => { const s = BriefPage.state.model.sessions.find((x) => x.id === 'lead-A'); const r = s && (s.reports || []).find((x) => x.id === 'blocks-demo'); return r ? r.decisionId : null; })()`);
+    assert.ok(Number.isInteger(decisionId), `the report links its decision: ${decisionId}`);
+    assert.equal(await page.eval(`document.querySelector(${J(blk(0) + ' .rbk-m')}).textContent`), `#${decisionId} 결정과\u00a0연결`);
+    await click(page, `${blk(0)} table .cv-pick[data-dec="${decisionId}"][data-opt="B"]`);
+    const sendSel = `${blk(0)} [data-act="ans-send"][data-id="${decisionId}"][data-where="blk"]`;
+    const confirm = await waitDom(page, `(() => { const b = document.querySelector(${J(sendSel)}); const row = b && b.closest('.ans-confirm'); return row ? row.textContent : null; })()`, { label: 'the confirm row under the compare' });
+    assert.ok(confirm.includes('B를 보낼까요?'), `the confirm row asks for B: ${confirm}`);
+    await page.eval(`(document.querySelector(${J(blk(0))}).scrollIntoView({ block: 'center' }), true)`);
+    await frames(page);
+    await page.screenshot(path.join(OUT, 'desktop-blocks-pick.png'));
+    const answerFile = path.join(answersDir(), `${pad6(decisionId)}.json`);
+    assert.equal(existsSync(answerFile), false, 'no answer before 보내기');
+    const written = pending(until(answersDir(), () => (existsSync(answerFile) ? readJson(answerFile) : null), `answers/${pad6(decisionId)}.json`));
+    await click(page, sendSel);
+    const ans = await written;
+    assert.deepEqual([ans.id, ans.option, ans.fromSessionId], [decisionId, 'B', 'board']);
+    const chosen = await waitDom(page, `(() => { const f = document.querySelector(${J(blk(0))}); const c = f && f.querySelector('table th.opt.chosen .k'); const picks = f ? [...f.querySelectorAll('.cv-pick')] : [];
+      return c && picks.length === 4 && picks.every((b) => b.disabled) ? { chosen: c.textContent, picksDisabled: picks.length } : null; })()`, { label: 'B chosen in the compare, every pick disabled' });
+
+    // captures: dark and light at 1440x900 (top: compare, bars, table; bottom: kv, flow, checklist), with the mouse on the
+    // rail's empty strip (no hover outline) and the answer's 900 ms change glow over
+    await mouse(page, 'mouseMoved', 8, 760);
+    await waitDom(page, `!document.querySelector('#main .flash')`, { label: 'the change glow over' });
+    const motion = await page.eval(`matchMedia('(prefers-reduced-motion: reduce)').matches ? 'reduce' : 'no-preference'`);
+    const captures = ['desktop-blocks-pick.png'];
+    try {
+      for (const scheme of ['dark', 'light']) {
+        await page.client.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }, { name: 'prefers-reduced-motion', value: motion }] });
+        for (const [part, n] of [[1, 0], [2, 3]]) {
+          await page.eval(`(() => { document.querySelector(${J(blk(n))}).scrollIntoView({ block: 'start' }); document.getElementById('main').scrollBy(0, -110); return true; })()`);
+          await frames(page);
+          const name = `desktop-blocks-${scheme}-${part}.png`;
+          await page.screenshot(path.join(OUT, name));
+          captures.push(name);
+        }
+      }
+    } finally {
+      await emulateMotion(page, motion);
+    }
+    return { report: 'blocks-demo', drawn, tick: { key, ticked, reRendered, reloaded, tickWindow, requestsSeen: requests.length, requestsCarryingTick: carrying.length },
+      compare: { decisionId, confirmRow: confirm, answerFile: `answers/${pad6(decisionId)}.json`, answer: { id: ans.id, option: ans.option, fromSessionId: ans.fromSessionId }, chosen }, captures };
+  });
   return { page, url };
 }
 
@@ -1349,8 +1475,10 @@ const MOBILE_CAPTURES = [
   'mobile-d-before', 'mobile-d-mid', 'mobile-d-after',
   'mobile-e-before', 'mobile-e-mid', 'mobile-e-after',
   'mobile-g-before', 'mobile-g-disconnected', 'mobile-g-after',
+  'mobile-blocks-dark-1', 'mobile-blocks-dark-2', 'mobile-blocks-light-1', 'mobile-blocks-light-2',
 ].map((n) => `${n}.png`);
-const DESKTOP_CAPTURES = ['desktop-state.png', 'desktop-annotation-sent.png', 'desktop-report-pick.png', 'desktop-file-page.png'];
+const DESKTOP_CAPTURES = ['desktop-state.png', 'desktop-annotation-sent.png', 'desktop-report-pick.png', 'desktop-file-page.png',
+  'desktop-blocks-pick.png', 'desktop-blocks-dark-1.png', 'desktop-blocks-dark-2.png', 'desktop-blocks-light-1.png', 'desktop-blocks-light-2.png'];
 
 // Fresh workers of lead-B for d-mobile (lead-A's workers are already finished and its process is gone).
 const MOBILE_WORKERS = [
@@ -1762,6 +1890,75 @@ async function mobileRun() {
       captures: ['mobile-g-before.png', 'mobile-g-disconnected.png', 'mobile-g-after.png'],
     };
   });
+
+  // 보고서 블록 at 390x844 (the report of desktop 'blocks', its decision answered B there): tables as records, the flow as step
+  // nodes (no scaled SVG), the compare as one card per option; 44 px controls, no text under 12 px, no sideways scroll; a tick
+  // of this browser survives a reload
+  await scenario('blocks-mobile', '보고서 블록 at 390x844: records, step nodes (no SVG), one card per option, 44 px controls, >= 12 px text, no sideways scroll; a tick survives a reload', async () => {
+    await showPage(page, 'lead-A', 'rep');
+    const blk = (n) => `#main [data-block="rep/blocks-demo/blk/${n}"]`;
+    const m = await page.eval(`(() => {
+      const vis = (e) => !!e && e.checkVisibility();
+      const r = document.querySelector('#main [data-block="rep/blocks-demo"]');
+      const qa = (n, s) => [...r.querySelectorAll('[data-block="rep/blocks-demo/blk/' + n + '"] ' + s)];
+      const main = document.getElementById('main');
+      const sizes = [];
+      const w = document.createTreeWalker(r.querySelector('.rbks'), NodeFilter.SHOW_TEXT);
+      for (let t; (t = w.nextNode());) if (t.data.trim() && vis(t.parentElement)) sizes.push(parseFloat(getComputedStyle(t.parentElement).fontSize));
+      const targets = [...r.querySelectorAll('.rbks button, .rbks label')].filter(vis).map((e) => { const b = e.getBoundingClientRect(); return [e.tagName.toLowerCase() + '.' + e.className, Math.round(b.width), Math.round(b.height)]; });
+      return {
+        compareTable: qa(0, 'table.rbk-cmp').some(vis), cards: qa(0, '.cmpc').filter(vis).map((c) => [...c.classList].filter((x) => /^(cmpc|rec|chosen)$/.test(x)).join(' ')),
+        longRow: qa(0, '.cmpc').filter(vis).map((c) => { // its third row is LONG_ROW: rendered widths and the value's line boxes
+          const dt = c.querySelectorAll('dt')[2], dd = c.querySelectorAll('dd')[2], rg = document.createRange();
+          rg.selectNodeContents(dd);
+          return { label: dt.textContent.length, labelPx: Math.round(dt.getBoundingClientRect().width), valuePx: Math.round(dd.getBoundingClientRect().width),
+            lines: new Set([...rg.getClientRects()].filter((q) => q.width > 0).map((q) => Math.round(q.top))).size };
+        }),
+        tableHead: qa(2, 'thead').some(vis), recordLabels: qa(2, 'tbody td').filter(vis).map((td) => getComputedStyle(td, '::before').content),
+        flowSvg: qa(4, '.flowbox svg').some(vis), steps: qa(4, 'ol.flow-steps > li').filter(vis).map((li) => li.textContent),
+        minTextPx: Math.min(...sizes), texts: sizes.length, targets: targets.length, under44: targets.filter((t) => t[1] < 44 || t[2] < 44),
+        sideways: { doc: document.documentElement.scrollWidth - innerWidth, main: main.scrollWidth - main.clientWidth },
+      };
+    })()`);
+    assert.equal(m.compareTable, false, 'the compare table gives way to cards');
+    assert.deepEqual(m.cards, ['cmpc rec', 'cmpc chosen'], 'A recommended, B chosen on the desktop');
+    // a long row label must not take the card: every card's value track keeps >= 120 px and the 43 characters fit in <= 6 lines
+    assert.ok(m.longRow.length === 2 && m.longRow.every((r) => r.label === LONG_ROW.label.length && r.valuePx >= 120 && r.lines <= 6), `long compare row readable: ${J(m.longRow)}`);
+    assert.equal(m.tableHead, false);
+    assert.deepEqual(m.recordLabels.slice(0, 3), ['"항목"', '"지금"', '"차이표 행"'], 'each cell carries its column name');
+    assert.equal(m.flowSvg, false, 'no SVG flow below 600 px');
+    assert.deepEqual(m.steps, ['1조사끝', '2</svg><b>진행 중', '3검증']);
+    assert.ok(m.minTextPx >= 12, `no text under 12 px: ${m.minTextPx}`);
+    assert.ok(m.targets > 0 && m.under44.length === 0, `every block control is a 44 px target: ${J(m.under44)}`);
+    assert.ok(m.sideways.doc <= 1 && m.sideways.main <= 1, `no sideways scroll: ${J(m.sideways)}`);
+    // a tap on the item's row ticks it; this browser's own localStorage keeps it through a reload
+    const key = 'omo-briefing.check.lead-A.blocks-demo.hostile';
+    const box = `${blk(5)} input[data-check-key="${key}"]`;
+    await click(page, `${blk(5)} label:has(> input[data-check-key="${key}"])`);
+    await waitDom(page, `localStorage.getItem(${J(key)}) === '1' && document.querySelector(${J(box)}).checked`, { label: 'the tick stored on the phone' });
+    await openBoard(page, serverUrl(), 'mobile');
+    await showPage(page, 'lead-A', 'rep');
+    const reloaded = await page.eval(`(() => { const i = document.querySelector(${J(box)}); return { checked: !!i && i.checked, meta: document.querySelector(${J(blk(5) + ' .rbk-m')}).textContent }; })()`);
+    assert.deepEqual(reloaded, { checked: true, meta: '1/2 확인 · 이 브라우저에만\u00a0저장' });
+    // captures: dark and light (top: the compare cards; then the flow's step nodes and the checklist), no hover outline
+    await mouse(page, 'mouseMoved', 8, 700);
+    await waitDom(page, `!document.querySelector('#main .flash')`, { label: 'no change glow' });
+    const motion = await page.eval(`matchMedia('(prefers-reduced-motion: reduce)').matches ? 'reduce' : 'no-preference'`);
+    const captures = [];
+    try {
+      for (const scheme of ['dark', 'light']) {
+        await page.client.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }, { name: 'prefers-reduced-motion', value: motion }] });
+        for (const [part, n] of [[1, 0], [2, 4]]) {
+          await page.eval(`(() => { document.querySelector(${J(blk(n))}).scrollIntoView({ block: 'start' }); document.getElementById('main').scrollBy(0, -110); return true; })()`);
+          await frames(page);
+          captures.push(await shot(page, `mobile-blocks-${scheme}-${part}.png`));
+        }
+      }
+    } finally {
+      await emulateMotion(page, motion);
+    }
+    return { ...m, tick: { key, reloaded }, captures };
+  });
   return page;
 }
 
@@ -1913,8 +2110,8 @@ try {
 }
 
 const cleanupResult = await cleanup();
-const scenarioIds = ['a', 'b', 'c', 'd', 'e', 'f', 'annotation-delivered', 'pick-writes-answer', 'legacy-501-bad-text', 'forged-origin-403', 'unknown-asset-404', 'i', 'g', 'h', 'file-no-send', 'j', 'k'];
-const extra = ['m-fit', 'f-mobile', 'plan-fold-mobile', 'c-mobile', 'd-mobile', 'e-blocked', 'e-mobile', 'g-mobile'];
+const scenarioIds = ['a', 'b', 'c', 'd', 'e', 'f', 'annotation-delivered', 'pick-writes-answer', 'legacy-501-bad-text', 'forged-origin-403', 'unknown-asset-404', 'blocks', 'i', 'g', 'h', 'file-no-send', 'j', 'k'];
+const extra = ['m-fit', 'f-mobile', 'plan-fold-mobile', 'c-mobile', 'd-mobile', 'e-blocked', 'e-mobile', 'g-mobile', 'blocks-mobile'];
 const allPass = !fatal
   && scenarioIds.every((id) => results[id] && results[id].pass)
   && extra.every((id) => results[id] && results[id].pass)

@@ -68,7 +68,7 @@
     if (p[0] === 'head') return '머리말'; if (p[0] === 'now') return '지금·다음'; if (p[0] === 'flow') return '흐름';
     if (p[0] === 'card') return '요약 카드'; if (p[0] === 'change') return '최근 변화'; if (p[0] === 'done') return '한 일';
     if (p[0] === 'dec') return '결정 카드'; if (p[0] === 'plan') return p[1] === 'todo' ? '할 일 표' : own(PLAN_KIND, p[2]) || '계획';
-    if (p[0] === 'wk') return '작업자'; if (p[0] === 'rep') return p[2] === 'img' ? '보고서 그림' : '보고서';
+    if (p[0] === 'wk') return '작업자'; if (p[0] === 'rep') return p[2] === 'img' ? '보고서 그림' : p[2] === 'blk' ? '보고서 블록' : '보고서';
     if (p[0] === 'note') return '보낸 피드백'; if (p[0] === 'att') return '자료'; return '블록';
   }
   function normNote(n) {

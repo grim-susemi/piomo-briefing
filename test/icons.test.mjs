@@ -14,7 +14,7 @@ const ICON_DIR = 'assets/icons/lucide';
 const FIXTURE = JSON.parse(read('test/fixtures/view-model-board.json'));
 const EP = /\p{Extended_Pictographic}/u;
 // = render.mjs PAGE_JS without page.js (it starts the page on DOMContentLoaded)
-const MODULES = ['icons', 'view', 'plan-view', 'workers-view', 'convo-view', 'shell', 'alarm', 'annotate'];
+const MODULES = ['icons', 'view', 'plan-view', 'workers-view', 'blocks', 'convo-view', 'shell', 'alarm', 'annotate'];
 const TEMPLATES = MODULES.filter((m) => m !== 'icons').concat('page');
 
 const PAGE = pageHtml(FIXTURE, 7, { mode: 'file' });
@@ -143,10 +143,11 @@ test('no pictographic emoji left in the rail, the sidebar or the tab bar, in tex
 });
 
 // Baseline: Buffer.byteLength(pageHtml(test/fixtures/view-model-board.json, 7, { mode: 'file' })) rendered from the accepted
-// tree b4414fb4817ab55edd201f6d578d55024d7bb2e0 (independently re-measured via checkout-index into a temp copy, 2026-10-18).
-// Todo 4 scope exception: re-point the accepted starting page, keeping the 16384 B budget unchanged.
-const BASELINE_TREE = 'b4414fb4817ab55edd201f6d578d55024d7bb2e0';
-const BASELINE_PAGE_BYTES = 367296;
+// tree 964b028d696f0e43ab84febee3b2bd0f942e9f3d (independently re-measured via read-tree + checkout-index into a temp copy,
+// LF, 2026-10-18). Todo 8 scope exception (report blocks grow the page on purpose): re-point the accepted starting page,
+// keeping the 16384 B budget unchanged.
+const BASELINE_TREE = '964b028d696f0e43ab84febee3b2bd0f942e9f3d';
+const BASELINE_PAGE_BYTES = 366940;
 
 test('fixture page growth over the accepted tree stays within 16 KB (whole page; icon payload printed too)', (t) => {
   const notice = /<!--\nIcons: Lucide[\s\S]*?-->\n/.exec(PAGE)[0];

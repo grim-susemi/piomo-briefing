@@ -14,12 +14,12 @@ const NOW = FIXTURE.generatedAt; // injected clock: the model's own generatedAt
 const WALL = NOW + 30000; // wall clock for the worker rows; nothing here reads the real one
 const [A, B, C] = FIXTURE.sessions;
 const SUB_KEYS = ['ov', 'plan', 'wk', 'dec', 'rep'];
-const MODULES = ['src/page/icons.js', 'src/page/view.js', 'src/page/plan-view.js', 'src/page/workers-view.js', 'src/page/convo-view.js'];
+const MODULES = ['src/page/icons.js', 'src/page/view.js', 'src/page/plan-view.js', 'src/page/workers-view.js', 'src/page/blocks.js', 'src/page/convo-view.js'];
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const pad = (n) => String(n).padStart(2, '0');
 const hhmm = (ms) => { const d = new Date(ms); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
 // C-BLOCK grammar of data-block values (plan elements are plan-view data-anchors, never data-block)
-const BLOCK = /^(?:head|now|flow|card\/(?:plan|wk|dec|rep)|change\/\d+\/\d+|done\/\d+\/\d+|dec\/[1-9]\d*|plan\/todo\/\d+|wk\/[A-Za-z0-9_-]+|rep\/[a-z0-9][a-z0-9_-]{0,63}(?:\/img\/\d+)?|note\/[^/\s]+|att\/\d+)$/;
+const BLOCK = /^(?:head|now|flow|card\/(?:plan|wk|dec|rep)|change\/\d+\/\d+|done\/\d+\/\d+|dec\/[1-9]\d*|plan\/todo\/\d+|wk\/[A-Za-z0-9_-]+|rep\/[a-z0-9][a-z0-9_-]{0,63}(?:\/img\/\d+|\/blk\/\d+)?|note\/[^/\s]+|att\/\d+)$/;
 const ASSET = /^assets\/[0-9a-f]{64}\.(?:png|jpg|webp)$/;
 const HOSTILE = '<img src=x onerror="alert(1)">\'`&</textarea><script>alert(2)</script>';
 

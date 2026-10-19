@@ -125,6 +125,7 @@
     badge.addEventListener('click', guard('badge', apply));
     root.addEventListener('click', guard('click', onClick));
     root.addEventListener('input', guard('input', onInput));
+    root.addEventListener('change', guard('checklist', onCheck));
     root.addEventListener('toggle', guard('details toggle', function (ev) {
       var t = ev.target, k = t && t.getAttribute && t.getAttribute('data-open-key');
       if (k) state.ui.expanded[k] = t.open === true;
@@ -152,9 +153,23 @@
     var a = doc.activeElement;
     if (a && main.contains(a)) {
       var tag = String(a.tagName || '').toLowerCase();
-      if (tag === 'input' || tag === 'textarea' || a.isContentEditable) return true;
+      // a checklist box is no typing
+      if ((tag === 'input' && a.getAttribute('type') !== 'checkbox') || tag === 'textarea' || a.isContentEditable) return true;
     }
     return false;
+  }
+
+  // checklist ticks (blocks.js): this browser only, never sent
+  var tickFails = 0;
+  function tick(fn) { try { return fn(g.localStorage); } catch (e) { if (!tickFails++) warn('checklist tick', e); } }
+  function isChecked(key) { return tick(function (s) { return s.getItem(key) === '1'; }) === true; }
+  function onCheck(ev) {
+    var t = ev.target, key = t.getAttribute('data-check-key'), list = t.closest('.rbk-chk'), n = 0;
+    if (!key || !list) return;
+    tick(function (s) { if (t.checked) s.setItem(key, '1'); else s.removeItem(key); });
+    var boxes = list.querySelectorAll('input');
+    for (var i = 0; i < boxes.length; i++) n += boxes[i].checked ? 1 : 0;
+    list.parentNode.querySelector('.rbk-m').textContent = g.BriefBlocks.checkCount(n, boxes.length);
   }
 
   function scheduleRelease() {
@@ -316,7 +331,7 @@
       region('side', sideList, g.BriefShell.side(model, state.ui));
       region('tabs', tabs, g.BriefShell.tabs(model, state.ui));
       var s = currentSession();
-      var html = s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision })
+      var html = s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision, checked: isChecked })
         : state.ui.active ? '<p class="empty">(지금 안 보임)</p>' : g.BriefView.renderOverview(model, state.ui);
       if (region('main', main, html)) {
         g.BriefAnnotate.decorate();
