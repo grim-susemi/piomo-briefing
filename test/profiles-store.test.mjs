@@ -45,6 +45,26 @@ function makeFixture(t, options = {}) {
     JSON.stringify({ key: 'gpt-kimi-deepseek', profile: 'native-gpt-kimi-deepseek', appliedAt: 'seed' }, null, 2));
   fs.writeFileSync(path.join(primary, 'agent', 'models.json'), JSON.stringify({ models: {} }, null, 2));
   fs.writeFileSync(path.join(primary, 'auth.json'), '{"token":"SECRET-DO-NOT-TOUCH"}');
+  if (options.mainOverride !== undefined) {
+    fs.mkdirSync(path.join(primary, 'runtime'), { recursive: true });
+    fs.writeFileSync(path.join(primary, 'runtime', 'native-profile-switcher-main.json'),
+      JSON.stringify(options.mainOverride, null, 2));
+  }
+  const mirrorHomes = [...(options.mirrorHomes ?? [])];
+  const mirrors = {};
+  for (const name of options.mirrors ?? []) {
+    const home = path.join(root, name, 'home', '.omo');
+    fs.mkdirSync(path.join(home, 'agent'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'omo.jsonc'), formatJsonText(omo, style));
+    fs.writeFileSync(path.join(home, 'agent', 'settings.json'), formatJsonText(settings, style));
+    if (options.mirrorMain !== undefined) {
+      fs.mkdirSync(path.join(home, 'runtime'), { recursive: true });
+      fs.writeFileSync(path.join(home, 'runtime', 'native-profile-switcher-main.json'),
+        JSON.stringify(options.mirrorMain, null, 2));
+    }
+    mirrorHomes.push(home);
+    mirrors[name] = home;
+  }
   fs.writeFileSync(path.join(stable, 'omo.jsonc'), formatJsonText(stableOmo, style));
   fs.writeFileSync(path.join(stable, 'agent', 'settings.json'), '{"packages":["stable-package"],"defaultProvider":"stable"}');
 
@@ -57,13 +77,13 @@ function makeFixture(t, options = {}) {
   const store = openProfilesStore({
     primaryHome: primary,
     stableHome: stable,
-    mirrorHomes: options.mirrorHomes ?? [],
+    mirrorHomes,
     pluginPath: plugin,
     inventory,
     hooks: options.hooks,
     now: options.now ?? (() => Date.parse('2026-10-20T12:00:00Z')),
   });
-  return { root, primary, stable, store, settings, style, plugin };
+  return { root, primary, stable, store, settings, style, plugin, mirrors, mirrorHomes };
 }
 
 function expectedOf(store) {
@@ -124,6 +144,89 @@ test('a stale expected hash is a 409 and leaves every file byte-identical', (t) 
   assert.equal(result.status, 409);
   assert.deepEqual(fx.store.state().targets, before);
   assert.equal(fx.store.journal(), null);
+});
+
+test('a stale expected hash for an untouched target is a 409 for setMain too', (t) => {
+  const fx = makeFixture(t);
+  const before = Object.fromEntries(fx.store.targetIds().map((id) => [id, fx.store.state().targets[id]]));
+  const authHash = hashFile(path.join(fx.primary, 'auth.json'));
+  const expected = expectedOf(fx.store);
+  expected['omo.jsonc'] = '0'.repeat(64);
+  const result = fx.store.apply(body('apply', [{ kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' }], fx.store, expected));
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'STALE');
+  assert.equal(result.status, 409);
+  assert.deepEqual(fx.store.state().targets, before);
+  assert.equal(hashFile(path.join(fx.primary, 'auth.json')), authHash);
+  assert.equal(fx.store.journal(), null);
+});
+
+test('setMain refuses a stale expected hash for an untouched lane mirror target', (t) => {
+  const fx = makeFixture(t, { mirrors: ['mirror1'] });
+  const settings = path.join(fx.primary, 'agent', 'settings.json');
+  const settingsBefore = fs.readFileSync(settings);
+  const mirrorOmo = path.join(fx.mirrors.mirror1, 'omo.jsonc');
+  const mirrorOmoBefore = fs.readFileSync(mirrorOmo);
+  const expected = expectedOf(fx.store);
+  expected['mirror/mirror1/omo.jsonc'] = '0'.repeat(64);
+  const result = fx.store.apply(body('apply', [{ kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' }], fx.store, expected));
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'STALE');
+  assert.equal(result.status, 409);
+  assert.deepEqual(fs.readFileSync(settings), settingsBefore);
+  assert.deepEqual(fs.readFileSync(mirrorOmo), mirrorOmoBefore);
+  assert.equal(fs.existsSync(path.join(fx.primary, 'runtime', 'native-profile-switcher-main.json')), false);
+  assert.equal(fs.existsSync(path.join(fx.mirrors.mirror1, 'runtime', 'native-profile-switcher-main.json')), false);
+  assert.equal(fx.store.journal(), null);
+});
+
+test('setMain mirrors the main sidecar identically to every lane', (t) => {
+  const seedMain = {
+    'native-gpt-kimi-deepseek': { provider: 'legacy', model: 'legacy-model', thinking: 'low' },
+    'native-experimental-custom': { provider: 'x', model: 'y', thinking: 'medium' },
+  };
+  const fx = makeFixture(t, { mirrors: ['mirror1', 'mirror2'], mainOverride: seedMain, mirrorMain: seedMain });
+  const result = fx.store.apply(body('apply', [{ kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' }], fx.store));
+  assert.equal(result.ok, true);
+  const expectedMain = {
+    ...seedMain,
+    'native-gpt-kimi-deepseek': { provider: 'openai', model: 'gpt-6-sol', thinking: 'high' },
+  };
+  const primaryMain = path.join(fx.primary, 'runtime', 'native-profile-switcher-main.json');
+  const primaryBytes = fs.readFileSync(primaryMain);
+  assert.deepEqual(readJsonFile(primaryMain), expectedMain);
+  for (const [name, home] of Object.entries(fx.mirrors)) {
+    const mirrorMain = path.join(home, 'runtime', 'native-profile-switcher-main.json');
+    assert.ok(fs.existsSync(mirrorMain), `${name} main sidecar missing`);
+    assert.deepEqual(readJsonFile(mirrorMain), expectedMain);
+    assert.deepEqual(fs.readFileSync(mirrorMain), primaryBytes, `${name} main sidecar differs from the primary`);
+    assert.ok(result.writes.includes(`mirror/${name}/runtime/native-profile-switcher-main.json`));
+  }
+});
+
+test('a rollback restores the lane main sidecars too', (t) => {
+  const seedMain = {
+    'native-gpt-kimi-deepseek': { provider: 'legacy', model: 'legacy-model', thinking: 'low' },
+  };
+  const fx = makeFixture(t, {
+    mirrors: ['mirror1', 'mirror2'], mainOverride: seedMain, mirrorMain: seedMain,
+    hooks: { reparse() { throw Object.assign(new Error('injected re-parse failure'), { code: 'INJECTED' }); } },
+  });
+  const primaryMain = path.join(fx.primary, 'runtime', 'native-profile-switcher-main.json');
+  const primaryBefore = fs.readFileSync(primaryMain);
+  const mirror1Main = path.join(fx.mirrors.mirror1, 'runtime', 'native-profile-switcher-main.json');
+  const mirror1Before = fs.readFileSync(mirror1Main);
+  // mirror2 starts without a sidecar: rollback must remove the file the apply created.
+  const mirror2Main = path.join(fx.mirrors.mirror2, 'runtime', 'native-profile-switcher-main.json');
+  fs.rmSync(mirror2Main);
+  const result = fx.store.apply(body('apply', [{ kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' }], fx.store));
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'ROLLED_BACK');
+  assert.equal(result.status, 500);
+  assert.deepEqual(fs.readFileSync(primaryMain), primaryBefore);
+  assert.deepEqual(fs.readFileSync(mirror1Main), mirror1Before);
+  assert.equal(fs.existsSync(mirror2Main), false);
+  assert.equal(fx.store.journal().status, 'rolled-back');
 });
 
 test('the 5.1.38 key allowlist rejects an unknown root key without writing', (t) => {

@@ -7,7 +7,7 @@
 // Write pipeline (preview performs only the first four steps):
 //   parse body -> read targets -> apply the change kinds to parsed values ->
 //   validate (todo-7 merge layer + 5.1.38 key allowlist + protected settings) ->
-//   compare-and-swap every changed target's sha256 against `expected` -> back up the
+//   compare-and-swap every read target's sha256 against `expected` -> back up the
 //   bytes under <primaryHome>/runtime/native-profile-switcher-backups -> atomic text
 //   write (same-directory wx tmp -> fsync -> rename with the contract's retry ladder)
 //   -> re-parse and re-validate -> on any failure restore the backups and report
@@ -703,14 +703,18 @@ export function openProfilesStore(options = {}) {
         const thinking = typeof change.thinking === 'string' && change.thinking.trim()
           ? change.thinking : profile.mainThinking;
         if (!THINKING.includes(thinking)) return refusal('BAD_REQUEST', `unknown thinking level ${thinking}`);
+        const main = { provider: change.provider, model: change.model, thinking };
         sidecar.value = setMainLayerOverride({
           state: sidecar.value,
           profileKey: profile.omoProfile,
-          main: { provider: change.provider, model: change.model, thinking },
+          main,
         });
         settings.value.defaultProvider = change.provider;
         settings.value.defaultModel = change.model;
-        context.main = { provider: change.provider, model: change.model, thinking };
+        context.main = main;
+        // The switcher's Set-MainLayerOverride writes the same override into every
+        // lane's runtime sidecar after the primary write (PS :2296-2338).
+        context.mainOverrides.push({ profileKey: profile.omoProfile, main: clone(main) });
         break;
       }
       case 'setModelProfile': {
@@ -896,7 +900,7 @@ export function openProfilesStore(options = {}) {
       files, config, settings, sidecar, selections, warnings: [],
       roster: { value: clone(rosterRead.roster), touched: false, warning: rosterRead.warning },
       configTouched: false, configReplaced: false, nextConfig: null,
-      selectedProfile: null, main: null,
+      selectedProfile: null, main: null, mainOverrides: [],
     };
     for (const change of body.changes) {
       const result = applyChange(context, change);
@@ -919,24 +923,19 @@ export function openProfilesStore(options = {}) {
 
     // Build the intended target values.
     const next = new Map();
-    const touched = new Set();
     const configChanged = context.configTouched || !deepEqual(savedConfig, saveConfig(readConfig(configFile.value)));
     if (configChanged) {
       next.set('omo.jsonc', { value: savedConfig, kind: 'jsonc' });
-      touched.add('omo.jsonc');
     }
     if (!deepEqual(settingsFile.value, settings.value)) {
       next.set('agent/settings.json', { value: settings.value, kind: 'json' });
-      touched.add('agent/settings.json');
     }
     if (!deepEqual(sidecarFile?.value ?? {}, sidecar.value)) {
       next.set('runtime/native-profile-switcher-main.json', { value: sidecar.value, kind: 'json' });
-      touched.add('runtime/native-profile-switcher-main.json');
     }
     for (const [id, value] of selections) {
       if (!deepEqual(files.get(id)?.value, value)) {
         next.set(id, { value, kind: 'json' });
-        touched.add(id);
       }
     }
     // Stable-500 role models and aliases only.
@@ -956,7 +955,6 @@ export function openProfilesStore(options = {}) {
         });
         if (synced.changed) {
           next.set('stable/omo.jsonc', { value: synced.config, kind: 'jsonc' });
-          touched.add('stable/omo.jsonc');
         }
       } catch (error) {
         return refusal('STABLE_REFUSED', error.message);
@@ -975,10 +973,17 @@ export function openProfilesStore(options = {}) {
     for (const [label, parts] of mirrorParts) {
       const configPart = parts.get('omo.jsonc');
       const settingsPart = parts.get('agent/settings.json');
+      const mainPart = parts.get('runtime/native-profile-switcher-main.json');
       if (!configPart?.file.exists) continue;
       const mirrorConfig = readConfig(configPart.file.value);
       let mirrorSettings = settingsPart?.file.exists && isPlainObject(settingsPart.file.value)
         ? clone(settingsPart.file.value) : null;
+      let mirrorMain = mainPart?.file.exists ? clone(mainPart.file.value) : {};
+      for (const override of context.mainOverrides) {
+        mirrorMain = setMainLayerOverride({
+          state: mirrorMain, profileKey: override.profileKey, main: override.main,
+        });
+      }
       let configTouched = false;
       let settingsTouched = false;
       let profileSelection = null;
@@ -1024,7 +1029,6 @@ export function openProfilesStore(options = {}) {
           warn(`allowlist: ${mirrorAllow.errors[0]}`);
         } else if (!deepEqual(saved, configPart.file.value)) {
           next.set(configPart.id, { value: saved, kind: 'jsonc' });
-          touched.add(configPart.id);
         }
       }
       if (settingsTouched && mirrorSettings) {
@@ -1033,7 +1037,12 @@ export function openProfilesStore(options = {}) {
           warn(`protected settings: ${mirrorCheck.errors[0]}`);
         } else if (!deepEqual(settingsPart.file.value, mirrorSettings)) {
           next.set(settingsPart.id, { value: mirrorSettings, kind: 'json' });
-          touched.add(settingsPart.id);
+        }
+      }
+      if (context.mainOverrides.length > 0 && mainPart) {
+        const beforeMain = mainPart.file.exists ? mainPart.file.value : {};
+        if (!mainPart.file.exists || !deepEqual(beforeMain, mirrorMain)) {
+          next.set(mainPart.id, { value: mirrorMain, kind: 'json' });
         }
       }
       if (profileSelection) {
@@ -1042,7 +1051,6 @@ export function openProfilesStore(options = {}) {
           if (!part) continue;
           if (!deepEqual(part.file.value, profileSelection)) {
             next.set(part.id, { value: profileSelection, kind: 'json' });
-            touched.add(part.id);
           }
         }
       }
@@ -1052,18 +1060,22 @@ export function openProfilesStore(options = {}) {
         return refusal('STALE', `roster revision ${body.rosterRevision} but current is ${rosterRead.roster.revision}`);
       }
       next.set('agent/primary-agents/roster.json', { value: context.roster.value, kind: 'roster' });
-      touched.add('agent/primary-agents/roster.json');
     }
 
-    // Compare-and-swap every changed target against the page's expected hashes.
-    for (const id of touched) {
+    // Compare-and-swap every target this pipeline read against the page's expected
+    // hashes, not only the ones the request would change: the page sends
+    // state.targets (null for an absent file), so a concurrent write to an
+    // untouched primary file or lane mirror is refused before any write.
+    for (const [id, expectedHash] of Object.entries(body.expected)) {
+      const file = files.get(id);
+      const currentHash = file?.exists ? sha256(file.bytes) : null;
+      if (expectedHash !== currentHash) {
+        return refusal('STALE', `${id} changed elsewhere`, { file: id, current: currentHash });
+      }
+    }
+    for (const id of files.keys()) {
       if (!Object.hasOwn(body.expected, id)) {
         return refusal('BAD_REQUEST', `expected.${id} is required`);
-      }
-      const current = files.get(id);
-      const currentHash = current?.exists ? sha256(current.bytes) : null;
-      if (body.expected[id] !== currentHash) {
-        return refusal('STALE', `${id} changed elsewhere`, { file: id, current: currentHash });
       }
     }
 
