@@ -630,6 +630,21 @@ export function summarizerWarnings(modelId, provider) {
   return warnings;
 }
 
+// WinForms Get-CommandCodeWarning (:2135-2185): a cmd-* alias is a preflight
+// warning when the profile has no CommandCode subscription assignment. A
+// missing registry/assignments member counts as unassigned; nothing throws.
+export function commandCodeWarning({ catalog, alias, registry, profileKey } = {}) {
+  const entry = isPlainObject(catalog) && isPlainObject(catalog[alias]) ? catalog[alias] : null;
+  const modelId = typeof entry?.model === 'string' ? entry.model : '';
+  const provider = modelId.split('/')[0];
+  if (provider !== 'commandcode' && provider !== 'commandcode-anthropic') return null;
+  const assignments = isPlainObject(registry?.profileAssignments) ? registry.profileAssignments : null;
+  const assigned = assignments && typeof assignments[profileKey] === 'string'
+    ? assignments[profileKey].trim() : '';
+  if (assigned) return null;
+  return '커맨드코드 모델이지만 구독이 배정되지 않았습니다 (기본 키로 동작)';
+}
+
 // ── lane mirrors (:2061-2094) ──────────────────────────────────────────────────
 // Pure: the caller resolves existence (no stat here). Fail-closed: a missing root is a
 // warning, never a directory creation.

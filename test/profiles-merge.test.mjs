@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 import { runScenario } from '../src/profiles/parity.mjs';
 import {
-  assertCatalogAlias, assertMemoryProfilePreservation, ensureOllamaCloudProviderText,
+  assertCatalogAlias, assertMemoryProfilePreservation, commandCodeWarning, ensureOllamaCloudProviderText,
   getModelProfileSettings, getOrCreateCatalogAlias, laneMirrorPlan, memoryFingerprint, migrateReviewerKeys,
   mergeModelProfileSettings, mergeProfileLayerIntoActiveScopes, readCompactionSummarizer,
   readMainOverride, removeNullModelProfile, resolveCatalogRouteAlias, resolveMainDefaults,
@@ -373,6 +373,23 @@ test('summarizer rules, legacy removal and warnings', () => {
   assert.equal(setCompactionSummarizer({ settings: {}, modelId: 'commandcode/muse-spark-1.3' }).warnings.length, 2);
   assert.match(setCompactionSummarizer({ settings: {}, modelId: 'commandcode/muse-spark-1.3' }).warnings[0].text, /Muse Spark/);
   assert.throws(() => setCompactionSummarizer({ settings: {}, modelId: 'bad' }), /요약 모델 ID가 올바르지 않습니다/);
+});
+
+test('CommandCode routing preflight warns only when the profile has no assignment', () => {
+  const catalog = {
+    'cmd-glm': { model: 'commandcode/z-ai/glm-5.3-flash' },
+    'cmd-claude': { model: 'commandcode-anthropic/claude-opus-5' },
+    plain: { model: 'openai/gpt-6-sol' },
+  };
+  const warning = '커맨드코드 모델이지만 구독이 배정되지 않았습니다 (기본 키로 동작)';
+  assert.equal(commandCodeWarning({ catalog, alias: 'cmd-glm', registry: null, profileKey: 'native-cmd-glm-deepseek' }), warning);
+  assert.equal(commandCodeWarning({ catalog, alias: 'cmd-claude', registry: { profileAssignments: {} }, profileKey: 'p' }), warning);
+  assert.equal(commandCodeWarning({
+    catalog, alias: 'cmd-glm', registry: { profileAssignments: { 'native-cmd-glm-deepseek': ' sub-1 ' } },
+    profileKey: 'native-cmd-glm-deepseek',
+  }), null);
+  assert.equal(commandCodeWarning({ catalog, alias: 'plain', registry: { profileAssignments: {} }, profileKey: 'p' }), null);
+  assert.equal(commandCodeWarning({}), null);
 });
 
 test('lane mirror plan is fail-closed for a missing root', () => {

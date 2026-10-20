@@ -28,7 +28,7 @@ import { validateRoster } from './contract/schema.mjs';
 import { readRoster } from './contract/schema.mjs';
 import { AGENT_IDS, LANES, THINKING } from './contract/constants.mjs';
 import {
-  clone, deepEqual, getEffectiveMemoryCatalog, getMemorySelectionFromConfig,
+  clone, commandCodeWarning, deepEqual, getEffectiveMemoryCatalog, getMemorySelectionFromConfig,
   getModelProfileSettings, getOrCreateCatalogAlias, getReflectionMemorySelectionFromConfig,
   isPlainObject, memoryFingerprint, mergeProfileLayerIntoActiveScopes, migrateReviewerKeys,
   readConfig, readCompactionSummarizer, readMainOverride, removeNullModelProfile,
@@ -244,6 +244,7 @@ function targetSpecs(roots, fs) {
       { id: `${prefix}/runtime/native-profile-switcher-main.json`, root: 'mirror', rel: `${label}/runtime/native-profile-switcher-main.json`, kind: 'json', backup: `${label}-main`, optional: true, mirrorRoot: root },
       { id: `${prefix}/native-profile-selection.json`, root: 'mirror', rel: `${label}/native-profile-selection.json`, kind: 'json', backup: `${label}-selection`, optional: true, mirrorRoot: root },
       { id: `${prefix}/agent/native-profile-selection.json`, root: 'mirror', rel: `${label}/agent/native-profile-selection.json`, kind: 'json', backup: `${label}-agent-selection`, optional: true, mirrorRoot: root },
+      { id: `${prefix}/commandcode-subscriptions.json`, root: 'mirror', rel: `${label}/commandcode-subscriptions.json`, kind: 'json', backup: `${label}-subscriptions`, optional: true, mirrorRoot: root },
     );
   }
   return specs;
@@ -633,6 +634,29 @@ export function openProfilesStore(options = {}) {
       ensureCatalogAlias: change.alias === undefined,
       ensureModelId: change.model, ensureVariant: change.thinking,
     });
+    return { profileKey, alias };
+  }
+
+  // Read-only companion of the WinForms -SubscriptionsPath preflight. Missing or
+  // malformed means "no assignment" for the warning, never a refused write.
+  function readSubscriptions() {
+    try {
+      const text = fs.readFileSync(join(roots.primaryHome, 'commandcode-subscriptions.json'), 'utf8');
+      const value = JSON.parse(String(text).replace(/^\uFEFF/, ''));
+      return isPlainObject(value) ? value : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function primarySubscriptions() {
+    try {
+      const text = fs.readFileSync(join(roots.primaryHome, 'commandcode-subscriptions.json'), 'utf8');
+      const value = JSON.parse(String(text).replace(/^\uFEFF/, ''));
+      return isPlainObject(value) ? value : null;
+    } catch {
+      return null;
+    }
   }
 
   function modelProfileChange(config, change, fallbackProfile) {
@@ -683,11 +707,17 @@ export function openProfilesStore(options = {}) {
       }
       case 'setRoute': {
         if (!config) return refusal('MISSING_CONFIG', 'omo.jsonc is missing');
+        let route;
         try {
-          routeChange(config, change, context.selectedProfile ?? activeProfile(context.files));
+          route = routeChange(config, change, context.selectedProfile ?? activeProfile(context.files));
         } catch (error) {
           return refusal('BAD_REQUEST', error.message);
         }
+        const catalog = (config['[senpi]'] ?? config['[native]'])?.models;
+        const preflight = commandCodeWarning({
+          catalog, alias: route.alias, registry: readSubscriptions(), profileKey: route.profileKey,
+        });
+        if (preflight && !warnings.includes(preflight)) warnings.push(preflight);
         context.configTouched = true;
         break;
       }
@@ -929,6 +959,18 @@ export function openProfilesStore(options = {}) {
     }
     if (!deepEqual(settingsFile.value, settings.value)) {
       next.set('agent/settings.json', { value: settings.value, kind: 'json' });
+    }
+    // WinForms lane mirror (:3755-3757): when the primary registry exists, every
+    // lane receives a copy, with the lane's own pre-write backup.
+    const subscriptions = primarySubscriptions();
+    if (subscriptions !== null) {
+      for (const [id, file] of files) {
+        if (!id.startsWith('mirror/') || !id.endsWith('/commandcode-subscriptions.json')) continue;
+        const current = file.exists ? file.value : null;
+        if (!deepEqual(current, subscriptions)) {
+          next.set(id, { value: subscriptions, kind: 'json' });
+        }
+      }
     }
     if (!deepEqual(sidecarFile?.value ?? {}, sidecar.value)) {
       next.set('runtime/native-profile-switcher-main.json', { value: sidecar.value, kind: 'json' });

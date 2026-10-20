@@ -204,6 +204,28 @@ test('setMain mirrors the main sidecar identically to every lane', (t) => {
   }
 });
 
+test('lane mirrors receive the CommandCode subscription registry when the primary has one', (t) => {
+  const fx = makeFixture(t, { mirrors: ['mirror1'] });
+  const subscriptions = {
+    profileAssignments: { 'native-cmd-glm-deepseek': 'sub-1' },
+    apiKey: 'SECRET-SUBSCRIPTION-KEY',
+  };
+  fs.writeFileSync(path.join(fx.primary, 'commandcode-subscriptions.json'),
+    JSON.stringify(subscriptions, null, 2));
+  const mirrorSubscriptions = path.join(fx.mirrors.mirror1, 'commandcode-subscriptions.json');
+  const oldMirror = { profileAssignments: { 'native-gpt-kimi-deepseek': 'old' } };
+  fs.writeFileSync(mirrorSubscriptions, JSON.stringify(oldMirror, null, 2));
+  const result = fx.store.apply(body('apply', [
+    { kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' },
+  ], fx.store));
+  assert.equal(result.ok, true);
+  assert.deepEqual(readJsonFile(mirrorSubscriptions), subscriptions);
+  assert.ok(result.writes.includes('mirror/mirror1/commandcode-subscriptions.json'));
+  const backup = result.backups.find((file) => /mirror1-subscriptions-.*\.json$/.test(file));
+  assert.ok(backup, JSON.stringify(result.backups));
+  assert.deepEqual(readJsonFile(backup), oldMirror);
+});
+
 test('a rollback restores the lane main sidecars too', (t) => {
   const seedMain = {
     'native-gpt-kimi-deepseek': { provider: 'legacy', model: 'legacy-model', thinking: 'low' },
@@ -446,6 +468,27 @@ test('setRoute, setModelProfile and setMemoryRow are applied through the same pi
   assert.equal(quick.ok, true);
   const afterQuick = readJsonFile(path.join(fx.primary, 'omo.jsonc'));
   assert.equal(afterQuick['[native]'].categories['desktop-kibitzer'], undefined);
+});
+
+test('setRoute to a CommandCode model surfaces the subscription preflight warning', (t) => {
+  const fx = makeFixture(t);
+  const subscriptionsPath = path.join(fx.primary, 'commandcode-subscriptions.json');
+  const change = {
+    kind: 'setRoute', profileKey: 'native-cmd-glm-deepseek', section: 'agents', role: 'explore',
+    provider: 'commandcode', model: 'z-ai/glm-5.3-flash', thinking: 'max',
+  };
+  const warning = '커맨드코드 모델이지만 구독이 배정되지 않았습니다 (기본 키로 동작)';
+  fs.writeFileSync(subscriptionsPath, JSON.stringify({ profileAssignments: {} }));
+  const unassigned = fx.store.preview(body('preview', [change], fx.store));
+  assert.equal(unassigned.ok, true);
+  assert.ok(unassigned.warnings.includes(warning), JSON.stringify(unassigned.warnings));
+  assert.deepEqual(unassigned.writes, ['omo.jsonc']);
+
+  fs.writeFileSync(subscriptionsPath,
+    JSON.stringify({ profileAssignments: { 'native-cmd-glm-deepseek': 'sub-123' } }));
+  const assigned = fx.store.preview(body('preview', [change], fx.store));
+  assert.equal(assigned.ok, true);
+  assert.equal(assigned.warnings.includes(warning), false);
 });
 
 test('migrateReviewerKeys rewrites the legacy reviewer names in the allowed paths', (t) => {
