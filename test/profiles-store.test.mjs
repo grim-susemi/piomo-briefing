@@ -420,10 +420,101 @@ test('an unfinished journal is shown as 중단된 적용 and is never replayed a
   assert.equal(view.status, 'interrupted');
   assert.equal(view.label, '중단된 적용');
   assert.equal(view.action, '다시 적용');
+  assert.equal(view.reapply, null, 'a journal without a recorded request offers no replay payload');
   const result = fx.store.apply(body('apply', [{ kind: 'setMain', provider: 'openai', model: 'gpt-6-sol' }], fx.store));
   assert.equal(result.ok, true);
   assert.equal(fx.store.journal().status, 'completed');
   assert.notEqual(fx.store.journal().id, 'interrupted-run');
+});
+
+test('setMemoryRow.row keeps the Reflection and Kibitzer routes independent', (t) => {
+  const fx = makeFixture(t);
+  const configPath = path.join(fx.primary, 'omo.jsonc');
+  const before = readJsonFile(configPath);
+  const kibBefore = JSON.parse(JSON.stringify(before['[native]'].memory.recall ?? null));
+  const kibCategoryBefore = JSON.parse(JSON.stringify(before['[native]'].categories['desktop-kibitzer'] ?? null));
+
+  const reflection = fx.store.apply(body('apply', [{
+    kind: 'setMemoryRow', row: 'reflection', mode: 'custom',
+    model: 'openai/gpt-6-sol', reasoning: 'high',
+  }], fx.store));
+  assert.equal(reflection.ok, true, JSON.stringify(reflection));
+
+  const afterReflection = readJsonFile(configPath);
+  assert.equal(afterReflection['[native]'].memory.reflection.category, 'desktop-reflection');
+  assert.ok(afterReflection['[native]'].categories['desktop-reflection']);
+  assert.deepEqual(afterReflection['[native]'].memory.recall ?? null, kibBefore, 'Reflection never moves Kibitzer recall');
+  assert.deepEqual(afterReflection['[native]'].categories['desktop-kibitzer'] ?? null, kibCategoryBefore,
+    'Reflection never rewrites desktop-kibitzer');
+  const reflectionRow = JSON.parse(JSON.stringify(afterReflection['[native]'].categories['desktop-reflection']));
+
+  const kibitzer = fx.store.apply(body('apply', [{
+    kind: 'setMemoryRow', row: 'kibitzer', mode: 'custom',
+    model: 'openai/gpt-6-sol', reasoning: 'low',
+  }], fx.store));
+  assert.equal(kibitzer.ok, true, JSON.stringify(kibitzer));
+  const afterKibitzer = readJsonFile(configPath);
+  assert.equal(afterKibitzer['[native]'].memory.recall.category, 'desktop-kibitzer');
+  assert.deepEqual(afterKibitzer['[native]'].categories['desktop-reflection'], reflectionRow,
+    'Kibitzer never rewrites desktop-reflection');
+  assert.equal(afterKibitzer['[native]'].memory.reflection.category, 'desktop-reflection');
+
+  const cleared = fx.store.apply(body('apply', [{ kind: 'setMemoryRow', row: 'reflection', mode: 'quick' }], fx.store));
+  assert.equal(cleared.ok, true, JSON.stringify(cleared));
+  const afterClear = readJsonFile(configPath);
+  assert.equal(afterClear['[native]'].categories['desktop-reflection'], undefined);
+  assert.equal(afterClear['[native]'].memory.reflection?.category, undefined);
+  assert.equal(afterClear['[native]'].memory.recall.category, 'desktop-kibitzer', 'Reflection quick leaves Kibitzer alone');
+  assert.ok(afterClear['[native]'].categories['desktop-kibitzer']);
+});
+
+test('setMemoryRow rejects an unknown row without a write and keeps the historical default', (t) => {
+  const fx = makeFixture(t);
+  const configPath = path.join(fx.primary, 'omo.jsonc');
+  const before = fs.readFileSync(configPath);
+  const rejected = fx.store.preview(body('preview', [{ kind: 'setMemoryRow', row: 'desktop-kibitzer', mode: 'quick' }], fx.store));
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.code, 'BAD_REQUEST');
+  assert.match(rejected.message, /row must be kibitzer or reflection/);
+  assert.deepEqual(fs.readFileSync(configPath), before);
+  const legacy = fx.store.apply(body('apply', [{ kind: 'setMemoryRow', mode: 'quick' }], fx.store));
+  assert.equal(legacy.ok, true, JSON.stringify(legacy));
+  assert.equal(readJsonFile(configPath)['[native]'].memory.reflection, undefined, 'no row still means Kibitzer');
+});
+
+test('a completed apply records its request; reapply is explicit and CAS-checked', (t) => {
+  const fx = makeFixture(t);
+  const journalPath = path.join(fx.stable, 'agent', 'primary-agents', 'apply-journal.json');
+  const settingsPath = path.join(fx.primary, 'agent', 'settings.json');
+  const changes = [{ kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' }];
+  const applied = fx.store.apply(body('apply', changes, fx.store));
+  assert.equal(applied.ok, true, JSON.stringify(applied));
+  const completed = fx.store.journal();
+  assert.equal(completed.status, 'completed');
+  assert.deepEqual(completed.request.changes, changes, 'the journal stores the payload the owner can replay');
+
+  const interrupted = {
+    v: 1, id: 'crash-1', action: 'apply', status: 'running',
+    startedAt: '2026-10-20T11:00:00.000Z',
+    request: { changes: [{ kind: 'setSummarizer', modelId: 'ollama/glm-5.3' }], rosterRevision: 0 },
+    steps: [{ step: 'write', target: 'agent/settings.json', status: 'ok' }],
+  };
+  atomicWriteText(journalPath, JSON.stringify(interrupted, null, 2));
+  const beforeJournal = fs.readFileSync(journalPath);
+  const beforeSettings = fs.readFileSync(settingsPath);
+  const state = fx.store.state();
+  assert.equal(state.applyJournal.status, 'interrupted');
+  assert.equal(state.applyJournal.action, '다시 적용');
+  assert.deepEqual(state.applyJournal.reapply.changes, interrupted.request.changes);
+  assert.equal(state.applyJournal.reapply.rosterRevision, 0);
+  assert.deepEqual(fs.readFileSync(journalPath), beforeJournal, 'state() never replays the journal');
+  assert.deepEqual(fs.readFileSync(settingsPath), beforeSettings, 'state() writes nothing');
+
+  const replayed = fx.store.apply(body('apply', state.applyJournal.reapply.changes, fx.store));
+  assert.equal(replayed.ok, true, JSON.stringify(replayed));
+  assert.equal(readJsonFile(settingsPath).compaction.model, 'ollama/glm-5.3');
+  assert.equal(fx.store.journal().status, 'completed');
+  assert.notEqual(fx.store.journal().id, 'crash-1');
 });
 
 test('auth.json and stable-500 agent/settings.json are never targets and never change', (t) => {

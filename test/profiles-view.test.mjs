@@ -25,6 +25,7 @@ function load() {
   return ctx.BriefProfiles;
 }
 const live = (extra = {}) => ({ live: true, pending: [], draft: {}, preview: null, conflict: false, error: '', status: '', result: null, busy: false, loading: false, ...extra });
+const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 test('render: header, target homes and every section in order', () => {
   const P = load();
@@ -332,6 +333,31 @@ test('pending tray: preview diffs, conflict message with reload and the apply re
   assert.match(textOf(html), /omo-20261020-120000-000\.jsonc/);
 });
 
+test('render: an interrupted journal renders a real 다시 적용 control, never in read-only', () => {
+  const P = load();
+  const interrupted = clone(STATE);
+  interrupted.applyJournal = {
+    v: 1, id: 'crash-1', action: '다시 적용', status: 'interrupted', label: '중단된 적용',
+    reapply: {
+      changes: [{ kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' }],
+      rosterRevision: 3
+    }
+  };
+  const html = P.render(interrupted, live());
+  assert.match(html, /data-pf-journal="interrupted"/);
+  assert.match(html, /data-pf="reapply"/);
+  assert.match(textOf(html), /중단된 적용/);
+  assert.match(textOf(html), /다시 적용/);
+  const readonlyHtml = P.render(interrupted, { ...live(), live: false });
+  assert.doesNotMatch(readonlyHtml, /data-pf="reapply"/);
+  assert.match(textOf(readonlyHtml), /중단된 적용/);
+  const legacy = clone(interrupted);
+  legacy.applyJournal.reapply = null;
+  const legacyHtml = P.render(legacy, live());
+  assert.doesNotMatch(legacyHtml, /data-pf="reapply"/);
+  assert.match(textOf(legacyHtml), /다시 적용할 변경 기록이 없어요/);
+});
+
 test('controller: load -> preview -> apply -> reload, with the exact POST body and token', async () => {
   const P = load();
   const calls = [];
@@ -424,6 +450,84 @@ test('no polling: the view never schedules a timer', () => {
   const src = read('src/page/profiles-view.js');
   assert.doesNotMatch(src, /setInterval|setTimeout|requestAnimationFrame/);
   assert.doesNotMatch(src, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
+});
+
+test('page wiring: Reflection and Kibitzer memory edits stay separate through the delegated handler', async () => {
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'profiles-view', 'annotate'] });
+  e.page.receive({ seq: 1, generatedAt: 0, sessions: [] });
+  e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
+  e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => STATE });
+  await tick();
+
+  async function setRow(key, model, thinking) {
+    let mode = e.byId.main.querySelector('[data-pf="memory-mode"][data-memory="' + key + '"]');
+    assert.ok(mode, key + ' mode control');
+    mode.value = 'custom';
+    e.fire(mode, 'change');
+    await tick();
+    // The deterministic DOM does not carry select values across a re-render, so set every
+    // control on the current tree and fire one change; the delegated handler reads the row.
+    mode = e.byId.main.querySelector('[data-pf="memory-mode"][data-memory="' + key + '"]');
+    const input = e.byId.main.querySelector('[data-pf="memory-model"][data-memory="' + key + '"]');
+    assert.ok(input, key + ' model control');
+    const think = e.byId.main.querySelector('[data-pf="memory-thinking"][data-memory="' + key + '"]');
+    assert.ok(think, key + ' thinking control');
+    mode.value = 'custom';
+    input.value = model;
+    think.value = thinking;
+    e.fire(think, 'change');
+    await tick();
+  }
+
+  await setRow('kibitzer', 'openai/gpt-6-sol', 'high');
+  await setRow('reflection', 'chatgpt-subscription/gpt-reflection-sentinel', 'high');
+  const pendingText = e.byId.main.querySelector('.pf-pending').textContent;
+  assert.match(pendingText, /Kibitzer 메모리 행/);
+  assert.match(pendingText, /Reflection 메모리 행/);
+
+  e.fire(e.byId.main.querySelector('[data-pf="preview"]'), 'click');
+  const post = e.fetches[e.fetches.length - 1];
+  assert.equal(post.url, '/profiles');
+  const changes = JSON.parse(post.opts.body).changes;
+  assert.deepEqual(changes.map((c) => c.row || 'kibitzer').sort(), ['kibitzer', 'reflection']);
+  assert.equal(changes.find((c) => c.row === 'kibitzer').model, 'openai/gpt-6-sol');
+  assert.equal(changes.find((c) => c.row === 'reflection').model, 'chatgpt-subscription/gpt-reflection-sentinel');
+});
+
+test('page wiring: 다시 적용 posts the journal payload through the protected apply route', async () => {
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'profiles-view', 'annotate'] });
+  const interrupted = clone(STATE);
+  interrupted.applyJournal = {
+    v: 1, id: 'crash-1', action: '다시 적용', status: 'interrupted', label: '중단된 적용',
+    reapply: {
+      changes: [{ kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' }],
+      rosterRevision: 3
+    }
+  };
+  e.page.receive({ seq: 1, generatedAt: 0, sessions: [] });
+  e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
+  e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => interrupted });
+  await tick();
+
+  const reapply = e.byId.main.querySelector('[data-pf="reapply"]');
+  assert.ok(reapply, 'the interrupted banner owns a real button');
+  e.fire(reapply, 'click');
+  await tick();
+  const post = e.fetches[e.fetches.length - 1];
+  assert.equal(post.url, '/profiles');
+  assert.equal(post.opts.method, 'POST');
+  const body = JSON.parse(post.opts.body);
+  assert.equal(body.action, 'apply');
+  assert.deepEqual(body.changes, interrupted.applyJournal.reapply.changes);
+  assert.deepEqual(body.expected, STATE.targets);
+  assert.equal(body.rosterRevision, 3);
+  post.resolve({ status: 200, ok: true, json: async () => ({ ok: true, action: 'apply', backups: [], writes: ['agent/settings.json'], hashes: {} }) });
+  await tick();
+  const reload = e.fetches[e.fetches.length - 1];
+  assert.equal(reload.url, '/profiles/state');
+  reload.resolve({ status: 200, ok: true, json: async () => ({ ...interrupted, applyJournal: { status: 'completed' } }) });
+  await tick();
+  assert.deepEqual(e.errors, []);
 });
 
 test('page wiring: the profiles rail click loads GET /profiles/state and a preview posts the pending change', async () => {

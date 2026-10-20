@@ -31,7 +31,7 @@ import {
   clone, commandCodeWarning, deepEqual, getEffectiveMemoryCatalog, getMemorySelectionFromConfig,
   getModelProfileSettings, getOrCreateCatalogAlias, getReflectionMemorySelectionFromConfig,
   isPlainObject, memoryFingerprint, mergeProfileLayerIntoActiveScopes, migrateReviewerKeys,
-  readConfig, readCompactionSummarizer, readMainOverride, removeNullModelProfile,
+  readConfig, readCompactionSummarizer, readMainOverride, reflectionMemoryFingerprint, removeNullModelProfile,
   resolveMainDefaults, selectionState, setCompactionSummarizer, setMainLayerOverride,
   setModelProfileSelection, setProfileLayerModel, stripEngineSectionAlias,
   syncStable500RoleModels,
@@ -400,7 +400,7 @@ function changeError(change, index) {
     setMain: ['kind', 'provider', 'model', 'thinking', 'profileKey'],
     setModelProfile: ['kind', 'selection', 'literal', 'profileKey'],
     setSummarizer: ['kind', 'modelId'],
-    setMemoryRow: ['kind', 'mode', 'model', 'reasoning', 'profileKey'],
+    setMemoryRow: ['kind', 'row', 'mode', 'model', 'reasoning', 'profileKey'],
     setAgentLane: ['kind', 'agentId', 'lane'],
     setAgentPin: ['kind', 'agentId', 'pin'],
     resetAgentMemory: ['kind', 'agentId'],
@@ -408,6 +408,10 @@ function changeError(change, index) {
   }[change.kind];
   const unknown = Object.keys(change).filter((key) => !allowed.includes(key));
   if (unknown.length > 0) return `${at}.${unknown[0]} is not allowed`;
+  if (change.kind === 'setMemoryRow' && change.row !== undefined
+    && change.row !== 'kibitzer' && change.row !== 'reflection') {
+    return `${at}.row must be kibitzer or reflection`;
+  }
   return null;
 }
 
@@ -507,7 +511,18 @@ export function openProfilesStore(options = {}) {
     const { raw, warning } = readJournal();
     if (!raw) return warning ? { status: 'unknown', label: warning, action: null } : null;
     if (raw.status === 'running') {
-      return { ...raw, status: 'interrupted', sourceStatus: 'running', label: INTERRUPTED_LABEL, action: REAPPLY_LABEL };
+      const request = isPlainObject(raw.request) ? raw.request : null;
+      const changes = Array.isArray(request?.changes) ? clone(request.changes) : null;
+      return {
+        ...raw, status: 'interrupted', sourceStatus: 'running', label: INTERRUPTED_LABEL, action: REAPPLY_LABEL,
+        // The explicit 다시 적용 control resubmits exactly these changes through the same
+        // protected apply path with the page's fresh expected hashes. The store itself
+        // never calls this on state(), startup or a normal apply.
+        reapply: changes ? {
+          changes,
+          rosterRevision: Number.isInteger(request.rosterRevision) ? request.rosterRevision : 0,
+        } : null,
+      };
     }
     return raw;
   }
@@ -677,6 +692,10 @@ export function openProfilesStore(options = {}) {
 
   function memoryRowChange(config, change, fallbackProfile) {
     if (change.mode !== 'quick' && change.mode !== 'custom') throw new Error('mode must be quick or custom');
+    if (change.row === 'reflection') {
+      setReflectionMemorySelection(config, change.mode, change.model ?? '', change.reasoning ?? '', fallbackProfile);
+      return;
+    }
     setMemorySelection(config, change.mode, change.model ?? '', change.reasoning ?? '', fallbackProfile);
   }
 
@@ -883,6 +902,58 @@ export function openProfilesStore(options = {}) {
       const planned = getMemorySelectionFromConfig(config, profile.omoProfile);
       if (planned.category !== 'quick' || planned.hasDedicated) {
         throw new Error(`profile ${profile.omoProfile} defeats the common Kibitzer route`);
+      }
+    }
+  }
+
+  // The original switcher's Set-ReflectionMemoryModelSelection (:3406-3468): a separate
+  // owned category and the `memory.reflection.category` pointer, never `memory.recall` and
+  // never `desktop-kibitzer`. Keeping this as its own function is what makes the two rows
+  // independent at the store boundary.
+  function setReflectionMemorySelection(config, mode, model, reasoning, profile) {
+    const engine = config['[senpi]'] ?? config['[native]'];
+    if (!isPlainObject(engine)) throw new Error('model catalog is missing');
+    if (mode === 'custom') {
+      if (!model.trim() || !reasoning.trim()) throw new Error('Choose service, model and thinking explicitly.');
+      if (!THINKING.includes(reasoning)) throw new Error(`unsupported thinking level ${reasoning}`);
+      const catalog = getEffectiveMemoryCatalog(config);
+      const alias = getOrCreateCatalogAlias({
+        catalog, provider: model.split('/')[0], model, reasoning,
+      }).alias;
+      if (!isPlainObject(engine.models)) engine.models = {};
+      if (!isPlainObject(engine.categories)) engine.categories = {};
+      if (!isPlainObject(engine.memory)) engine.memory = {};
+      if (!isPlainObject(engine.memory.reflection)) engine.memory.reflection = {};
+      if (!isPlainObject(engine.models[alias])) engine.models[alias] = { model, reasoning };
+      const entry = engine.models[alias];
+      const entryReasoning = getMemoryReasoning(entry) || reasoning;
+      if (typeof entry.reasoning !== 'string' || !entry.reasoning) entry.reasoning = entryReasoning;
+      const expectedModel = String(entry.model ?? model);
+      engine.categories['desktop-reflection'] = {
+        description: reflectionMemoryFingerprint(alias, expectedModel, entryReasoning),
+        model: alias,
+        reasoning: entryReasoning,
+      };
+      engine.memory.reflection.category = 'desktop-reflection';
+      for (const [key, entry2] of Object.entries(config.profiles ?? {})) {
+        if (!isPlainObject(entry2)) continue;
+        const state = getReflectionMemorySelectionFromConfig(config, key);
+        if (state.external || state.category !== 'desktop-reflection' || !state.owned
+          || state.model !== expectedModel || state.reasoning !== entryReasoning) {
+          throw new Error(`profile ${key} defeats the common Reflection route (${JSON.stringify({ category: state.category, owned: state.owned, external: state.external, model: state.model, reasoning: state.reasoning, expectedModel, entryReasoning })})`);
+        }
+      }
+      return;
+    }
+    const state = getReflectionMemorySelectionFromConfig(config);
+    if (state.owned && isPlainObject(engine.categories)) delete engine.categories['desktop-reflection'];
+    if (isPlainObject(engine.memory?.reflection) && engine.memory.reflection.category === 'desktop-reflection') {
+      delete engine.memory.reflection.category;
+    }
+    if (profile) {
+      const planned = getReflectionMemorySelectionFromConfig(config, profile.omoProfile);
+      if (planned.category !== 'quick' || planned.hasDedicated) {
+        throw new Error(`profile ${profile.omoProfile} defeats the common Reflection route`);
       }
     }
   }
@@ -1195,6 +1266,7 @@ export function openProfilesStore(options = {}) {
       writeJournal({
         v: 1, id: `${at}-${randomBytes(4).toString('hex')}`, action: 'apply', status: 'completed',
         startedAt: at, finishedAt: at, changes: result.body.changes.map((change) => change.kind), targets: [],
+        request: { changes: clone(result.body.changes), rosterRevision: result.body.rosterRevision },
         steps: [{ step: 'validate', status: 'ok', at }, { step: 'no-op', status: 'ok', at }],
       });
       return { ok: true, action: 'apply', backups: [], hashes: result.hashes, warnings: result.warnings, writes: [] };
@@ -1214,6 +1286,10 @@ export function openProfilesStore(options = {}) {
       ],
       changes: result.body.changes.map((change) => change.kind),
       targets: result.writes.map((write) => write.id),
+      // A process that dies before `completed` leaves this behind; the view exposes it as
+      // the explicit 다시 적용 payload. Storing the payload (not a server-side replay
+      // hook) keeps the reapply owner-triggered and CAS-checked like every other write.
+      request: { changes: clone(result.body.changes), rosterRevision: result.body.rosterRevision },
     };
     let journalWritten = false;
     const backups = new Map();

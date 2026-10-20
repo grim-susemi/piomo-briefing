@@ -14,6 +14,7 @@
 
   var STALE_BANNER = '인벤토리 갱신 필요';
   var CONFLICT_TEXT = '다른 곳에서 바뀌었어요 — 새로고침 후 다시 적용';
+  var REAPPLY_LABEL = '다시 적용';
   var READONLY_LIVE = '실시간 상황판에서만 바꿀 수 있어요';
   var READONLY_FILE = '이 페이지는 보기 전용입니다 - 실시간 상황판에서 열어 주세요';
   var AGENTS = [
@@ -275,7 +276,7 @@
     if (kind === 'setMain') return head + ' → ' + str(c.provider) + ' · ' + str(c.model) + ' / ' + str(c.thinking);
     if (kind === 'setModelProfile') return head + ' → ' + (str(c.selection) === 'custom-literal' ? '직접 입력 ' + str(c.literal) : str(c.selection) === 'off' ? '끔' : str(c.selection) || '프로필 기본');
     if (kind === 'setSummarizer') return head + ' → ' + (str(c.modelId) || '설정 안 함');
-    if (kind === 'setMemoryRow') return head + ' → ' + str(c.mode) + (str(c.model) ? ' · ' + str(c.model) : '') + (str(c.reasoning) ? ' / ' + str(c.reasoning) : '');
+    if (kind === 'setMemoryRow') return (str(c.row) === 'reflection' ? 'Reflection' : 'Kibitzer') + ' ' + head + ' → ' + str(c.mode) + (str(c.model) ? ' · ' + str(c.model) : '') + (str(c.reasoning) ? ' / ' + str(c.reasoning) : '');
     if (kind === 'setAgentLane') return str(c.agentId) + ' 레인 → ' + str(c.lane);
     if (kind === 'setAgentPin') return str(c.agentId) + ' 핀 → ' + (obj(c.pin) ? str(c.pin.provider) + ' · ' + str(c.pin.modelId) + ' / ' + str(c.pin.thinking) : '없음');
     if (kind === 'resetAgentMemory') return str(c.agentId) + ' 기억 초기화';
@@ -291,6 +292,21 @@
   }
   function banner(text, cls, role) {
     return '<div class="pf-banner ' + (cls || '') + '"' + (role ? attr('role', role) : '') + '>' + ic('info', 'ic-sm') + ' <b>' + esc(text) + '</b></div>';
+  }
+  // An interrupted apply is a real state, not a sentence: the owner must be able to trigger
+  // the explicit replay. The payload is the journal's recorded changes (never the pending
+  // tray), and the click posts them once through the same guarded apply route.
+  function journalBanner(view, ro) {
+    var journal = obj(view && view.applyJournal);
+    if (!journal || journal.status !== 'interrupted') return '';
+    var payload = obj(journal.reapply);
+    var changes = arr(payload && payload.changes);
+    var head = '<div class="pf-banner pf-banner-warn" data-pf-journal="interrupted" role="status">' +
+      ic('info', 'ic-sm') + ' <b>' + esc('중단된 적용') + '</b>';
+    if (ro) return head + ' <span class="pf-muted">' + esc('읽기 전용') + '</span></div>';
+    if (!changes.length) return head + ' <span class="pf-muted">' + esc('다시 적용할 변경 기록이 없어요') + '</span></div>';
+    return head + ' ' + button('reapply', ' aria-label="' + esc(REAPPLY_LABEL) + '"',
+      ic('refresh-cw', 'ic-sm') + ' ' + esc(REAPPLY_LABEL), false, 'pf-btn') + '</div>';
   }
   // Loading, error and a loaded view are three states. A missing view is never a read-only view: the
   // read-only badge and note may only appear once a state exists and says writes are refused.
@@ -361,6 +377,11 @@
       '<div class="pf-sec-b">' + body + '</div></section>';
   }
 
+  function memoryChangeOf(pending, row) {
+    return findChange(pending, function (c) {
+      return c && c.kind === 'setMemoryRow' && (str(c.row) || 'kibitzer') === row;
+    });
+  }
   function agentRows(view, edit, ro) {
     var roster = obj(view && view.roster) || {};
     var agents = obj(roster.agents) || {};
@@ -562,14 +583,15 @@
   }
 
   function memoryRows(view, edit, ro) {
-    var pending = firstOf(pendingOf(edit), 'setMemoryRow');
-    var draft = draftOf(edit, 'memory');
+    var draft = obj(edit && edit.draft);
     var mem = obj(view && view.memory) || {};
     var rows = ['kibitzer', 'reflection'].map(function (key) {
       var m = obj(mem[key]) || {};
-      var mode = pending ? str(pending.mode) : draft && str(draft.mode) ? str(draft.mode) : str(m.mode) || 'quick';
-      var model = pending ? str(pending.model) : draft && str(draft.model) ? str(draft.model) : str(m.model);
-      var reasoning = pending ? str(pending.reasoning) : draft && str(draft.reasoning) ? str(draft.reasoning) : str(m.reasoning);
+      var pending = memoryChangeOf(pendingOf(edit), key);
+      var d = draft && has(draft, 'memory:' + key) && obj(draft['memory:' + key]) ? draft['memory:' + key] : null;
+      var mode = pending ? str(pending.mode) : d && str(d.mode) ? str(d.mode) : str(m.mode) || 'quick';
+      var model = pending ? str(pending.model) : d && str(d.model) ? str(d.model) : str(m.model);
+      var reasoning = pending ? str(pending.reasoning) : d && str(d.reasoning) ? str(d.reasoning) : str(m.reasoning);
       var controls;
       if (ro) {
         controls = '<span class="pf-ro-val">' + valueOrDash(mode) + ' · ' + valueOrDash(model) + (reasoning ? ' / ' + esc(reasoning) : '') + '</span>';
@@ -683,7 +705,7 @@
       (v && arr(v.warnings).length ? '<div class="pf-warnings">' + arr(v.warnings).map(function (w) {
         return '<p class="pf-warn">' + ic('info', 'ic-sm') + ' ' + esc(w) + '</p>';
       }).join('') + '</div>' : '') +
-      (v && v.applyJournal && v.applyJournal.status === 'interrupted' ? banner('중단된 적용 · ' + str(v.applyJournal.label || '다시 적용'), 'pf-banner-warn', 'status') : '') +
+      journalBanner(v, ro) +
       (state === 'view' ? tray(v, e) + agentRows(v, e, ro) + profileCards(v, e, ro) + routingRows(v, e, ro) +
         mainModel(v, e, ro) + modelLane(v, e, ro) + summarizer(v, e, ro) + memoryRows(v, e, ro) + guide(v) : '') +
       '</div>';
@@ -771,7 +793,8 @@
       if (!obj(a) || !obj(b) || a.kind !== b.kind) return false;
       if (a.kind === 'setRoute') return a.section === b.section && a.role === b.role;
       if (a.kind === 'setAgentLane' || a.kind === 'setAgentPin' || a.kind === 'resetAgentMemory') return a.agentId === b.agentId;
-      if (a.kind === 'selectProfile' || a.kind === 'setMain' || a.kind === 'setModelProfile' || a.kind === 'setSummarizer' || a.kind === 'setMemoryRow') return true;
+      if (a.kind === 'setMemoryRow') return (str(a.row) || 'kibitzer') === (str(b.row) || 'kibitzer');
+      if (a.kind === 'selectProfile' || a.kind === 'setMain' || a.kind === 'setModelProfile' || a.kind === 'setSummarizer') return true;
       if (a.kind === 'migrateReviewerKeys') return true;
       return false;
     }
@@ -822,22 +845,26 @@
       return snapshot();
     }
 
-    function send(action) {
+    function send(action, changesOverride, options) {
+      var opt = obj(options) || {};
+      var reapply = opt.reapply === true;
+      var list = Array.isArray(changesOverride) ? changesOverride.slice() : s.pending.slice();
       if (s.busy) return Promise.resolve(snapshot());
       if (typeof fetchFn !== 'function') {
         s.error = '실시간 상황판에서만 보낼 수 있어요'; changed(); return Promise.resolve(snapshot());
       }
-      if (!s.pending.length) {
-        s.error = '바꾼 값을 먼저 골라 주세요'; changed(); return Promise.resolve(snapshot());
+      if (!list.length) {
+        s.error = reapply ? '다시 적용할 변경 기록이 없어요' : '바꾼 값을 먼저 골라 주세요';
+        changed(); return Promise.resolve(snapshot());
       }
       var body = {
         action: action,
-        changes: s.pending.slice(),
+        changes: list,
         expected: obj(s.view && s.view.targets) || {},
         rosterRevision: num(obj(s.view && s.view.roster) && s.view.roster.revision) || 0
       };
       s.busy = true; s.preview = null; s.result = null; s.conflict = false; s.error = '';
-      s.status = action === 'preview' ? '미리보기 중…' : '적용 중…';
+      s.status = reapply ? '다시 적용 중…' : action === 'preview' ? '미리보기 중…' : '적용 중…';
       changed();
       return Promise.resolve(fetchFn('/profiles', {
         method: 'POST',
@@ -857,8 +884,9 @@
             changed();
             return snapshot();
           }
-          s.result = json; s.pending = []; s.draft = map(); s.preview = null; s.conflict = false; s.error = '';
-          s.status = '적용했어요';
+          s.result = json; s.preview = null; s.conflict = false; s.error = '';
+          if (!reapply) { s.pending = []; s.draft = map(); }
+          s.status = reapply ? '다시 적용했어요' : '적용했어요';
           changed();
           return load().then(function () { return snapshot(); });
         }
@@ -890,7 +918,17 @@
       touch: touch,
       removeKind: removeKind,
       preview: function () { return send('preview'); },
-      apply: function () { return send('apply'); }
+      apply: function () { return send('apply'); },
+      reapply: function () {
+        var journal = obj(s.view && s.view.applyJournal);
+        var payload = obj(journal && journal.reapply);
+        var changes = arr(payload && payload.changes);
+        if (!changes.length) {
+          s.status = '실패'; s.error = '다시 적용할 변경 기록이 없어요'; changed();
+          return Promise.resolve(snapshot());
+        }
+        return send('apply', changes, { reapply: true });
+      }
     };
   }
 
@@ -928,6 +966,8 @@
         c.preview();
       } else if (act === 'apply') {
         c.apply();
+      } else if (act === 'reapply') {
+        c.reapply();
       } else if (act === 'clear') {
         c.clear();
       } else if (act === 'drop') {
@@ -1024,14 +1064,16 @@
         c.add({ kind: 'setSummarizer', modelId: str(t.value) });
       } else if (act === 'memory-mode' || act === 'memory-model' || act === 'memory-thinking') {
         var memRow = t.closest('[data-pf-memory]');
+        var key = memRow ? str(memRow.getAttribute('data-pf-memory')) : '';
         var mode = memRow ? str(memRow.querySelector('[data-pf="memory-mode"]').value) : 'quick';
         var modelEl = memRow ? memRow.querySelector('[data-pf="memory-model"]') : null;
         var thinkEl = memRow ? memRow.querySelector('[data-pf="memory-thinking"]') : null;
         var modelValue = modelEl ? str(modelEl.value) : '';
         var thinkValue = thinkEl ? str(thinkEl.value) : '';
-        c.setDraft('memory', { mode: mode, model: modelValue, reasoning: thinkValue });
-        if (mode === 'quick') c.add({ kind: 'setMemoryRow', mode: 'quick' });
-        else if (modelValue && thinkValue) c.add({ kind: 'setMemoryRow', mode: 'custom', model: modelValue, reasoning: thinkValue });
+        if (!key) return;
+        c.setDraft('memory:' + key, { mode: mode, model: modelValue, reasoning: thinkValue });
+        if (mode === 'quick') c.add({ kind: 'setMemoryRow', row: key, mode: 'quick' });
+        else if (modelValue && thinkValue) c.add({ kind: 'setMemoryRow', row: key, mode: 'custom', model: modelValue, reasoning: thinkValue });
         else c.touch();
       }
     }

@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 import { createBoardServer } from '../src/server.mjs';
@@ -220,6 +221,91 @@ test('apply through the route returns ok, backups and hashes', async (t) => {
   assert.equal(json.hashes['agent/settings.json'], sha(fs.readFileSync(path.join(primary, 'agent', 'settings.json'))));
 });
 
+test('a Reflection memory-row apply through the route leaves Kibitzer unchanged', async (t) => {
+  const { port, store, primary } = await withServer(t);
+  const omoPath = path.join(primary, 'omo.jsonc');
+  const read = () => JSON.parse(fs.readFileSync(omoPath, 'utf8').replace(/^\uFEFF/, ''));
+  const before = read();
+  const kibRecall = JSON.parse(JSON.stringify(before['[native]'].memory?.recall ?? null));
+  const kibCategory = JSON.parse(JSON.stringify(before['[native]'].categories?.['desktop-kibitzer'] ?? null));
+  const current = store.state();
+  const res = await request({
+    port, path: '/profiles', method: 'POST', headers: JSON_HEADERS(port),
+    body: JSON.stringify({
+      action: 'apply',
+      changes: [{ kind: 'setMemoryRow', row: 'reflection', mode: 'custom', model: 'openai/gpt-6-sol', reasoning: 'high' }],
+      expected: current.targets,
+      rosterRevision: current.roster.revision,
+    }),
+  });
+  assert.equal(res.status, 200, res.body);
+  const after = read();
+  assert.equal(after['[native]'].memory.reflection.category, 'desktop-reflection');
+  assert.ok(after['[native]'].categories['desktop-reflection']);
+  assert.deepEqual(after['[native]'].memory.recall ?? null, kibRecall, 'the route never moves Kibitzer recall');
+  assert.deepEqual(after['[native]'].categories?.['desktop-kibitzer'] ?? null, kibCategory,
+    'the route never rewrites desktop-kibitzer');
+});
+
+test('reapply through the route applies the interrupted journal payload once', async (t) => {
+  const { port, stable, primary } = await withServer(t);
+  const journalPath = path.join(stable, 'agent', 'primary-agents', 'apply-journal.json');
+  fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+  const recorded = { changes: [{ kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' }], rosterRevision: 0 };
+  fs.writeFileSync(journalPath, JSON.stringify({
+    v: 1, id: 'crash-route', action: 'apply', status: 'running',
+    startedAt: '2026-10-20T11:00:00.000Z', request: recorded, steps: [],
+  }, null, 2));
+  const stateRes = await request({ port, path: '/profiles/state' });
+  assert.equal(stateRes.status, 200, stateRes.body);
+  const state = JSON.parse(stateRes.body);
+  assert.equal(state.applyJournal.status, 'interrupted');
+  assert.equal(state.applyJournal.action, '다시 적용');
+  assert.deepEqual(state.applyJournal.reapply.changes, recorded.changes);
+  const res = await request({
+    port, path: '/profiles', method: 'POST', headers: JSON_HEADERS(port),
+    body: JSON.stringify({
+      action: 'apply', changes: state.applyJournal.reapply.changes,
+      expected: state.targets, rosterRevision: state.roster.revision,
+    }),
+  });
+  assert.equal(res.status, 200, res.body);
+  const settings = JSON.parse(fs.readFileSync(path.join(primary, 'agent', 'settings.json'), 'utf8'));
+  assert.equal(settings.defaultProvider, 'openai');
+  assert.equal(settings.defaultModel, 'gpt-6-sol');
+  const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
+  assert.equal(journal.status, 'completed');
+  assert.notEqual(journal.id, 'crash-route');
+});
+
+test('reapply is refused on a hash mismatch and leaves the journal running', async (t) => {
+  const { port, stable, primary } = await withServer(t);
+  const journalPath = path.join(stable, 'agent', 'primary-agents', 'apply-journal.json');
+  fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+  const recorded = { changes: [{ kind: 'setSummarizer', modelId: 'ollama/glm-5.3' }], rosterRevision: 0 };
+  fs.writeFileSync(journalPath, JSON.stringify({
+    v: 1, id: 'crash-stale', action: 'apply', status: 'running',
+    startedAt: '2026-10-20T11:00:00.000Z', request: recorded, steps: [],
+  }, null, 2));
+  const state = JSON.parse((await request({ port, path: '/profiles/state' })).body);
+  const settingsPath = path.join(primary, 'agent', 'settings.json');
+  const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  settings.defaultModel = 'changed-behind-the-page';
+  fs.writeFileSync(settingsPath, formatJsonText(settings, STYLE));
+  const behind = fs.readFileSync(settingsPath);
+  const res = await request({
+    port, path: '/profiles', method: 'POST', headers: JSON_HEADERS(port),
+    body: JSON.stringify({
+      action: 'apply', changes: state.applyJournal.reapply.changes,
+      expected: state.targets, rosterRevision: state.roster.revision,
+    }),
+  });
+  assert.equal(res.status, 409, res.body);
+  assert.equal(JSON.parse(res.body).code, 'STALE');
+  assert.deepEqual(fs.readFileSync(settingsPath), behind, 'the refused reapply writes nothing');
+  assert.equal(JSON.parse(fs.readFileSync(journalPath, 'utf8')).status, 'running');
+});
+
 test('POST /profiles never resolves a request value as a path', async (t) => {
   const { port, store, root } = await withServer(t);
   const expected = { ...store.state().targets, '../../../../escape': null };
@@ -268,4 +354,41 @@ test('GET /profiles/state is 404 when no profiles store is wired', async (t) => 
   const { port } = await withServer(t, { profilesState: undefined });
   const res = await request({ port, path: '/profiles/state' });
   assert.equal(res.status, 404);
+});
+
+test('the profile controller reapply reaches the real route and completes the journal', async (t) => {
+  const { port, stable, primary } = await withServer(t);
+  const journalPath = path.join(stable, 'agent', 'primary-agents', 'apply-journal.json');
+  fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+  const recorded = { changes: [{ kind: 'setSummarizer', modelId: 'ollama/glm-5.3' }], rosterRevision: 0 };
+  fs.writeFileSync(journalPath, JSON.stringify({
+    v: 1, id: 'crash-controller', action: 'apply', status: 'running',
+    startedAt: '2026-10-20T11:00:00.000Z', request: recorded, steps: [],
+  }, null, 2));
+
+  const ctx = vm.createContext({});
+  vm.runInContext(fs.readFileSync(path.join(here, '..', 'src', 'page', 'profiles-view.js'), 'utf8'), ctx,
+    { filename: 'profiles-view.js' });
+  const fetch = async (url, opts = {}) => {
+    const res = await request({
+      port, path: url, method: opts.method || 'GET',
+      headers: {
+        ...(opts.headers || {}),
+        origin: `http://127.0.0.1:${port}`,
+        'sec-fetch-site': 'same-origin',
+      },
+      body: opts.body,
+    });
+    return { status: res.status, ok: res.status >= 200 && res.status < 300, json: async () => JSON.parse(res.body) };
+  };
+  const controller = ctx.BriefProfiles.createController({ fetch, token: 'route-token' });
+  await controller.load();
+  assert.equal(controller.snapshot().view.applyJournal.status, 'interrupted');
+  const result = await controller.reapply();
+  assert.equal(result.status, '다시 적용했어요', JSON.stringify(result));
+  assert.equal(result.result.ok, true);
+  assert.equal(result.result.action, 'apply');
+  assert.equal(JSON.parse(fs.readFileSync(journalPath, 'utf8')).status, 'completed');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(primary, 'agent', 'settings.json'), 'utf8')).compaction.model,
+    'ollama/glm-5.3');
 });
