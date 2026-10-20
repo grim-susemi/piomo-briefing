@@ -406,6 +406,80 @@ async function main() {
     assert.equal(run.checks.layout390.docScrollWidth <= run.checks.layout390.innerWidth, true, '390 horizontal scroll');
     assert.deepEqual(run.checks.layout390.overflow, [], '390 elements outside the viewport');
 
+    run.checks.a11y = await page.eval(`(() => {
+      const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+      const visible = (el) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+      };
+      const labelFor = new Map();
+      for (const label of document.querySelectorAll('.pf label[for]')) {
+        const id = label.getAttribute('for');
+        if (!id) continue;
+        const text = norm((label.querySelector('.pf-sel-t') || label).textContent);
+        if (text) labelFor.set(id, text);
+      }
+      const nameOf = (el) => {
+        const aria = norm(el.getAttribute('aria-label'));
+        if (aria) return aria;
+        const ref = el.getAttribute('aria-labelledby');
+        if (ref) {
+          const text = norm(ref.split(/\\s+/).map((id) => document.getElementById(id)).filter(Boolean)
+            .map((node) => node.textContent).join(' '));
+          if (text) return text;
+        }
+        if (el.id && labelFor.has(el.id)) return labelFor.get(el.id);
+        const wrap = el.closest('label');
+        if (wrap) return norm(wrap.querySelector('.pf-sel-t') ? wrap.querySelector('.pf-sel-t').textContent : wrap.textContent);
+        if (el.tagName === 'BUTTON') return norm(el.textContent);
+        return '';
+      };
+      const controls = [...document.querySelectorAll('.pf select, .pf input, .pf button, [data-pf-side] button')]
+        .filter(visible);
+      const expected = {
+        'route-provider': '서비스', 'route-model': '모델', 'route-thinking': '추론',
+        'memory-mode': '모드', 'memory-model': '모델', 'memory-thinking': '추론',
+        'agent-lane': '레인', 'agent-pin': '핀', 'agent-pin-thinking': '추론',
+        'main-provider': '서비스', 'main-model': '모델', 'main-thinking': '추론',
+        'lane-select': 'model_profile', 'lane-literal': '직접 입력 값', 'summarizer-model': '요약 모델'
+      };
+      const rows = controls.map((el) => {
+        const labelEl = el.id ? document.querySelector('.pf label[for="' + CSS.escape(el.id) + '"] .pf-sel-t') : null;
+        return { tag: el.tagName.toLowerCase(), pf: el.getAttribute('data-pf') || '', id: el.id || '',
+          name: nameOf(el), label: el.id && labelFor.has(el.id) ? labelFor.get(el.id) : '', labelVisible: visible(labelEl) };
+      });
+      const selects = rows.filter((r) => r.tag === 'select');
+      return {
+        controls: rows.length,
+        selects: selects.length,
+        unnamed: rows.filter((r) => !r.name).map((r) => ({ tag: r.tag, pf: r.pf, id: r.id })),
+        selectsWithoutVisibleLabel: selects.filter((r) => !r.label || !r.labelVisible).map((r) => ({ pf: r.pf, id: r.id })),
+        wrongLabels: rows.filter((r) => expected[r.pf] && r.label !== expected[r.pf])
+          .map((r) => ({ pf: r.pf, expected: expected[r.pf], actual: r.label })),
+        sample: rows.filter((r) => expected[r.pf]).slice(0, 12)
+      };
+    })()`);
+    assert.deepEqual(run.checks.a11y.unnamed, [], 'controls without an accessible name');
+    assert.deepEqual(run.checks.a11y.selectsWithoutVisibleLabel, [], 'select without a visible label');
+    assert.deepEqual(run.checks.a11y.wrongLabels, [], 'per-control label mismatch');
+    assert.ok(run.checks.a11y.selects > 0, 'no selects measured');
+
+    run.checks.header390 = await page.eval(`(() => {
+      const keep = document.querySelector('.pf-sub .pf-keep');
+      if (!keep) return { present: false };
+      const range = document.createRange();
+      range.selectNodeContents(keep);
+      const rects = [...range.getClientRects()].map((r) => ({ top: Math.round(r.top), left: Math.round(r.left), width: Math.round(r.width) }));
+      const lines = [...new Set(rects.map((r) => r.top))].length;
+      return { present: true, text: keep.textContent, whiteSpace: getComputedStyle(keep).whiteSpace, rects, lines,
+        overflow: keep.getBoundingClientRect().right > innerWidth + 1 };
+    })()`);
+    assert.equal(run.checks.header390.present, true, 'header phrase span missing');
+    assert.equal(run.checks.header390.whiteSpace, 'nowrap', 'header phrase is breakable');
+    assert.equal(run.checks.header390.lines, 1, 'header phrase split across lines at 390');
+    assert.equal(run.checks.header390.overflow, false, 'header phrase overflows at 390');
+
     run.checks.contrast = await page.eval(`(() => {
       const parse = (value) => {
         const m = /rgba?\\(([^)]+)\\)/.exec(value || '');
@@ -437,7 +511,7 @@ async function main() {
       };
       const rows = [];
       const seen = new Set();
-      const selectors = ['.pf-title', '.pf-sub', '.pf-agent-n', '.pf-lbl', '.pf-route-ko', '.pf-route-en',
+      const selectors = ['.pf-title', '.pf-sub', '.pf-agent-n', '.pf-lbl', '.pf-sel-t', '.pf-route-ko', '.pf-route-en',
         '.pf-btn', '.pf-chip', '.pf-ro-val', '.pf-card-sum', '.pf-nav-b'];
       for (const selector of selectors) {
         for (const el of document.querySelectorAll(selector)) {
@@ -880,6 +954,24 @@ function writeEvidence() {
   stale.push(`backups unchanged: ${run.stale?.backupsUnchanged}; journal unchanged: ${run.stale?.journalUnchanged}; roster unchanged: ${run.stale?.rosterUnchanged}`);
   stale.push(`result: ${run.stale?.httpStatus === 409 && run.stale?.backupsUnchanged && run.stale?.journalUnchanged && run.stale?.rosterUnchanged ? 'PASS' : 'FAIL'}`);
   fs.writeFileSync(path.join(EVIDENCE, 'task-13-piomo-primary-agents-stale.txt'), stale.join('\n') + '\n');
+
+  const a11y = run.checks.a11y || {};
+  const a11yLines = [
+    'piomo-primary-agents todo 13 - profiles view accessible names (fixed build)',
+    `build: served page sha256 ${run.build?.hash} (${run.build?.pageBytes} B)`,
+    `source: src/page/profiles-view.js sha256 ${sha256(fs.readFileSync(path.join(ROOT, 'src/page/profiles-view.js')))}`,
+    `controls total ${a11y.controls ?? '?'}`,
+    `selects total ${a11y.selects ?? '?'}`,
+    `controls without accessible name ${a11y.unnamed?.length ?? '?'}`,
+    `selects without a visible label ${a11y.selectsWithoutVisibleLabel?.length ?? '?'}`,
+    `per-control label mismatches ${a11y.wrongLabels?.length ?? '?'}`,
+    `header 390: ${JSON.stringify(run.checks.header390 || null)}`,
+    `labels: ${JSON.stringify(a11y.sample || [])}`,
+    `result: ${run.checks.a11y && run.checks.a11y.unnamed?.length === 0
+      && run.checks.a11y.selectsWithoutVisibleLabel?.length === 0 && run.checks.a11y.wrongLabels?.length === 0
+      && run.checks.header390?.lines === 1 ? 'PASS' : 'FAIL'}`,
+  ];
+  fs.writeFileSync(path.join(EVIDENCE, 'task-13-piomo-primary-agents-a11y.txt'), a11yLines.join('\n') + '\n');
 
   fs.writeFileSync(path.join(OUT, 'captures.json'), `${JSON.stringify(run, null, 2)}\n`);
 }
