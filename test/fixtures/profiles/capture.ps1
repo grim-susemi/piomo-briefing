@@ -398,6 +398,13 @@ function Invoke-Scenario {
     $psi.CreateNoWindow = $true
     $psi.WorkingDirectory = $RepoRoot
     $psi.EnvironmentVariables['USERPROFILE'] = (Join-Path $root 'home')
+    # The child is Windows PowerShell 5.1. Under pwsh the inherited PSModulePath points at
+    # PowerShell 7 modules, which hides the 5.1 inbox modules (Get-FileHash and friends fail).
+    # Give the child only the Windows PowerShell module path; the parent env is untouched.
+    $psi.EnvironmentVariables['PSModulePath'] = @(
+        (Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules'),
+        (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\Modules')
+    ) -join ';'
 
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $psi
