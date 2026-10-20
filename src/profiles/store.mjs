@@ -24,8 +24,7 @@ import { fileURLToPath } from 'node:url';
 
 import { parseJsonc } from './contract/jsonc.mjs';
 import { atomicWriteJson, writeRoster as contractWriteRoster } from './contract/atomic.mjs';
-import { validateRoster } from './contract/schema.mjs';
-import { readRoster } from './contract/schema.mjs';
+import { readMemory, readRoster, validateRoster } from './contract/schema.mjs';
 import { AGENT_IDS, LANES, THINKING } from './contract/constants.mjs';
 import {
   clone, commandCodeWarning, deepEqual, getEffectiveMemoryCatalog, getMemorySelectionFromConfig,
@@ -36,7 +35,12 @@ import {
   setModelProfileSelection, setProfileLayerModel, stripEngineSectionAlias,
   syncStable500RoleModels,
 } from './merge.mjs';
-import { PROFILE_META, ROLE_INVENTORY, buildRoutingRows, getMemoryReasoning, getProfile } from './model.mjs';
+import {
+  CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE, PROFILE_META, ROLE_INVENTORY, buildRoutingRows,
+  expandLayerRoles, getMemoryReasoning, getProfile, newRouteRow,
+} from './model.mjs';
+import { chatGptPickerModels, recommendationGuide, refreshRoutingRows } from './refresh-5.1.38.mjs';
+import { compareRecommendation, getRecommendationManifestShape } from './recommend.mjs';
 
 export const PRIMARY_HOME_DEFAULT = 'C:/Users/USER/.omo';
 export const MIRROR_HOME_DEFAULTS = [
@@ -45,6 +49,9 @@ export const MIRROR_HOME_DEFAULTS = [
 ];
 export const STABLE_HOME_DEFAULT = 'C:/Users/USER/.omo-stable-500/home/.omo';
 export const PLUGIN_DEFAULT = 'C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.38-r1/package/plugin/extensions/omo.js';
+// The switcher's recommendation table is read-only reference data; the board never
+// writes it and tests inject their own object instead of touching the desktop app.
+export const RECOMMENDATION_MANIFEST_DEFAULT = 'C:/Users/USER/Desktop/OpenCode_Modes/OMO_Native_Recommendation.json';
 export const INVENTORY_PATH = fileURLToPath(new URL('./inventory-5.1.38.json', import.meta.url));
 export const BACKUP_DIR = ['runtime', 'native-profile-switcher-backups'];
 export const REDACTED = '<redacted>';
@@ -451,6 +458,7 @@ export function openProfilesStore(options = {}) {
   const inventoryPath = options.inventoryPath ?? INVENTORY_PATH;
   const hooks = options.hooks ?? {};
   const journalEnabled = options.journal !== false;
+  const recommendationManifestPath = options.recommendationManifestPath ?? RECOMMENDATION_MANIFEST_DEFAULT;
   const agentDir = join(roots.stableHome, 'agent');
   const journalPath = join(agentDir, 'primary-agents', 'apply-journal.json');
   const backupDir = join(roots.primaryHome, ...BACKUP_DIR);
@@ -458,6 +466,108 @@ export function openProfilesStore(options = {}) {
   function loadInventory() {
     if (options.inventory) return options.inventory;
     try { return JSON.parse(fs.readFileSync(inventoryPath, UTF8)); } catch { return null; }
+  }
+
+  function readRecommendationManifest() {
+    if (isPlainObject(options.recommendationManifest)) {
+      return { manifest: options.recommendationManifest, warning: null };
+    }
+    let text;
+    try {
+      text = fs.readFileSync(recommendationManifestPath, UTF8);
+    } catch (error) {
+      if (error?.code === 'ENOENT') return { manifest: null, warning: null };
+      return { manifest: null, warning: `recommendation manifest unreadable: ${error.message}` };
+    }
+    try {
+      const parsed = JSON.parse(String(text).replace(/^\uFEFF/, ''));
+      getRecommendationManifestShape(parsed);
+      return { manifest: parsed, warning: null };
+    } catch (error) {
+      return { manifest: null, warning: `recommendation manifest ignored: ${error.message}` };
+    }
+  }
+
+  // The host registry is handed over as a getter: extension.mjs points it at the live
+  // session context, while tests pass an array. Only the ChatGPT-subscription models
+  // are added to the picker, so the catalog stays the source of every other provider.
+  function registryPickerModels() {
+    const source = options.registry ?? options.registryModels ?? [];
+    let available;
+    try { available = typeof source === 'function' ? source() : source; } catch { available = []; }
+    if (available && typeof available.getAvailable === 'function') {
+      try { available = available.getAvailable(); } catch { available = []; }
+    }
+    if (!Array.isArray(available)) return [];
+    const models = [];
+    for (const item of available) {
+      if (typeof item === 'string') {
+        const at = item.indexOf('/');
+        models.push(at > 0 ? { provider: item.slice(0, at), id: item.slice(at + 1) } : { provider: null, id: item });
+        continue;
+      }
+      if (!isPlainObject(item)) continue;
+      const raw = typeof item.id === 'string' ? item.id
+        : typeof item.modelId === 'string' ? item.modelId
+          : typeof item.model === 'string' ? item.model : '';
+      if (!raw) continue;
+      let provider = typeof item.provider === 'string' ? item.provider : null;
+      let id = raw;
+      const at = raw.indexOf('/');
+      if (at > 0) {
+        const prefix = raw.slice(0, at);
+        if (!provider || provider === prefix) {
+          provider = provider ?? prefix;
+          id = raw.slice(at + 1);
+        }
+      }
+      models.push({ provider, id });
+    }
+    return chatGptPickerModels({ registryModels: models }).map((id) => ({
+      provider: CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE,
+      model: `${CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE}/${id}`,
+    }));
+  }
+
+  function routingRowsFor(inventory, layer) {
+    if (!inventory) return buildRoutingRows({ inventory: ROLE_INVENTORY, layer });
+    try {
+      return refreshRoutingRows({ inventory, layer });
+    } catch {
+      return buildRoutingRows({ inventory: ROLE_INVENTORY, layer });
+    }
+  }
+
+  function attachRecommendations(rows, catalog, layer, manifest) {
+    // expandLayerRoles resolves inherited category routes exactly like the switcher's
+    // comparison; compareRecommendation then reports the real status per route.
+    const comparison = compareRecommendation(expandLayerRoles({ catalog, layer }).map(newRouteRow), manifest);
+    const byKey = new Map(comparison.Items.map((item) => [`${item.Section}/${item.Role}`, item]));
+    for (const row of rows) {
+      const key = `${row.section}/${row.role}`;
+      let item = byKey.get(key);
+      if (!item) {
+        // A role that exists only in the 5.1.38 inventory is not in expandLayerRoles;
+        // compare its own row so it still carries a real status, never 'unknown'.
+        const alias = typeof row.model === 'string' ? row.model : '';
+        const entry = alias && isPlainObject(catalog) ? catalog[alias] : null;
+        const unresolved = Boolean(alias)
+          && !(isPlainObject(entry) && typeof entry.model === 'string' && entry.model.trim());
+        item = compareRecommendation([{
+          Section: row.section,
+          Role: row.role,
+          ModelKey: alias,
+          ModelId: unresolved ? '' : String(entry?.model ?? ''),
+          Variant: entry ? getMemoryReasoning(entry) : String(row.reasoning ?? ''),
+          Unresolved: unresolved,
+          EffectiveAlias: '',
+          EffectiveCategory: '',
+          BadgeEn: String(row.BadgeEn ?? ''),
+        }], manifest).Items[0];
+      }
+      row.recommendation = item;
+    }
+    return comparison;
   }
 
   function specs() {
@@ -547,7 +657,8 @@ export function openProfilesStore(options = {}) {
 
   function state() {
     const files = readAll();
-    const inventory = inventoryStatus();
+    const inventoryView = inventoryStatus();
+    const inventoryRaw = loadInventory();
     const configFile = files.get('omo.jsonc');
     const settingsFile = files.get('agent/settings.json');
     const sidecarFile = files.get('runtime/native-profile-switcher-main.json');
@@ -557,7 +668,12 @@ export function openProfilesStore(options = {}) {
     const sidecar = sidecarFile?.value ?? null;
     const rosterRead = readRoster(agentDir, { fs });
     const layer = layerOf(config, profile);
-    const rows = buildRoutingRows({ inventory: ROLE_INVENTORY, layer }).map((row) => {
+    const catalog = config?.['[native]']?.models ?? config?.['[senpi]']?.models ?? null;
+    const warnings = [];
+    if (rosterRead.warning) warnings.push(rosterRead.warning.message ?? rosterRead.warning);
+    if (configFile?.error) warnings.push(`omo.jsonc: ${configFile.error.message}`);
+    if (settingsFile?.error) warnings.push(`agent/settings.json: ${settingsFile.error.message}`);
+    const rows = routingRowsFor(inventoryRaw, layer).map((row) => {
       const entry = layer?.[row.section]?.[row.role];
       return {
         ...row,
@@ -565,15 +681,49 @@ export function openProfilesStore(options = {}) {
         reasoning: isPlainObject(entry) ? entry.reasoning ?? entry.variant ?? null : null,
       };
     });
+    const manifestRead = readRecommendationManifest();
+    if (manifestRead.warning) warnings.push(manifestRead.warning);
+    const recommendation = attachRecommendations(rows, catalog, layer, manifestRead.manifest);
+    let guide = null;
+    if (inventoryRaw) {
+      try {
+        // The switcher's manifest still names 5.1.33 in its source URLs; only its
+        // descriptive fields belong in the 5.1.38 guide, whose pins come from inventory.
+        guide = recommendationGuide({
+          inventory: inventoryRaw,
+          manifest: manifestRead.manifest
+            ? { title: manifestRead.manifest.title, snapshotDate: manifestRead.manifest.snapshotDate }
+            : null,
+        });
+      } catch (error) {
+        warnings.push(`recommendation guide: ${error.message}`);
+      }
+    }
+    // The extension owns these files; the board only projects them for display.
+    const rosterAgents = {};
+    for (const id of AGENT_IDS) {
+      const memoryRead = readMemory(agentDir, id, { fs });
+      if (memoryRead.warning) warnings.push(memoryRead.warning.message);
+      rosterAgents[id] = { ...rosterRead.roster.agents[id] };
+      if (memoryRead.memory) {
+        rosterAgents[id].remembered = {
+          provider: memoryRead.memory.model.provider,
+          modelId: memoryRead.memory.model.modelId,
+          thinking: memoryRead.memory.thinking,
+          rosterRev: memoryRead.memory.rosterRev,
+          updatedAt: memoryRead.memory.updatedAt,
+        };
+      }
+    }
     const mainOverride = profile ? readMainOverride(sidecar, profile.omoProfile) : null;
     const main = profile ? {
       effective: resolveMainDefaults(profile, sidecar),
       override: mainOverride,
     } : { effective: null, override: null };
     const comments = Boolean(configFile?.comments);
-    const readOnly = inventory.stale || comments || !configFile?.exists || !settingsFile?.exists
+    const readOnly = inventoryView.stale || comments || !configFile?.exists || !settingsFile?.exists
       || Boolean(configFile?.error) || Boolean(settingsFile?.error);
-    const reason = inventory.stale ? 'INVENTORY_STALE'
+    const reason = inventoryView.stale ? 'INVENTORY_STALE'
       : comments ? 'COMMENTS_PRESENT'
         : !configFile?.exists || !settingsFile?.exists ? 'MISSING_CONFIG'
           : configFile?.error || settingsFile?.error ? 'INVALID_CONFIG' : null;
@@ -584,8 +734,8 @@ export function openProfilesStore(options = {}) {
       generatedAt: new Date(nowFn()).toISOString(),
       readOnly,
       readOnlyReason: reason,
-      banner: inventory.stale ? INVENTORY_STALE_LABEL : null,
-      inventory,
+      banner: inventoryView.stale ? INVENTORY_STALE_LABEL : null,
+      inventory: inventoryView,
       homes: {
         primary: roots.primaryHome,
         stable: roots.stableHome,
@@ -602,7 +752,8 @@ export function openProfilesStore(options = {}) {
         mainThinking: item.mainThinking, summary: item.summary,
         current: profile?.key === item.key,
       })),
-      routing: { rows, layer },
+      routing: { rows, layer, recommendation },
+      guide,
       main,
       modelProfile: settings ? getModelProfileSettings(config ?? {}, profile?.omoProfile ?? '') : null,
       summarizer: settings ? readCompactionSummarizer(settings) : null,
@@ -610,15 +761,12 @@ export function openProfilesStore(options = {}) {
         kibitzer: getMemorySelectionFromConfig(config, profile?.omoProfile ?? ''),
         reflection: getReflectionMemorySelectionFromConfig(config, profile?.omoProfile ?? ''),
       } : null,
-      catalog: config?.['[native]']?.models ?? config?.['[senpi]']?.models ?? null,
-      roster: { revision: rosterRead.roster.revision, agents: rosterRead.roster.agents, warning: rosterRead.warning },
+      catalog,
+      registryModels: registryPickerModels(),
+      roster: { revision: rosterRead.roster.revision, agents: rosterAgents, warning: rosterRead.warning },
       targets: targetsView,
       applyJournal: journalView(),
-      warnings: [
-        ...(rosterRead.warning ? [rosterRead.warning] : []),
-        ...(configFile?.error ? [`omo.jsonc: ${configFile.error.message}`] : []),
-        ...(settingsFile?.error ? [`agent/settings.json: ${settingsFile.error.message}`] : []),
-      ],
+      warnings,
     };
     return redact(view);
   }

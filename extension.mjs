@@ -1105,8 +1105,17 @@ export function createBriefingExtension(opts = {}) {
 
     // Plan tool, board server host and live worker rows of this session (lead sessions only; never called for workers).
     let hostSid = null;
-    const profilesStore = (opts.createProfilesStore ?? openProfilesStore)(opts.profilesStoreOptions ?? {});
+    // The board store is built before any session context exists, so the host model
+    // registry is handed over as a getter and resolves to the current session's
+    // registry whenever GET /profiles/state reads the picker list.
+    let profilesCtx = null;
+    const profilesStoreOptions = { ...(opts.profilesStoreOptions ?? {}) };
+    if (!Object.hasOwn(profilesStoreOptions, 'registry')) {
+      profilesStoreOptions.registry = () => profilesCtx?.modelRegistry ?? null;
+    }
+    const profilesStore = (opts.createProfilesStore ?? openProfilesStore)(profilesStoreOptions);
     function setupLive(ctx) {
+      profilesCtx = ctx;
       planTool = (opts.createPlanTool ?? createPlanTool)({
         store,
         sessionId: sid,

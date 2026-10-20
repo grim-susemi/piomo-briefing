@@ -155,6 +155,17 @@
       if (!entry) return;
       out.push({ alias: alias, model: str(entry.model), variant: str(entry.variant) || str(entry.reasoning) });
     });
+    // The ChatGPT-subscription picker is completed from the live host registry.
+    // Registry-only models are appended; the catalog stays the source of truth for
+    // every other provider, and a missing registry degrades to the catalog alone.
+    arr(view && view.registryModels).forEach(function (item) {
+      var model = str(item && (item.model || item.id));
+      if (!model) return;
+      if (model.indexOf('/') < 0 && item && str(item.provider)) model = str(item.provider) + '/' + model;
+      if (!providerOf(model)) return;
+      for (var i = 0; i < out.length; i++) if (out[i].model === model) return;
+      out.push({ alias: str(item && item.alias) || bareModel(model), model: model, variant: str(item && item.variant) });
+    });
     return out;
   }
   function providerOf(model) {
