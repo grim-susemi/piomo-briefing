@@ -1,0 +1,2 @@
+# Tests and checked-in fixtures assume LF; core.autocrlf=true on Windows otherwise checks files out with CRLF.
+* text=auto eol=lf
