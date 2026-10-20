@@ -1,0 +1,15 @@
+{
+    "scenario":  "apply-kimi-deepseek",
+    "mode":  "Apply",
+    "modeArgs":  [
+                     "-Apply",
+                     "-ProfileKey",
+                     "kimi-deepseek"
+                 ],
+    "exitCode":  0,
+    "durationMs":  4879,
+    "engine":  "powershell.exe",
+    "intent":  null,
+    "stream":  null,
+    "result":  null
+}

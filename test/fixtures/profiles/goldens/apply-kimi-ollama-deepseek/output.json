@@ -1,0 +1,15 @@
+{
+    "scenario":  "apply-kimi-ollama-deepseek",
+    "mode":  "Apply",
+    "modeArgs":  [
+                     "-Apply",
+                     "-ProfileKey",
+                     "kimi-ollama-deepseek"
+                 ],
+    "exitCode":  0,
+    "durationMs":  4513,
+    "engine":  "powershell.exe",
+    "intent":  null,
+    "stream":  "✓ ollama-cloud provider 보장됨 (키는 환경변수 OLLAMA_API_KEY에서 읽음)\n",
+    "result":  null
+}

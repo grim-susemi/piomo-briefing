@@ -1,0 +1,35 @@
+{
+    "defaultProvider":  "chatgpt-subscription",
+    "defaultModel":  "gpt-6-sol",
+    "defaultThinkingLevel":  "high",
+    "tuiMode":  "fullscreen",
+    "packages":  [
+                     "<redacted>",
+                     "C:/Users/USER/.omo-stable-500/home/.omo/agent/packages/piomo-agent-coordination-mod"
+                 ],
+    "extensions":  [
+                       "C:/Users/USER/orca/projects/herdr-agent-sidebar-diagnosis/repair/herdr-senpi.mjs"
+                   ],
+    "hideThinkingBlock":  true,
+    "theme":  "dark",
+    "markdown":  {
+                     "mermaid":  "streaming"
+                 },
+    "compaction":  {
+                       "enabled":  true,
+                       "summarizationMaxDurationMs":  900000,
+                       "model":  "ollama/deepseek-v4.1-flash"
+                   },
+    "smoothStreamingFps":  60,
+    "defaultProjectTrust":  "always",
+    "fullscreenScrollbar":  "auto",
+    "fullscreenCopyOnSelect":  true,
+    "fullscreenWheelScrollLines":  "auto",
+    "retry":  {
+                  "fallbackChains":  {
+                                         "*":  [
+
+                                               ]
+                                     }
+              }
+}

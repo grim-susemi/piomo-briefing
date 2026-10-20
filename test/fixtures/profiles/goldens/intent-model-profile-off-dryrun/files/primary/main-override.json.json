@@ -1,0 +1,17 @@
+{
+    "native-gpt-deepseek":  {
+                                "provider":  "commandcode",
+                                "model":  "deepseek/deepseek-v4-pro",
+                                "thinking":  "high"
+                            },
+    "native-cmd-glm-deepseek":  {
+                                    "provider":  "anthropic-subscription",
+                                    "model":  "claude-opus-5-5",
+                                    "thinking":  "medium"
+                                },
+    "native-experimental-custom":  {
+                                       "provider":  "chatgpt-subscription",
+                                       "model":  "gpt-6-sol",
+                                       "thinking":  "high"
+                                   }
+}

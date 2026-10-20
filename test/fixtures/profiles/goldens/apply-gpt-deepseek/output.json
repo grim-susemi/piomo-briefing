@@ -1,0 +1,15 @@
+{
+    "scenario":  "apply-gpt-deepseek",
+    "mode":  "Apply",
+    "modeArgs":  [
+                     "-Apply",
+                     "-ProfileKey",
+                     "gpt-deepseek"
+                 ],
+    "exitCode":  0,
+    "durationMs":  6198,
+    "engine":  "powershell.exe",
+    "intent":  null,
+    "stream":  null,
+    "result":  null
+}

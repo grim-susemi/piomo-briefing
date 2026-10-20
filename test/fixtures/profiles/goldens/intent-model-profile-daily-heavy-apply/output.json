@@ -1,0 +1,55 @@
+{
+    "scenario":  "intent-model-profile-daily-heavy-apply",
+    "mode":  "ApplyIntentPath.Apply",
+    "modeArgs":  [
+                     "-ApplyIntentPath",
+                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\intents\\model-profile-daily-heavy.json",
+                     "-OutFile",
+                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\out\\intent-model-profile-daily-heavy-apply\\result.json"
+                 ],
+    "exitCode":  0,
+    "durationMs":  2289,
+    "engine":  "powershell.exe",
+    "intent":  {
+                   "schema":  1,
+                   "profileKey":  "gpt-kimi-deepseek",
+                   "activate":  false,
+                   "routing":  [
+
+                               ],
+                   "modelProfile":  {
+                                        "selection":  "daily-heavy",
+                                        "literal":  ""
+                                    }
+               },
+    "stream":  null,
+    "result":  {
+                   "steps":  [
+                                 {
+                                     "name":  "Invoke-PendingApply",
+                                     "ok":  true,
+                                     "message":  "보류 변경 1건을 반영했습니다."
+                                 },
+                                 {
+                                     "name":  "modelProfile",
+                                     "ok":  true,
+                                     "message":  "보류 변경 1건을 반영했습니다."
+                                 }
+                             ],
+                   "written":  [
+                                   {
+                                       "path":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\omo.jsonc",
+                                       "backupPath":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\runtime\\native-profile-switcher-backups\\omo-20261020-091509-727.jsonc",
+                                       "backupSha256":  "32cb983549937815f9dda1b7c7e772b8c79be2fd960995f585c7ba5d4c86dcf9",
+                                       "postSha256":  "0b6968bc8a001602d6b0e5ef4f900d5a3ff68676fde679e1fbd44ea3c0986fc9"
+                                   }
+                               ],
+                   "nonFileEffects":  [
+
+                                      ],
+                   "skippedUnderIsolation":  [
+
+                                             ],
+                   "partial":  false
+               }
+}

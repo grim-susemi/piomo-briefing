@@ -1,0 +1,78 @@
+{
+    "scenario":  "intent-model-profile-off-dryrun",
+    "mode":  "ApplyIntentPath.DryRun",
+    "modeArgs":  [
+                     "-ApplyIntentPath",
+                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\intents\\model-profile-off.json",
+                     "-OutFile",
+                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\out\\intent-model-profile-off-dryrun\\result.json",
+                     "-DryRun"
+                 ],
+    "exitCode":  0,
+    "durationMs":  4323,
+    "engine":  "powershell.exe",
+    "intent":  {
+                   "schema":  1,
+                   "profileKey":  "gpt-kimi-deepseek",
+                   "activate":  false,
+                   "routing":  [
+
+                               ],
+                   "modelProfile":  {
+                                        "selection":  "off",
+                                        "literal":  ""
+                                    }
+               },
+    "stream":  null,
+    "result":  {
+                   "files":  [
+
+                             ],
+                   "activation":  {
+                                      "from":  "cmd-glm-deepseek",
+                                      "to":  "cmd-glm-deepseek"
+                                  },
+                   "nonFileEffects":  [
+
+                                      ],
+                   "skippedUnderIsolation":  [
+
+                                             ],
+                   "steps":  [
+                                 {
+                                     "name":  "Invoke-PendingApply",
+                                     "ok":  true,
+                                     "message":  "보류 변경 1건을 반영했습니다."
+                                 },
+                                 {
+                                     "name":  "modelProfile",
+                                     "ok":  true,
+                                     "message":  "보류 변경 1건을 반영했습니다."
+                                 }
+                             ],
+                   "preSha256":  {
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.config\\opencode\\opencode.json":  "1a8946a566d6cfd2f283c91d9f0cca923badb1be8350bbc0bc93082423494abf",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\agent\\models.json":  "df194eb4cccfbb267f974677a61bca16bb457e00ccfb5b057c621eb2bdea33c8",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\agent\\models-store.json":  "40a1ed0a447021d4aaad4751c59b0b40e8b4d0d0966186dc32aa9453c17e19b7",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\agent\\native-profile-selection.json":  "cee5194df390b71b0331fe490a06490a75b621a5b48cc1c7f8d40e0309d4939e",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\agent\\settings.json":  "ee9a7577e3fe0b5b189cf70fcf8a6ff0d07f542ec91f152d2bef0d470eddf5b8",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\commandcode-subscriptions.json":  null,
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\native-profile-selection.json":  "cee5194df390b71b0331fe490a06490a75b621a5b48cc1c7f8d40e0309d4939e",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\omo.jsonc":  "32cb983549937815f9dda1b7c7e772b8c79be2fd960995f585c7ba5d4c86dcf9",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\runtime\\native-profile-selection.json":  "cee5194df390b71b0331fe490a06490a75b621a5b48cc1c7f8d40e0309d4939e",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\runtime\\native-profile-switcher-main.json":  "d0fcb94af9aa1d00c507d81757b7403aded37d349a9f76e66fb3abc6fd0f5095",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\runtime\\native-profile-switcher-recommendation.json":  "2d0c1b955897c2b06d1bb2ce8c9036dc86ebd413f7a16d9c64e5db5bc5047b04",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo-stable-500\\home\\.omo\\agent\\models.json":  "b1d814174459850a074e2d30b22e2b00be5b29c1f86b6649274c4d83d5c16975",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo-stable-500\\home\\.omo\\agent\\models-store.json":  "0cf6fa8e883a273b68c387fdf7c8c5aa35def0075ba50d0c0d179d719be90f64",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo-stable-500\\home\\.omo\\agent\\native-profile-selection.json":  "d0213309db7b581b24607e58f1a0adc8c73b80df1afece4423db0e020ba6f7c6",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo-stable-500\\home\\.omo\\agent\\settings.json":  "9dad73b6140ec8f0b9d0740c1d4f42a1a71ba0916adf16746020e4f94cdd9439",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo-stable-500\\home\\.omo\\commandcode-subscriptions.json":  null,
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo-stable-500\\home\\.omo\\native-profile-selection.json":  "d0213309db7b581b24607e58f1a0adc8c73b80df1afece4423db0e020ba6f7c6",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo-stable-500\\home\\.omo\\omo.jsonc":  "82f9867f66412d84b36c070023ed298405c00101ad0b45b2acd5d56c062ecc11",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo-stable-500\\home\\.omo\\runtime\\native-profile-selection.json":  "d0213309db7b581b24607e58f1a0adc8c73b80df1afece4423db0e020ba6f7c6",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo-stable-500\\home\\.omo\\runtime\\native-profile-switcher-main.json":  "edc9f01c693a7c140b46e870e32a64818b8d280b754c6149549d65e7517ac17f",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\inputs\\OMO_Native_Recommendation.json":  "946865e7dc92c625aac23dea349b3da2154d56a98c7e226766d9b3ed24337d3b"
+                                 },
+                   "partial":  false
+               }
+}

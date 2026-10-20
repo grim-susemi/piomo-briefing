@@ -1,0 +1,15 @@
+{
+    "primary":  [
+                    {
+                        "name":  "omo-20261020-091554-513.jsonc",
+                        "sha256":  "32cb983549937815f9dda1b7c7e772b8c79be2fd960995f585c7ba5d4c86dcf9"
+                    },
+                    {
+                        "name":  "senpi-settings-20261020-091554-513.json",
+                        "sha256":  "ee9a7577e3fe0b5b189cf70fcf8a6ff0d07f542ec91f152d2bef0d470eddf5b8"
+                    }
+                ],
+    "stable":  [
+
+               ]
+}

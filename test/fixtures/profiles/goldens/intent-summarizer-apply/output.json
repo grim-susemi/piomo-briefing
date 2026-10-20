@@ -1,0 +1,58 @@
+{
+    "scenario":  "intent-summarizer-apply",
+    "mode":  "ApplyIntentPath.Apply",
+    "modeArgs":  [
+                     "-ApplyIntentPath",
+                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\intents\\summarizer.json",
+                     "-OutFile",
+                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\out\\intent-summarizer-apply\\result.json"
+                 ],
+    "exitCode":  0,
+    "durationMs":  2630,
+    "engine":  "powershell.exe",
+    "intent":  {
+                   "schema":  1,
+                   "profileKey":  "gpt-kimi-deepseek",
+                   "activate":  false,
+                   "routing":  [
+
+                               ],
+                   "summarizer":  "opencode-go/deepseek-v4-flash"
+               },
+    "stream":  null,
+    "result":  {
+                   "steps":  [
+                                 {
+                                     "name":  "Invoke-PendingApply",
+                                     "ok":  true,
+                                     "message":  "보류 변경 1건을 반영했습니다."
+                                 },
+                                 {
+                                     "name":  "summarizer",
+                                     "ok":  true,
+                                     "message":  "보류 변경 1건을 반영했습니다."
+                                 }
+                             ],
+                   "written":  [
+                                   {
+                                       "path":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\agent\\settings.json",
+                                       "backupPath":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\runtime\\native-profile-switcher-backups\\senpi-settings-20261020-091546-109.json",
+                                       "backupSha256":  "ee9a7577e3fe0b5b189cf70fcf8a6ff0d07f542ec91f152d2bef0d470eddf5b8",
+                                       "postSha256":  "b6317fe4bba4799fd9024cd42cc3af5ee720db797e7027a6a24b7b29374f0dd0"
+                                   },
+                                   {
+                                       "path":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo-stable-500\\home\\.omo\\agent\\settings.json",
+                                       "backupPath":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo-stable-500\\home\\.omo\\runtime\\native-profile-switcher-backups\\senpi-settings-20261020-091546-163.json",
+                                       "backupSha256":  "9dad73b6140ec8f0b9d0740c1d4f42a1a71ba0916adf16746020e4f94cdd9439",
+                                       "postSha256":  "c26cf95792878566c64d98fd60150ab6f690d32ffd1fc5daad2e4980c692f60c"
+                                   }
+                               ],
+                   "nonFileEffects":  [
+
+                                      ],
+                   "skippedUnderIsolation":  [
+
+                                             ],
+                   "partial":  false
+               }
+}

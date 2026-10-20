@@ -1,0 +1,15 @@
+{
+    "scenario":  "apply-cmd-glm-deepseek",
+    "mode":  "Apply",
+    "modeArgs":  [
+                     "-Apply",
+                     "-ProfileKey",
+                     "cmd-glm-deepseek"
+                 ],
+    "exitCode":  0,
+    "durationMs":  4434,
+    "engine":  "powershell.exe",
+    "intent":  null,
+    "stream":  null,
+    "result":  null
+}

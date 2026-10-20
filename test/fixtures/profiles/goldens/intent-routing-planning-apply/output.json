@@ -1,0 +1,57 @@
+{
+    "scenario":  "intent-routing-planning-apply",
+    "mode":  "ApplyIntentPath.Apply",
+    "modeArgs":  [
+                     "-ApplyIntentPath",
+                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\intents\\routing-planning.json",
+                     "-OutFile",
+                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\out\\intent-routing-planning-apply\\result.json"
+                 ],
+    "exitCode":  0,
+    "durationMs":  2968,
+    "engine":  "powershell.exe",
+    "intent":  {
+                   "schema":  1,
+                   "profileKey":  "gpt-kimi-deepseek",
+                   "activate":  false,
+                   "routing":  [
+                                   {
+                                       "section":  "agents",
+                                       "role":  "plan-consultant",
+                                       "provider":  "chatgpt-subscription",
+                                       "model":  "chatgpt-subscription/gpt-5.6-terra",
+                                       "reasoning":  "high"
+                                   }
+                               ]
+               },
+    "stream":  null,
+    "result":  {
+                   "steps":  [
+                                 {
+                                     "name":  "Invoke-PendingApply",
+                                     "ok":  true,
+                                     "message":  "보류 변경 1건을 반영했습니다."
+                                 },
+                                 {
+                                     "name":  "routing:native-gpt-kimi-deepseek|agents|plan-consultant",
+                                     "ok":  true,
+                                     "message":  "보류 변경 1건을 반영했습니다."
+                                 }
+                             ],
+                   "written":  [
+                                   {
+                                       "path":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\omo.jsonc",
+                                       "backupPath":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261020-091415-592\\home\\.omo\\runtime\\native-profile-switcher-backups\\omo-20261020-091603-346.jsonc",
+                                       "backupSha256":  "32cb983549937815f9dda1b7c7e772b8c79be2fd960995f585c7ba5d4c86dcf9",
+                                       "postSha256":  "aa23c6a83a1b50cc50b6520065eb6aca4f0ec02eb72669d46cb9dfd2028a9ff3"
+                                   }
+                               ],
+                   "nonFileEffects":  [
+
+                                      ],
+                   "skippedUnderIsolation":  [
+
+                                             ],
+                   "partial":  false
+               }
+}

@@ -1,0 +1,22 @@
+{
+    "primary":  [
+                    {
+                        "name":  "omo-20261020-091546-109.jsonc",
+                        "sha256":  "32cb983549937815f9dda1b7c7e772b8c79be2fd960995f585c7ba5d4c86dcf9"
+                    },
+                    {
+                        "name":  "senpi-settings-20261020-091546-109.json",
+                        "sha256":  "ee9a7577e3fe0b5b189cf70fcf8a6ff0d07f542ec91f152d2bef0d470eddf5b8"
+                    }
+                ],
+    "stable":  [
+                   {
+                       "name":  "omo-20261020-091546-163.jsonc",
+                       "sha256":  "82f9867f66412d84b36c070023ed298405c00101ad0b45b2acd5d56c062ecc11"
+                   },
+                   {
+                       "name":  "senpi-settings-20261020-091546-163.json",
+                       "sha256":  "9dad73b6140ec8f0b9d0740c1d4f42a1a71ba0916adf16746020e4f94cdd9439"
+                   }
+               ]
+}
