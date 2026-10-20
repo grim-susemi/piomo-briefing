@@ -94,6 +94,71 @@ test('escaping: model ids containing script or img markup render as text, never 
   }
 });
 
+function labelledControls(html) {
+  const labels = new Map();
+  for (const m of html.matchAll(/<label[^>]*\bfor="([^"]+)"[^>]*>([\s\S]*?)<\/label>/g)) {
+    const t = /<span class="pf-sel-t">([\s\S]*?)<\/span>/.exec(m[2]);
+    labels.set(m[1], t ? textOf(t[1]).trim() : '');
+  }
+  const controls = [...html.matchAll(/<(select|input)\b([^>]*)>/g)].map((m) => {
+    const attrs = m[2];
+    return {
+      tag: m[1],
+      id: (/\bid="([^"]+)"/.exec(attrs) || [])[1] || '',
+      pf: (/\bdata-pf="([^"]+)"/.exec(attrs) || [])[1] || '',
+      aria: (/\baria-label="([^"]+)"/.exec(attrs) || [])[1] || '',
+      ref: (/\baria-labelledby="([^"]+)"/.exec(attrs) || [])[1] || '',
+    };
+  });
+  return { labels, controls };
+}
+
+test('a11y: every select and input has a visible label and an accessible name', () => {
+  const P = load();
+  const html = P.render(STATE, live());
+  const { labels, controls } = labelledControls(html);
+  const selects = controls.filter((c) => c.tag === 'select');
+  assert.equal(selects.length, 42, 'the fixture renders 42 selects');
+  assert.equal(controls.length, 45, '42 selects + 3 text inputs');
+  for (const c of controls) {
+    const name = c.aria || c.ref || labels.get(c.id) || '';
+    assert.ok(name.trim(), `${c.tag} [data-pf=${c.pf || '?'}] has no accessible name`);
+    if (c.tag === 'select') assert.ok((labels.get(c.id) || '').trim(), `${c.id} has no visible label`);
+  }
+  const byPf = (pf) => controls.filter((c) => c.pf === pf);
+  for (const c of byPf('route-provider')) assert.equal(labels.get(c.id), '서비스');
+  for (const c of byPf('route-model')) assert.equal(labels.get(c.id), '모델');
+  for (const c of byPf('route-thinking')) assert.equal(labels.get(c.id), '추론');
+  for (const c of byPf('memory-mode')) assert.equal(labels.get(c.id), '모드');
+  for (const c of byPf('memory-model')) assert.equal(labels.get(c.id), '모델');
+  for (const c of byPf('memory-thinking')) assert.equal(labels.get(c.id), '추론');
+  for (const c of byPf('agent-pin-thinking')) assert.equal(labels.get(c.id), '추론');
+  assert.equal(byPf('route-provider').length, STATE.routing.rows.length);
+  assert.equal(byPf('agent-pin-thinking').length, 4);
+  assert.equal(byPf('memory-mode').length, 2);
+});
+
+test('phone: the view raises its local control token to the 44 px --hit target', () => {
+  const css = read('src/page/profiles-view.css');
+  const tokens = read('src/page/tokens.css');
+  assert.match(tokens, /--ctl-h:\s*28px/);
+  assert.match(tokens, /--hit:\s*44px/);
+  const phone = css.slice(css.indexOf('@media (max-width: 599px)'));
+  assert.match(phone, /\.pf\s*\{\s*--ctl-h:\s*var\(--hit\);\s*\}/);
+  assert.match(phone, /\.pf-nav-b,\s*\.pf-diff summary\s*\{\s*min-height:\s*var\(--hit\);\s*\}/);
+  assert.match(css, /\.pf select, \.pf input\[type="text"\] \{[\s\S]*?height: var\(--ctl-h\);/);
+  assert.match(css, /\.pf-btn \{[\s\S]*?min-height: var\(--ctl-h\);/);
+});
+
+test('header: the memory-row phrase stays together with its predicate', () => {
+  const P = load();
+  const html = P.render(STATE, live());
+  const keep = /<span class="pf-keep">([\s\S]*?)<\/span>/.exec(html);
+  assert.ok(keep, 'the keep-together span is rendered');
+  assert.equal(textOf(keep[1]).trim(), '메모리 행을 상황판에서 확인하고');
+  assert.match(read('src/page/profiles-view.css'), /\.pf-keep\s*\{\s*white-space:\s*nowrap;\s*\}/);
+});
+
 test('read-only without a token: no selects and no preview/apply controls', () => {
   const P = load();
   const html = P.render(STATE, { live: false });

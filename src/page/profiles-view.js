@@ -112,6 +112,12 @@
   function select(name, attrs, options, disabled) {
     return '<select' + attr('data-pf', name) + (attrs || '') + boolAttr('disabled', disabled) + '>' + options + '</select>';
   }
+  function slug(v) { return str(v).replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'x'; }
+  function withId(id, attrs) { return attr('id', id) + (attrs || ''); }
+  function labelled(text, id, control, cls) {
+    return '<label class="pf-sel' + (cls ? ' ' + cls : '') + '"' + attr('for', id) + '>' +
+      '<span class="pf-sel-t">' + esc(text) + '</span>' + control + '</label>';
+  }
   function textInput(name, attrs, value, disabled, placeholder) {
     return '<input type="text"' + attr('data-pf', name) + (attrs || '') + attr('value', value) +
       (placeholder ? attr('placeholder', placeholder) : '') + boolAttr('disabled', disabled) + '>';
@@ -278,7 +284,7 @@
     }
     return '<header class="pf-head">' +
       '<div class="pf-head-l"><p class="pf-kicker">[프로필·에이전트]</p><h1 class="pf-title">프로필·에이전트</h1>' +
-      '<p class="pf-sub">WinForms 스위처의 역할 배치·모델 레인·메모리 행을 상황판에서 확인하고, 실시간 상황판에서 미리보기 후 적용합니다.</p></div>' +
+      '<p class="pf-sub">WinForms 스위처의 역할 배치·모델 레인·<span class="pf-keep">메모리 행을 상황판에서 확인하고</span>, 실시간 상황판에서 미리보기 후 적용합니다.</p></div>' +
       '<div class="pf-head-r">' + badge +
       (activeCard ? '<span class="pf-active">현재 ' + esc(activeCard.nameKr || activeCard.name || active.key) + '</span>' : '') +
       '</div></header>';
@@ -354,20 +360,24 @@
         pinOpts += '<option value="' + esc(pinValue) + '" selected>' + esc(pinValue) + '</option>';
       }
       var mem = remembered ? str(remembered.provider) + ' · ' + str(remembered.modelId) + (str(remembered.thinking) ? ' / ' + str(remembered.thinking) : '') : '';
+      var laneId = 'pf-agent-lane-' + id;
       var controls = ro
-        ? '<span class="pf-ro-val">' + esc(lane) + '</span>'
-        : '<select data-pf="agent-lane" data-agent="' + esc(id) + '">' + laneOptions(lane) + '</select>';
+        ? '<span class="pf-lbl">레인</span><span class="pf-ro-val">' + esc(lane) + '</span>'
+        : labelled('레인', laneId, select('agent-lane', withId(laneId, ' data-agent="' + esc(id) + '"'), laneOptions(lane)));
+      var pinId = 'pf-agent-pin-' + id, pinThinkId = 'pf-agent-pin-thinking-' + id;
       var pinControls = ro
-        ? '<span class="pf-ro-val">' + (pin ? esc(pinProvider + ' · ' + pinModel + ' / ' + pinThinking) : '없음') + '</span>'
-        : '<select data-pf="agent-pin" data-agent="' + esc(id) + '">' + pinOpts + '</select>' +
-          select('agent-pin-thinking', ' data-agent="' + esc(id) + '"', thinkingOptions(pinThinking, false), !pin);
+        ? '<span class="pf-lbl">핀</span><span class="pf-ro-val">' + (pin ? esc(pinProvider + ' · ' + pinModel + ' / ' + pinThinking) : '없음') + '</span>'
+        : '<div class="pf-pin-sels">' +
+          labelled('핀', pinId, select('agent-pin', withId(pinId, ' data-agent="' + esc(id) + '"'), pinOpts)) +
+          labelled('추론', pinThinkId, select('agent-pin-thinking', withId(pinThinkId, ' data-agent="' + esc(id) + '"'), thinkingOptions(pinThinking, false), !pin)) +
+          '</div>';
       var resetBtn = ro ? '<span class="pf-muted">기억은 확장이 관리</span>' : button('reset-memory', ' data-agent="' + esc(id) + '"', '기억 초기화', false, 'pf-btn pf-btn-ghost');
       if (reset && !ro) resetBtn = button('reset-memory', ' data-agent="' + esc(id) + '"', '초기화 대기', false, 'pf-btn pf-btn-ghost on');
       return '<article class="pf-agent" data-pf-agent="' + esc(id) + '">' +
         '<div class="pf-agent-id"><span class="pf-dot pf-dot-' + esc(id) + '" aria-hidden="true"></span>' +
         '<span class="pf-agent-n">' + esc(name) + '</span><span class="pf-agent-k">[rev ' + esc(num(agent.rev) === null ? 0 : agent.rev) + ']</span></div>' +
-        '<div class="pf-field"><span class="pf-lbl">레인</span>' + controls + '</div>' +
-        '<div class="pf-field"><span class="pf-lbl">핀</span>' + pinControls + (id === 'hephaestus' ? ' <span class="pf-hint">gpt-*만</span>' : '') + '</div>' +
+        '<div class="pf-field">' + controls + '</div>' +
+        '<div class="pf-field">' + pinControls + (id === 'hephaestus' ? ' <span class="pf-hint">gpt-*만</span>' : '') + '</div>' +
         '<div class="pf-field"><span class="pf-lbl">기억</span><span class="pf-ro-val pf-mem">' + (mem ? esc(mem) : '<span class="pf-dash">—</span>') + '</span></div>' +
         '<div class="pf-field pf-field-act">' + resetBtn + '</div></article>';
     }).join('');
@@ -420,12 +430,16 @@
         var providers = providersOf(entries, provider);
         var rec = recommendationOf(r);
         var readonlyRow = ro || r.readOnly === true || !!r.absentIn;
+        var rid = 'pf-route-' + slug(r.section + '-' + r.role);
         var fields = readonlyRow
           ? '<span class="pf-ro-val">' + valueOrDash(provider) + ' · ' + valueOrDash(bareModel(full)) + ' / ' + valueOrDash(thinking) + '</span>'
           : '<div class="pf-route-sels">' +
-            providerSelect('route-provider', ' data-route="' + esc(r.section + '/' + r.role) + '"', providers, provider, false) +
-            modelSelect('route-model', ' data-route="' + esc(r.section + '/' + r.role) + '"', entries, provider, full, false) +
-            select('route-thinking', ' data-route="' + esc(r.section + '/' + r.role) + '"', thinkingOptions(thinking, true), false) +
+            labelled('서비스', rid + '-provider', providerSelect('route-provider',
+              withId(rid + '-provider', ' data-route="' + esc(r.section + '/' + r.role) + '"'), providers, provider, false)) +
+            labelled('모델', rid + '-model', modelSelect('route-model',
+              withId(rid + '-model', ' data-route="' + esc(r.section + '/' + r.role) + '"'), entries, provider, full, false)) +
+            labelled('추론', rid + '-thinking', select('route-thinking',
+              withId(rid + '-thinking', ' data-route="' + esc(r.section + '/' + r.role) + '"'), thinkingOptions(thinking, true), false)) +
             '</div>';
         return '<div class="pf-route" data-pf-route="' + esc(r.section + '/' + r.role) + '">' +
           '<div class="pf-route-id">' + tag(r.section === 'agents' ? 'agent' : 'category') +
@@ -461,9 +475,9 @@
         (override ? chip('pf-c-green', '직접 지정') : chip('pf-c-gray', '프로필 기본')) + '</div>';
     } else {
       body = '<div class="pf-main" data-pf-main>' +
-        '<div class="pf-field"><span class="pf-lbl">서비스</span>' + providerSelect('main-provider', ' data-main="1"', providers, provider, false) + '</div>' +
-        '<div class="pf-field"><span class="pf-lbl">모델</span>' + mainModelSelect('main-model', ' data-main="1"', entries, provider, model, false) + '</div>' +
-        '<div class="pf-field"><span class="pf-lbl">추론</span>' + select('main-thinking', ' data-main="1"', thinkingOptions(thinking, true), false) + '</div>' +
+        '<div class="pf-field">' + labelled('서비스', 'pf-main-provider', providerSelect('main-provider', withId('pf-main-provider', ' data-main="1"'), providers, provider, false)) + '</div>' +
+        '<div class="pf-field">' + labelled('모델', 'pf-main-model', mainModelSelect('main-model', withId('pf-main-model', ' data-main="1"'), entries, provider, model, false)) + '</div>' +
+        '<div class="pf-field">' + labelled('추론', 'pf-main-thinking', select('main-thinking', withId('pf-main-thinking', ' data-main="1"'), thinkingOptions(thinking, true), false)) + '</div>' +
         '<div class="pf-field pf-field-act">' + (override ? chip('pf-c-green', '직접 지정') : chip('pf-c-gray', '프로필 기본')) + '</div></div>';
     }
     return section('main', body, null);
@@ -489,9 +503,9 @@
       ? '<div class="pf-lane-ro"><span class="pf-ro-val">' + valueOrDash(selection === 'custom-literal' ? literal : selection) + '</span>' +
         (selection === 'custom-literal' ? chip('pf-c-amber', '직접 입력') : '') + '</div>'
       : '<div class="pf-lane" data-pf-lane>' +
-        '<div class="pf-field"><span class="pf-lbl">model_profile</span>' + select('lane-select', ' data-lane="1"', options, false) + '</div>' +
-        '<div class="pf-field pf-field-grow"><span class="pf-lbl">직접 입력 값</span>' +
-        textInput('lane-literal', ' data-lane="1"', literal, selection !== 'custom-literal', '예: custom-literal-id') + '</div>' +
+        '<div class="pf-field">' + labelled('model_profile', 'pf-lane-select', select('lane-select', withId('pf-lane-select', ' data-lane="1"'), options, false)) + '</div>' +
+        '<div class="pf-field pf-field-grow">' +
+        labelled('직접 입력 값', 'pf-lane-literal', textInput('lane-literal', withId('pf-lane-literal', ' data-lane="1"'), literal, selection !== 'custom-literal', '예: custom-literal-id')) + '</div>' +
         '<div class="pf-field pf-field-act">' + chip('pf-c-gray', 'preview에서 검증') + '</div></div>';
     return section('lanes', body, null);
   }
@@ -504,8 +518,8 @@
     var warnings = summarizerWarnings(current);
     var body = ro
       ? '<div class="pf-sum-ro"><span class="pf-ro-val">' + valueOrDash(current || '설정 안 함') + '</span></div>'
-      : '<div class="pf-sum" data-pf-sum><div class="pf-field pf-field-grow"><span class="pf-lbl">요약 모델</span>' +
-        select('summarizer-model', ' data-sum="1"', summarizerOptions(entries, current), false) + '</div>' +
+      : '<div class="pf-sum" data-pf-sum><div class="pf-field pf-field-grow">' +
+        labelled('요약 모델', 'pf-summarizer-model', select('summarizer-model', withId('pf-summarizer-model', ' data-sum="1"'), summarizerOptions(entries, current), false)) + '</div>' +
         '<div class="pf-field pf-field-act">' + chip('pf-c-gray', 'compaction.model') + '</div></div>' +
         warnings.map(function (w) { return '<p class="pf-warn pf-warn-' + esc(w.level) + '">' + ic('info', 'ic-sm') + ' ' + esc(w.text) + '</p>'; }).join('');
     return section('summarizer', body, null);
@@ -524,12 +538,13 @@
       if (ro) {
         controls = '<span class="pf-ro-val">' + valueOrDash(mode) + ' · ' + valueOrDash(model) + (reasoning ? ' / ' + esc(reasoning) : '') + '</span>';
       } else {
+        var memId = 'pf-memory-' + slug(key);
         controls = '<div class="pf-mem-sels" data-pf-memory="' + esc(key) + '">' +
-          select('memory-mode', ' data-memory="' + esc(key) + '"',
+          labelled('모드', memId + '-mode', select('memory-mode', withId(memId + '-mode', ' data-memory="' + esc(key) + '"'),
             '<option value="quick"' + (mode === 'quick' ? ' selected' : '') + '>quick</option>' +
-            '<option value="custom"' + (mode === 'custom' ? ' selected' : '') + '>custom</option>', false) +
-          textInput('memory-model', ' data-memory="' + esc(key) + '"', model, mode !== 'custom', '예: opencode-go/deepseek-v4-flash') +
-          select('memory-thinking', ' data-memory="' + esc(key) + '"', thinkingOptions(reasoning, true), mode !== 'custom') +
+            '<option value="custom"' + (mode === 'custom' ? ' selected' : '') + '>custom</option>', false)) +
+          labelled('모델', memId + '-model', textInput('memory-model', withId(memId + '-model', ' data-memory="' + esc(key) + '"'), model, mode !== 'custom', '예: opencode-go/deepseek-v4-flash')) +
+          labelled('추론', memId + '-thinking', select('memory-thinking', withId(memId + '-thinking', ' data-memory="' + esc(key) + '"'), thinkingOptions(reasoning, true), mode !== 'custom')) +
           '</div>';
       }
       var chips = [];

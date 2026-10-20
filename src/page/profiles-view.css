@@ -28,6 +28,7 @@
 }
 .pf-title { margin: 2px 0 0; font-size: var(--fs-2xl); line-height: 1.25; }
 .pf-sub { margin: var(--sp-1) 0 0; max-width: 64ch; color: var(--c-fg-2); font-size: var(--fs-sm); }
+.pf-keep { white-space: nowrap; }
 .pf-active { color: var(--c-fg-2); font-size: var(--fs-sm); font-weight: var(--fw-medium); }
 
 .pf-tag {
@@ -137,6 +138,8 @@
 
 /* fields and controls: the board's 4 px rhythm, 8 px row radius, 10 px control radius */
 .pf-field { display: grid; gap: 2px; min-width: 0; }
+.pf-sel { display: grid; gap: 2px; min-width: 0; }
+.pf-sel-t { color: var(--c-fg-3); font-size: var(--fs-2xs); font-weight: var(--fw-medium); }
 .pf-lbl { color: var(--c-fg-3); font-size: var(--fs-2xs); font-weight: var(--fw-medium); }
 .pf-field-grow { grid-column: span 2; }
 .pf-field-act { justify-content: end; align-content: end; }
@@ -196,6 +199,7 @@
   background: var(--c-main);
 }
 .pf-agent-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); min-width: 0; }
+.pf-pin-sels { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .8fr); gap: var(--sp-1); align-items: end; }
 .pf-agent-n { font-weight: var(--fw-semibold); }
 .pf-agent-k { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-2xs); }
 .pf-dot { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: var(--r-full); background: var(--c-gray); }
@@ -353,6 +357,15 @@ button.pf-card:hover { background: var(--fill-hover); border-color: var(--c-line
   .pf-mem-sels { grid-template-columns: minmax(0, 1fr); }
   .pf-guide-row { grid-template-columns: minmax(0, 1fr); }
   .pf-sec-b { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
+}
+@media (max-width: 599px) {
+  /* Phone visual-qa D1: the shell's 44 px target (shell.css 322-328, tokens.css --hit).
+   * Desktop keeps the 28 px board density in --ctl-h; only the phone raises the local token. */
+  .pf { --ctl-h: var(--hit); }
+  .pf-agent { align-items: start; }
+  .pf-pin-sels { grid-template-columns: minmax(0, 1fr); }
+  .pf-nav-b, .pf-diff summary { min-height: var(--hit); }
+  .pf-nav-b { align-items: center; }
 }
 @media (prefers-reduced-motion: reduce) {
   .pf-btn { transition: none; }
