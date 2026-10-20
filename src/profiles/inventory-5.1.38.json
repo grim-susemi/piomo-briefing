@@ -1,0 +1,107 @@
+{
+  "schema": 1,
+  "version": "5.1.38",
+  "sources": {
+    "omoTask": {
+      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.38-r1\\package\\plugin\\extensions\\omo-task.js",
+      "sha256": "2b559bb11f0285072722cffbb7f322756c81aec867f6fb4a683278f075d7f783",
+      "bytes": 1103838
+    },
+    "omo": {
+      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.38-r1\\package\\plugin\\extensions\\omo.js",
+      "sha256": "4a8aef923825ccd5fbb5ab6d4b3b72e0ae145b670309f1db3ead53827c029476",
+      "bytes": 1533145
+    }
+  },
+  "agents": [
+    "explore",
+    "librarian",
+    "plan-consultant",
+    "plan-reviewer",
+    "omo-native-code-reviewer",
+    "omo-native-qa-executor",
+    "omo-native-gate-reviewer"
+  ],
+  "categories": [
+    "visual-engineering",
+    "artistry",
+    "ultrabrain",
+    "deep-low",
+    "deep-high",
+    "quick",
+    "unspecified-low",
+    "unspecified-high",
+    "architect",
+    "writing"
+  ],
+  "lanes": [
+    "daily-normal",
+    "daily-heavy",
+    "geeky-normal",
+    "geeky-heavy"
+  ],
+  "schemaKeys": {
+    "root": [
+      "formatOnMutation",
+      "gateway",
+      "$schema",
+      "categories",
+      "agents",
+      "git_master",
+      "task",
+      "teams",
+      "models",
+      "model_profiles",
+      "model_profile",
+      "memory",
+      "telemetry",
+      "side_panel",
+      "computer",
+      "disabled_skills",
+      "[opencode]",
+      "[native]",
+      "[senpi]",
+      "[codex]",
+      "profiles",
+      "_migrations",
+      "legacy_migrations"
+    ],
+    "native": [
+      "formatOnMutation",
+      "gateway",
+      "categories",
+      "agents",
+      "git_master",
+      "task",
+      "teams",
+      "models",
+      "model_profiles",
+      "model_profile",
+      "memory",
+      "telemetry",
+      "side_panel",
+      "computer",
+      "disabled_skills"
+    ],
+    "agentEntry": [
+      "description",
+      "prompt",
+      "model",
+      "models",
+      "reasoning",
+      "variant",
+      "reasoningEffort",
+      "tools",
+      "execution_mode",
+      "background",
+      "max_depth",
+      "allowed_subagents",
+      "disallowed_tools",
+      "max_turns",
+      "temperature",
+      "disable",
+      "permission",
+      "prompt_append"
+    ]
+  }
+}
