@@ -27,8 +27,9 @@
 //   broadcasts it. A data.js written by any generation is never forwarded.
 // - Board writes: every time this process starts serving it makes a new random write token (memory only: not in the lock,
 //   server.json, a log or a model) and hands it to the board server and, as getPage(vm, token), to the served page.
-//   answer(body) / focus(body) -> Promise|{status, json} are the extension's hooks for POST /answer and /focus; while the
-//   board is paused the host answers 503 PAUSED itself and calls neither.
+//   answer(body) / focus(body) / profiles(body) -> Promise|{status, json} are the extension's hooks for
+//   POST /answer, /focus and /profiles; profilesState() is the read-only GET /profiles/state model.
+//   While the board is paused the host answers 503 PAUSED itself and calls none of them.
 // - File I/O here is async; every timer and socket is unref'd; nothing here throws into the caller's session.
 //
 // Error keys: 'server:listen' (bind, NO_PORT), 'server:lock' (lock, server.json, owner health), 'server:sse' (view model,
@@ -178,6 +179,8 @@ export function createServerHost(options) {
     getPage,
     answer,
     focus,
+    profiles,
+    profilesState,
     reclaimStale,
     onError = () => {},
     onRecover = () => {},
@@ -344,9 +347,11 @@ export function createServerHost(options) {
     markPaused,
     readInstalled,
     markStale(recheck = true) { owner = null; role = 'stale'; if (recheck) startCheck(); changed(); },
-    // board write hooks (POST /answer, POST /focus): paused = 503 and the hook is never called
+    // board write hooks (POST /answer, /focus, /profiles): paused = 503 and the hook is never called
     answer: typeof answer === 'function' ? (body) => (enabledNow() ? answer(body) : PAUSED_REPLY) : undefined,
     focus: typeof focus === 'function' ? (body) => (enabledNow() ? focus(body) : PAUSED_REPLY) : undefined,
+    profiles: typeof profiles === 'function' ? (body) => (enabledNow() ? profiles(body) : PAUSED_REPLY) : undefined,
+    profilesState: typeof profilesState === 'function' ? () => profilesState() : undefined,
   };
 
   async function replaceFile(path, text) {
@@ -802,6 +807,8 @@ export function createServerHost(options) {
       assetAllowed: (name) => assetAllowed(e, name),
       onAnswer: (body) => writeVia(e, 'answer', body),
       onFocus: (body) => writeVia(e, 'focus', body),
+      onProfiles: (body) => writeVia(e, 'profiles', body),
+      profilesState: typeof e.driver.profilesState === 'function' ? () => e.driver.profilesState() : undefined,
       generation: e.driver.generation,
       portBase,
       portCount: PORT_COUNT,

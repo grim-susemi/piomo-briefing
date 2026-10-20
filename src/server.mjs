@@ -1,5 +1,6 @@
-// Loopback-only board server: GET / (page), /data.json (view model), /events (SSE), /health, and exactly two
-// guarded write routes, POST /answer and POST /focus. `node:http` only. No CORS (no Access-Control-* header,
+// Loopback-only board server: GET / (page), /data.json (view model), /events (SSE), /health,
+// /profiles/state (profile switcher view model + target hashes) and exactly three guarded write
+// routes, POST /answer, /focus and /profiles. `node:http` only. No CORS (no Access-Control-* header,
 // OPTIONS stays 405), never serves data.js (a cross-site <script> could read it). Every other method/path is 405/404.
 //
 // A write route runs only when ALL of these hold, checked in this order; the first failure is answered and
@@ -11,8 +12,13 @@
 // The write slot stays taken until the callback itself settles: writeTimeoutMs only decides when the 504 is sent,
 // it never cancels the callback or frees the slot, so at most one callback runs at any time (others get 429).
 // /answer body: {id: positive integer, sessionId: string} + exactly one of option ('A'|'B'|'C') / text (string).
-// /focus body: {sessionId: string}. Responses are JSON {ok, code?} with the SECURE headers. Without a non-empty
+// /focus body: {sessionId: string}. /profiles body: {action: 'preview'|'apply', changes: [...],
+// expected: {<target id>: sha256|null}, rosterRevision: integer >= 0}; the store validates the change
+// kinds and resolves every target id itself, so no request value becomes a filesystem path.
+// Responses are JSON {ok, code?} with the SECURE headers. Without a non-empty
 // `token` and the matching callback a write route does not exist (405 like any other non-GET).
+// GET /profiles/state has the Host check and the same Sec-Fetch-Site gate as /data.json; it is read-only
+// and its values are redacted by the profiles store before they reach the wire.
 //
 // GET /assets/<64 hex>.<png|jpg|webp> (report images) has the Host and Sec-Fetch-Site gate of /data.json and is 404 unless
 // assetAllowed(name) says the current model references it; the bytes come only from `assetsDir/<name>` (a regular file of
@@ -21,7 +27,7 @@
 //
 // createBoardServer({getPage, getViewModel, generation, portBase, portCount=10, preferPort?, assetsDir?, assetAllowed?,
 //                    onError, onRecover, pingMs?, onClientCount?, createServer?,
-//                    token?, onAnswer?, onFocus?, bodyTimeoutMs=2000, writeTimeoutMs=10000})
+//                    token?, onAnswer?, onFocus?, onProfiles?, profilesState?, bodyTimeoutMs=2000, writeTimeoutMs=10000})
 //   -> {start(): Promise<{port}>, broadcast(vm), sendPaused(), close(): Promise<void>, clientCount(), address()}
 //
 // Error keys reported through onError(key, err) / cleared through onRecover(key):
@@ -41,14 +47,16 @@ const MAX_SOCKETS = 64;
 const PING_MS = 15000;
 const CLOSE_BOUND_MS = 500;
 const MAX_CLIENT_BACKLOG = 2 * 1024 * 1024; // a stalled SSE reader is dropped instead of buffering forever
-const GATED_PATHS = new Set(['/data.json', '/events', '/health']);
+const GATED_PATHS = new Set(['/data.json', '/events', '/health', '/profiles/state']);
 const ASSET_PREFIX = '/assets/';
 const SITE_OK = new Set(['same-origin', 'none']);
 const MAX_BODY_BYTES = 4096;
 const MAX_ANSWER_BYTES = 65536;
+const MAX_PROFILES_BYTES = 65536;
 const BODY_TIMEOUT_MS = 2000;
 const WRITE_TIMEOUT_MS = 10000; // after this a still-running write callback is answered 504; it keeps the write slot until it settles
 const ANSWER_KEYS = new Set(['id', 'sessionId', 'option', 'text', 'values', 'action']);
+const PROFILES_KEYS = new Set(['action', 'changes', 'expected', 'rosterRevision']);
 const ANNOTATION_KEYS = new Set(['kind', 'sessionId', 'requestId', 'text']);
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ANSWER_OPTIONS = new Set(['A', 'B', 'C']);
@@ -107,6 +115,8 @@ export function createBoardServer(options) {
     token,
     onAnswer,
     onFocus,
+    onProfiles,
+    profilesState,
     bodyTimeoutMs = BODY_TIMEOUT_MS,
     writeTimeoutMs = WRITE_TIMEOUT_MS,
     pingMs = PING_MS,
@@ -130,6 +140,7 @@ export function createBoardServer(options) {
   const writeHandlers = new Map();
   if (tokenBytes && typeof onAnswer === 'function') writeHandlers.set('/answer', onAnswer);
   if (tokenBytes && typeof onFocus === 'function') writeHandlers.set('/focus', onFocus);
+  if (tokenBytes && typeof onProfiles === 'function') writeHandlers.set('/profiles', onProfiles);
   let writeInFlight = false;
   const idleWaiters = new Set();
 
@@ -314,7 +325,8 @@ export function createBoardServer(options) {
 
   // Resolves {buf}, {status, code} (413/408) or {aborted: true} (the client went away; nothing to answer).
   function readBody(req, pathname) {
-    const maxBytes = pathname === '/answer' ? MAX_ANSWER_BYTES : MAX_BODY_BYTES;
+    const maxBytes = pathname === '/profiles' ? MAX_PROFILES_BYTES
+      : pathname === '/answer' ? MAX_ANSWER_BYTES : MAX_BODY_BYTES;
     return new Promise((resolve) => {
       if (Number(req.headers['content-length']) > maxBytes) {
         resolve({ status: 413, code: 'TOO_LARGE' });
@@ -363,6 +375,16 @@ export function createBoardServer(options) {
     const keys = Object.keys(b);
     return keys.length === 1 && keys[0] === 'sessionId' && typeof b.sessionId === 'string';
   }
+  // Shape only: the profiles store validates every change kind and target id. Values in the
+  // body are never used as paths.
+  function validProfiles(b) {
+    const keys = Object.keys(b);
+    return keys.length === PROFILES_KEYS.size && keys.every((key) => PROFILES_KEYS.has(key))
+      && (b.action === 'preview' || b.action === 'apply')
+      && Array.isArray(b.changes)
+      && typeof b.expected === 'object' && b.expected !== null && !Array.isArray(b.expected)
+      && Number.isInteger(b.rosterRevision) && b.rosterRevision >= 0;
+  }
   // The parsed body when it is a JSON object with exactly the keys the route allows, else null.
   function parseWriteBody(buf, pathname) {
     let value, text;
@@ -375,11 +397,12 @@ export function createBoardServer(options) {
     }
     if (pathname === '/answer' && value?.kind !== 'annotation' && buf.length > MAX_BODY_BYTES) return LEGACY_TOO_LARGE;
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-    if (pathname === '/answer') {
+    if (pathname === '/answer' || pathname === '/profiles') {
       const duplicate = duplicateAnswerKey(text);
       if (duplicate) return { [DUPLICATE_KEY]: duplicate };
     }
-    return (pathname === '/answer' ? validAnswer(value) : validFocus(value)) ? value : null;
+    return (pathname === '/answer' ? validAnswer(value)
+      : pathname === '/profiles' ? validProfiles(value) : validFocus(value)) ? value : null;
   }
 
   // Runs the callback and owns the write slot until the callback settles. The deadline only picks the moment the
@@ -509,6 +532,16 @@ export function createBoardServer(options) {
       case '/health':
         send(res, 200, 'application/json; charset=utf-8', JSON.stringify({ ok: true, generation, seq: lastSeq, pid: process.pid }));
         return;
+      case '/profiles/state': {
+        if (typeof profilesState !== 'function') {
+          plain(res, 404, 'not found');
+          return;
+        }
+        const state = await profilesState();
+        send(res, 200, 'application/json; charset=utf-8', JSON.stringify(state));
+        recoverSse();
+        return;
+      }
       case '/events':
         await serveEvents(req, res);
         return;

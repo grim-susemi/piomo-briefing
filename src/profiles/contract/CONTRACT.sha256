@@ -1,0 +1,9 @@
+# piomo-primary-agents contract digest v1
+# sha256 over sorted files: name NUL bytes NUL, excluding CONTRACT.sha256
+contract-sha256 e357c8eccf72f438cd5932bf1f9a69137a955631046a44b42d97dfacaf228eb8
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  .gitkeep
+3978b6ea26db73a75ff093ee6ff14036e590c9d5c74bb237bbde6b541b3096c1  atomic.mjs
+401d3fe95977f0f9f41ad71c89202045cfb2d3c08699a9d94cddda8e3abd35e5  constants.mjs
+6eb3f8689d7cc86c421c93e44ea8b1a43526bc2a40e6205fbad13688f36cdec1  jsonc.mjs
+8cce0034f51a83437f4e5ea3376f9d3e2d51de0adc11a163f3c7c73ebc8dcdf3  resolve.mjs
+452c7a8347dc7d68ff4a858e0f60db4910c82efaf063c11ebfef2e7dadde8601  schema.mjs

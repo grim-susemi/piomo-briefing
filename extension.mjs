@@ -38,6 +38,7 @@ import { applyDecide, applyBoardAnswer, applyBoardAnnotation, formatDecideResult
 import { renderPageMaybe, buildViewModel, pageHtml, serverInfoOf, withReports, OWN_GENERATION } from './src/render.mjs';
 import { importImage, gcAssets } from './src/assets.mjs';
 import { createServerHost, readInstalledGeneration } from './src/server-host.mjs';
+import { openProfilesStore } from './src/profiles/store.mjs';
 import { createWorkersLive } from './src/workers-live.mjs';
 import { createPlanTool } from './src/plan-tool.mjs';
 import { createAskBridge } from './src/ask-bridge.mjs';
@@ -589,6 +590,21 @@ export function createBriefingExtension(opts = {}) {
       });
     }
 
+    function boardProfiles(body) {
+      // The store owns every read/write and resolves target ids itself; this hook only
+      // returns the board's {status, json} envelope. It never throws.
+      try {
+        return profilesStore.handle(body);
+      } catch (err) {
+        hostError('profiles', err);
+        return boardReply(500, 'IO_ERROR');
+      }
+    }
+
+    function boardProfilesState() {
+      return profilesStore.state();
+    }
+
     function collect(ctx, { readTaskRecords = false, cache = autoCache } = {}) {
       let branch = [];
       try { branch = ctx.sessionManager.getBranch(); } catch { branch = []; }
@@ -1089,6 +1105,7 @@ export function createBriefingExtension(opts = {}) {
 
     // Plan tool, board server host and live worker rows of this session (lead sessions only; never called for workers).
     let hostSid = null;
+    const profilesStore = (opts.createProfilesStore ?? openProfilesStore)(opts.profilesStoreOptions ?? {});
     function setupLive(ctx) {
       planTool = (opts.createPlanTool ?? createPlanTool)({
         store,
@@ -1121,6 +1138,8 @@ export function createBriefingExtension(opts = {}) {
           getPage: (vm, token) => pageHtml(vm, generation, { mode: 'server', token }),
           answer: boardAnswer,
           focus: boardFocus,
+          profiles: boardProfiles,
+          profilesState: boardProfilesState,
           reclaimStale: (rel, rec) => store.reclaimStale(rel, rec),
           onError: hostError,
           onRecover: hostRecover,
