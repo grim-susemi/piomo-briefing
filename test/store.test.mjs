@@ -750,3 +750,46 @@ test('annotation snapshot: broken recent records are reported, while invalid nam
     assert.deepEqual(snap.receipts, []);
   } finally { cleanup(root); }
 });
+
+test('readSnapshot: an unchanged settled file is read once; a changed or fresh file is read again', () => {
+  const root = tmpRoot();
+  try {
+    const reads = new Map();
+    const countingFs = { ...realFs, readFileSync: (file, ...rest) => { reads.set(String(file), (reads.get(String(file)) ?? 0) + 1); return realFs.readFileSync(file, ...rest); } };
+    const store = openStore(join(root, 'state'), { fs: countingFs });
+    const settled = join(root, 'state/sessions/s1/meta.json');
+    const fresh = join(root, 'state/sessions/s2/meta.json');
+    store.writeNew('sessions/s1/meta.json', { sessionId: 's1', n: 1 });
+    store.writeNew('sessions/s2/meta.json', { sessionId: 's2', n: 1 });
+    const old = new Date(Date.now() - 3600 * 1000);
+    realFs.utimesSync(settled, old, old); // older than the settle time: cacheable
+    const metaOf = (snap, sid) => snap.sessions.find((s) => s.sid === sid).meta;
+    assert.equal(metaOf(store.readSnapshot(), 's1').n, 1);
+    assert.equal(metaOf(store.readSnapshot(), 's1').n, 1);
+    assert.equal(reads.get(settled), 1, 'a settled, unchanged file is read once across two snapshots');
+    store.readSnapshot();
+    assert.equal(reads.get(fresh), 3, 'a file written inside the settle time is never served from the cache');
+    // same size, new mtime: the content must be read again
+    realFs.writeFileSync(settled, JSON.stringify({ sessionId: 's1', n: 2 }, null, 2) + '\n');
+    const newer = new Date(Date.now() - 1800 * 1000);
+    realFs.utimesSync(settled, newer, newer);
+    assert.equal(metaOf(store.readSnapshot(), 's1').n, 2, 'a changed file is read again');
+    assert.equal(reads.get(settled), 2);
+  } finally { cleanup(root); }
+});
+
+test('readSnapshot: the text cache keeps maxMtime and still reports broken JSON every time', () => {
+  const root = tmpRoot();
+  try {
+    const store = openStore(join(root, 'state'));
+    store.writeNew('sessions/s1/meta.json', { sessionId: 's1' });
+    store.writeNew('sessions/s2/meta.json', 'not json');
+    const old = new Date(Date.now() - 3600 * 1000);
+    for (const sid of ['s1', 's2']) realFs.utimesSync(join(root, 'state/sessions', sid, 'meta.json'), old, old);
+    const first = store.readSnapshot(), second = store.readSnapshot();
+    assert.equal(second.maxMtime, first.maxMtime);
+    assert.ok(second.maxMtime >= old.getTime() - 1000);
+    assert.equal(first.readErrors.length, 1);
+    assert.equal(second.readErrors.length, 1, 'a cached broken file is still reported');
+  } finally { cleanup(root); }
+});

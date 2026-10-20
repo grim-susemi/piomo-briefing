@@ -29,6 +29,11 @@ const MAX_RETRIES = 8;
 // Reader backoff (ms) while a replace() may be in flight: 2+4+8+16+32+64+100 = 226ms total, then give up.
 const READ_RETRY_DELAYS_MS = [2, 4, 8, 16, 32, 64, 100];
 const BRIEFS_KEPT = 20;
+// readSnapshot() keeps the text of each file keyed by its mtime and size, so an unchanged file costs one stat instead of open, read,
+// close and a second stat. A file is cached only once its mtime is older than this settle time: a write landing in the same
+// timestamp tick as the read (same mtime, same size) can then never be served stale.
+const TEXT_CACHE_SETTLE_MS = 2000;
+const TEXT_CACHE_MAX = 6000;
 const BRIEF_PATH = /^sessions\/([^/]+)\/briefs\/(\d+)\.json$/;
 const NUMBERED = /^(\d+)\.json$/;
 const ANNOTATION_FILE = /^a-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/;
@@ -67,6 +72,7 @@ export function openStore(root, opts = {}) {
   const fs = opts.fs ?? nodeFs;
   const sleep = opts.sleep ?? sleepSync;
   const isAlive = opts.isAlive ?? isPidAlive;
+  const textCache = new Map();
 
   function abs(rel) {
     if (typeof rel !== 'string' || rel === '') throw new Error('invalid store path: ' + rel);
@@ -297,19 +303,34 @@ export function openStore(root, opts = {}) {
     // countMtime=false for our own published output, so a publish never makes the store look newer.
     function load(rel, countMtime = true) {
       const file = abs(rel);
-      const touch = () => {
+      const touch = (known) => {
         if (!countMtime) return;
+        if (known !== undefined) { if (known > maxMtime) maxMtime = known; return; }
         try { const mt = fs.statSync(file).mtimeMs; if (mt > maxMtime) maxMtime = mt; } catch { /* gone */ }
       };
+      // One stat decides: an unchanged file is served from the cache. Any stat failure (a replace in flight, a missing file,
+      // a fake fs without statSync) falls back to the plain retrying read below.
+      let st = null;
+      try { st = fs.statSync(file); } catch { st = null; }
+      const hit = st ? textCache.get(file) : undefined;
+      const cached = hit !== undefined && hit.mtimeMs === st.mtimeMs && hit.size === st.size;
       try {
-        const text = readText(rel);
+        let text;
+        if (cached) text = hit.text;
+        else {
+          text = readText(rel);
+          if (st && text !== null && Date.now() - st.mtimeMs > TEXT_CACHE_SETTLE_MS) {
+            if (textCache.size >= TEXT_CACHE_MAX) textCache.clear();
+            textCache.set(file, { mtimeMs: st.mtimeMs, size: st.size, text });
+          } else textCache.delete(file);
+        }
         if (text === null) return undefined;
         const value = JSON.parse(text);
-        touch();
+        touch(cached ? st.mtimeMs : undefined);
         return value;
       } catch (err) {
         readErrors.push({ rel, message: String(err && err.message || err) });
-        touch();
+        touch(cached ? st.mtimeMs : undefined);
         return undefined;
       }
     }

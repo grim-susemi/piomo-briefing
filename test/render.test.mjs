@@ -8,7 +8,7 @@ import { fork, spawnSync } from 'node:child_process';
 import vm from 'node:vm';
 import { openStore } from '../src/store.mjs';
 import { validateBrief } from '../src/schema.mjs';
-import { buildViewModel, renderPage, pageHtml, withReports, MAX_VM_BYTES, OMITTED_CHIP } from '../src/render.mjs';
+import { buildViewModel, renderPage, pageHtml, withReports, realKey, realCacheFor, MAX_VM_BYTES, OMITTED_CHIP } from '../src/render.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CHILD = join(HERE, 'helpers', 'render-child.mjs');
@@ -1030,4 +1030,32 @@ test('tokens.css is the first stylesheet chunk of the page: the later sheets rea
   assert.equal(styles[0], order.map(sheet).join('\n'), 'tokens.css first, then the sheets in their old order');
   assert.match(sheet('tokens.css'), /^:root \{\n  color-scheme: light dark;/m, 'the tokens follow the light and the dark scheme');
   assert.doesNotMatch(styles[0], /font-weight:\s*(?:[7-9]00|bold)/, 'weights 400 / 500 / 600 only');
+});
+
+test('realKey answers are kept per fs object between calls and expire after the TTL', (t) => {
+  let calls = 0;
+  const fakeFs = { realpathSync: (p) => { calls++; return p; } };
+  const otherFs = { realpathSync: (p) => { calls++; return p; } };
+  const memo = realCacheFor(fakeFs);
+  assert.equal(realCacheFor(fakeFs), memo, 'the same fs object shares one memo');
+  assert.notEqual(realCacheFor(otherFs), memo, 'another fs object never shares answers');
+  let clock = 1_000_000;
+  t.mock.method(Date, 'now', () => clock);
+  const a = realKey('C:/Work/File.txt', fakeFs, memo);
+  assert.equal(a, 'c:/work/file.txt');
+  realKey('C:/Work/File.txt', fakeFs, realCacheFor(fakeFs));
+  assert.equal(calls, 1, 'the second publish does not call realpath again');
+  clock += 31_000;
+  realKey('C:/Work/File.txt', fakeFs, realCacheFor(fakeFs));
+  assert.equal(calls, 2, 'an expired answer is resolved again');
+});
+
+test('realKey memo keeps a missing path as null until it expires', (t) => {
+  const fakeFs = { realpathSync: () => { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; } };
+  let clock = 5_000_000;
+  t.mock.method(Date, 'now', () => clock);
+  assert.equal(realKey('C:/gone/x.txt', fakeFs, realCacheFor(fakeFs)), null);
+  assert.equal(realCacheFor(fakeFs).has('C:/gone/x.txt'), true);
+  clock += 31_000;
+  assert.equal(realCacheFor(fakeFs).has('C:/gone/x.txt'), false);
 });

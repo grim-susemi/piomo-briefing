@@ -87,8 +87,33 @@ const REPORT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const pathKey = (p) => (/^[A-Za-z]:[\\/]/.test(p)
   ? win32.resolve(p).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
   : posix.resolve(p).replace(/\/+$/, ''));
+// Evidence and attachment paths are resolved on every publish, hundreds of realpath calls each time. The answers are kept
+// between publishes per fs object and expire after REAL_KEY_TTL_MS, so a moved link or a newly created file is seen again soon.
+const REAL_KEY_TTL_MS = 30000;
+const REAL_KEY_MAX = 4000;
+const realMemos = new WeakMap();
+class RealKeyMemo {
+  constructor() { this.entries = new Map(); }
+  has(p) {
+    const entry = this.entries.get(p);
+    if (entry === undefined) return false;
+    if (Date.now() - entry.at > REAL_KEY_TTL_MS) { this.entries.delete(p); return false; }
+    return true;
+  }
+  get(p) { return this.entries.get(p)?.key; }
+  set(p, key) {
+    if (this.entries.size >= REAL_KEY_MAX) this.entries.clear();
+    this.entries.set(p, { key, at: Date.now() });
+  }
+}
+export function realCacheFor(fs) {
+  if (fs === null || typeof fs !== 'object') return new Map();
+  let memo = realMemos.get(fs);
+  if (memo === undefined) { memo = new RealKeyMemo(); realMemos.set(fs, memo); }
+  return memo;
+}
 // the identity on disk: realpath of the path, else of its folder (a file that does not exist yet), else null
-function realKey(p, fs, cache) {
+export function realKey(p, fs, cache) {
   if (cache.has(p)) return cache.get(p);
   let key = null;
   if (fs && typeof fs.realpathSync === 'function') {
@@ -582,7 +607,7 @@ export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
   const evidenceFs = opts.fs ?? nodeFs;
   const check = evidenceChecker(evidenceFs);
   const stateDir = typeof opts.stateDir === 'string' && opts.stateDir ? opts.stateDir : null;
-  const realCache = new Map();
+  const realCache = realCacheFor(evidenceFs);
   const stateKeys = stateDir ? [...new Set([pathKey(stateDir), realKey(stateDir, evidenceFs, realCache)].filter(Boolean))] : [];
   const sourceCtx = new Map();
   const snap = isObj(snapshot) ? snapshot : {};
