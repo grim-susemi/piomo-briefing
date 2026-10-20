@@ -9,8 +9,8 @@
 //   <out>/state-<loading|error>-<390|1024|1440>-<light|dark>.png  fetch-pending and fetch-failed frames
 //   <out>/state-<state>-<viewport>-<theme>-full.png
 //   <out>/captures.json                                    manifest + measured evidence
-//   <evidence>/task-13-piomo-primary-agents-e2e.txt        apply proof
-//   <evidence>/task-13-piomo-primary-agents-stale.txt      409 proof
+//   <evidence>/task-<N>-piomo-primary-agents-e2e.txt        apply proof (--prefix names the task)
+//   <evidence>/task-<N>-piomo-primary-agents-stale.txt      409 proof
 //
 // The e2e changes one routing row and one agent lane through the real page,
 // previews, applies, and compares the temp omo.jsonc bytes with the config the
@@ -57,14 +57,13 @@ const LIVE_SERVER = 'C:/Users/USER/.omo-stable-500/home/.omo/agent/briefing/stat
 const LIVE_OMOTASK = 'C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.38-r1/package/plugin/extensions/omo-task.js';
 const FIXED_NOW = Date.parse('2026-10-20T12:00:00Z');
 const PS_STYLE = { bom: true, eol: '\r\n', indent: '    ', keySep: ':  ', trailingNewline: true };
-const TOKEN = 'piomo-t13-board-token';
 const VIEWPORTS = [
   { name: '390', width: 390, height: 844, mobile: true },
   { name: '1024', width: 1024, height: 768, mobile: false },
   { name: '1440', width: 1440, height: 900, mobile: false },
 ];
 const SCHEMES = ['light', 'dark'];
-const ROUTE = 'agents/oracle';
+const ROUTE = 'agents/explore';
 const LANE_AGENT = 'atlas';
 const LANE = 'geeky-heavy';
 const ROUTE_CHANGE = { provider: 'anthropic-subscription', model: 'anthropic-subscription/claude-opus-5-5', thinking: 'medium' };
@@ -78,7 +77,14 @@ const arg = (name) => {
 const OUT = arg('--out') ? path.resolve(arg('--out')) : '';
 const EVIDENCE = arg('--evidence') ? path.resolve(arg('--evidence')) : OUT;
 const KEEP = argv.includes('--keep');
+const PREFIX = arg('--prefix') || 'task-13-piomo-primary-agents';
+const TASK = /^task-(\d+)-piomo-primary-agents$/.exec(PREFIX)?.[1] || '';
+const TOKEN = `piomo-t${TASK}-board-token`;
 const PORT_BASE = Number(process.env.OMO_BRIEFING_PORT_BASE || 47480);
+if (!TASK) {
+  console.error(`--prefix ${PREFIX}: expected task-<N>-piomo-primary-agents`);
+  process.exit(2);
+}
 if (!OUT) {
   console.error('usage: node scripts/qa-profiles.mjs --out <captures-dir> [--evidence <dir>] [--keep]');
   process.exit(2);
@@ -149,6 +155,14 @@ function seedHomes(root) {
   write(path.join(primary, 'agent', 'native-profile-selection.json'), { key: 'gpt-kimi-deepseek', profile: 'native-gpt-kimi-deepseek' });
   write(path.join(stable, 'omo.jsonc'), JSON.parse(fs.readFileSync(path.join(GOLDEN, 'stable/omo.jsonc.json'), 'utf8')));
   fs.writeFileSync(path.join(stable, 'agent', 'settings.json'), '{"packages":["stable"]}');
+  // The board only reads the extension-owned memory sidecars; one valid file makes the
+  // remembered-model row visible in the real state-to-render path.
+  const memoryDir = path.join(stable, 'agent', 'primary-agents', 'memory');
+  fs.mkdirSync(memoryDir, { recursive: true });
+  fs.writeFileSync(path.join(memoryDir, 'sisyphus.json'), JSON.stringify({
+    v: 1, agentId: 'sisyphus', model: { provider: 'openai', modelId: 'gpt-6.1-sol' },
+    thinking: 'high', rosterRev: 0, updatedAt: '2026-10-20T12:00:00.000Z',
+  }));
   return { primary, stable, stateDir };
 }
 
@@ -171,7 +185,7 @@ function expectedConfigFrom(input, style) {
     catalog, provider: ROUTE_CHANGE.provider, model: ROUTE_CHANGE.model, reasoning: ROUTE_CHANGE.thinking,
   });
   setProfileLayerModel({
-    config, profileKey: 'native-gpt-kimi-deepseek', section: 'agents', role: 'oracle',
+    config, profileKey: 'native-gpt-kimi-deepseek', section: 'agents', role: 'explore',
     alias: resolved.alias, ensureCatalogAlias: true,
     ensureModelId: ROUTE_CHANGE.model, ensureVariant: ROUTE_CHANGE.thinking,
   });
@@ -207,7 +221,7 @@ const sleepFrame = () => 'new Promise((resolve) => requestAnimationFrame(() => r
 async function main() {
   const liveBefore = liveState();
   run.liveBefore = liveBefore;
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piomo-t13-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `piomo-t${TASK}-`));
   run.tempRoot = root;
   const homes = seedHomes(root);
   const omoPath = path.join(homes.primary, 'omo.jsonc');
@@ -368,6 +382,38 @@ async function main() {
       }
     };
 
+    const captureStates = async (name) => {
+      for (const vp of VIEWPORTS) for (const scheme of SCHEMES) await captureState(name, vp, scheme);
+    };
+    const captureJournal = async (vp, theme) => {
+      await applyViewport(vp);
+      await applyScheme(theme);
+      await closePeek();
+      await page.eval(`(() => { const box = document.querySelector('[data-pf-journal="interrupted"]'); if (box) box.scrollIntoView({ block: 'start' }); return true; })()`);
+      await settle();
+      await capture(path.join(OUT, `state-journal-${vp.name}-${theme}.png`));
+    };
+    // Real-pixel fit of the short enum selects: the native control ellipsizes when the chosen
+    // label is wider than the content box (client width minus padding and the 20 px arrow).
+    const selectFit = () => page.eval(`(() => {
+      const canvas = document.createElement('canvas').getContext('2d');
+      const targets = ['agent-lane', 'agent-pin', 'agent-pin-thinking', 'memory-mode', 'memory-thinking'];
+      const rows = [...document.querySelectorAll('.pf select')]
+        .filter((el) => targets.includes(el.getAttribute('data-pf')))
+        .map((el) => {
+          const cs = getComputedStyle(el);
+          canvas.font = cs.fontSize + ' ' + cs.fontFamily;
+          const chosen = el.options[el.selectedIndex];
+          const text = chosen ? chosen.text : '';
+          const pad = Number.parseFloat(cs.paddingLeft) + Number.parseFloat(cs.paddingRight);
+          return { pf: el.getAttribute('data-pf'), id: el.id, text,
+            width: Math.round(el.getBoundingClientRect().width), clientWidth: el.clientWidth,
+            textWidth: Math.round(canvas.measureText(text).width),
+            available: Math.max(0, Math.round(el.clientWidth - pad - 20)) };
+        });
+      return { rows, truncated: rows.filter((row) => row.textWidth > row.available) };
+    })()`);
+
     await page.goto(url);
     await waitFor(`!!document.querySelector('[data-shell]')`, 'board shell');
     await openProfiles();
@@ -414,18 +460,24 @@ async function main() {
         const think = row.querySelector('[data-pf="agent-pin-thinking"]');
         const mem = row.querySelector('.pf-mem');
         const reset = row.querySelector('[data-pf="reset-memory"]');
-        const tops = [lane, pin, think].filter(Boolean).map(top);
+        const tops = [lane, pin].filter(Boolean).map(top);
+        const allTops = [lane, pin, think].filter(Boolean).map(top);
         return { agent: row.getAttribute('data-pf-agent'), laneTop: top(lane), pinTop: top(pin), thinkingTop: top(think),
           delta: tops.length ? Math.max(...tops) - Math.min(...tops) : null,
+          allDelta: allTops.length ? Math.max(...allTops) - Math.min(...allTops) : null,
+          thinkingBelowPin: !!(pin && think && top(think) > top(pin)),
           resetGap: reset && mem ? Math.abs(center(reset) - center(mem)) : null,
           resetInsideMemory: !!(reset && reset.closest('.pf-mem-field')) };
       });
       return { rows, maxDelta: Math.max(...rows.map((r) => r.delta || 0)),
+        maxAllDelta: Math.max(...rows.map((r) => r.allDelta || 0)),
+        stacked: rows.every((r) => r.thinkingBelowPin),
         maxResetGap: Math.max(...rows.map((r) => r.resetGap || 0)),
         resetOutside: rows.filter((r) => !r.resetInsideMemory).map((r) => r.agent) };
     })()`);
     run.checks.agentAlign1440 = await agentAlignment();
-    assert.equal(run.checks.agentAlign1440.maxDelta <= 1, true, 'agent lane/pin/thinking select tops differ at 1440');
+    assert.equal(run.checks.agentAlign1440.maxDelta <= 1, true, 'agent lane/pin select tops differ at 1440');
+    assert.equal(run.checks.agentAlign1440.maxAllDelta <= 1, true, 'agent lane/pin/thinking select tops differ at 1440');
     assert.deepEqual(run.checks.agentAlign1440.resetOutside, [], 'reset action outside the memory field at 1440');
     assert.equal(run.checks.agentAlign1440.maxResetGap <= 20, true, 'reset action is not next to the memory value at 1440');
 
@@ -433,7 +485,8 @@ async function main() {
     await applyScheme('light');
     await settle();
     run.checks.agentAlign1024 = await agentAlignment();
-    assert.equal(run.checks.agentAlign1024.maxDelta <= 1, true, 'agent lane/pin/thinking select tops differ at 1024');
+    assert.equal(run.checks.agentAlign1024.maxDelta <= 1, true, 'agent lane/pin select tops differ at 1024');
+    assert.equal(run.checks.agentAlign1024.stacked, true, 'agent pin/thinking pair is not stacked at 1024');
     assert.deepEqual(run.checks.agentAlign1024.resetOutside, [], 'reset action outside the memory field at 1024');
     assert.equal(run.checks.agentAlign1024.maxResetGap <= 20, true, 'reset action is not next to the memory value at 1024');
     run.checks.layout1024 = await page.eval(`(() => {
@@ -448,6 +501,8 @@ async function main() {
     assert.equal(run.checks.layout1024.docScrollWidth <= run.checks.layout1024.innerWidth, true, '1024 horizontal scroll');
     assert.equal(run.checks.layout1024.mainScrollWidth <= run.checks.layout1024.mainClientWidth, true, '1024 main horizontal scroll');
     assert.deepEqual(run.checks.layout1024.overflow, [], '1024 elements outside the viewport');
+    run.checks.selectFit1024 = await selectFit();
+    assert.deepEqual(run.checks.selectFit1024.truncated, [], 'short select values are ellipsized at 1024');
 
     await applyViewport(VIEWPORTS[0]);
     await applyScheme('light');
@@ -476,6 +531,8 @@ async function main() {
     })()`);
     assert.equal(run.checks.layout390.docScrollWidth <= run.checks.layout390.innerWidth, true, '390 horizontal scroll');
     assert.deepEqual(run.checks.layout390.overflow, [], '390 elements outside the viewport');
+    run.checks.selectFit390 = await selectFit();
+    assert.deepEqual(run.checks.selectFit390.truncated, [], 'short select values are ellipsized at 390');
 
     run.checks.a11y = await page.eval(`(() => {
       const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
@@ -535,6 +592,26 @@ async function main() {
     assert.deepEqual(run.checks.a11y.selectsWithoutVisibleLabel, [], 'select without a visible label');
     assert.deepEqual(run.checks.a11y.wrongLabels, [], 'per-control label mismatch');
     assert.ok(run.checks.a11y.selects > 0, 'no selects measured');
+
+    // Todo-22 carried states from todos 20/21: absent-in-5.1.38 row, recommendation pins and
+    // the extension-owned remembered model, all read through the real store state.
+    run.checks.addedStates = await page.eval(`(() => {
+      const absent = [...document.querySelectorAll('.pf-route')]
+        .filter((row) => row.textContent.includes('5.1.38에 없음'))
+        .map((row) => ({ route: row.getAttribute('data-pf-route'), selects: row.querySelectorAll('select').length }));
+      const guide = document.querySelector('.pf-guide');
+      const remembered = document.querySelector('[data-pf-agent="sisyphus"] .pf-mem');
+      return {
+        absentRows: absent,
+        guide: guide ? { sources: guide.querySelectorAll('.pf-guide-row').length, text: guide.textContent } : null,
+        remembered: remembered ? remembered.textContent : ''
+      };
+    })()`);
+    assert.ok(run.checks.addedStates.absentRows.some((row) => row.route === 'agents/oracle' && row.selects === 0),
+      'the 5.1.38-absent Oracle row is not read-only');
+    assert.equal(run.checks.addedStates.guide?.sources, 2, 'the recommendation guide does not pin both 5.1.38 sources');
+    assert.match(run.checks.addedStates.guide.text, /omo-task\.js/, 'the guide omits the omo-task.js pin');
+    assert.match(run.checks.addedStates.remembered, /gpt-6\.1-sol/, 'the remembered model is not rendered');
 
     run.checks.header390 = await page.eval(`(() => {
       const keep = document.querySelector('.pf-sub .pf-keep');
@@ -621,7 +698,8 @@ async function main() {
       const rows = [];
       const seen = new Set();
       const selectors = ['.pf-title', '.pf-sub', '.pf-agent-n', '.pf-lbl', '.pf-sel-t', '.pf-route-ko', '.pf-route-en',
-        '.pf-btn', '.pf-chip', '.pf-ro-val', '.pf-card-sum', '.pf-nav-b'];
+        '.pf-btn', '.pf-chip', '.pf-ro-val', '.pf-card-sum', '.pf-nav-b',
+        '.pf select:disabled', '.pf input:disabled', '.pf-btn:disabled', '.pf-btn-ghost:disabled'];
       for (const selector of selectors) {
         for (const el of document.querySelectorAll(selector)) {
           const cs = getComputedStyle(el);
@@ -672,16 +750,16 @@ async function main() {
       readonlyText: ((document.querySelector('.pf') || {}).innerText || '').match(/읽기 전용/g) || [],
       hasReadonlyNote: !!document.querySelector('.pf-ro-note'),
       sections: document.querySelectorAll('[data-pf-sec]').length,
+      skeleton: document.querySelectorAll('.pf-skeleton .pf-skel').length,
+      pulse: !!document.querySelector('.pf-pulse'),
     }))()`);
     assert.equal(run.checks.loading.hasLoading, true, 'loading frame has no loading status');
     assert.deepEqual(run.checks.loading.readonlyText, [], 'loading frame says read-only');
     assert.equal(run.checks.loading.hasReadonlyNote, false, 'loading frame renders the read-only note');
     assert.equal(run.checks.loading.sections, 0, 'loading frame renders loaded sections');
-    await capture(path.join(OUT, 'state-loading-1440-light.png'));
-    await captureState('loading', VIEWPORTS[2], 'dark');
-    await captureState('loading', VIEWPORTS[1], 'light');
-    await captureState('loading', VIEWPORTS[0], 'light');
-    await captureState('loading', VIEWPORTS[0], 'dark');
+    assert.ok(run.checks.loading.skeleton >= 12, 'loading frame does not reserve a skeleton layout');
+    assert.equal(run.checks.loading.pulse, true, 'loading frame has no pulsing glyph');
+    await captureStates('loading');
     await page.client.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: loadingInit.identifier });
 
     await applyViewport(VIEWPORTS[2]);
@@ -712,9 +790,7 @@ async function main() {
     assert.equal(run.checks.error.hasLoading, false, 'error frame still says loading');
     assert.deepEqual(run.checks.error.readonlyText, [], 'error frame says read-only');
     assert.equal(run.checks.error.hasReadonlyNote, false, 'error frame renders the read-only note');
-    await capture(path.join(OUT, 'state-error-1440-light.png'));
-    await captureState('error', VIEWPORTS[0], 'light');
-    await captureState('error', VIEWPORTS[1], 'light');
+    await captureStates('error');
     await page.client.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: errorInit.identifier });
 
     // ── XSS probe: hostile model markup must stay text ────────────────────────
@@ -806,9 +882,7 @@ async function main() {
     await waitFor(`document.querySelectorAll('.pf-pending li').length === 2`, 'two pending changes');
     run.expected.pending = await page.eval(`([...document.querySelectorAll('.pf-pending li')].map((li) => li.textContent))`);
 
-    await captureState('pending', VIEWPORTS[2], 'light');
-    await captureState('pending', VIEWPORTS[2], 'dark');
-    await captureState('pending', VIEWPORTS[1], 'light');
+    await captureStates('pending');
     await applyViewport(VIEWPORTS[2]);
     await applyScheme('light');
     await scrollTop();
@@ -876,15 +950,11 @@ async function main() {
       assert.equal(target.w >= 44 && target.h >= 44, true, `remove target ${target.w}x${target.h} below 44x44`);
       assert.equal(target.title, '이 변경 지우기', 'remove target has no tooltip');
     }
-    await captureState('preview', VIEWPORTS[0], 'light');
-    await captureState('preview', VIEWPORTS[0], 'dark');
-    await captureState('preview', VIEWPORTS[1], 'light');
+    await captureStates('preview');
     await applyViewport(VIEWPORTS[2]);
     await applyScheme('light');
     await scrollTop();
     await settle();
-    await captureState('preview', VIEWPORTS[2], 'light');
-    await captureState('preview', VIEWPORTS[2], 'dark');
 
     await applyScheme('light');
     await page.eval(`(() => { document.querySelector('[data-pf="apply"]').click(); return true; })()`);
@@ -901,10 +971,7 @@ async function main() {
     assert.equal(run.checks.apply.done, true, 'apply did not succeed: ' + JSON.stringify(run.checks.apply));
     assert.deepEqual([...run.checks.apply.writes].sort(), ['agent/primary-agents/roster.json', 'omo.jsonc'], 'apply write set');
     await waitFor(`(() => { const el = document.querySelector('[data-pf-agent="atlas"] .pf-agent-k'); return el && el.textContent.includes('rev 1'); })()`, 'reloaded roster revision');
-    await captureState('success', VIEWPORTS[2], 'light');
-    await captureState('success', VIEWPORTS[0], 'light');
-    await captureState('success', VIEWPORTS[0], 'dark');
-    await captureState('success', VIEWPORTS[1], 'light');
+    await captureStates('success');
 
     const afterOmo = fs.readFileSync(omoPath);
     const actualParsed = JSON.parse(stripBom(afterOmo.toString('utf8')));
@@ -962,10 +1029,7 @@ async function main() {
     assert.equal(run.checks.stale.pendingCount, 1, '409 dropped the pending edits');
     const staleFetch = run.checks.stale.fetches.filter((f) => f.url.includes('/profiles')).at(-1);
     assert.equal(staleFetch.status, 409, 'stale apply was not a 409');
-    await captureState('conflict', VIEWPORTS[2], 'light');
-    await captureState('conflict', VIEWPORTS[1], 'light');
-    await captureState('conflict', VIEWPORTS[0], 'light');
-    await captureState('conflict', VIEWPORTS[2], 'dark');
+    await captureStates('conflict');
 
     const afterStale = Object.fromEntries(targetFiles.map((file) => [path.relative(root, file).replace(/\\/g, '/'), hashFile(file)]));
     for (const [name, hash] of Object.entries(afterStale)) {
@@ -1013,6 +1077,35 @@ async function main() {
       crossOrigin: { status: crossOrigin.status, code: JSON.parse(crossOrigin.body).code },
       badHost: { status: badHost.status },
     };
+
+    // ── interrupted apply (todo 20): a real 다시 적용 control, never auto-replayed ──
+    const interruptedJournal = {
+      v: 1, id: 'qa-interrupted', status: 'running', action: 'apply',
+      request: {
+        action: 'apply',
+        changes: [{ kind: 'setAgentLane', agentId: 'sisyphus', lane: 'daily-heavy' }],
+        rosterRevision: 0,
+      },
+    };
+    fs.writeFileSync(journalPath, JSON.stringify(interruptedJournal, null, 2));
+    const journalHashBefore = hashFile(journalPath);
+    const omoHashBeforeJournalLoad = hashFile(omoPath);
+    await page.goto(url);
+    await waitFor(`!!document.querySelector('[data-shell]')`, 'board shell after interrupted journal');
+    await openProfiles();
+    run.checks.journal = await page.eval(`(() => {
+      const box = document.querySelector('[data-pf-journal="interrupted"]');
+      const btn = box && box.querySelector('[data-pf="reapply"]');
+      return { present: !!box, text: box ? box.textContent : '', hasReapply: !!btn,
+        reapplyLabel: btn ? btn.textContent.trim() : '' };
+    })()`);
+    assert.equal(run.checks.journal.present, true, 'interrupted journal banner missing');
+    assert.match(run.checks.journal.text, /중단된 적용/, 'interrupted journal label missing');
+    assert.equal(run.checks.journal.hasReapply, true, 'interrupted journal has no 다시 적용 control');
+    assert.match(run.checks.journal.reapplyLabel, /다시 적용/, 'reapply control label missing');
+    assert.equal(hashFile(journalPath), journalHashBefore, 'interrupted journal was replayed on load');
+    assert.equal(hashFile(omoPath), omoHashBeforeJournalLoad, 'interrupted journal wrote the config on load');
+    for (const vp of VIEWPORTS) for (const scheme of SCHEMES) await captureJournal(vp, scheme);
 
     run.checks.consoleErrors = consoleErrors;
     assert.deepEqual(consoleErrors, [], 'page console errors: ' + consoleErrors.join(' | '));
@@ -1093,7 +1186,7 @@ function writeEvidence() {
   run.checks.duplicateCaptures = [...byHash.values()].filter((group) => group.length > 1);
   const e2e = [];
   const stale = [];
-  e2e.push('piomo-primary-agents todo 13 - board profiles guarded write e2e');
+  e2e.push(`piomo-primary-agents todo ${TASK} - board profiles guarded write e2e`);
   e2e.push(`run: ${run.startedAt} .. ${run.finishedAt}`);
   e2e.push(`build: served page sha256 ${run.build?.hash} (${run.build?.pageBytes} B), BWT HEAD ${gitHead()}`);
   e2e.push(`server: ${run.server?.url} (temp port ${run.server?.port}, state dir ${run.server?.stateDir})`);
@@ -1111,6 +1204,10 @@ function writeEvidence() {
   e2e.push(`adversarial HTTP: ${JSON.stringify(run.checks.http || null)}`);
   e2e.push(`contrast: light ${run.checks.contrast?.pass ? 'PASS' : 'FAIL'}; dark ${run.checks.contrastDark?.pass ? 'PASS' : 'FAIL'}; light rows ${JSON.stringify(run.checks.contrast?.rows || [])}`);
   e2e.push(`selects: ${run.checks.selects?.count ?? '?'} measured; titles missing ${JSON.stringify(run.checks.selects?.missingTitle || [])}; title mismatches ${JSON.stringify(run.checks.selects?.titleMismatch || [])}; without ellipsis ${JSON.stringify(run.checks.selects?.noEllipsis || [])}; wider than control ${JSON.stringify(run.checks.selects?.widerThanControl || [])}`);
+  e2e.push(`select fit 1024: ${JSON.stringify(run.checks.selectFit1024 || null)}`);
+  e2e.push(`select fit 390: ${JSON.stringify(run.checks.selectFit390 || null)}`);
+  e2e.push(`added states: ${JSON.stringify(run.checks.addedStates || null)}`);
+  e2e.push(`interrupted journal: ${JSON.stringify(run.checks.journal || null)}`);
   e2e.push(`copy 390: ${JSON.stringify(run.checks.copy390 || null)}`);
   e2e.push(`loading frame: ${JSON.stringify(run.checks.loading || null)}`);
   e2e.push(`error frame: ${JSON.stringify(run.checks.error || null)}`);
@@ -1135,20 +1232,20 @@ function writeEvidence() {
   e2e.push(`live after:  ${JSON.stringify(run.liveAfter)}`);
   e2e.push(`result: ${run.ok ? 'PASS' : 'FAIL'}`);
   if (run.errors.length) e2e.push(...run.errors.map((e) => `ERROR ${e}`));
-  fs.writeFileSync(path.join(EVIDENCE, 'task-13-piomo-primary-agents-e2e.txt'), e2e.join('\n') + '\n');
+  fs.writeFileSync(path.join(EVIDENCE, `${PREFIX}-e2e.txt`), e2e.join('\n') + '\n');
 
-  stale.push('piomo-primary-agents todo 13 - stale apply 409');
+  stale.push(`piomo-primary-agents todo ${TASK} - stale apply 409`);
   stale.push(`before edit: ${JSON.stringify(run.stale?.before || null)}`);
   stale.push(`mutation: appended CRLF to temp omo.jsonc -> ${run.stale?.mutatedOmo}`);
   stale.push(`apply answer: HTTP ${run.stale?.httpStatus} (${run.stale?.conflictText || ''})`);
   stale.push(`after 409: ${JSON.stringify(run.stale?.after || null)}`);
   stale.push(`backups unchanged: ${run.stale?.backupsUnchanged}; journal unchanged: ${run.stale?.journalUnchanged}; roster unchanged: ${run.stale?.rosterUnchanged}`);
   stale.push(`result: ${run.stale?.httpStatus === 409 && run.stale?.backupsUnchanged && run.stale?.journalUnchanged && run.stale?.rosterUnchanged ? 'PASS' : 'FAIL'}`);
-  fs.writeFileSync(path.join(EVIDENCE, 'task-13-piomo-primary-agents-stale.txt'), stale.join('\n') + '\n');
+  fs.writeFileSync(path.join(EVIDENCE, `${PREFIX}-stale.txt`), stale.join('\n') + '\n');
 
   const a11y = run.checks.a11y || {};
   const a11yLines = [
-    'piomo-primary-agents todo 13 - profiles view accessible names (fixed build)',
+    'piomo-primary-agents todo ' + TASK + ' - profiles view accessible names (fixed build)',
     `build: served page sha256 ${run.build?.hash} (${run.build?.pageBytes} B)`,
     `source: src/page/profiles-view.js sha256 ${sha256(fs.readFileSync(path.join(ROOT, 'src/page/profiles-view.js')))}`,
     `controls total ${a11y.controls ?? '?'}`,
@@ -1162,7 +1259,7 @@ function writeEvidence() {
       && run.checks.a11y.selectsWithoutVisibleLabel?.length === 0 && run.checks.a11y.wrongLabels?.length === 0
       && run.checks.header390?.lines === 1 ? 'PASS' : 'FAIL'}`,
   ];
-  fs.writeFileSync(path.join(EVIDENCE, 'task-13-piomo-primary-agents-a11y.txt'), a11yLines.join('\n') + '\n');
+  fs.writeFileSync(path.join(EVIDENCE, `${PREFIX}-a11y.txt`), a11yLines.join('\n') + '\n');
 
   fs.writeFileSync(path.join(OUT, 'captures.json'), `${JSON.stringify(run, null, 2)}\n`);
 }
@@ -1174,4 +1271,4 @@ function gitHead() {
 
 await main();
 if (!run.ok) process.exit(1);
-console.log(`PASS ${run.captures.length} captures; build ${run.build.hash}; e2e ${path.join(EVIDENCE, 'task-13-piomo-primary-agents-e2e.txt')}`);
+console.log(`PASS ${run.captures.length} captures; build ${run.build.hash}; e2e ${path.join(EVIDENCE, `${PREFIX}-e2e.txt`)}`);
