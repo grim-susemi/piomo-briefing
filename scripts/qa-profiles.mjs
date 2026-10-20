@@ -78,7 +78,7 @@ const OUT = arg('--out') ? path.resolve(arg('--out')) : '';
 const EVIDENCE = arg('--evidence') ? path.resolve(arg('--evidence')) : OUT;
 const KEEP = argv.includes('--keep');
 const PREFIX = arg('--prefix') || 'task-13-piomo-primary-agents';
-const TASK = /^task-(\d+)-piomo-primary-agents$/.exec(PREFIX)?.[1] || '';
+const TASK = /^task-(\d+)-piomo-primary-agents(?:-r\d+)?$/.exec(PREFIX)?.[1] || '';
 const TOKEN = `piomo-t${TASK}-board-token`;
 const PORT_BASE = Number(process.env.OMO_BRIEFING_PORT_BASE || 47480);
 if (!TASK) {
@@ -113,6 +113,17 @@ const run = {
 const failures = [];
 const fail = (message) => { failures.push(String(message)); throw new Error(message); };
 const hashFile = (file) => sha256(fs.readFileSync(file));
+const SOURCE_FILES = [
+  'src/page/profiles-view.js', 'src/page/profiles-view.css', 'src/page/page.js',
+  'test/profiles-view.test.mjs', 'test/fixtures/profiles-view-state.json', 'scripts/qa-profiles.mjs',
+];
+function sourceTree() {
+  const files = SOURCE_FILES.map((file) => ({
+    path: file, bytes: fs.statSync(path.join(ROOT, file)).size, sha256: hashFile(path.join(ROOT, file)),
+  }));
+  const treeSha256 = sha256(Buffer.from(files.map((file) => file.path + '\0' + file.sha256).join('\n')));
+  return { treeSha256, files };
+}
 const readJsonc = (file) => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
 const stripBom = (text) => text.replace(/^\uFEFF/, '');
 
@@ -247,6 +258,7 @@ async function main() {
   const pageText = (await request({ port, path: '/' })).body;
   const buildHash = sha256(Buffer.from(pageText.split(TOKEN).join('<board-token>')));
   run.build = { hash: buildHash, pageBytes: Buffer.byteLength(pageText), url };
+  run.source = sourceTree();
   run.fixture = {
     goldens: path.relative(ROOT, GOLDEN).replace(/\\/g, '/'),
     omoBefore: hashFile(omoPath),
@@ -305,6 +317,17 @@ async function main() {
       features: [{ name: 'prefers-color-scheme', value: scheme }],
     });
     const scrollTop = () => page.eval(`(() => { window.scrollTo(0, 0); const m = document.querySelector('#main'); if (m) m.scrollTop = 0; return true; })()`);
+    const scrollUnderHeader = (selector, block = 'start') => page.eval(`(() => {
+      const main = document.querySelector('#main');
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) return false;
+      el.scrollIntoView({ block: ${JSON.stringify(block)} });
+      const head = document.querySelector('.pf-head');
+      if (${JSON.stringify(block)} === 'start' && head && getComputedStyle(head).position === 'sticky') {
+        main.scrollTop -= Math.ceil(head.getBoundingClientRect().height) + 8;
+      }
+      return true;
+    })()`);
     const closePeek = async () => {
       if (await page.eval(`!!document.querySelector('.sh-shell') && document.querySelector('.sh-shell').getAttribute('data-peek') === 'true'`)) {
         await page.eval(`document.querySelector('.sh-ib').click()`);
@@ -313,6 +336,20 @@ async function main() {
     };
     const settle = async () => {
       await page.eval(`document.fonts && document.fonts.ready ? document.fonts.ready.then(() => true) : true`);
+      await page.eval(sleepFrame());
+      // Theme switches transition colour for 150 ms. A frame pair alone would sample the middle of
+      // that transition, so wait for the finite animations/transitions before measuring or capturing.
+      await page.eval(`new Promise((resolve) => {
+        const pending = document.getAnimations().filter((a) => {
+          const timing = a.effect && a.effect.getTiming ? a.effect.getTiming() : null;
+          return a.playState === 'running' && !(timing && timing.iterations === Infinity);
+        });
+        if (!pending.length) return resolve(true);
+        let left = pending.length;
+        const done = () => { if (--left <= 0) resolve(true); };
+        for (const animation of pending) animation.finished.then(done, done);
+        setTimeout(() => resolve(true), 500);
+      })`);
       await page.eval(sleepFrame());
     };
     const capture = async (file, { full = false } = {}) => {
@@ -350,6 +387,10 @@ async function main() {
       })()`);
       for (const sec of layout) {
         if (!sec.key) continue;
+        const stickyOffset = await page.eval(`(() => {
+          const head = document.querySelector('.pf-head');
+          return head && getComputedStyle(head).position === 'sticky' ? Math.ceil(head.getBoundingClientRect().height) + 8 : 0;
+        })()`);
         const stops = [sec.top];
         if (sec.height > sec.view) {
           if (sec.key === 'routing') stops.push(sec.top + Math.floor((sec.height - sec.view) / 2));
@@ -357,7 +398,8 @@ async function main() {
         }
         const unique = [...new Set(stops.map((n) => Math.max(0, Math.min(Math.round(n), sec.max))))];
         for (let i = 0; i < unique.length; i += 1) {
-          await page.eval(`document.querySelector('#main').scrollTop = ${unique[i]}`);
+          const stop = Math.max(0, Math.min(unique[i] - stickyOffset, sec.max));
+          await page.eval(`document.querySelector('#main').scrollTop = ${stop}`);
           await settle();
           const suffix = unique.length > 1 ? `-${i + 1}` : '';
           await capture(path.join(OUT, `section-${sec.key}-${vp.name}-${scheme}${suffix}.png`));
@@ -372,14 +414,10 @@ async function main() {
       await applyViewport(vp);
       await applyScheme(theme);
       await closePeek();
-      await page.eval(`(() => { const tray = document.querySelector('.pf-tray'); if (tray) tray.scrollIntoView({ block: 'start' }); return true; })()`);
+      await scrollUnderHeader('.pf-tray');
       await settle();
       await capture(path.join(OUT, `state-${name}-${vp.name}-${theme}.png`));
-      if (name === 'preview' || name === 'success') {
-        await page.eval(`(() => { const list = document.querySelectorAll('.pf-diff, .pf-backups'); const last = list[list.length - 1]; if (last) last.scrollIntoView({ block: 'end' }); return true; })()`);
-        await settle();
-        await capture(path.join(OUT, `state-${name}-${vp.name}-${theme}-end.png`));
-      }
+      if (name === 'preview' || name === 'success') await captureEnd(name, vp, theme);
     };
 
     const captureStates = async (name) => {
@@ -389,7 +427,7 @@ async function main() {
       await applyViewport(vp);
       await applyScheme(theme);
       await closePeek();
-      await page.eval(`(() => { const box = document.querySelector('[data-pf-journal="interrupted"]'); if (box) box.scrollIntoView({ block: 'start' }); return true; })()`);
+      await scrollUnderHeader('[data-pf-journal="interrupted"]');
       await settle();
       await capture(path.join(OUT, `state-journal-${vp.name}-${theme}.png`));
     };
@@ -414,23 +452,348 @@ async function main() {
       return { rows, truncated: rows.filter((row) => row.textWidth > row.available) };
     })()`);
 
+    // The real scroll owner is .sh-main (#main). A bottom frame is only evidence when that owner
+    // is at its maximum scroll and the last section is inside the viewport.
+    const mainInfo = () => page.eval(`(() => {
+      const main = document.querySelector('#main');
+      return { owner: !!main && main.classList.contains('sh-main'), scrollTop: Math.round(main.scrollTop),
+        max: Math.round(main.scrollHeight - main.clientHeight),
+        atBottom: main.scrollTop >= main.scrollHeight - main.clientHeight - 1 };
+    })()`);
+    const scrollToBottom = async () => {
+      await page.eval(`(() => { const main = document.querySelector('#main'); main.scrollTop = main.scrollHeight; return true; })()`);
+      await settle();
+    };
+    const captureEnd = async (name, vp, theme) => {
+      await scrollToBottom();
+      const state = await mainInfo();
+      assert.equal(state.owner, true, 'bottom frame scroll owner is not .sh-main');
+      assert.equal(state.atBottom, true, `${name} ${vp.name} ${theme} did not reach .sh-main bottom: ${JSON.stringify(state)}`);
+      const guideVisible = await page.eval(`(() => {
+        const guide = document.querySelector('#pf-sec-guide');
+        if (!guide) return false;
+        const r = guide.getBoundingClientRect();
+        return r.bottom > 0 && r.top < innerHeight;
+      })()`);
+      assert.equal(guideVisible, true, `${name} ${vp.name} ${theme} bottom frame does not show the last section`);
+      run.checks.endScroll = run.checks.endScroll || {};
+      run.checks.endScroll[`${name}-${vp.name}-${theme}`] = state;
+      await capture(path.join(OUT, `state-${name}-${vp.name}-${theme}-end.png`));
+    };
+
+    const loadedProbe = () => page.eval(`(() => {
+      const parse = (value) => {
+        const m = /rgba?\\(([^)]+)\\)/.exec(value || '');
+        if (!m) return null;
+        const p = m[1].split(',').map((x) => Number(x.trim()));
+        return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+      };
+      const composite = (fg, bg) => ({ r: fg.r * fg.a + bg.r * (1 - fg.a), g: fg.g * fg.a + bg.g * (1 - fg.a), b: fg.b * fg.a + bg.b * (1 - fg.a), a: 1 });
+      const background = (el) => {
+        const layers = [];
+        for (let node = el; node; node = node.parentElement) {
+          const c = parse(getComputedStyle(node).backgroundColor);
+          if (c && c.a > 0) { layers.push(c); if (c.a >= 0.999) break; }
+        }
+        let bg = { r: 255, g: 255, b: 255, a: 1 };
+        for (let i = layers.length - 1; i >= 0; i -= 1) bg = composite(layers[i], bg);
+        return bg;
+      };
+      const lum = (c) => {
+        const f = (v) => { const s = v / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+        return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+      };
+      const ratio = (a, b) => {
+        const l1 = lum(a), l2 = lum(b);
+        return Math.round(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)) * 100) / 100;
+      };
+      const contrast = (el) => { const fg = parse(getComputedStyle(el).color); const bg = background(el); return ratio(composite(fg, bg), bg); };
+      const main = document.querySelector('#main');
+      const base = main.getBoundingClientRect().top - main.scrollTop;
+      const rel = (el) => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top - base), height: Math.round(r.height), width: Math.round(r.width) }; };
+      const sections = {};
+      for (const el of document.querySelectorAll('[data-pf-sec]')) sections[el.getAttribute('data-pf-sec')] = rel(el);
+      const agents = [...document.querySelectorAll('.pf-agent')].map(rel);
+      const title = document.querySelector('.pf-title');
+      const tr = title.getBoundingClientRect();
+      const hit = document.elementFromPoint(tr.left + tr.width / 2, tr.top + tr.height / 2);
+      const tray = document.querySelector('.pf-tray');
+      const firstAgent = document.querySelector('.pf-agent');
+      const dots = [...document.querySelectorAll('.pf-dot')].map((el) => ({
+        id: (el.className.match(/pf-dot-(\\w+)/) || [])[1], shape: (el.className.match(/pf-shape-(\\w+)/) || [])[1],
+        label: el.getAttribute('aria-label'), role: el.getAttribute('role'),
+        background: getComputedStyle(el).backgroundColor, clip: getComputedStyle(el).clipPath, radius: getComputedStyle(el).borderRadius,
+      }));
+      const on = document.querySelector('.pf-card.on');
+      const chip = on && on.querySelector('.pf-current');
+      const cards = [...document.querySelectorAll('.pf-card')].map((el) => ({ on: el.classList.contains('on'), bg: getComputedStyle(el).backgroundColor, border: getComputedStyle(el).borderColor }));
+      const hint = document.querySelector('[data-pf-agent="hephaestus"] .pf-hint');
+      const hintLabel = hint && hint.closest('label');
+      const pinSel = document.querySelector('[data-pf-agent="hephaestus"] [data-pf="agent-pin"]');
+      const thinkSel = document.querySelector('[data-pf-agent="hephaestus"] [data-pf="agent-pin-thinking"]');
+      const guide = document.querySelector('#pf-sec-guide');
+      const guideHead = guide && guide.querySelector('.pf-guide-h');
+      const guideSub = guide && guide.querySelector('.pf-sec-s');
+      const guideVersion = guideHead && guideHead.querySelector('.pf-chip');
+      const rail = document.querySelector('#rail');
+      const railBg = rail ? background(rail) : null;
+      const railRows = [...document.querySelectorAll('.sh-rb')].map((el) => {
+        const fg = parse(getComputedStyle(el).color);
+        const bg = background(el);
+        return { key: el.getAttribute('data-key'), on: el.classList.contains('on'), ratio: ratio(composite(fg, bg), bg),
+          color: getComputedStyle(el).color, background: getComputedStyle(el).backgroundColor };
+      });
+      const keeps = [...document.querySelectorAll('.pf-card-sum .pf-keep')].map((el) => {
+        const range = document.createRange(); range.selectNodeContents(el);
+        const box = el.getBoundingClientRect();
+        const parent = el.closest('.pf-card-sum').getBoundingClientRect();
+        return { text: el.textContent, lines: new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size,
+          overflow: box.right > parent.right + 1 || box.left < parent.left - 1 };
+      });
+      const summaries = [...document.querySelectorAll('.pf-card-sum')].map((el) => ({ text: el.textContent, overflow: el.scrollWidth > el.clientWidth + 1 }));
+      const controls = [...document.querySelectorAll('.pf-btn, .pf select, .pf input')].filter((el) => el.offsetParent !== null)
+        .map((el) => { const r = el.getBoundingClientRect(); return { tag: el.tagName.toLowerCase(), w: Math.round(r.width), h: Math.round(r.height) }; });
+      const overflow = [...document.querySelectorAll('.pf *')].filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && (r.right > innerWidth + 1 || r.left < -1);
+      }).map((el) => String(el.className).slice(0, 80)).slice(0, 20);
+      return {
+        viewport: { width: innerWidth, height: innerHeight },
+        title: { text: title.textContent, visible: tr.width > 0 && tr.height > 0, top: Math.round(tr.top),
+          sticky: getComputedStyle(title.closest('.pf-head')).position, covered: !!(hit && hit !== title && !title.contains(hit)) },
+        tray: { compact: tray.classList.contains('pf-tray-compact'), height: Math.round(tray.getBoundingClientRect().height),
+          actions: tray.querySelectorAll('.pf-tray-acts button').length,
+          firstAgentTop: firstAgent ? Math.round(firstAgent.getBoundingClientRect().top - base) : null },
+        sections, agents, dots,
+        hint: { text: hint && hint.textContent, labelFor: hintLabel && hintLabel.getAttribute('for'),
+          pinId: pinSel && pinSel.id, thinkingId: thinkSel && thinkSel.id,
+          hintTop: hint ? Math.round(hint.getBoundingClientRect().top) : null,
+          pinBottom: pinSel ? Math.round(pinSel.getBoundingClientRect().bottom) : null,
+          thinkTop: thinkSel ? Math.round(thinkSel.getBoundingClientRect().top) : null },
+        guide: { head: guideHead && guideHead.textContent, headVersion: guideVersion && guideVersion.textContent,
+          sub: guideSub && guideSub.textContent, hasStale: !!(guide && guide.textContent.includes('5.1.33')) },
+        rail: { rows: railRows, background: railBg,
+          debug: { mediaDark: matchMedia('(prefers-color-scheme: dark)').matches,
+            rootScheme: getComputedStyle(document.documentElement).colorScheme,
+            rbScheme: getComputedStyle(document.querySelector('.sh-rb')).colorScheme,
+            rbToken: getComputedStyle(document.querySelector('.sh-rb')).getPropertyValue('--c-fg-2'),
+            railBg: getComputedStyle(rail).backgroundColor, rbOpacity: getComputedStyle(document.querySelector('.sh-rb')).opacity } },
+        keeps, summaries,
+        selected: { on: !!on, chip: !!chip, chipText: chip && chip.textContent, chipIcon: !!(chip && chip.querySelector('svg')),
+          selected: cards.filter((c) => c.on)[0] || null, unselected: cards.filter((c) => !c.on)[0] || null },
+        controls: { count: controls.length, minHeight: controls.length ? Math.min(...controls.map((c) => c.h)) : 0,
+          minWidth: controls.length ? Math.min(...controls.map((c) => c.w)) : 0 },
+        overflow, main: { scrollTop: Math.round(main.scrollTop), max: Math.round(main.scrollHeight - main.clientHeight), owner: main.classList.contains('sh-main') },
+      };
+    })()`);
+
+    const pressCapture = async (kind, selector, vp, theme) => {
+      await applyViewport(vp);
+      await applyScheme(theme);
+      await closePeek();
+      if (kind === 'nav' && vp.width < 900) {
+        const peek = await page.eval(`document.querySelector('.sh-shell').getAttribute('data-peek') === 'true'`);
+        if (!peek) {
+          await page.eval(`document.querySelector('.sh-ib').click()`);
+          await waitFor(`document.querySelector('.sh-shell').getAttribute('data-peek') === 'true'`, 'sidebar peek for press capture');
+        }
+      }
+      await page.eval(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) throw new Error('press target missing'); el.scrollIntoView({ block: 'center' }); return true; })()`);
+      await settle();
+      const box = await page.eval(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: Math.round(r.width), h: Math.round(r.height) }; })()`);
+      const before = await page.eval(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); const cs = getComputedStyle(el); return { background: cs.backgroundColor, color: cs.color, pending: document.querySelectorAll('.pf-pending li').length }; })()`);
+      const restFile = path.join(OUT, `press-${kind}-${vp.name}-${theme}-rest.png`);
+      const downFile = path.join(OUT, `press-${kind}-${vp.name}-${theme}-down.png`);
+      await capture(restFile);
+      await page.client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y, button: 'none' });
+      await page.client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: box.x, y: box.y, button: 'left', buttons: 1, clickCount: 1 });
+      await settle();
+      const down = await page.eval(`(() => {
+        const parse = (value) => { const m = /rgba?\\(([^)]+)\\)/.exec(value || ''); if (!m) return null; const p = m[1].split(',').map((x) => Number(x.trim())); return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 }; };
+        const composite = (fg, bg) => ({ r: fg.r * fg.a + bg.r * (1 - fg.a), g: fg.g * fg.a + bg.g * (1 - fg.a), b: fg.b * fg.a + bg.b * (1 - fg.a), a: 1 });
+        const background = (el) => { const layers = []; for (let node = el; node; node = node.parentElement) { const c = parse(getComputedStyle(node).backgroundColor); if (c && c.a > 0) { layers.push(c); if (c.a >= 0.999) break; } } let bg = { r: 255, g: 255, b: 255, a: 1 }; for (let i = layers.length - 1; i >= 0; i -= 1) bg = composite(layers[i], bg); return bg; };
+        const lum = (c) => { const f = (v) => { const s = v / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
+        const ratio = (a, b) => { const l1 = lum(a), l2 = lum(b); return Math.round(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)) * 100) / 100; };
+        const el = document.querySelector(${JSON.stringify(selector)});
+        const cs = getComputedStyle(el); const bg = background(el); const fg = parse(cs.color);
+        return { activeIsTarget: el.matches(':active'), background: cs.backgroundColor, color: cs.color, ratio: ratio(composite(fg, bg), bg), pending: document.querySelectorAll('.pf-pending li').length };
+      })()`);
+      await capture(downFile);
+      await page.client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1, button: 'none' });
+      await page.client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 1, y: 1, button: 'left', buttons: 0, clickCount: 1 });
+      await settle();
+      if (kind === 'nav' && vp.width < 900) await closePeek();
+      assert.equal(down.activeIsTarget, true, `${kind} ${vp.name} ${theme} was not in a real :active state`);
+      assert.notEqual(down.background, before.background, `${kind} ${vp.name} ${theme} press did not paint a different fill`);
+      assert.ok(down.ratio >= 4.5, `${kind} ${vp.name} ${theme} pressed text contrast ${down.ratio}:1`);
+      assert.equal(down.pending, before.pending, `${kind} press changed the pending edits`);
+      assert.notEqual(hashFile(restFile), hashFile(downFile), `${kind} press frame is byte-identical to rest`);
+      run.checks.presses = run.checks.presses || {};
+      run.checks.presses[`${kind}-${vp.name}-${theme}`] = { box, rest: before, down,
+        restSha256: hashFile(restFile), downSha256: hashFile(downFile) };
+    };
+
+    const focusCapture = async (vp, theme) => {
+      await applyViewport(vp);
+      await applyScheme(theme);
+      await closePeek();
+      await scrollTop();
+      await settle();
+      await page.eval(`document.activeElement && document.activeElement.blur && document.activeElement.blur()`);
+      let focus = null;
+      for (let index = 0; index < 80 && !focus; index += 1) {
+        await page.client.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
+        await page.client.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
+        focus = await page.eval(`(() => {
+          const el = document.activeElement;
+          if (!el || !el.matches || !el.matches('.pf select, .pf input, .pf button')) return null;
+          const cs = getComputedStyle(el);
+          const r = el.getBoundingClientRect();
+          const parse = (value) => { const m = /rgba?\\(([^)]+)\\)/.exec(value || ''); if (!m) return null; const p = m[1].split(',').map((x) => Number(x.trim())); return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 }; };
+          const lum = (c) => { const f = (v) => { const s = v / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
+          const ratio = (a, b) => { const l1 = lum(a), l2 = lum(b); return Math.round(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)) * 100) / 100; };
+          const layers = [];
+          for (let node = el; node; node = node.parentElement) { const c = parse(getComputedStyle(node).backgroundColor); if (c && c.a > 0) { layers.push(c); if (c.a >= 0.999) break; } }
+          let bg = { r: 255, g: 255, b: 255, a: 1 };
+          const composite = (fg, base) => ({ r: fg.r * fg.a + base.r * (1 - fg.a), g: fg.g * fg.a + base.g * (1 - fg.a), b: fg.b * fg.a + base.b * (1 - fg.a), a: 1 });
+          for (let i = layers.length - 1; i >= 0; i -= 1) bg = composite(layers[i], bg);
+          return { tag: el.tagName, pf: el.getAttribute('data-pf'), id: el.id, outlineStyle: cs.outlineStyle,
+            outlineWidth: cs.outlineWidth, outlineColor: cs.outlineColor, outlineRatio: ratio(parse(cs.outlineColor), bg),
+            visible: r.width > 0 && r.height > 0, top: Math.round(r.top), bottom: Math.round(r.bottom) };
+        })()`);
+      }
+      assert.ok(focus, `no profiles control received keyboard focus at ${vp.name}-${theme}`);
+      assert.equal(focus.visible, true, `focused control is not visible at ${vp.name}-${theme}`);
+      assert.equal(focus.outlineStyle, 'solid', `no focus outline at ${vp.name}-${theme}`);
+      assert.ok(Number.parseFloat(focus.outlineWidth) >= 2, `focus ring is thinner than 2px at ${vp.name}-${theme}`);
+      assert.ok(focus.outlineRatio >= 3, `focus ring contrast ${focus.outlineRatio}:1 at ${vp.name}-${theme}`);
+      assert.ok(focus.top >= 0 && focus.bottom <= vp.height, `focused control is outside the viewport at ${vp.name}-${theme}`);
+      await capture(path.join(OUT, `focus-${vp.name}-${theme}.png`));
+      run.checks.focus = run.checks.focus || {};
+      run.checks.focus[`${vp.name}-${theme}`] = focus;
+      await page.eval(`document.activeElement && document.activeElement.blur && document.activeElement.blur()`);
+    };
+
+    const measureLoaded = async (vp, theme) => {
+      await applyViewport(vp);
+      await applyScheme(theme);
+      await closePeek();
+      await scrollTop();
+      await settle();
+      const probe = await loadedProbe();
+      run.checks.byViewport = run.checks.byViewport || {};
+      run.checks.byViewport[`${vp.name}-${theme}`] = probe;
+      assert.equal(probe.title.text, '프로필·에이전트', 'visible page title');
+      assert.equal(probe.title.visible, true, `page title hidden at ${vp.name}-${theme}`);
+      assert.equal(probe.title.covered, false, `page title covered at ${vp.name}-${theme}`);
+      if (vp.width <= 599) assert.equal(probe.title.sticky, 'sticky', 'compact title is not a sticky plain bar');
+      assert.equal(probe.tray.compact, true, `empty tray is not compact at ${vp.name}-${theme}`);
+      assert.equal(probe.tray.actions, 0, `empty tray still shows actions at ${vp.name}-${theme}`);
+      assert.ok(probe.tray.height <= 64, `empty tray is ${probe.tray.height}px at ${vp.name}-${theme}`);
+      assert.ok(probe.tray.firstAgentTop < 500, `first agent starts at ${probe.tray.firstAgentTop}px at ${vp.name}-${theme}`);
+      assert.equal(probe.dots.length, 4, 'four identity marks');
+      assert.deepEqual(probe.dots.map((d) => d.shape).sort(), ['circle', 'diamond', 'square', 'triangle'], 'identity shapes');
+      assert.equal(new Set(probe.dots.map((d) => d.background)).size, 4, 'identity colours are still distinct');
+      for (const dot of probe.dots) {
+        assert.equal(dot.role, 'img');
+        assert.match(dot.label, /· (원형|사각형|삼각형|마름모) 표식/);
+      }
+      assert.equal(probe.hint.labelFor, probe.hint.pinId, 'GPT hint is not inside the pin label');
+      assert.equal(probe.hint.text, 'GPT 계열만');
+      assert.ok(probe.hint.hintTop >= probe.hint.pinBottom - 1, 'GPT hint does not sit under the pin select');
+      if (vp.width < 1440) assert.ok(probe.hint.hintTop < probe.hint.thinkTop, 'GPT hint is attached to thinking, not pin');
+      assert.ok(probe.guide.headVersion, 'guide version chip missing');
+      assert.equal(probe.guide.headVersion, (probe.guide.sub || '').split(' ')[0], 'guide heading/chip/subtitle versions differ');
+      assert.equal(probe.guide.hasStale, false, 'guide still prints the stale 5.1.33 label');
+      assert.ok(probe.rail.rows.length > 0, 'no rail controls measured');
+      for (const row of probe.rail.rows) assert.ok(row.ratio >= 3, `rail ${row.key} contrast ${row.ratio}:1 at ${vp.name}-${theme}`);
+      assert.deepEqual(probe.keeps.filter((k) => k.lines !== 1), [], `kept phrase split at ${vp.name}-${theme}`);
+      assert.deepEqual(probe.keeps.filter((k) => k.overflow), [], `kept phrase overflows at ${vp.name}-${theme}`);
+      assert.deepEqual(probe.summaries.filter((s) => s.overflow), [], `profile copy overflows at ${vp.name}-${theme}`);
+      assert.equal(probe.selected.on, true);
+      assert.equal(probe.selected.chip, true);
+      assert.equal(probe.selected.chipIcon, true, 'selected card check glyph missing');
+      assert.match(probe.selected.chipText, /현재/);
+      assert.notEqual(probe.selected.selected.bg, probe.selected.unselected.bg, 'selected card has no wash');
+      assert.deepEqual(probe.overflow, [], `overflow at ${vp.name}-${theme}`);
+      if (vp.width <= 599) {
+        assert.ok(probe.controls.minHeight >= 44, `phone target ${probe.controls.minHeight}px`);
+        await page.eval(`document.querySelector('#main').scrollTop = 600`);
+        await settle();
+        const sticky = await page.eval(`(() => { const t = document.querySelector('.pf-title'); const r = t.getBoundingClientRect(); return { top: Math.round(r.top), visible: r.top >= 0 && r.bottom <= innerHeight }; })()`);
+        assert.equal(sticky.visible, true, 'compact title did not stay visible after scrolling');
+        run.checks.byViewport[`${vp.name}-${theme}`].titleScrolled = sticky;
+        await page.eval(`document.querySelector('#main').scrollTop = 0`);
+        await settle();
+      }
+      return probe;
+    };
+
     await page.goto(url);
     await waitFor(`!!document.querySelector('[data-shell]')`, 'board shell');
     await openProfiles();
 
-    // ── 6-shot matrix + full-page companions (one browser, one page) ───────────
+    // ── 6-shot matrix + sections + pressed pixels + targeted rows ─────────────
     for (const vp of VIEWPORTS) {
-      await applyViewport(vp);
-      await scrollTop();
-      await settle();
       for (const scheme of SCHEMES) {
-        await applyScheme(scheme);
-        await scrollTop();
-        await settle();
+        await measureLoaded(vp, scheme);
         await capture(path.join(OUT, `profiles-${vp.name}-${scheme}.png`));
         await captureSections(vp, scheme);
       }
     }
+
+    // A3/B9: real pointer-down frames. CDP presses the actual element; no class is forced.
+    for (const vp of VIEWPORTS) for (const scheme of SCHEMES) {
+      await pressCapture('card', '.pf-card[data-profile="gpt-deepseek"]', vp, scheme);
+    }
+    for (const vp of VIEWPORTS) for (const scheme of SCHEMES) {
+      await pressCapture('nav', '.pf-nav-b[data-target="agents"]', vp, scheme);
+    }
+    for (const vp of VIEWPORTS) for (const scheme of SCHEMES) await focusCapture(vp, scheme);
+
+    // B10/B11: the Oracle absence row and the remembered model row at the widths where the
+    // section frames cut them off.
+    const captureTargeted = async (vp, theme) => {
+      await applyViewport(vp);
+      await applyScheme(theme);
+      await closePeek();
+      await page.eval(`(() => { const row = document.querySelector('[data-pf-route="agents/oracle"]'); if (!row) throw new Error('oracle row missing'); row.scrollIntoView({ block: 'center' }); return true; })()`);
+      await settle();
+      const oracle = await page.eval(`(() => {
+        const main = document.querySelector('#main');
+        const row = document.querySelector('[data-pf-route="agents/oracle"]');
+        const mr = main.getBoundingClientRect(), r = row.getBoundingClientRect();
+        return { text: row.textContent, selects: row.querySelectorAll('select').length,
+          visible: r.top >= mr.top - 1 && r.bottom <= mr.bottom + 1 };
+      })()`);
+      assert.equal(oracle.selects, 0, `Oracle row is editable at ${vp.name}-${theme}`);
+      assert.match(oracle.text, /5\.1\.38에 없음/);
+      assert.equal(oracle.visible, true, `Oracle row not in frame at ${vp.name}-${theme}`);
+      await capture(path.join(OUT, `section-profiles-oracle-${vp.name}-${theme}.png`));
+      run.checks.targeted = run.checks.targeted || {};
+      run.checks.targeted[`oracle-${vp.name}-${theme}`] = oracle;
+      if (vp.name === '390') {
+        await page.eval(`(() => { const line = document.querySelector('[data-pf-agent="sisyphus"] .pf-mem-line'); if (!line) throw new Error('memory line missing'); line.scrollIntoView({ block: 'center' }); return true; })()`);
+        await settle();
+        const memory = await page.eval(`(() => {
+          const main = document.querySelector('#main');
+          const line = document.querySelector('[data-pf-agent="sisyphus"] .pf-mem-line');
+          const value = line.querySelector('.pf-mem');
+          const reset = line.querySelector('[data-pf="reset-memory"]');
+          const mr = main.getBoundingClientRect(), r = line.getBoundingClientRect();
+          return { value: value && value.textContent, reset: reset && reset.textContent,
+            visible: r.top >= mr.top - 1 && r.bottom <= mr.bottom + 1,
+            target: reset ? { w: Math.round(reset.getBoundingClientRect().width), h: Math.round(reset.getBoundingClientRect().height) } : null };
+        })()`);
+        assert.match(memory.value, /gpt-6\.1-sol/);
+        assert.match(memory.reset, /기억 초기화/);
+        assert.equal(memory.visible, true, `remembered model not in frame at 390-${theme}`);
+        assert.ok(memory.target.w >= 44 && memory.target.h >= 44, 'memory reset target below 44px at 390');
+        await capture(path.join(OUT, `section-agents-memory-390-${theme}.png`));
+        run.checks.targeted[`memory-390-${theme}`] = memory;
+      }
+    };
+    for (const vp of [VIEWPORTS[0], VIEWPORTS[1]]) for (const theme of SCHEMES) await captureTargeted(vp, theme);
 
     // ── measured evidence at 1440 and 390 ──────────────────────────────────────
     await applyViewport(VIEWPORTS[2]);
@@ -592,6 +955,25 @@ async function main() {
     assert.deepEqual(run.checks.a11y.selectsWithoutVisibleLabel, [], 'select without a visible label');
     assert.deepEqual(run.checks.a11y.wrongLabels, [], 'per-control label mismatch');
     assert.ok(run.checks.a11y.selects > 0, 'no selects measured');
+
+    // Negative controls: the same contrast/overflow/target probes must flag known-bad synthetic
+    // nodes, so the zero-hit results above are not a detector that can never fire.
+    run.checks.negativeControls = await page.eval(`(() => {
+      const parse = (value) => { const m = /rgba?\\(([^)]+)\\)/.exec(value || ''); if (!m) return null; const p = m[1].split(',').map((x) => Number(x.trim())); return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 }; };
+      const lum = (c) => { const f = (v) => { const s = v / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
+      const ratio = (a, b) => { const l1 = lum(a), l2 = lum(b); return Math.round(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)) * 100) / 100; };
+      const root = document.querySelector('.pf');
+      const low = document.createElement('span'); low.style.color = 'rgb(188,188,192)'; low.style.background = 'rgb(236,236,239)'; low.textContent = 'x'; root.appendChild(low);
+      const lowRatio = ratio(parse(getComputedStyle(low).color), parse(getComputedStyle(low).backgroundColor)); low.remove();
+      const wide = document.createElement('div'); wide.style.width = '2000px'; wide.style.height = '1px'; root.appendChild(wide);
+      const overflowDetected = [...document.querySelectorAll('.pf *')].some((el) => el.getBoundingClientRect().right > innerWidth + 1); wide.remove();
+      const small = document.createElement('button'); small.className = 'pf-btn'; small.style.width = '10px'; small.style.height = '10px'; root.appendChild(small);
+      const smallRect = small.getBoundingClientRect(); const targetDetected = smallRect.width < 44 || smallRect.height < 44; small.remove();
+      return { lowRatio, contrastDetected: lowRatio < 3, overflowDetected, targetDetected };
+    })()`);
+    assert.equal(run.checks.negativeControls.contrastDetected, true, 'contrast probe cannot see a known 1.6:1 pair');
+    assert.equal(run.checks.negativeControls.overflowDetected, true, 'overflow probe cannot see a 2000px node');
+    assert.equal(run.checks.negativeControls.targetDetected, true, 'target probe cannot see a 10px control');
 
     // Todo-22 carried states from todos 20/21: absent-in-5.1.38 row, recommendation pins and
     // the extension-owned remembered model, all read through the real store state.
@@ -759,7 +1141,44 @@ async function main() {
     assert.equal(run.checks.loading.sections, 0, 'loading frame renders loaded sections');
     assert.ok(run.checks.loading.skeleton >= 12, 'loading frame does not reserve a skeleton layout');
     assert.equal(run.checks.loading.pulse, true, 'loading frame has no pulsing glyph');
-    await captureStates('loading');
+    // A1: the skeleton uses the loaded full-width agent rows. Measure both at each width.
+    run.checks.loadingGeometry = {};
+    const loadingGeometry = () => page.eval(`(() => {
+      const main = document.querySelector('#main');
+      const base = main.getBoundingClientRect().top - main.scrollTop;
+      const rel = (el) => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top - base), height: Math.round(r.height), width: Math.round(r.width) }; };
+      const item = (key) => { const el = document.querySelector('[data-pf-skel="' + key + '"]'); return el ? rel(el) : null; };
+      return { agents: item('agents'), profiles: item('profiles'), routing: item('routing'),
+        homes: item('homes'), tray: item('tray'), agentRows: [...document.querySelectorAll('[data-pf-skel="agent"]')].map(rel) };
+    })()`);
+    for (const vp of VIEWPORTS) {
+      for (const scheme of SCHEMES) {
+        await applyViewport(vp);
+        await applyScheme(scheme);
+        await settle();
+        if (scheme === 'light') run.checks.loadingGeometry[vp.name] = await loadingGeometry();
+        await capture(path.join(OUT, `state-loading-${vp.name}-${scheme}.png`));
+      }
+    }
+    for (const vp of VIEWPORTS) {
+      const skeleton = run.checks.loadingGeometry[vp.name];
+      const loaded = run.checks.byViewport[`${vp.name}-light`];
+      assert.equal(skeleton.agentRows.length, 4, `loading skeleton agent rows at ${vp.name}`);
+      assert.ok(new Set(skeleton.agentRows.map((row) => row.width)).size === 1, `skeleton agents are not one full-width column at ${vp.name}`);
+      for (const key of ['agents', 'profiles', 'routing']) {
+        const delta = Math.abs(skeleton[key].top - loaded.sections[key].top);
+        const ratio = skeleton[key].height / loaded.sections[key].height;
+        skeleton[key].loadedTop = loaded.sections[key].top;
+        skeleton[key].loadedHeight = loaded.sections[key].height;
+        skeleton[key].topDelta = delta;
+        skeleton[key].heightRatio = Math.round(ratio * 100) / 100;
+        assert.ok(delta <= 80, `loading/loaded ${key} top delta ${delta}px at ${vp.name}`);
+        assert.ok(ratio >= 0.85 && ratio <= 1.25, `loading/loaded ${key} height ratio ${ratio} at ${vp.name}`);
+      }
+      const skeletonFill = skeleton.agentRows[0].width / skeleton.agents.width;
+      const loadedFill = loaded.agents[0].width / loaded.sections.agents.width;
+      assert.ok(Math.abs(skeletonFill - loadedFill) <= 0.02, `agent row fill ratio differs at ${vp.name}`);
+    }
     await page.client.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: loadingInit.identifier });
 
     await applyViewport(VIEWPORTS[2]);
@@ -882,6 +1301,33 @@ async function main() {
     await waitFor(`document.querySelectorAll('.pf-pending li').length === 2`, 'two pending changes');
     run.expected.pending = await page.eval(`([...document.querySelectorAll('.pf-pending li')].map((li) => li.textContent))`);
 
+    // B5: discard is a danger action with an inline confirmation; cancel keeps every value.
+    await page.eval(`document.querySelector('[data-pf="clear"]').click()`);
+    await waitFor(`!!document.querySelector('.pf-clear')`, 'discard confirmation');
+    run.checks.clearConfirm = await page.eval(`(() => ({
+      danger: document.querySelector('[data-pf="clear"]').classList.contains('pf-btn-danger'),
+      group: document.querySelector('.pf-clear').getAttribute('aria-label'),
+      hasCancel: !!document.querySelector('[data-pf="clear-cancel"]'),
+      hasConfirm: !!document.querySelector('[data-pf="clear-confirm"]'),
+      pending: document.querySelectorAll('.pf-pending li').length,
+    }))()`);
+    assert.equal(run.checks.clearConfirm.danger, true, 'discard action is not danger-styled');
+    assert.equal(run.checks.clearConfirm.group, '대기 변경 버리기 확인');
+    assert.equal(run.checks.clearConfirm.hasCancel, true);
+    assert.equal(run.checks.clearConfirm.hasConfirm, true);
+    assert.equal(run.checks.clearConfirm.pending, 2);
+    await page.eval(`document.querySelector('[data-pf="clear-cancel"]').click()`);
+    await settle();
+    run.checks.clearCancel = await page.eval(`({
+      prompt: !!document.querySelector('.pf-clear'),
+      pending: document.querySelectorAll('.pf-pending li').length,
+      text: (document.querySelector('.pf-pending') || {}).textContent || '',
+    })`);
+    assert.equal(run.checks.clearCancel.prompt, false);
+    assert.equal(run.checks.clearCancel.pending, 2, 'cancel dropped a pending edit');
+    assert.match(run.checks.clearCancel.text, /atlas 레인/);
+    assert.match(run.checks.clearCancel.text, /agents\/explore/);
+
     await captureStates('pending');
     await applyViewport(VIEWPORTS[2]);
     await applyScheme('light');
@@ -927,7 +1373,7 @@ async function main() {
     }
     run.checks.shell390AfterClose = await shellState();
     await capture(path.join(OUT, 'state-preview-390-before-scroll.png'));
-    await page.eval(`(() => { const tray = document.querySelector('.pf-tray'); if (tray) tray.scrollIntoView({ block: 'start' }); return true; })()`);
+    await scrollUnderHeader('.pf-tray');
     await settle();
     run.checks.shell390AfterScroll = await shellState();
     run.checks.previewLayout390 = await page.eval(`(() => {
@@ -972,6 +1418,33 @@ async function main() {
     assert.deepEqual([...run.checks.apply.writes].sort(), ['agent/primary-agents/roster.json', 'omo.jsonc'], 'apply write set');
     await waitFor(`(() => { const el = document.querySelector('[data-pf-agent="atlas"] .pf-agent-k'); return el && el.textContent.includes('rev 1'); })()`, 'reloaded roster revision');
     await captureStates('success');
+
+    // B5 confirm path: only the explicit confirmation clears the pending values.
+    await applyViewport(VIEWPORTS[2]);
+    await applyScheme('light');
+    await scrollTop();
+    await settle();
+    await page.eval(`(() => {
+      const el = document.querySelector('select[data-pf="agent-lane"][data-agent="atlas"]');
+      el.value = 'daily-normal';
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return el.value;
+    })()`);
+    await waitFor(`document.querySelectorAll('.pf-pending li').length === 1`, 'confirm-path pending change');
+    await page.eval(`document.querySelector('[data-pf="clear"]').click()`);
+    await waitFor(`!!document.querySelector('[data-pf="clear-confirm"]')`, 'confirm-path prompt');
+    await page.eval(`document.querySelector('[data-pf="clear-confirm"]').click()`);
+    await settle();
+    run.checks.clearConfirmed = await page.eval(`(() => ({
+      pending: document.querySelectorAll('.pf-pending li').length,
+      prompt: !!document.querySelector('.pf-clear'),
+      trayCompact: !!document.querySelector('.pf-tray-compact'),
+      result: !!document.querySelector('.pf-done'),
+    }))()`);
+    assert.equal(run.checks.clearConfirmed.pending, 0);
+    assert.equal(run.checks.clearConfirmed.prompt, false);
+    assert.equal(run.checks.clearConfirmed.trayCompact, true);
+    assert.equal(run.checks.clearConfirmed.result, false);
 
     const afterOmo = fs.readFileSync(omoPath);
     const actualParsed = JSON.parse(stripBom(afterOmo.toString('utf8')));
@@ -1042,6 +1515,39 @@ async function main() {
     const rosterAfterStale = readJsonc(rosterPath);
     assert.equal(rosterAfterStale.revision, 1, '409 bumped the roster revision');
     assert.equal(rosterAfterStale.agents.prometheus.lane, 'daily-heavy', '409 applied the lane');
+    // A2: the stale primary actions are disabled and 새로고침 is the only promoted recovery.
+    run.checks.conflictActions = await page.eval(`(() => ({
+      conflict: !!document.querySelector('.pf-conflict'),
+      previewDisabled: !!document.querySelector('[data-pf="preview"]')?.disabled,
+      applyDisabled: !!document.querySelector('[data-pf="apply"]')?.disabled,
+      reloadPrimary: !!document.querySelector('.pf-conflict [data-pf="reload"]')?.classList.contains('pf-btn-primary'),
+      reloadLabel: (document.querySelector('.pf-conflict [data-pf="reload"]') || {}).textContent || '',
+      pending: document.querySelectorAll('.pf-pending li').length,
+    }))()`);
+    assert.equal(run.checks.conflictActions.conflict, true);
+    assert.equal(run.checks.conflictActions.previewDisabled, true, 'stale preview stayed enabled');
+    assert.equal(run.checks.conflictActions.applyDisabled, true, 'stale apply stayed enabled');
+    assert.equal(run.checks.conflictActions.reloadPrimary, true, 'refresh is not the promoted primary recovery');
+    assert.match(run.checks.conflictActions.reloadLabel, /새로고침/);
+    assert.equal(run.checks.conflictActions.pending, 1);
+    // The reload is the recovery: a fresh state read clears the banner and the stale actions.
+    await page.goto(url);
+    await waitFor(`!!document.querySelector('[data-shell]')`, 'board shell after 409 reload');
+    await openProfiles();
+    run.checks.conflictRecovery = await page.eval(`(() => ({
+      conflict: !!document.querySelector('.pf-conflict'),
+      pending: document.querySelectorAll('.pf-pending li').length,
+      applyPresent: !!document.querySelector('[data-pf="apply"]'),
+      previewPresent: !!document.querySelector('[data-pf="preview"]'),
+      applyDisabled: !!document.querySelector('[data-pf="apply"]')?.disabled,
+      previewDisabled: !!document.querySelector('[data-pf="preview"]')?.disabled,
+      trayCompact: !!document.querySelector('.pf-tray-compact'),
+    }))()`);
+    assert.equal(run.checks.conflictRecovery.conflict, false, '409 banner survived a successful reload');
+    assert.equal(run.checks.conflictRecovery.pending, 0, '409 pending edits survived the reload');
+    assert.equal(run.checks.conflictRecovery.applyPresent, false, 'stale apply returned after reload');
+    assert.equal(run.checks.conflictRecovery.previewPresent, false, 'stale preview returned after reload');
+    assert.equal(run.checks.conflictRecovery.trayCompact, true);
     run.stale = {
       before: beforeStale,
       mutatedOmo: mutatedHash,
@@ -1106,6 +1612,41 @@ async function main() {
     assert.equal(hashFile(journalPath), journalHashBefore, 'interrupted journal was replayed on load');
     assert.equal(hashFile(omoPath), omoHashBeforeJournalLoad, 'interrupted journal wrote the config on load');
     for (const vp of VIEWPORTS) for (const scheme of SCHEMES) await captureJournal(vp, scheme);
+
+    // Capture identity: every viewport frame has the emulated viewport size, and the set carries
+    // every required state family, pressed/focus frames and the two targeted rows.
+    const dimensions = { 390: [390, 844], 1024: [1024, 768], 1440: [1440, 900] };
+    const badDimensions = [];
+    for (const entry of run.captures) {
+      const match = /-(390|1024|1440)-(light|dark)(?:-|\\.|$)/.exec(entry.file);
+      if (!match) continue;
+      const [width, height] = dimensions[match[1]];
+      if (entry.width !== width || entry.height !== height) {
+        badDimensions.push({ file: entry.file, width: entry.width, height: entry.height });
+      }
+    }
+    run.checks.captureDimensions = { checked: run.captures.length, bad: badDimensions };
+    assert.deepEqual(badDimensions, [], 'capture dimensions do not match the viewport');
+    const files = new Set(run.captures.map((entry) => entry.file));
+    const required = [];
+    for (const vp of VIEWPORTS) for (const theme of SCHEMES) {
+      required.push(
+        `profiles-${vp.name}-${theme}.png`, `state-loading-${vp.name}-${theme}.png`,
+        `state-error-${vp.name}-${theme}.png`, `state-pending-${vp.name}-${theme}.png`,
+        `state-conflict-${vp.name}-${theme}.png`, `state-preview-${vp.name}-${theme}.png`,
+        `state-preview-${vp.name}-${theme}-end.png`, `state-success-${vp.name}-${theme}.png`,
+        `state-success-${vp.name}-${theme}-end.png`, `state-journal-${vp.name}-${theme}.png`,
+        `press-card-${vp.name}-${theme}-down.png`, `press-nav-${vp.name}-${theme}-down.png`,
+        `focus-${vp.name}-${theme}.png`,
+      );
+    }
+    for (const vp of [VIEWPORTS[0], VIEWPORTS[1]]) for (const theme of SCHEMES) {
+      required.push(`section-profiles-oracle-${vp.name}-${theme}.png`);
+    }
+    for (const theme of SCHEMES) required.push(`section-agents-memory-390-${theme}.png`);
+    const missing = required.filter((file) => !files.has(file));
+    run.checks.captureSet = { count: files.size, required: required.length, missing };
+    assert.deepEqual(missing, [], 'the round-2 capture set is incomplete');
 
     run.checks.consoleErrors = consoleErrors;
     assert.deepEqual(consoleErrors, [], 'page console errors: ' + consoleErrors.join(' | '));
@@ -1189,6 +1730,7 @@ function writeEvidence() {
   e2e.push(`piomo-primary-agents todo ${TASK} - board profiles guarded write e2e`);
   e2e.push(`run: ${run.startedAt} .. ${run.finishedAt}`);
   e2e.push(`build: served page sha256 ${run.build?.hash} (${run.build?.pageBytes} B), BWT HEAD ${gitHead()}`);
+  e2e.push(`source tree sha256 ${run.source?.treeSha256}; files ${JSON.stringify(run.source?.files || [])}`);
   e2e.push(`server: ${run.server?.url} (temp port ${run.server?.port}, state dir ${run.server?.stateDir})`);
   e2e.push(`fixture: ${run.fixture?.goldens}; plugin sha256 ${run.fixture?.pluginLoaded} matches inventory ${run.fixture?.inventoryPinned === run.fixture?.pluginLoaded}`);
   e2e.push(`pending: ${JSON.stringify(run.expected?.pending || [])}`);
@@ -1210,6 +1752,16 @@ function writeEvidence() {
   e2e.push(`interrupted journal: ${JSON.stringify(run.checks.journal || null)}`);
   e2e.push(`copy 390: ${JSON.stringify(run.checks.copy390 || null)}`);
   e2e.push(`loading frame: ${JSON.stringify(run.checks.loading || null)}`);
+  e2e.push(`loading geometry: ${JSON.stringify(run.checks.loadingGeometry || null)}`);
+  e2e.push(`viewport probes: ${JSON.stringify(run.checks.byViewport || null)}`);
+  e2e.push(`pressed frames: ${JSON.stringify(run.checks.presses || null)}`);
+  e2e.push(`focus frames: ${JSON.stringify(run.checks.focus || null)}`);
+  e2e.push(`capture set: ${JSON.stringify(run.checks.captureSet || null)}; dimensions ${JSON.stringify(run.checks.captureDimensions || null)}`);
+  e2e.push(`targeted rows: ${JSON.stringify(run.checks.targeted || null)}`);
+  e2e.push(`end scroll: ${JSON.stringify(run.checks.endScroll || null)}`);
+  e2e.push(`clear confirmation: ${JSON.stringify(run.checks.clearConfirm || null)}; cancel ${JSON.stringify(run.checks.clearCancel || null)}; confirmed ${JSON.stringify(run.checks.clearConfirmed || null)}`);
+  e2e.push(`conflict actions: ${JSON.stringify(run.checks.conflictActions || null)}; recovery ${JSON.stringify(run.checks.conflictRecovery || null)}`);
+  e2e.push(`negative controls: ${JSON.stringify(run.checks.negativeControls || null)}`);
   e2e.push(`error frame: ${JSON.stringify(run.checks.error || null)}`);
   e2e.push(`agent alignment 1440: ${JSON.stringify(run.checks.agentAlign1440 || null)}`);
   e2e.push(`agent alignment 1024: ${JSON.stringify(run.checks.agentAlign1024 || null)}`);
@@ -1254,6 +1806,10 @@ function writeEvidence() {
     `selects without a visible label ${a11y.selectsWithoutVisibleLabel?.length ?? '?'}`,
     `per-control label mismatches ${a11y.wrongLabels?.length ?? '?'}`,
     `header 390: ${JSON.stringify(run.checks.header390 || null)}`,
+    `rail contrast: ${JSON.stringify((run.checks.byViewport && run.checks.byViewport['390-light'] && run.checks.byViewport['390-light'].rail) || null)}`,
+    `pressed states: ${JSON.stringify(run.checks.presses || null)}`,
+    `focus states: ${JSON.stringify(run.checks.focus || null)}`,
+    `phone targets: ${JSON.stringify((run.checks.byViewport && run.checks.byViewport['390-light'] && run.checks.byViewport['390-light'].controls) || null)}`,
     `labels: ${JSON.stringify(a11y.sample || [])}`,
     `result: ${run.checks.a11y && run.checks.a11y.unnamed?.length === 0
       && run.checks.a11y.selectsWithoutVisibleLabel?.length === 0 && run.checks.a11y.wrongLabels?.length === 0
