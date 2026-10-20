@@ -27,7 +27,7 @@
   letter-spacing: .04em;
 }
 .pf-title { margin: 2px 0 0; font-size: var(--fs-2xl); line-height: 1.25; }
-.pf-sub { margin: var(--sp-1) 0 0; max-width: 64ch; color: var(--c-fg-2); font-size: var(--fs-sm); }
+.pf-sub { margin: var(--sp-1) 0 0; max-width: 64ch; color: var(--c-fg-2); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: break-word; }
 .pf-keep { white-space: nowrap; }
 .pf-active { color: var(--c-fg-2); font-size: var(--fs-sm); font-weight: var(--fw-medium); }
 
@@ -95,6 +95,18 @@
 .pf-empty { margin: 0; display: flex; align-items: baseline; gap: var(--sp-1); }
 .pf-ro-note { padding: var(--sp-2) 0 0; }
 .pf-loading { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-4) 0; }
+.pf-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: var(--hair) solid var(--c-red);
+  border-radius: var(--r-lg);
+  background: var(--c-red-tint);
+}
+.pf-error .pf-err { flex: 1 1 auto; }
 .pf-dash { color: var(--c-fg-4); }
 .pf-ro-val { min-width: 0; overflow-wrap: anywhere; color: var(--c-fg); font-size: var(--fs-sm); }
 .pf-warnings { display: grid; gap: var(--sp-1); }
@@ -154,6 +166,9 @@
   color: var(--c-fg);
   font: inherit;
   font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
 }
 .pf select:disabled, .pf input:disabled { color: var(--c-fg-3); background: var(--c-sunk); cursor: not-allowed; }
 .pf select:focus-visible, .pf input:focus-visible, .pf button:focus-visible, .pf summary:focus-visible {
@@ -179,19 +194,20 @@
 }
 .pf-btn:hover:not(:disabled) { background: var(--fill-hover); }
 .pf-btn:active:not(:disabled) { background: var(--fill-press); }
-.pf-btn:disabled { color: var(--c-fg-3); cursor: not-allowed; opacity: .7; }
+.pf-btn:disabled { color: var(--c-fg-3); background: var(--c-sunk); border-color: var(--c-line); cursor: not-allowed; opacity: 1; }
+.pf-btn-ghost:disabled { background: transparent; }
 .pf-btn-primary:disabled { border-color: var(--c-line); background: var(--c-sunk); color: var(--c-fg-3); opacity: 1; }
 .pf-btn-primary { border-color: var(--c-primary); background: var(--c-primary); color: var(--c-on-primary); }
 .pf-btn-primary:hover:not(:disabled) { background: var(--c-fg-2); border-color: transparent; }
 .pf-btn-ghost { background: transparent; }
-.pf-btn-icon { width: var(--ctl-h); padding: 0; }
+.pf-btn-icon { width: var(--ctl-h); min-width: var(--ctl-h); min-height: var(--ctl-h); flex: none; padding: 0; }
 
 /* agents */
 .pf-agents { display: grid; gap: var(--sp-2); }
 .pf-agent {
   display: grid;
-  grid-template-columns: minmax(150px, 1.1fr) minmax(120px, .8fr) minmax(190px, 1.4fr) minmax(140px, 1fr) auto;
-  align-items: end;
+  grid-template-columns: minmax(150px, 1.1fr) minmax(120px, .8fr) minmax(190px, 1.4fr) minmax(180px, 1.2fr);
+  align-items: start;
   gap: var(--sp-2) var(--sp-3);
   padding: var(--sp-2) var(--sp-3);
   border: var(--hair) solid var(--c-line);
@@ -200,6 +216,8 @@
 }
 .pf-agent-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); min-width: 0; }
 .pf-pin-sels { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .8fr); gap: var(--sp-1); align-items: end; }
+.pf-mem-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; }
+.pf-mem-line .pf-ro-val { flex: 1 1 auto; }
 .pf-agent-n { font-weight: var(--fw-semibold); }
 .pf-agent-k { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-2xs); }
 .pf-dot { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: var(--r-full); background: var(--c-gray); }
@@ -230,7 +248,7 @@ button.pf-card:hover { background: var(--fill-hover); border-color: var(--c-line
 .pf-card-name { font-weight: var(--fw-semibold); }
 .pf-card-en { color: var(--c-fg-3); font-size: var(--fs-xs); }
 .pf-card-tag { margin-top: 2px; }
-.pf-card-sum { margin-top: 2px; color: var(--c-fg-2); font-size: var(--fs-sm); }
+.pf-card-sum { margin-top: 2px; color: var(--c-fg-2); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: break-word; }
 .pf-card-main { margin-top: var(--sp-1); color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
 
 /* routing */
@@ -250,7 +268,7 @@ button.pf-card:hover { background: var(--fill-hover); border-color: var(--c-line
 .pf-route-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1); min-width: 0; }
 .pf-route-ko { font-weight: var(--fw-medium); }
 .pf-route-en { color: var(--c-fg-3); font-size: var(--fs-xs); overflow-wrap: anywhere; }
-.pf-route-sels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-1); }
+.pf-route-sels { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.8fr) minmax(0, .7fr); gap: var(--sp-1); }
 .pf-route-val { min-width: 0; }
 .pf-route-rec { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1); min-width: 0; }
 .pf-rec-off { color: var(--c-fg-3); font-size: var(--fs-2xs); overflow-wrap: anywhere; }
@@ -340,9 +358,10 @@ button.pf-card:hover { background: var(--fill-hover); border-color: var(--c-line
 
 @media (max-width: 1040px) {
   .pf-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pf-agent { grid-template-columns: minmax(140px, 1fr) minmax(120px, .8fr) minmax(180px, 1.3fr) minmax(130px, 1fr); }
-  .pf-agent .pf-field-act { grid-column: 1 / -1; justify-content: start; }
+  .pf-agent { grid-template-columns: minmax(120px, 1fr) minmax(100px, .8fr) minmax(150px, 1.3fr) minmax(140px, 1.2fr); }
+  .pf-mem-sels { grid-template-columns: minmax(56px, .6fr) minmax(0, 1.4fr) minmax(64px, .7fr); }
   .pf-route { grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.6fr); }
+  .pf-route-sels { grid-template-columns: minmax(0, 1fr); }
   .pf-route-rec { grid-column: 1 / -1; }
 }
 @media (max-width: 760px) {
@@ -350,7 +369,7 @@ button.pf-card:hover { background: var(--fill-hover); border-color: var(--c-line
   .pf-cards, .pf-mems { grid-template-columns: minmax(0, 1fr); }
   .pf-agent { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .pf-agent-id { grid-column: 1 / -1; }
-  .pf-agent .pf-field-act { grid-column: 1 / -1; }
+  .pf-agent .pf-mem-field { grid-column: 1 / -1; }
   .pf-route { grid-template-columns: minmax(0, 1fr); }
   .pf-route-sels, .pf-main, .pf-lane, .pf-sum { grid-template-columns: minmax(0, 1fr); }
   .pf-field-grow { grid-column: auto; }

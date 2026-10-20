@@ -156,7 +156,106 @@ test('header: the memory-row phrase stays together with its predicate', () => {
   const keep = /<span class="pf-keep">([\s\S]*?)<\/span>/.exec(html);
   assert.ok(keep, 'the keep-together span is rendered');
   assert.equal(textOf(keep[1]).trim(), '메모리 행을 상황판에서 확인하고');
+  assert.match(html, /<span class="pf-keep">실시간 상황판<\/span>/);
+  assert.doesNotMatch(/<p class="pf-sub">([\s\S]*?)<\/p>/.exec(html)[1], /·/, 'no dangling middle dot in the header');
   assert.match(read('src/page/profiles-view.css'), /\.pf-keep\s*\{\s*white-space:\s*nowrap;\s*\}/);
+});
+
+test('phone: the pending-row icon button keeps its 44 px width when the label shrinks it', () => {
+  const P = load();
+  const html = P.render(STATE, live({ pending: [{ kind: 'setRoute', section: 'agents', role: 'explore', provider: 'anthropic-subscription', model: 'anthropic-subscription/claude-opus-5-5', thinking: 'medium' }] }));
+  const drop = /<button[^>]*data-pf="drop"[^>]*>/.exec(html)[0];
+  assert.match(drop, /aria-label="이 변경 지우기"/);
+  assert.match(drop, /title="이 변경 지우기"/);
+  const css = read('src/page/profiles-view.css');
+  assert.match(css, /\.pf-btn-icon\s*\{[^}]*flex:\s*none;/);
+  assert.match(css, /\.pf-btn-icon\s*\{[^}]*min-width:\s*var\(--ctl-h\);/);
+  assert.match(css, /\.pf-btn-icon\s*\{[^}]*min-height:\s*var\(--ctl-h\);/);
+});
+
+test('agents: lane, pin and thinking share a top baseline; reset sits with the memory value', () => {
+  const P = load();
+  const html = P.render(STATE, live());
+  assert.match(html, /class="pf-field pf-mem-field"[\s\S]*?class="pf-mem-line"[\s\S]*?data-pf="reset-memory"/);
+  const css = read('src/page/profiles-view.css');
+  assert.match(css, /\.pf-agent \{[\s\S]*?align-items:\s*start;/);
+  assert.match(css, /\.pf-mem-line\s*\{[\s\S]*?align-items:\s*center;/);
+  const at1040 = css.slice(css.indexOf('@media (max-width: 1040px)'), css.indexOf('@media (max-width: 760px)'));
+  assert.doesNotMatch(at1040, /\.pf-agent \.pf-field-act/, 'the reset action must not be pushed to its own row');
+  assert.match(at1040, /\.pf-agent \{[\s\S]*?minmax\(140px, 1\.2fr\)/);
+  assert.match(at1040, /\.pf-mem-sels \{[\s\S]*?minmax\(0, 1\.4fr\)/);
+});
+
+test('loading and error render as their own states, never as read-only', () => {
+  const P = load();
+  let html = P.render(null, live({ loading: true }));
+  assert.match(html, /프로필 상태를 불러오는 중…/);
+  assert.match(html, /data-pf-root/);
+  assert.doesNotMatch(html, /읽기 전용/);
+  assert.doesNotMatch(html, /지금은 읽기 전용이라/);
+  assert.doesNotMatch(html, /data-pf="preview"/);
+
+  html = P.render(null, live({ loading: false, error: '프로필 상태를 불러오지 못했어요 (HTTP 500)' }));
+  assert.match(html, /HTTP 500/);
+  assert.match(html, /role="alert"/);
+  assert.match(html, /data-pf="reload"/);
+  assert.match(html, /다시 시도/);
+  assert.doesNotMatch(html, /불러오는 중…/);
+  assert.doesNotMatch(html, /읽기 전용/);
+  assert.doesNotMatch(html, /지금은 읽기 전용이라/);
+
+  html = P.render(STATE, live());
+  assert.match(html, /편집 가능/);
+  assert.doesNotMatch(html, /불러오는 중/);
+});
+
+test('selects: every control titles its selected label and declares an ellipsis', () => {
+  const P = load();
+  const html = P.render(STATE, live());
+  const tags = [...html.matchAll(/<select\b([^>]*)>/g)].map((m) => m[1]);
+  assert.equal(tags.length, 42);
+  for (const attrs of tags) assert.match(attrs, /\btitle="[^"]+"/, 'select without a full-value title');
+  const model = /<select[^>]*data-pf="route-model"[^>]*>/.exec(html)[0];
+  assert.match(model, /title="[^"]*·[^"]*\/[^"]*"/, 'model title carries alias and full id');
+  const css = read('src/page/profiles-view.css');
+  assert.match(css, /\.pf select,[\s\S]*?text-overflow:\s*ellipsis;/);
+  assert.match(css, /\.pf select,[\s\S]*?white-space:\s*nowrap;/);
+});
+
+test('summarizer: several aliases for one model still select exactly one option with a matching title', () => {
+  const P = load();
+  const state = clone(STATE);
+  const current = state.summarizer.provider + '/' + state.summarizer.model;
+  state.catalog['dup-sum-a'] = { model: current, variant: 'high' };
+  state.catalog['dup-sum-b'] = { model: current, variant: 'high' };
+  const html = P.render(state, live());
+  const pick = [...html.matchAll(/<select\b([^>]*)>([\s\S]*?)<\/select>/g)].find((m) => /data-pf="summarizer-model"/.test(m[1]));
+  assert.ok(pick, 'summarizer select missing');
+  const selected = [...pick[2].matchAll(/<option\b[^>]*\bselected[^>]*>([\s\S]*?)<\/option>/g)];
+  assert.equal(selected.length, 1, 'more than one option is selected');
+  const title = /\btitle="([^"]*)"/.exec(pick[1])[1];
+  assert.equal(title, textOf(selected[0][1]).trim(), 'title differs from the visible selected label');
+});
+
+test('copy: (max 추론), 진짜 max 추론 and 실시간 상황판 stay on one line', () => {
+  const P = load();
+  const state = clone(STATE);
+  state.profiles[5].summary += ' 올라마는 high가 한계라 진짜 max 추론이 필요할 때 쓰는 경로입니다.';
+  const html = P.render(state, live());
+  assert.match(html, /<span class="pf-keep">\(max 추론\)<\/span>/);
+  assert.match(html, /<span class="pf-keep">진짜 max 추론<\/span>/);
+  assert.match(html, /<span class="pf-keep">실시간 상황판<\/span>/);
+  assert.equal((html.match(/class="pf-card-sum"/g) || []).length, 6);
+  assert.doesNotMatch(html, /\(max 추론\)가/, 'the parenthetical must not be emitted raw');
+});
+
+test('disabled secondary buttons keep their contrast without opacity', () => {
+  const css = read('src/page/profiles-view.css');
+  const rule = /\.pf-btn:disabled \{([^}]*)\}/.exec(css)[1];
+  assert.match(rule, /opacity:\s*1/);
+  assert.match(rule, /background:\s*var\(--c-sunk\)/);
+  assert.match(rule, /border-color:\s*var\(--c-line\)/);
+  assert.doesNotMatch(css, /opacity:\s*\.7/);
 });
 
 test('read-only without a token: no selects and no preview/apply controls', () => {

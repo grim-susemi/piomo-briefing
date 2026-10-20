@@ -109,8 +109,19 @@
     });
     return out;
   }
-  function select(name, attrs, options, disabled) {
-    return '<select' + attr('data-pf', name) + (attrs || '') + boolAttr('disabled', disabled) + '>' + options + '</select>';
+  function unesc(v) {
+    return str(v).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'").replace(/&#96;/g, '`').replace(/&amp;/g, '&');
+  }
+  function selectedLabel(options) {
+    var m = /<option\b[^>]*\bselected[^>]*>([\s\S]*?)<\/option>/.exec(options);
+    if (!m) m = /<option\b[^>]*>([\s\S]*?)<\/option>/.exec(options);
+    return m ? unesc(m[1]) : '';
+  }
+  function select(name, attrs, options, disabled, title) {
+    var t = typeof title === 'string' ? title : selectedLabel(options);
+    return '<select' + attr('data-pf', name) + (attrs || '') + (t ? attr('title', t) : '') +
+      boolAttr('disabled', disabled) + '>' + options + '</select>';
   }
   function slug(v) { return str(v).replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'x'; }
   function withId(id, attrs) { return attr('id', id) + (attrs || ''); }
@@ -127,6 +138,13 @@
       boolAttr('disabled', disabled) + '>' + text + '</button>';
   }
   function valueOrDash(v) { return str(v) ? esc(v) : '<span class="pf-dash" aria-label="없음">—</span>'; }
+  // The model copy is data, not markup: escape it first, then wrap only the known Korean phrases that must
+  // not split across lines (a parenthetical or a modifier + noun is unreadable when broken at 390 px).
+  function summaryText(v) {
+    return esc(v)
+      .replace(/\(max 추론\)/g, '<span class="pf-keep">(max 추론)</span>')
+      .replace(/진짜 max 추론/g, '<span class="pf-keep">진짜 max 추론</span>');
+  }
 
   // ---- model helpers -----------------------------------------------------------------------------------------------
   function catalogEntries(view) {
@@ -199,9 +217,11 @@
     return select(name, attrs, opts, disabled);
   }
   function summarizerOptions(entries, current) {
-    var opts = '<option value=""' + (current ? '' : ' selected') + '>(설정 안 함)</option>', found = false;
+    var opts = '<option value=""' + (current ? '' : ' selected') + '>(설정 안 함)</option>', found = false, seen = map();
     entries.forEach(function (e) {
       if (e.model === current) found = true;
+      if (has(seen, e.model)) return;
+      seen[e.model] = true;
       opts += '<option value="' + esc(e.model) + '"' + (e.model === current ? ' selected' : '') + '>' +
         esc(e.alias + ' · ' + e.model) + '</option>';
     });
@@ -272,11 +292,27 @@
   function banner(text, cls, role) {
     return '<div class="pf-banner ' + (cls || '') + '"' + (role ? attr('role', role) : '') + '>' + ic('info', 'ic-sm') + ' <b>' + esc(text) + '</b></div>';
   }
+  // Loading, error and a loaded view are three states. A missing view is never a read-only view: the
+  // read-only badge and note may only appear once a state exists and says writes are refused.
+  function viewState(view, edit) {
+    if (obj(view)) return 'view';
+    return edit && str(edit.error) ? 'error' : 'loading';
+  }
+  function loadingBlock() {
+    return '<div class="pf-loading" role="status">' + ic('refresh-cw', 'ic-sm') + ' 프로필 상태를 불러오는 중…</div>';
+  }
+  function errorBlock(edit) {
+    return '<div class="pf-error" role="alert"><p class="pf-err">' + esc(edit && edit.error) + '</p>' +
+      button('reload', ' aria-label="다시 시도"', ic('refresh-cw', 'ic-sm') + ' 다시 시도', false, 'pf-btn') + '</div>';
+  }
 
   function header(view, edit) {
     var live = edit && edit.live === true;
-    var ro = readonly(view, edit);
-    var badge = !live ? chip('pf-c-gray', '파일 보기') : ro ? chip('pf-c-amber', '읽기 전용') : chip('pf-c-green', '편집 가능');
+    var state = viewState(view, edit);
+    var ro = state === 'view' && readonly(view, edit);
+    var badge = state === 'loading' ? chip('pf-c-gray', '불러오는 중')
+      : state === 'error' ? chip('pf-c-red', '불러오지 못함')
+      : !live ? chip('pf-c-gray', '파일 보기') : ro ? chip('pf-c-amber', '읽기 전용') : chip('pf-c-green', '편집 가능');
     var active = obj(view && view.activeProfile);
     var activeCard = null;
     if (active) {
@@ -284,7 +320,7 @@
     }
     return '<header class="pf-head">' +
       '<div class="pf-head-l"><p class="pf-kicker">[프로필·에이전트]</p><h1 class="pf-title">프로필·에이전트</h1>' +
-      '<p class="pf-sub">WinForms 스위처의 역할 배치·모델 레인·<span class="pf-keep">메모리 행을 상황판에서 확인하고</span>, 실시간 상황판에서 미리보기 후 적용합니다.</p></div>' +
+      '<p class="pf-sub">WinForms 스위처의 역할 배치와 모델 레인, <span class="pf-keep">메모리 행을 상황판에서 확인하고</span>, <span class="pf-keep">실시간 상황판</span>에서 미리보기 후 적용합니다.</p></div>' +
       '<div class="pf-head-r">' + badge +
       (activeCard ? '<span class="pf-active">현재 ' + esc(activeCard.nameKr || activeCard.name || active.key) + '</span>' : '') +
       '</div></header>';
@@ -378,8 +414,8 @@
         '<span class="pf-agent-n">' + esc(name) + '</span><span class="pf-agent-k">[rev ' + esc(num(agent.rev) === null ? 0 : agent.rev) + ']</span></div>' +
         '<div class="pf-field">' + controls + '</div>' +
         '<div class="pf-field">' + pinControls + (id === 'hephaestus' ? ' <span class="pf-hint">gpt-*만</span>' : '') + '</div>' +
-        '<div class="pf-field"><span class="pf-lbl">기억</span><span class="pf-ro-val pf-mem">' + (mem ? esc(mem) : '<span class="pf-dash">—</span>') + '</span></div>' +
-        '<div class="pf-field pf-field-act">' + resetBtn + '</div></article>';
+        '<div class="pf-field pf-mem-field"><span class="pf-lbl">기억</span><div class="pf-mem-line">' +
+        '<span class="pf-ro-val pf-mem">' + (mem ? esc(mem) : '<span class="pf-dash">—</span>') + '</span>' + resetBtn + '</div></div></article>';
     }).join('');
     return section('agents', '<div class="pf-agents">' + rows + '</div>', AGENTS.length,
       roster.warning ? chip('pf-c-amber', 'roster 경고', str(roster.warning)) : '');
@@ -396,7 +432,7 @@
         '<span class="pf-card-name">' + esc(p.nameKr || p.name || p.key) + '</span>' + (on ? chip('pf-c-green', '현재') : '') + '</span>' +
         '<span class="pf-card-en">' + esc(p.name || '') + '</span>' +
         '<span class="pf-card-tag">' + tag(p.tag || 'profile') + '</span>' +
-        '<span class="pf-card-sum">' + esc(p.summary || '') + '</span>' +
+        '<span class="pf-card-sum">' + summaryText(p.summary || '') + '</span>' +
         '<span class="pf-card-main">' + esc(str(p.mainProvider) + ' · ' + str(p.mainModel) + ' / ' + str(p.mainThinking)) + '</span>';
       if (ro) return '<article class="pf-card' + (on ? ' on' : '') + '">' + body + '</article>';
       return '<button type="button" class="pf-card' + (on ? ' on' : '') + '"' + attr('data-pf', 'select-profile') +
@@ -604,7 +640,7 @@
     var list = pending.length
       ? '<ol class="pf-pending">' + pending.map(function (c, i) {
         return '<li><span class="pf-pending-t">' + esc(changeLabel(c)) + '</span>' +
-          button('drop', ' data-index="' + i + '" aria-label="이 변경 지우기"', ic('x', 'ic-sm'), busy, 'pf-btn pf-btn-icon') + '</li>';
+          button('drop', ' data-index="' + i + '" aria-label="이 변경 지우기" title="이 변경 지우기"', ic('x', 'ic-sm'), busy, 'pf-btn pf-btn-icon') + '</li>';
       }).join('') + '</ol>'
       : emptyNote('바꾼 값이 없어요. 아래에서 값을 고르면 여기에 모입니다.');
     return '<section class="pf-tray" id="pf-sec-tray" data-pf-sec="tray">' +
@@ -637,18 +673,19 @@
   // ---- public renderers --------------------------------------------------------------------------------------------
   function render(view, edit) {
     var v = obj(view), e = obj(edit) || {};
-    var ro = readonly(v, e);
+    var state = viewState(v, e);
+    var ro = state === 'view' ? readonly(v, e) : true;
     var stale = !!(v && (v.banner === STALE_BANNER || (obj(v.inventory) && v.inventory.stale === true) || v.readOnlyReason === 'INVENTORY_STALE'));
     var html = '<div class="pf" data-pf-root data-readonly="' + ro + '">' + header(v, e) + (v ? homes(v) : '') +
       (stale ? banner(STALE_BANNER, 'pf-banner-warn', 'alert') : '') +
-      (!v ? '<div class="pf-loading" role="status">' + ic('refresh-cw', 'ic-sm') + ' 프로필 상태를 불러오는 중…</div>' + (e.error ? '<p class="pf-err" role="alert">' + esc(e.error) + '</p>' : '') : '') +
+      (state === 'loading' ? loadingBlock() : '') +
+      (state === 'error' ? errorBlock(e) : '') +
       (v && arr(v.warnings).length ? '<div class="pf-warnings">' + arr(v.warnings).map(function (w) {
         return '<p class="pf-warn">' + ic('info', 'ic-sm') + ' ' + esc(w) + '</p>';
       }).join('') + '</div>' : '') +
       (v && v.applyJournal && v.applyJournal.status === 'interrupted' ? banner('중단된 적용 · ' + str(v.applyJournal.label || '다시 적용'), 'pf-banner-warn', 'status') : '') +
-      tray(v, e) +
-      (v ? agentRows(v, e, ro) + profileCards(v, e, ro) + routingRows(v, e, ro) + mainModel(v, e, ro) +
-        modelLane(v, e, ro) + summarizer(v, e, ro) + memoryRows(v, e, ro) + guide(v) : '') +
+      (state === 'view' ? tray(v, e) + agentRows(v, e, ro) + profileCards(v, e, ro) + routingRows(v, e, ro) +
+        mainModel(v, e, ro) + modelLane(v, e, ro) + summarizer(v, e, ro) + memoryRows(v, e, ro) + guide(v) : '') +
       '</div>';
     return html;
   }
@@ -666,7 +703,10 @@
       return '<button type="button" class="pf-nav-b" data-pf="jump" data-target="' + esc(s[0]) + '">' +
         '<span class="pf-nav-t">' + esc(s[1]) + '</span>' + (count ? '<span class="pf-count">' + count + '</span>' : '') + '</button>';
     }).join('');
-    var state = !v ? chip('pf-c-gray', '불러오는 중') : ro ? chip('pf-c-amber', '읽기 전용') : chip('pf-c-green', '편집 가능');
+    var loadState = viewState(v, e);
+    var state = loadState === 'loading' ? chip('pf-c-gray', '불러오는 중')
+      : loadState === 'error' ? chip('pf-c-red', '불러오기 실패')
+      : ro ? chip('pf-c-amber', '읽기 전용') : chip('pf-c-green', '편집 가능');
     return '<div class="pf-nav" data-pf-side>' + emptyNote('섹션 이동', 'pf-nav-h') +
       '<div class="pf-nav-state">' + state + (pending ? chip('pf-c-amber', pending + '개 대기') : '') + '</div>' +
       nav +
