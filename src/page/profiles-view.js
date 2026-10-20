@@ -373,7 +373,7 @@
     return '<div class="pf-loading" data-pf-loading role="status">' +
       '<div class="pf-skeleton">' +
       '<div class="pf-skel pf-skel-homes" data-pf-skel="homes" aria-hidden="true"></div>' +
-      '<div class="pf-skel pf-skel-tray pf-tray-compact" data-pf-skel="tray"><p class="pf-loading-h"><span class="pf-pulse" aria-hidden="true">' +
+      '<div class="pf-skel pf-skel-tray pf-tray-compact" data-pf-skel="tray"><p class="pf-loading-h" id="pf-focus-status" tabindex="-1"><span class="pf-pulse" aria-hidden="true">' +
       ic('refresh-cw', 'ic-sm') + '</span> 프로필 상태를 불러오는 중…</p></div>' +
       sec('agents', '<div class="pf-skel-agents">' + agents + '</div>') +
       sec('profiles', '<div class="pf-skel-cards">' + cards + '</div>') +
@@ -381,7 +381,7 @@
       '</div></div>';
   }
   function errorBlock(edit) {
-    return '<div class="pf-error" role="alert"><p class="pf-err">' + esc(edit && edit.error) + '</p>' +
+    return '<div class="pf-error" role="alert"><p class="pf-err" id="pf-focus-status" tabindex="-1">' + esc(edit && edit.error) + '</p>' +
       button('reload', ' aria-label="다시 시도"', ic('refresh-cw', 'ic-sm') + ' 다시 시도', false, 'pf-btn') + '</div>';
   }
 
@@ -524,7 +524,7 @@
       return '<button type="button" class="pf-card' + (on ? ' on' : '') + '"' + attr('data-pf', 'select-profile') +
         attr('data-profile', p.key) + ' aria-pressed="' + on + '">' + body + '</button>';
     }).join('');
-    return section('profiles', '<div class="pf-cards">' + cards + '</div>', arr(view && view.profiles).length);
+    return section('profiles', '<div class="pf-cards">' + (cards || emptyNote('프로필이 없어요')) + '</div>', arr(view && view.profiles).length);
   }
 
   function routingRows(view, edit, ro) {
@@ -741,7 +741,8 @@
     if (!pending.length && !busy && !status && !err && !conflict && !preview && !result && !confirmClear) {
       return '<section class="pf-tray pf-tray-compact" id="pf-sec-tray" data-pf-sec="tray" aria-label="바꿀 값">' +
         '<div class="pf-tray-c" title="바꾼 값이 없어요. 값을 고르면 여기에 모입니다.">' + tag('대기') + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
-        '<span class="pf-muted pf-tray-note">바꾼 값 없음</span></div></section>';
+        '<span class="pf-muted pf-tray-note">바꾼 값 없음</span>' +
+        '<span class="pf-tray-next">아래에서 값을 고르면 여기에 모입니다</span></div></section>';
     }
     var list = pending.length
       ? '<ol class="pf-pending">' + pending.map(function (c, i) {
@@ -752,7 +753,8 @@
     return '<section class="pf-tray" id="pf-sec-tray" data-pf-sec="tray">' +
       '<header class="pf-sec-h"><div class="pf-sec-t">' + tag('대기') + '<h2>바꿀 값</h2><p class="pf-sec-s">미리보기는 쓰지 않고, 적용만 파일을 씁니다.</p></div>' +
       '<div class="pf-sec-r"><span class="pf-count">' + pending.length + '</span>' +
-      (status ? chip(conflict ? 'pf-c-red' : result ? 'pf-c-green' : 'pf-c-gray', status) : '') + '</div></header>' +
+      (status ? '<span class="pf-chip ' + (conflict ? 'pf-c-red' : result ? 'pf-c-green' : 'pf-c-gray') +
+        '" id="pf-focus-status" tabindex="-1" role="status">' + esc(status) + '</span>' : '') + '</div></header>' +
       '<div class="pf-sec-b">' + list +
       '<div class="pf-tray-acts">' +
       button('preview', ' aria-label="미리보기"', ic('search', 'ic-sm') + ' 미리보기', busy || !pending.length || conflict, 'pf-btn') +
@@ -848,35 +850,49 @@
     }
     function statusOf(res) { return res && num(res.status) !== null ? res.status : (res && res.ok ? 200 : 0); }
 
+    function failureCopy(err) {
+      var message = str(err && err.message);
+      if (/^HTTP \d{3}$/.test(message)) return '프로필 상태를 불러오지 못했어요. 서버가 응답하지 않았어요. 다시 시도해 주세요.';
+      if (/abort|failed to fetch|network|offline|fetch/i.test(message)) return '프로필 상태를 불러오지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.';
+      return '프로필 상태를 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.';
+    }
+
     function load() {
       if (typeof fetchFn !== 'function') {
         s.error = '상태를 불러올 수 없어요'; s.loading = false; changed(); return Promise.resolve(snapshot());
       }
-      s.loading = true; changed();
+      s.loading = true; s.error = ''; changed();
       var mine = ++seq;
-      return Promise.resolve(fetchFn('/profiles/state', { cache: 'no-store', headers: { Accept: 'application/json' } })).then(function (res) {
+      function settleFailure(err) {
+        if (mine !== seq) return snapshot();
+        // Expected fetch failures get plain user copy; the diagnostic stays in the console as a warning.
+        // Unexpected exceptions raised while handling a response are not caught here.
+        if (g.console && g.console.warn) g.console.warn('[profiles] state read failed', err);
+        s.loading = false;
+        s.error = failureCopy(err);
+        changed();
+        return snapshot();
+      }
+      var request;
+      try { request = fetchFn('/profiles/state', { cache: 'no-store', headers: { Accept: 'application/json' } }); }
+      catch (err) { return settleFailure(err); }
+      return Promise.resolve(request).then(function (res) {
+        if (mine !== seq) return snapshot();
         var status = statusOf(res);
-        if (!res || (status !== 200 && res.ok !== true)) {
-          throw new Error('HTTP ' + status);
-        }
-        return responseJson(res);
-      }).then(function (json) {
-        if (mine !== seq) return snapshot();
-        s.view = obj(json);
-        s.loading = false;
-        s.error = '';
-        // A successful state read is the 409 recovery: the stale conflict and its banner are gone.
-        s.conflict = false;
-        if (s.status === '다른 곳에서 바뀜') s.status = '';
-        changed();
-        return snapshot();
-      }).catch(function (err) {
-        if (mine !== seq) return snapshot();
-        s.loading = false;
-        s.error = '프로필 상태를 불러오지 못했어요' + (err && err.message ? ' (' + err.message + ')' : '');
-        changed();
-        return snapshot();
-      });
+        if (!res || (status !== 200 && res.ok !== true)) return settleFailure({ message: 'HTTP ' + status });
+        return responseJson(res).then(function (json) {
+          if (mine !== seq) return snapshot();
+          if (!obj(json)) return settleFailure({ message: 'invalid-json' });
+          s.view = obj(json);
+          s.loading = false;
+          s.error = '';
+          // A successful state read is the 409 recovery: the stale conflict and its banner are gone.
+          s.conflict = false;
+          if (s.status === '다른 곳에서 바뀜') s.status = '';
+          changed();
+          return snapshot();
+        });
+      }, settleFailure);
     }
 
     function sameTarget(a, b) {
@@ -978,11 +994,15 @@
       s.busy = true; s.preview = null; s.result = null; s.conflict = false; s.error = ''; s.confirmClear = false;
       s.status = reapply ? '다시 적용 중…' : action === 'preview' ? '미리보기 중…' : '적용 중…';
       changed();
-      return Promise.resolve(fetchFn('/profiles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Board-Token': token() },
-        body: JSON.stringify(body)
-      })).then(function (res) {
+      var request;
+      try {
+        request = fetchFn('/profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Board-Token': token() },
+          body: JSON.stringify(body)
+        });
+      } catch (err) { request = Promise.reject(err); }
+      return Promise.resolve(request).then(function (res) {
         var status = statusOf(res);
         return responseJson(res).then(function (json) {
           return { status: status, json: json };
@@ -1014,7 +1034,8 @@
       }).catch(function (err) {
         s.busy = false;
         s.status = '실패';
-        s.error = '보내지 못했어요 - 다시 시도해 주세요' + (err && err.message ? ' (' + err.message + ')' : '');
+        if (g.console && g.console.warn) g.console.warn('[profiles] send failed', err);
+        s.error = '보내지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.';
         changed();
         return snapshot();
       });
@@ -1060,6 +1081,20 @@
       var el = row && typeof row.querySelector === 'function' ? row.querySelector(sel) : null;
       return el ? str(el.value) : '';
     }
+    function focusLost() {
+      var doc = root.ownerDocument, active = doc && doc.activeElement;
+      if (!active) return true;
+      if (active === doc.body || active === doc.documentElement) return true;
+      return !!(doc.body && typeof doc.body.contains === 'function' && !doc.body.contains(active));
+    }
+    // Preview/apply re-render synchronously with their actions disabled. The focus status chip is the
+    // same tag/id in busy and result states, so page.js region() carries focus into the next render.
+    function restoreStatusFocus() {
+      var doc = root.ownerDocument;
+      if (!doc || !focusLost()) return;
+      var target = root.querySelector('#pf-focus-status');
+      if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
+    }
     function onClick(ev) {
       var t = actOf(ev && ev.target);
       if (!t || !root.contains(t)) return;
@@ -1078,10 +1113,13 @@
         c.add({ kind: 'resetAgentMemory', agentId: t.getAttribute('data-agent') });
       } else if (act === 'preview') {
         c.preview();
+        restoreStatusFocus();
       } else if (act === 'apply') {
         c.apply();
+        restoreStatusFocus();
       } else if (act === 'reapply') {
         c.reapply();
+        restoreStatusFocus();
       } else if (act === 'clear') {
         c.askClear();
       } else if (act === 'clear-cancel') {
@@ -1091,7 +1129,11 @@
       } else if (act === 'drop') {
         c.drop(num(t.getAttribute('data-index')));
       } else if (act === 'reload') {
-        if (typeof h.reload === 'function') h.reload();
+        // An inline error retry re-reads in place; the conflict recovery keeps the full reload hand-off.
+        if (typeof t.closest === 'function' && t.closest('.pf-error')) {
+          c.load();
+          restoreStatusFocus();
+        } else if (typeof h.reload === 'function') h.reload();
         else if (g.location && typeof g.location.reload === 'function') g.location.reload();
       }
     }

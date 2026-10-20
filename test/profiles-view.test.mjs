@@ -500,6 +500,47 @@ test('controller: a non-200 preview is shown, never reported as success, and pen
   assert.equal(snap.pending.length, 1, 'edits survive a refusal');
 });
 
+test('controller: expected state-read failure is plain, contained, and retry recovers', async () => {
+  const P = load();
+  let rejectNext = true;
+  const c = P.createController({
+    fetch: () => {
+      if (rejectNext) { rejectNext = false; throw new Error('qa-offline'); }
+      return Promise.resolve({ status: 200, json: async () => STATE });
+    },
+    token: 't',
+  });
+  const failed = await c.load();
+  assert.equal(failed.loading, false);
+  assert.match(failed.error, /네트워크 연결을 확인한 뒤/);
+  assert.doesNotMatch(failed.error, /qa-offline/, 'the raw cause token must stay out of the user copy');
+  const retried = await c.load();
+  assert.equal(retried.error, '');
+  assert.equal(retried.loading, false);
+  assert.equal(retried.view.activeProfile.key, 'gpt-kimi-deepseek');
+});
+
+test('page wiring: busy preview and its result keep focus on the profiles status', async () => {
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'profiles-view', 'annotate'] });
+  e.page.receive({ seq: 1, generatedAt: 0, sessions: [] });
+  e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
+  e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => STATE });
+  await tick();
+  const lane = e.byId.main.querySelector('[data-pf="agent-lane"][data-agent="atlas"]');
+  lane.value = 'daily-heavy';
+  e.fire(lane, 'change');
+  await tick();
+  e.fire(e.byId.main.querySelector('[data-pf="preview"]'), 'click');
+  assert.equal(e.document.activeElement.id, 'pf-focus-status', 'busy render dropped focus');
+  assert.match(e.document.activeElement.textContent, /미리보기 중/);
+  const post = e.fetches[e.fetches.length - 1];
+  post.resolve({ status: 200, ok: true, json: async () => ({ ok: true, action: 'preview', diffs: [], warnings: [], writes: [] }) });
+  await tick();
+  assert.equal(e.document.activeElement.id, 'pf-focus-status', 'preview result dropped focus');
+  assert.match(e.document.activeElement.textContent, /미리보기 준비됨/);
+  assert.deepEqual(e.errors, []);
+});
+
 test('no polling: the view never schedules a timer', () => {
   const src = read('src/page/profiles-view.js');
   assert.doesNotMatch(src, /setInterval|setTimeout|requestAnimationFrame/);
@@ -786,13 +827,15 @@ test('copy: product names, interpunct compounds and modifier phrases stay unbrea
   }
 });
 
-test('tray: empty is compact; pending, error, conflict, success and confirm keep the full tray', () => {
+test('tray: empty is compact and visibly names the next action', () => {
   const P = load();
   let html = P.render(STATE, live());
   assert.match(html, /class="pf-tray pf-tray-compact"/);
   assert.doesNotMatch(html, /data-pf="preview"/);
   assert.match(textOf(html), /바꾼 값 없음/);
   assert.match(html, /title="바꾼 값이 없어요\. 값을 고르면 여기에 모입니다\."/);
+  const next = /<span class="pf-tray-next">([^<]+)<\/span>/.exec(html);
+  assert.ok(next && textOf(next[1]).trim().length >= 8, 'the compact tray needs a visible next action');
   const pending = [{ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' }];
   html = P.render(STATE, live({ pending }));
   assert.doesNotMatch(html, /pf-tray-compact/);

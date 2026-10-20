@@ -5,8 +5,10 @@
   max-width: 1220px;
   padding: var(--sp-4) var(--sp-4) var(--sp-12);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-3);
   min-width: 0;
+  width: 100%;
 }
 .pf-head {
   display: flex;
@@ -14,11 +16,12 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--sp-3);
+  min-width: 0;
   padding: 0 0 var(--sp-2);
   border-bottom: var(--hair) solid var(--c-line);
 }
 .pf-head-l { min-width: 0; }
-.pf-head-r { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); }
+.pf-head-r { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); min-width: 0; max-width: 100%; }
 .pf-kicker {
   margin: 0;
   color: var(--c-fg-3);
@@ -144,18 +147,20 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
+  min-width: 0;
+  max-width: 100%;
   padding: var(--sp-2) var(--sp-3);
   border: var(--hair) solid var(--c-red);
   border-radius: var(--r-lg);
   background: var(--c-red-tint);
 }
-.pf-error .pf-err { flex: 1 1 auto; }
+.pf-error .pf-err { flex: 1 1 12ch; min-width: 0; overflow-wrap: anywhere; }
 .pf-dash { color: var(--c-fg-4); }
 .pf-ro-val { min-width: 0; overflow-wrap: anywhere; color: var(--c-fg); font-size: var(--fs-sm); }
 .pf-warnings { display: grid; gap: var(--sp-1); }
 .pf-warn { margin: 2px 0 0; display: flex; align-items: baseline; gap: var(--sp-1); color: var(--c-amber); font-size: var(--fs-sm); }
 .pf-warn-info { color: var(--c-fg-2); }
-.pf-err { margin: 0; color: var(--c-red); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.pf-err { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--c-red); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
 
 .pf-sec {
   min-width: 0;
@@ -213,6 +218,10 @@
   overflow: hidden;
   white-space: nowrap;
 }
+.pf select:hover:not(:disabled), .pf input[type="text"]:hover:not(:disabled) {
+  border-color: var(--c-line-strong);
+  background: var(--fill-hover);
+}
 .pf select:disabled, .pf input:disabled {
   color: var(--c-fg-3);
   background: var(--c-sunk);
@@ -221,7 +230,8 @@
   opacity: 1;
   cursor: not-allowed;
 }
-.pf select:focus-visible, .pf input:focus-visible, .pf button:focus-visible, .pf summary:focus-visible {
+.pf select:focus-visible, .pf input:focus-visible, .pf button:focus-visible, .pf summary:focus-visible,
+.pf #pf-focus-status:focus-visible {
   outline: 2px solid var(--c-accent);
   outline-offset: 2px;
 }
@@ -291,6 +301,7 @@
 
 /* profiles */
 .pf-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
+.pf-cards > .pf-empty { grid-column: 1 / -1; }
 .pf-card {
   display: grid;
   gap: 2px;
@@ -370,6 +381,7 @@ button.pf-card:active { background: var(--fill-press); border-color: var(--c-lin
 .pf-tray-compact { padding: var(--sp-2) var(--sp-3); }
 .pf-tray-c { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); }
 .pf-tray-note { flex: 1 1 auto; }
+.pf-tray-next { flex: 1 1 auto; min-width: 0; margin-top: 2px; color: var(--c-fg-3); font-size: var(--fs-sm); }
 .pf-btn-danger { border-color: var(--c-red); color: var(--c-red); background: transparent; }
 .pf-btn-danger:hover:not(:disabled), .pf-btn-danger:active:not(:disabled) { background: var(--c-red-tint); }
 .pf-clear { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: var(--hair) solid var(--c-red); border-radius: var(--r-lg); background: var(--c-red-tint); }
@@ -394,6 +406,7 @@ button.pf-card:active { background: var(--fill-press); border-color: var(--c-lin
 .pf-preview-h { margin: 0; display: flex; align-items: baseline; gap: var(--sp-1); font-weight: var(--fw-semibold); }
 .pf-diff { border: var(--hair) solid var(--c-line); border-radius: var(--r-md); background: var(--c-main); }
 .pf-diff summary { cursor: pointer; padding: var(--sp-1) var(--sp-2); font-size: var(--fs-sm); }
+.pf-diff summary:hover { background: var(--fill-hover); }
 .pf-diff ul { margin: 0; padding: 0 var(--sp-2) var(--sp-2); list-style: none; display: grid; gap: 2px; }
 .pf-diff li { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1); font-size: var(--fs-xs); }
 .pf-diff-path { font-family: var(--font-mono); color: var(--c-fg-2); overflow-wrap: anywhere; }
@@ -481,12 +494,15 @@ button.pf-card:active { background: var(--fill-press); border-color: var(--c-lin
   .pf-nav-b, .pf-diff summary { min-height: var(--hit); }
   .pf-nav-b { align-items: center; }
   /* The compact page keeps a plain, always-visible title strip; the editor leads below it. */
-  .pf-head { position: sticky; top: 0; z-index: 3; flex-wrap: nowrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; background: var(--c-main); border-bottom: var(--hair) solid var(--c-line); }
-  .pf-head-l { display: block; min-width: 0; }
+  .pf-head { position: sticky; top: 0; z-index: 3; flex-wrap: wrap; align-items: flex-start; gap: var(--sp-1) var(--sp-2); padding: var(--sp-2) 0; background: var(--c-main); border-bottom: var(--hair) solid var(--c-line); }
+  .pf-tray-compact { padding: var(--sp-1) var(--sp-2); }
+  .pf-tray-c { gap: 2px var(--sp-2); }
+  .pf-tray-next { margin-top: 0; }
+  .pf-head-l { display: block; flex: 1 1 100%; min-width: 0; }
   .pf-kicker, .pf-active { display: none; }
   .pf-sub { margin-top: 2px; }
   .pf-title { margin: 0; font-size: var(--fs-lg); line-height: 1.3; white-space: nowrap; }
-  .pf-head-r { flex: none; }
+  .pf-head-r { flex: 0 0 auto; max-width: 100%; margin-left: auto; }
   .pf-skel-homes { min-height: calc(var(--sp-12) * 2); }
   .pf-homes { display: grid; gap: 2px; }
   .pf-home { display: flex; flex-wrap: nowrap; align-items: baseline; max-width: 100%; }
@@ -495,6 +511,11 @@ button.pf-card:active { background: var(--fill-press); border-color: var(--c-lin
   .pf-skel-card { min-height: calc(var(--sp-12) * 5); }
   .pf-skel-id, .pf-skel-agent .pf-skel-mem { grid-column: auto; }
   .pf-skel-route { min-height: calc(var(--sp-12) * 7); }
+}
+/* C1 desktop floor: the shared --fs-sm token is 12px at wide widths, but these are prose lines.
+ * Keep the repair on this page so the denser shared board typography is unchanged. */
+@media (min-width: 600px) {
+  .pf-sub, .pf-sec-s, .pf-card-sum, .pf-tray-next, .pf-ro-val, .pf-active { font-size: 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .pf-btn { transition: none; }

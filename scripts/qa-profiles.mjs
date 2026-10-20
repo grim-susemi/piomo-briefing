@@ -117,6 +117,23 @@ const run = {
 const failures = [];
 const fail = (message) => { failures.push(String(message)); throw new Error(message); };
 const hashFile = (file) => sha256(fs.readFileSync(file));
+function parseColor(value) {
+  const match = /rgba?\(([^)]+)\)/.exec(value || '');
+  if (!match) return null;
+  const parts = match[1].split(',').map((part) => Number(part.trim()));
+  return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
+}
+function contrastRatio(foreground, background) {
+  const a = parseColor(foreground), b = parseColor(background);
+  if (!a || !b) return null;
+  const fg = { r: a.r * a.a + b.r * (1 - a.a), g: a.g * a.a + b.g * (1 - a.a), b: a.b * a.a + b.b * (1 - a.a) };
+  const lum = (color) => {
+    const channel = (value) => { const s = value / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b);
+  };
+  const l1 = lum(fg), l2 = lum(b);
+  return Math.round(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)) * 100) / 100;
+}
 const SOURCE_FILES = [
   'src/page/profiles-view.js', 'src/page/profiles-view.css', 'src/page/page.js',
   'test/profiles-view.test.mjs', 'test/fixtures/profiles-view-state.json', 'scripts/qa-profiles.mjs',
@@ -250,11 +267,12 @@ async function main() {
     pluginPath: PLUGIN, inventory, now: () => FIXED_NOW,
   });
   const vm = JSON.parse(fs.readFileSync(VM_FILE, 'utf8'));
+  let profilesStateOverride = null;
   const server = createBoardServer({
     portBase: PORT_BASE, portCount: 5, generation: 7, token: TOKEN,
     getPage: () => pageHtml(vm, 7, { mode: 'server', token: TOKEN }),
     getViewModel: () => vm,
-    profilesState: () => store.state(),
+    profilesState: () => profilesStateOverride || store.state(),
     onProfiles: (body) => store.handle(body),
   });
   const { port } = await server.start();
@@ -287,7 +305,6 @@ async function main() {
     listen('Runtime.consoleAPICalled', (p) => {
       if (p.type === 'error') {
         const text = `console.error ${(p.args || []).map((a) => a.value ?? a.description).join(' ')}`;
-        if (text.includes('qa-offline')) { run.checks.expectedOfflineLog = text; return; }
         consoleErrors.push(text);
       }
     });
@@ -318,8 +335,9 @@ async function main() {
       });
       await page.client.send('Emulation.setTouchEmulationEnabled', { enabled: vp.mobile, maxTouchPoints: vp.mobile ? 5 : 1 });
     };
-    const applyScheme = (scheme) => page.client.send('Emulation.setEmulatedMedia', {
-      features: [{ name: 'prefers-color-scheme', value: scheme }],
+    const applyScheme = (scheme, reduced = false) => page.client.send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-color-scheme', value: scheme }]
+        .concat(reduced ? [{ name: 'prefers-reduced-motion', value: 'reduce' }] : []),
     });
     const scrollTop = () => page.eval(`(() => { window.scrollTo(0, 0); const m = document.querySelector('#main'); if (m) m.scrollTop = 0; return true; })()`);
     const scrollUnderHeader = (selector, block = 'start') => page.eval(`(() => {
@@ -376,6 +394,99 @@ async function main() {
       return info;
     };
 
+    // Round-3 measurable fit: every 390 state must sit inside the .pf content box, not merely inside
+    // the document. The pane box is the main client box minus the profiles page padding.
+    const paneBounds = () => page.eval(`(() => {
+      const main = document.querySelector('#main');
+      const pf = document.querySelector('.pf');
+      if (!main || !pf) return null;
+      const cs = getComputedStyle(pf);
+      const padL = Number.parseFloat(cs.paddingLeft) || 0;
+      const padR = Number.parseFloat(cs.paddingRight) || 0;
+      const pr = pf.getBoundingClientRect();
+      const content = { left: +(pr.left + padL).toFixed(2), right: +(pr.right - padR).toFixed(2),
+        width: +(pr.width - padL - padR).toFixed(2) };
+      const box = (sel) => { const el = document.querySelector(sel); if (!el) return null; const r = el.getBoundingClientRect();
+        return { left: +r.left.toFixed(2), right: +r.right.toFixed(2), width: +r.width.toFixed(2),
+          top: +r.top.toFixed(2), bottom: +r.bottom.toFixed(2) }; };
+      const overflow = [...document.querySelectorAll('.pf *')].filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && (r.right > content.right + 0.75 || r.left < content.left - 0.75);
+      }).map((el) => ({ tag: el.tagName.toLowerCase(), cls: String(el.className).slice(0, 80),
+        left: +el.getBoundingClientRect().left.toFixed(2), right: +el.getBoundingClientRect().right.toFixed(2) })).slice(0, 12);
+      return { innerWidth, docScrollWidth: document.documentElement.scrollWidth,
+        main: { left: +main.getBoundingClientRect().left.toFixed(2), right: +main.getBoundingClientRect().right.toFixed(2),
+          clientWidth: main.clientWidth },
+        pane: { left: +pr.left.toFixed(2), right: +pr.right.toFixed(2), width: +pr.width.toFixed(2),
+          scrollWidth: pf.scrollWidth, clientWidth: pf.clientWidth },
+        content, header: box('.pf-head'), chip: box('.pf-head-r .pf-chip'), error: box('.pf-error'),
+        errorCopy: box('.pf-error .pf-err'), retry: box('.pf-error [data-pf="reload"]'), overflow };
+    })()`);
+    const assertPaneBounds = (bounds, label) => {
+      assert.ok(bounds, `${label}: no .pf content box`);
+      const eps = 0.75;
+      assert.ok(bounds.header && bounds.header.left >= bounds.content.left - eps
+        && bounds.header.right <= bounds.content.right + eps,
+      `${label}: header ${JSON.stringify(bounds.header)} escapes content ${JSON.stringify(bounds.content)}`);
+      assert.ok(bounds.chip && bounds.chip.left >= bounds.content.left - eps
+        && bounds.chip.right <= bounds.content.right + eps,
+      `${label}: status chip ${JSON.stringify(bounds.chip)} escapes content ${JSON.stringify(bounds.content)}`);
+      if (bounds.error) {
+        assert.ok(bounds.error.left >= bounds.content.left - eps && bounds.error.right <= bounds.content.right + eps,
+          `${label}: error panel ${JSON.stringify(bounds.error)} escapes content ${JSON.stringify(bounds.content)}`);
+      }
+      assert.ok(bounds.pane.scrollWidth <= bounds.pane.clientWidth + 1, `${label}: .pf scrolls horizontally`);
+      assert.ok(bounds.docScrollWidth <= bounds.innerWidth, `${label}: document scrolls horizontally`);
+      assert.deepEqual(bounds.overflow, [], `${label}: profiles elements outside the pane content box`);
+    };
+
+    const proseSizes = () => page.eval(`(() => {
+      const size = (sel) => { const el = document.querySelector(sel); return el ? Number.parseFloat(getComputedStyle(el).fontSize) : null; };
+      return { sub: size('.pf-sub'), section: size('.pf-sec-s'), card: size('.pf-card-sum'),
+        remembered: size('.pf-ro-val'), trayNext: size('.pf-tray-next') };
+    })()`);
+
+    const hoverCapture = async (file, selector, vp, scheme) => {
+      await applyViewport(vp);
+      await applyScheme(scheme);
+      await settle();
+      const found = await page.eval(`(() => { const el = document.querySelector(${JSON.stringify(selector)});
+        if (!el) return false; el.scrollIntoView({ block: 'center' }); return true; })()`);
+      assert.ok(found, `hover target missing: ${selector}`);
+      await settle();
+      const at = await page.eval(`(() => { const el = document.querySelector(${JSON.stringify(selector)});
+        const r = el.getBoundingClientRect(); const x = r.left + r.width / 2; const y = r.top + r.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        return { x, y, inside: !!hit && (hit === el || el.contains(hit)), width: r.width, height: r.height }; })()`);
+      assert.equal(at.inside, true, `pointer is not over ${selector}: ${JSON.stringify(at)}`);
+      const read = () => page.eval(`(() => { const el = document.querySelector(${JSON.stringify(selector)});
+        const cs = getComputedStyle(el); return { background: cs.backgroundColor, border: cs.borderTopColor, color: cs.color }; })()`);
+      const before = await read();
+      await page.client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y, button: 'none' });
+      await settle();
+      const after = await read();
+      assert.notDeepEqual(after, before, `hover did not change the computed paint of ${selector}`);
+      await capture(file);
+      run.checks.hover = run.checks.hover || {};
+      run.checks.hover[path.basename(file, '.png')] = { selector, vp: vp.name, scheme, before, after, inside: at.inside };
+      await page.client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1, button: 'none' });
+      await settle();
+    };
+
+    const pressEnter = async () => {
+      await page.client.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter',
+        windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' });
+      await page.client.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter',
+        windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+    };
+    const focusInfo = () => page.eval(`(() => {
+      const a = document.activeElement; const cs = a ? getComputedStyle(a) : null;
+      return { id: a ? a.id : '', tag: a ? a.tagName : '', text: ((a && a.textContent) || '').trim().slice(0, 100),
+        inside: !!(a && a.closest && a.closest('.pf')), applyDisabled: !!document.querySelector('[data-pf="apply"]')?.disabled,
+        previewDisabled: !!document.querySelector('[data-pf="preview"]')?.disabled,
+        outlineWidth: cs ? cs.outlineWidth : '' };
+    })()`);
+
     // The shell scrolls #main, so a page-level "full page" shot would only repeat the
     // viewport. Capture every section at its scroll stops instead (no layout change).
     const captureSections = async (vp, scheme) => {
@@ -421,6 +532,12 @@ async function main() {
       await closePeek();
       await scrollUnderHeader('.pf-tray');
       await settle();
+      if (name === 'loading' || name === 'error') {
+        const bounds = await paneBounds();
+        run.checks[`${name}Bounds`] = run.checks[`${name}Bounds`] || {};
+        run.checks[`${name}Bounds`][`${vp.name}-${theme}`] = bounds;
+        assertPaneBounds(bounds, `${name} ${vp.name}-${theme}`);
+      }
       await capture(path.join(OUT, `state-${name}-${vp.name}-${theme}.png`));
       if (name === 'preview' || name === 'success') await captureEnd(name, vp, theme);
     };
@@ -816,6 +933,10 @@ async function main() {
     })()`);
     assert.equal(run.checks.layout1440.docScrollWidth <= run.checks.layout1440.innerWidth, true, '1440 horizontal scroll');
     assert.deepEqual(run.checks.layout1440.overflow, [], '1440 elements outside the viewport');
+    run.checks.prose1440 = await proseSizes();
+    for (const [name, size] of Object.entries(run.checks.prose1440)) {
+      assert.ok(size >= 14, `1440 profiles prose ${name} is ${size}px, below the 14px floor`);
+    }
 
     // Round-3 A7/A8: in every agent row the lane, pin and thinking selects start on one line, and the
     // reset action lives inside the memory field (never under the agent name).
@@ -871,6 +992,10 @@ async function main() {
     assert.deepEqual(run.checks.layout1024.overflow, [], '1024 elements outside the viewport');
     run.checks.selectFit1024 = await selectFit();
     assert.deepEqual(run.checks.selectFit1024.truncated, [], 'short select values are ellipsized at 1024');
+    run.checks.prose1024 = await proseSizes();
+    for (const [name, size] of Object.entries(run.checks.prose1024)) {
+      assert.ok(size >= 14, `1024 profiles prose ${name} is ${size}px, below the 14px floor`);
+    }
 
     await applyViewport(VIEWPORTS[0]);
     await applyScheme('light');
@@ -1162,7 +1287,7 @@ async function main() {
         await applyScheme(scheme);
         await settle();
         if (scheme === 'light') run.checks.loadingGeometry[vp.name] = await loadingGeometry();
-        await capture(path.join(OUT, `state-loading-${vp.name}-${scheme}.png`));
+        await captureState('loading', vp, scheme);
       }
     }
     for (const vp of VIEWPORTS) {
@@ -1185,18 +1310,46 @@ async function main() {
       assert.ok(Math.abs(skeletonFill - loadedFill) <= 0.02, `agent row fill ratio differs at ${vp.name}`);
     }
     await page.client.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: loadingInit.identifier });
-
-    await applyViewport(VIEWPORTS[2]);
+    await applyViewport(VIEWPORTS[0]);
+    await applyScheme('light', true);
+    await settle();
+    run.checks.reducedMotion = await page.eval(`(() => {
+      const pulse = document.querySelector('.pf-pulse');
+      const loadingText = document.querySelector('.pf-loading-h');
+      const cs = pulse ? getComputedStyle(pulse) : null;
+      return { animationName: cs ? cs.animationName : '', opacity: cs ? cs.opacity : '',
+        loadingText: loadingText ? loadingText.textContent : '' };
+    })()`);
+    assert.equal(run.checks.reducedMotion.animationName, 'none', 'reduced motion still pulses the loading glyph');
+    assert.equal(run.checks.reducedMotion.opacity, '1', 'reduced motion leaves the loading glyph dimmed');
+    assert.match(run.checks.reducedMotion.loadingText, /불러오는 중/);
+    await capture(path.join(OUT, 'state-loading-390-light-reduced-motion.png'));
     await applyScheme('light');
-    const errorInit = await page.client.send('Page.addScriptToEvaluateOnNewDocument', {
-      source: `window.fetch = () => Promise.reject(new Error('qa-offline'));`,
-    });
+
+    // Profiles-only failure: /data.json stays healthy, so an expected state-read refusal must not
+    // paint the shared page-error badge. Retry re-reads in place and recovers the loaded view.
+    await applyViewport(VIEWPORTS[0]);
+    await applyScheme('light');
+    await page.eval(`window.localStorage.clear(); window.sessionStorage.clear();`);
     await page.goto(url);
     await waitFor(`!!window.BriefPage && window.BriefPage.state.ui.live === true`, 'board page bound for error probe');
+    if (await page.eval(`window.BriefPage.state.ui.view === 'profiles'`)) {
+      await page.eval(`document.querySelector('[data-sh="view"][data-key="home"]').click()`);
+      await settle();
+    }
+    await page.eval(`window.__qaProfileFail = true;
+      if (!window.__qaRealFetch) {
+        window.__qaRealFetch = window.fetch;
+        window.fetch = function (url, opts) {
+          if (window.__qaProfileFail && String(url).indexOf('/profiles') === 0) return Promise.reject(new Error('qa-offline'));
+          return window.__qaRealFetch.apply(this, [url, opts]);
+        };
+      }`);
     await page.eval(`document.querySelector('[data-sh="view"][data-key="profiles"]').click()`);
     await waitFor(`!!document.querySelector('.pf-error')`, 'error frame');
     run.checks.error = await page.eval(`(() => {
       const box = document.querySelector('.pf-error');
+      const pageError = document.getElementById('page-error');
       return {
         hasError: !!box,
         errorText: box ? box.innerText : '',
@@ -1205,17 +1358,39 @@ async function main() {
         hasLoading: !!document.querySelector('.pf-loading'),
         readonlyText: ((document.querySelector('.pf') || {}).innerText || '').match(/읽기 전용/g) || [],
         hasReadonlyNote: !!document.querySelector('.pf-ro-note'),
+        pageErrorVisible: !!pageError && pageError.hidden !== true,
       };
     })()`);
     assert.equal(run.checks.error.hasError, true, 'error frame has no error box');
-    assert.match(run.checks.error.errorText, /qa-offline/, 'error frame does not show the cause');
+    assert.match(run.checks.error.errorText, /네트워크 연결을 확인한 뒤/, 'error frame does not show a plain cause');
+    assert.doesNotMatch(run.checks.error.errorText, /qa-offline/, 'error frame leaks the raw cause token');
     assert.equal(run.checks.error.hasRetry, true, 'error frame has no retry affordance');
     assert.match(run.checks.error.retryLabel, /다시 시도/);
     assert.equal(run.checks.error.hasLoading, false, 'error frame still says loading');
     assert.deepEqual(run.checks.error.readonlyText, [], 'error frame says read-only');
     assert.equal(run.checks.error.hasReadonlyNote, false, 'error frame renders the read-only note');
+    assert.equal(run.checks.error.pageErrorVisible, false, 'profiles failure painted the shared page-error badge');
     await captureStates('error');
-    await page.client.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: errorInit.identifier });
+
+    await applyViewport(VIEWPORTS[0]);
+    await applyScheme('light');
+    await page.eval(`window.__qaProfileFail = false`);
+    await page.eval(`document.querySelector('.pf-error [data-pf="reload"]').click()`);
+    await waitFor(`document.querySelectorAll('.pf-agent').length === 4 && !document.querySelector('.pf-loading')`, 'offline retry loaded profiles');
+    run.checks.offlineRetry = await page.eval(`(() => ({
+      error: !!document.querySelector('.pf-error'),
+      loading: !!document.querySelector('.pf-loading'),
+      agents: document.querySelectorAll('.pf-agent').length,
+      editable: !!document.querySelector('.pf select') && !document.querySelector('.pf[data-readonly="true"]'),
+      pageError: !!document.getElementById('page-error') && document.getElementById('page-error').hidden !== true,
+    }))()`);
+    assert.equal(run.checks.offlineRetry.error, false, 'retry did not clear the error');
+    assert.equal(run.checks.offlineRetry.loading, false, 'retry left the loading state');
+    assert.equal(run.checks.offlineRetry.agents, 4, 'retry did not load the four agents');
+    assert.equal(run.checks.offlineRetry.editable, true, 'retry did not recover the editable view');
+    assert.equal(run.checks.offlineRetry.pageError, false, 'retry painted the shared page-error badge');
+    await settle();
+    await capture(path.join(OUT, 'state-error-retry-390-light.png'));
 
     // ── XSS probe: hostile model markup must stay text ────────────────────────
     addXssProbe(omoPath, PS_STYLE);
@@ -1251,6 +1426,46 @@ async function main() {
     }).map((el) => ({ tag: el.tagName.toLowerCase(), cls: String(el.className).slice(0, 80),
       scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, text: el.textContent.trim().slice(0, 120) }))))()`);
 
+    // Empty-data profiles response: no cards and no routing rows, but an explicit empty sentence
+    // and the compact tray's next action must still be present and the view must not error.
+    const emptyProfiles = { ...store.state(), activeProfile: null, profiles: [], routing: { ...store.state().routing, rows: [] } };
+    profilesStateOverride = emptyProfiles;
+    await page.goto(url);
+    await waitFor(`!!document.querySelector('[data-shell]')`, 'board shell for empty-data state');
+    await openProfiles();
+    run.checks.empty = await page.eval(`(() => ({
+      cards: document.querySelectorAll('.pf-card').length,
+      routes: document.querySelectorAll('.pf-route').length,
+      profileNote: [...document.querySelectorAll('.pf-cards .pf-empty')].map((el) => el.textContent.trim()),
+      routeNote: [...document.querySelectorAll('.pf-routes .pf-empty, #pf-sec-routing .pf-empty')].map((el) => el.textContent.trim()),
+      trayNext: (document.querySelector('.pf-tray-next') || {}).textContent || '',
+      compactTray: !!document.querySelector('.pf-tray-compact'),
+      error: !!document.querySelector('.pf-error'),
+    }))()`);
+    assert.equal(run.checks.empty.cards, 0, 'empty data still rendered profile cards');
+    assert.equal(run.checks.empty.routes, 0, 'empty data still rendered routing rows');
+    assert.ok(run.checks.empty.profileNote.some((text) => text.includes('프로필이 없어요')), 'empty profiles have no explicit sentence');
+    assert.ok(run.checks.empty.routeNote.some((text) => text.includes('배치할 역할이 없어요')), 'empty routing has no explicit sentence');
+    assert.ok(run.checks.empty.trayNext.trim().length >= 8, 'empty tray does not name the next action');
+    assert.equal(run.checks.empty.compactTray, true, 'empty data did not keep the compact tray');
+    assert.equal(run.checks.empty.error, false, 'empty data rendered an error');
+    for (const [vp, theme] of [[VIEWPORTS[0], 'light'], [VIEWPORTS[1], 'light'], [VIEWPORTS[2], 'dark']]) {
+      await applyViewport(vp);
+      await applyScheme(theme);
+      await scrollTop();
+      await closePeek();
+      await settle();
+      await capture(path.join(OUT, `state-empty-${vp.name}-${theme}.png`));
+    }
+    profilesStateOverride = null;
+    await page.goto(url);
+    await waitFor(`!!document.querySelector('[data-shell]')`, 'board shell after empty-data state');
+    await openProfiles();
+
+    // Real pointer hover on a select and on a preview summary; the computed paint must change.
+    await hoverCapture(path.join(OUT, 'hover-select-390-light.png'), '[data-pf="agent-lane"][data-agent="sisyphus"]', VIEWPORTS[0], 'light');
+    await hoverCapture(path.join(OUT, 'hover-select-1440-dark.png'), '[data-pf="agent-lane"][data-agent="sisyphus"]', VIEWPORTS[2], 'dark');
+
     // ── guarded write e2e: route + lane, preview, apply ───────────────────────
     await applyViewport(VIEWPORTS[2]);
     await applyScheme('light');
@@ -1267,9 +1482,20 @@ async function main() {
       change: ROUTE_CHANGE,
     };
 
-    await page.eval(`window.__qaProfileFetches = []; const realFetch = window.fetch; window.fetch = function (...args) {
-      return realFetch.apply(this, args).then((res) => { window.__qaProfileFetches.push({ url: String(args[0]), status: res.status }); return res; });
-    };`);
+    await page.eval(`window.__qaProfileFetches = []; window.__qaRealFetch = window.fetch;
+      window.__qaHoldApply = false; window.__qaReleaseApply = null;
+      window.fetch = function (...args) {
+        const real = window.__qaRealFetch;
+        if (window.__qaHoldApply && String(args[0]) === '/profiles' && args[1] && args[1].method === 'POST') {
+          window.__qaHoldApply = false;
+          return new Promise((resolve, reject) => { window.__qaReleaseApply = () => real.apply(window, args).then((res) => {
+            window.__qaProfileFetches.push({ url: String(args[0]), status: res.status }); resolve(res);
+          }, reject); });
+        }
+        return real.apply(window, args).then((res) => {
+          window.__qaProfileFetches.push({ url: String(args[0]), status: res.status }); return res;
+        });
+      };`);
 
     await page.eval(`(() => {
       const el = document.querySelector('select[data-pf="agent-lane"][data-agent="${LANE_AGENT}"]');
@@ -1402,15 +1628,56 @@ async function main() {
       assert.equal(target.title, '이 변경 지우기', 'remove target has no tooltip');
     }
     await captureStates('preview');
+
+    // Real hover on a preview summary, then a keyboard preview activation with a held POST so the
+    // busy frame and its active element can be read through the real page.
+    await hoverCapture(path.join(OUT, 'hover-summary-390-light.png'), '.pf-diff summary', VIEWPORTS[0], 'light');
+    await applyViewport(VIEWPORTS[0]);
+    await applyScheme('light');
+    await closePeek();
+    await scrollUnderHeader('.pf-tray');
+    await settle();
+    await page.eval(`window.__qaHoldApply = true`);
+    await page.eval(`document.querySelector('[data-pf="preview"]').focus()`);
+    await pressEnter();
+    await waitFor(`!!document.querySelector('[data-pf="preview"]')?.disabled && document.activeElement.id === 'pf-focus-status'`, 'preview busy focus');
+    run.checks.focusBusyPreview = await focusInfo();
+    assert.equal(run.checks.focusBusyPreview.id, 'pf-focus-status', 'busy preview lost keyboard focus');
+    assert.equal(run.checks.focusBusyPreview.inside, true, 'busy preview focus left the profiles surface');
+    assert.match(run.checks.focusBusyPreview.text, /미리보기 중/);
+    assert.equal(run.checks.focusBusyPreview.previewDisabled, true, 'busy preview control is not disabled');
+    await capture(path.join(OUT, 'focus-busy-preview-390-light.png'));
+    await page.eval(`window.__qaReleaseApply && window.__qaReleaseApply()`);
+    await waitFor(`!!document.querySelector('.pf-preview') && document.activeElement.id === 'pf-focus-status'`, 'preview result focus');
+    run.checks.focusAfterPreview = await focusInfo();
+    assert.equal(run.checks.focusAfterPreview.id, 'pf-focus-status', 'preview result lost keyboard focus');
+    assert.match(run.checks.focusAfterPreview.text, /미리보기 준비됨/);
+    await capture(path.join(OUT, 'focus-after-preview-390-light.png'));
+
     await applyViewport(VIEWPORTS[2]);
     await applyScheme('light');
     await scrollTop();
     await settle();
 
-    await applyScheme('light');
-    await page.eval(`(() => { document.querySelector('[data-pf="apply"]').click(); return true; })()`);
+    // The one writing apply is also entered from the keyboard under a held POST; focus must survive
+    // the busy render, the success receipt and the state reload that follows it.
+    await page.eval(`window.__qaHoldApply = true`);
+    await page.eval(`document.querySelector('[data-pf="apply"]').focus()`);
+    await pressEnter();
+    await waitFor(`!!document.querySelector('[data-pf="apply"]')?.disabled && document.activeElement.id === 'pf-focus-status'`, 'apply busy focus');
+    run.checks.focusBusyApply = await focusInfo();
+    assert.equal(run.checks.focusBusyApply.id, 'pf-focus-status', 'busy apply lost keyboard focus');
+    assert.equal(run.checks.focusBusyApply.inside, true, 'busy apply focus left the profiles surface');
+    assert.match(run.checks.focusBusyApply.text, /적용 중/);
+    assert.equal(run.checks.focusBusyApply.applyDisabled, true, 'busy apply control is not disabled');
+    await capture(path.join(OUT, 'focus-busy-apply-1440-light.png'));
+    await page.eval(`window.__qaReleaseApply && window.__qaReleaseApply()`);
     await waitFor(`!!document.querySelector('.pf-done') || !!document.querySelector('.pf-conflict') || !!document.querySelector('.pf-err')`, 'apply result');
     await waitFor(`!document.querySelector('.pf-loading')`, 'state reload after apply');
+    run.checks.focusAfterApply = await focusInfo();
+    assert.equal(run.checks.focusAfterApply.id, 'pf-focus-status', 'apply success lost keyboard focus');
+    assert.match(run.checks.focusAfterApply.text, /적용했어요/);
+    await capture(path.join(OUT, 'focus-after-apply-1440-light.png'));
     run.checks.apply = await page.eval(`(() => ({
       done: !!document.querySelector('.pf-done'),
       conflict: !!document.querySelector('.pf-conflict'),
@@ -1618,6 +1885,141 @@ async function main() {
     assert.equal(hashFile(omoPath), omoHashBeforeJournalLoad, 'interrupted journal wrote the config on load');
     for (const vp of VIEWPORTS) for (const scheme of SCHEMES) await captureJournal(vp, scheme);
 
+    // Reapply is a real owner action: a successful replay writes once and clears the interrupted
+    // banner; a later stale replay must answer 409 and write nothing.
+    await applyViewport(VIEWPORTS[0]);
+    await applyScheme('light');
+    await scrollUnderHeader('[data-pf-journal="interrupted"]');
+    await settle();
+    const reapplyOmoBefore = hashFile(omoPath);
+    const reapplyRosterBefore = hashFile(rosterPath);
+    const reapplyBackupsBefore = fs.existsSync(backupDir) ? fs.readdirSync(backupDir).sort() : [];
+    await page.eval(`document.querySelector('[data-pf="reapply"]').click()`);
+    await waitFor(`!!document.querySelector('.pf-done') || !!document.querySelector('.pf-conflict') || !!document.querySelector('.pf-err')`, 'journal reapply result');
+    await waitFor(`!document.querySelector('.pf-loading')`, 'journal reapply reload');
+    const reapplyJournal = readJsonc(journalPath);
+    run.checks.journalReapplySuccess = await page.eval(`(() => ({
+      done: !!document.querySelector('.pf-done'), conflict: !!document.querySelector('.pf-conflict'),
+      error: (document.querySelector('.pf-err') || {}).textContent || '',
+      banner: !!document.querySelector('[data-pf-journal="interrupted"]'),
+      statusChip: (document.querySelector('#pf-focus-status') || {}).textContent || '',
+      writes: [...document.querySelectorAll('.pf-writes code')].map((el) => el.textContent),
+    }))()`);
+    run.checks.journalReapplySuccess.journalStatus = reapplyJournal.status;
+    run.checks.journalReapplySuccess.omoChanged = hashFile(omoPath) !== reapplyOmoBefore;
+    run.checks.journalReapplySuccess.rosterChanged = hashFile(rosterPath) !== reapplyRosterBefore;
+    run.checks.journalReapplySuccess.backupsAdded = (fs.existsSync(backupDir) ? fs.readdirSync(backupDir).sort() : []).length > reapplyBackupsBefore.length;
+    assert.equal(run.checks.journalReapplySuccess.done, true, 'journal reapply did not succeed: ' + JSON.stringify(run.checks.journalReapplySuccess));
+    assert.equal(run.checks.journalReapplySuccess.banner, false, 'journal banner survived a successful reapply');
+    assert.equal(run.checks.journalReapplySuccess.journalStatus, 'completed', 'journal did not complete after reapply');
+    assert.ok(run.checks.journalReapplySuccess.omoChanged || run.checks.journalReapplySuccess.rosterChanged,
+      'successful reapply wrote no protected file');
+    assert.ok(run.checks.journalReapplySuccess.writes.includes('agent/primary-agents/roster.json'),
+      'successful reapply did not report the roster write');
+    assert.equal(run.checks.journalReapplySuccess.backupsAdded, true, 'successful reapply created no backup');
+    await capture(path.join(OUT, 'state-journal-success-390-light.png'));
+    await applyViewport(VIEWPORTS[1]);
+    await applyScheme('light');
+    await scrollUnderHeader('.pf-done');
+    await settle();
+    await capture(path.join(OUT, 'state-journal-success-1024-light.png'));
+
+    const interruptedAgain = {
+      v: 1, id: 'qa-interrupted-409', status: 'running', action: 'apply',
+      request: { action: 'apply', changes: [{ kind: 'setAgentLane', agentId: 'prometheus', lane: 'geeky-heavy' }], rosterRevision: 1 },
+    };
+    fs.writeFileSync(journalPath, JSON.stringify(interruptedAgain, null, 2));
+    await page.goto(url);
+    await waitFor(`!!document.querySelector('[data-shell]')`, 'board shell after second interrupted journal');
+    await openProfiles();
+    await page.eval(`window.__qaStatuses = []; window.__qaRealStatusFetch = window.fetch;
+      window.fetch = function (url, opts) {
+        return window.__qaRealStatusFetch.apply(this, [url, opts]).then((res) => {
+          if (String(url).indexOf('/profiles') === 0) window.__qaStatuses.push(res.status); return res;
+        });
+      };`);
+    const journalConflictTargets = [omoPath, path.join(homes.primary, 'agent', 'settings.json'), rosterPath,
+      path.join(homes.stable, 'omo.jsonc')].filter((file) => fs.existsSync(file));
+    const journalConflictBefore = Object.fromEntries(journalConflictTargets.map((file) => [file, hashFile(file)]));
+    const journalConflictJournalBefore = hashFile(journalPath);
+    const journalConflictBackupsBefore = fs.existsSync(backupDir) ? fs.readdirSync(backupDir).sort() : [];
+    fs.appendFileSync(omoPath, '\r\n');
+    const journalConflictMutated = hashFile(omoPath);
+    await applyViewport(VIEWPORTS[0]);
+    await applyScheme('light');
+    await scrollUnderHeader('[data-pf-journal="interrupted"]');
+    await settle();
+    await page.eval(`document.querySelector('[data-pf="reapply"]').click()`);
+    await waitFor(`!!document.querySelector('.pf-conflict')`, 'journal reapply conflict');
+    run.checks.journalReapplyConflict = await page.eval(`(() => ({
+      conflict: !!document.querySelector('.pf-conflict'),
+      conflictText: (document.querySelector('.pf-conflict') || {}).innerText || '',
+      banner: !!document.querySelector('[data-pf-journal="interrupted"]'),
+      statuses: window.__qaStatuses.slice(),
+      writes: [...document.querySelectorAll('.pf-writes code')].map((el) => el.textContent),
+    }))()`);
+    const journalConflictAfter = Object.fromEntries(journalConflictTargets.map((file) => [file, hashFile(file)]));
+    run.checks.journalReapplyConflict.protectedHash = journalConflictAfter;
+    run.checks.journalReapplyConflict.journalUnchanged = hashFile(journalPath) === journalConflictJournalBefore;
+    run.checks.journalReapplyConflict.backupsUnchanged = JSON.stringify(fs.existsSync(backupDir) ? fs.readdirSync(backupDir).sort() : []) === JSON.stringify(journalConflictBackupsBefore);
+    assert.equal(run.checks.journalReapplyConflict.conflict, true, 'journal reapply 409 was not shown');
+    assert.ok(run.checks.journalReapplyConflict.statuses.includes(409), 'journal reapply did not answer 409');
+    assert.ok(run.checks.journalReapplyConflict.conflictText.includes(CONFLICT_TEXT), 'journal 409 copy missing');
+    assert.equal(journalConflictAfter[omoPath], journalConflictMutated, 'journal 409 rewrote the mutated omo.jsonc');
+    for (const file of journalConflictTargets) {
+      if (file === omoPath) continue;
+      assert.equal(journalConflictAfter[file], journalConflictBefore[file], `journal 409 rewrote ${file}`);
+    }
+    assert.equal(run.checks.journalReapplyConflict.journalUnchanged, true, 'journal reapply 409 rewrote the journal');
+    assert.equal(run.checks.journalReapplyConflict.backupsUnchanged, true, 'journal reapply 409 created a backup');
+    await capture(path.join(OUT, 'state-journal-conflict-390-light.png'));
+    await applyViewport(VIEWPORTS[1]);
+    await applyScheme('dark');
+    await scrollUnderHeader('[data-pf-journal="interrupted"]');
+    await settle();
+    await capture(path.join(OUT, 'state-journal-conflict-1024-dark.png'));
+
+    // Sibling routes stay on the shared shell's rail treatment; the A8 repair remains page-scoped.
+    const railSample = () => page.eval(`(() => {
+      const rail = document.querySelector('#rail');
+      const inactive = document.querySelector('.sh-rb:not(.on)');
+      const active = document.querySelector('.sh-rb.on');
+      return { view: window.BriefPage.state.ui.view,
+        railBg: getComputedStyle(rail).backgroundColor,
+        inactive: inactive ? getComputedStyle(inactive).color : '',
+        active: active ? getComputedStyle(active).color : '' };
+    })()`);
+    run.checks.railScope = {};
+    await applyViewport(VIEWPORTS[0]);
+    await applyScheme('light');
+    await settle();
+    let sample = await railSample();
+    run.checks.railScope['profiles-390-light'] = { ...sample, inactiveRatio: contrastRatio(sample.inactive, sample.railBg) };
+    for (const vp of VIEWPORTS) {
+      for (const theme of SCHEMES) {
+        await applyViewport(vp);
+        await applyScheme(theme);
+        await settle();
+        for (const key of ['home', 'inbox']) {
+          await closePeek();
+          await page.eval(`document.querySelector('[data-sh="view"][data-key="${key}"]').click()`);
+          await waitFor(`window.BriefPage.state.ui.view === '${key}'`, `sibling route ${key}`);
+          await closePeek();
+          await settle();
+          await capture(path.join(OUT, `sibling-${key}-${vp.name}-${theme}.png`));
+          if (vp.name === '390') {
+            sample = await railSample();
+            run.checks.railScope[`${key}-390-${theme}`] = { ...sample, inactiveRatio: contrastRatio(sample.inactive, sample.railBg) };
+          }
+        }
+      }
+    }
+    assert.equal(run.checks.railScope['profiles-390-light'].view, 'profiles', 'profiles rail sample is not on profiles');
+    assert.equal(run.checks.railScope['home-390-light'].view, 'home', 'sibling rail sample is not on home');
+    assert.notEqual(run.checks.railScope['profiles-390-light'].inactive, run.checks.railScope['home-390-light'].inactive,
+      'the A8 rail repair was promoted to the sibling route');
+    assert.ok(run.checks.railScope['profiles-390-light'].inactiveRatio >= 4.5, 'profiles rail contrast fell below 4.5:1');
+
     // Capture identity: every viewport frame has the emulated viewport size, and the set carries
     // every required state family, pressed/focus frames and the two targeted rows.
     const dimensions = { 390: [390, 844], 1024: [1024, 768], 1440: [1440, 900] };
@@ -1649,9 +2051,21 @@ async function main() {
       required.push(`section-profiles-oracle-${vp.name}-${theme}.png`);
     }
     for (const theme of SCHEMES) required.push(`section-agents-memory-390-${theme}.png`);
+    required.push(
+      'state-loading-390-light-reduced-motion.png', 'state-error-retry-390-light.png',
+      'state-empty-390-light.png', 'state-empty-1024-light.png', 'state-empty-1440-dark.png',
+      'hover-select-390-light.png', 'hover-select-1440-dark.png', 'hover-summary-390-light.png',
+      'focus-busy-preview-390-light.png', 'focus-after-preview-390-light.png',
+      'focus-busy-apply-1440-light.png', 'focus-after-apply-1440-light.png',
+      'state-journal-success-390-light.png', 'state-journal-success-1024-light.png',
+      'state-journal-conflict-390-light.png', 'state-journal-conflict-1024-dark.png',
+    );
+    for (const vp of VIEWPORTS) for (const theme of SCHEMES) {
+      required.push(`sibling-home-${vp.name}-${theme}.png`, `sibling-inbox-${vp.name}-${theme}.png`);
+    }
     const missing = required.filter((file) => !files.has(file));
     run.checks.captureSet = { count: files.size, required: required.length, missing };
-    assert.deepEqual(missing, [], 'the round-2 capture set is incomplete');
+    assert.deepEqual(missing, [], 'the round-3 capture set is incomplete');
 
     run.checks.consoleErrors = consoleErrors;
     assert.deepEqual(consoleErrors, [], 'page console errors: ' + consoleErrors.join(' | '));
@@ -2043,6 +2457,18 @@ function writeEvidence() {
   e2e.push(`conflict actions: ${JSON.stringify(run.checks.conflictActions || null)}; recovery ${JSON.stringify(run.checks.conflictRecovery || null)}`);
   e2e.push(`negative controls: ${JSON.stringify(run.checks.negativeControls || null)}`);
   e2e.push(`error frame: ${JSON.stringify(run.checks.error || null)}`);
+  e2e.push(`390 loading bounds: ${JSON.stringify(run.checks.loadingBounds || null)}`);
+  e2e.push(`390 error bounds: ${JSON.stringify(run.checks.errorBounds || null)}`);
+  e2e.push(`reduced motion: ${JSON.stringify(run.checks.reducedMotion || null)}`);
+  e2e.push(`offline retry: ${JSON.stringify(run.checks.offlineRetry || null)}`);
+  e2e.push(`empty data: ${JSON.stringify(run.checks.empty || null)}`);
+  e2e.push(`hover: ${JSON.stringify(run.checks.hover || null)}`);
+  e2e.push(`desktop prose: 1440 ${JSON.stringify(run.checks.prose1440 || null)}; 1024 ${JSON.stringify(run.checks.prose1024 || null)}`);
+  e2e.push(`focus busy preview: ${JSON.stringify(run.checks.focusBusyPreview || null)}; after ${JSON.stringify(run.checks.focusAfterPreview || null)}`);
+  e2e.push(`focus busy apply: ${JSON.stringify(run.checks.focusBusyApply || null)}; after ${JSON.stringify(run.checks.focusAfterApply || null)}`);
+  e2e.push(`journal reapply success: ${JSON.stringify(run.checks.journalReapplySuccess || null)}`);
+  e2e.push(`journal reapply 409: ${JSON.stringify(run.checks.journalReapplyConflict || null)}`);
+  e2e.push(`rail scope: ${JSON.stringify(run.checks.railScope || null)}`);
   e2e.push(`agent alignment 1440: ${JSON.stringify(run.checks.agentAlign1440 || null)}`);
   e2e.push(`agent alignment 1024: ${JSON.stringify(run.checks.agentAlign1024 || null)}`);
   e2e.push(`pending targets 390: ${JSON.stringify(run.checks.preview390Targets || null)}`);
