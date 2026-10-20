@@ -325,8 +325,23 @@
     if (obj(view)) return 'view';
     return edit && str(edit.error) ? 'error' : 'loading';
   }
+  // The loading frame reserves the loaded geometry instead of leaving an empty page: a homes
+  // strip, the pending tray, four agent rows, six profile cards and the routing block. The
+  // glyph pulses only while the request is pending; the reduced-motion rule stops it.
   function loadingBlock() {
-    return '<div class="pf-loading" role="status">' + ic('refresh-cw', 'ic-sm') + ' 프로필 상태를 불러오는 중…</div>';
+    var agents = '';
+    for (var i = 0; i < 4; i++) agents += '<div class="pf-skel pf-skel-agent"></div>';
+    var cards = '';
+    for (var j = 0; j < 6; j++) cards += '<div class="pf-skel pf-skel-card"></div>';
+    return '<div class="pf-loading" data-pf-loading role="status">' +
+      '<p class="pf-loading-h"><span class="pf-pulse" aria-hidden="true">' + ic('refresh-cw', 'ic-sm') + '</span> 프로필 상태를 불러오는 중…</p>' +
+      '<div class="pf-skeleton" aria-hidden="true">' +
+      '<div class="pf-skel pf-skel-homes"></div>' +
+      '<div class="pf-skel pf-skel-tray"></div>' +
+      '<div class="pf-skel-grid">' + agents + '</div>' +
+      '<div class="pf-skel-cards">' + cards + '</div>' +
+      '<div class="pf-skel pf-skel-routes"></div>' +
+      '</div></div>';
   }
   function errorBlock(edit) {
     return '<div class="pf-error" role="alert"><p class="pf-err">' + esc(edit && edit.error) + '</p>' +

@@ -183,7 +183,8 @@ test('agents: lane, pin and thinking share a top baseline; reset sits with the m
   assert.match(css, /\.pf-mem-line\s*\{[\s\S]*?align-items:\s*center;/);
   const at1040 = css.slice(css.indexOf('@media (max-width: 1040px)'), css.indexOf('@media (max-width: 760px)'));
   assert.doesNotMatch(at1040, /\.pf-agent \.pf-field-act/, 'the reset action must not be pushed to its own row');
-  assert.match(at1040, /\.pf-agent \{[\s\S]*?minmax\(140px, 1\.2fr\)/);
+  assert.match(at1040, /\.pf-agent \{ grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\) minmax\(0, 1\.2fr\); \}/);
+  assert.match(at1040, /\.pf-agent \.pf-mem-field \{ grid-column: 1 \/ -1; \}/);
   assert.match(at1040, /\.pf-mem-sels \{[\s\S]*?minmax\(0, 1\.4fr\)/);
 });
 
@@ -208,6 +209,27 @@ test('loading and error render as their own states, never as read-only', () => {
   html = P.render(STATE, live());
   assert.match(html, /편집 가능/);
   assert.doesNotMatch(html, /불러오는 중/);
+});
+
+test('loading: reserves the loaded geometry and pulses a glyph that stops under reduced motion', () => {
+  const P = load();
+  const html = P.render(null, live({ loading: true }));
+  assert.match(html, /data-pf-loading/);
+  assert.equal((html.match(/class="pf-skel pf-skel-agent"/g) || []).length, 4, 'four agent placeholders');
+  assert.equal((html.match(/class="pf-skel pf-skel-card"/g) || []).length, 6, 'six profile-card placeholders');
+  assert.match(html, /class="pf-skeleton" aria-hidden="true"/);
+  assert.match(html, /class="pf-pulse" aria-hidden="true"/);
+  const css = read('src/page/profiles-view.css');
+  assert.match(css, /@keyframes pf-pulse/);
+  assert.match(css, /\.pf-pulse \{[^}]*animation: pf-pulse var\(--pf-pulse-dur\)/);
+  const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+  assert.match(reduced, /\.pf-pulse \{ animation: none; opacity: 1; \}/);
+});
+
+test('pressed: profile cards and sidebar section buttons use the press fill', () => {
+  const css = read('src/page/profiles-view.css');
+  assert.match(css, /button\.pf-card:active \{[^}]*background: var\(--fill-press\)/);
+  assert.match(css, /\.pf-nav-b:active \{[^}]*background: var\(--fill-press\)/);
 });
 
 test('selects: every control titles its selected label and declares an ellipsis', () => {
@@ -257,6 +279,34 @@ test('disabled secondary buttons keep their contrast without opacity', () => {
   assert.match(rule, /background:\s*var\(--c-sunk\)/);
   assert.match(rule, /border-color:\s*var\(--c-line\)/);
   assert.doesNotMatch(css, /opacity:\s*\.7/);
+});
+
+test('disabled selects and secondary buttons set colour, background and border without UA dimming', () => {
+  const css = read('src/page/profiles-view.css');
+  const select = /\.pf select:disabled, \.pf input:disabled \{([^}]*)\}/.exec(css)[1];
+  assert.match(select, /color:\s*var\(--c-fg-3\)/);
+  assert.match(select, /background:\s*var\(--c-sunk\)/);
+  assert.match(select, /border-color:\s*var\(--c-line\)/);
+  assert.match(select, /-webkit-text-fill-color:\s*var\(--c-fg-3\)/);
+  assert.match(select, /opacity:\s*1/);
+  const button = /\.pf-btn:disabled \{([^}]*)\}/.exec(css)[1];
+  assert.match(button, /color:\s*var\(--c-fg-3\)/);
+  assert.match(button, /background:\s*var\(--c-sunk\)/);
+  assert.match(button, /border-color:\s*var\(--c-line\)/);
+  assert.match(button, /opacity:\s*1/);
+  const ghost = /\.pf-btn-ghost:disabled \{([^}]*)\}/.exec(css)[1];
+  assert.match(ghost, /color:\s*var\(--c-fg-3\)/);
+  assert.match(ghost, /border-color:\s*var\(--c-line\)/);
+});
+
+test('responsive controls: 1024 stacks the agent pin/thinking pair and 390 uses one agent column', () => {
+  const css = read('src/page/profiles-view.css');
+  const at1040 = css.slice(css.indexOf('@media (max-width: 1040px)'), css.indexOf('@media (max-width: 760px)'));
+  assert.match(at1040, /\.pf-pin-sels \{ grid-template-columns: minmax\(0, 1fr\); \}/);
+  assert.match(at1040, /\.pf-mem-sels \{ grid-template-columns: minmax\(80px/);
+  assert.match(at1040, /\.pf-mem-sels \{[^}]*minmax\(92px/);
+  const at599 = css.slice(css.indexOf('@media (max-width: 599px)'));
+  assert.match(at599, /\.pf-agent \{ grid-template-columns: minmax\(0, 1fr\); align-items: start; \}/);
 });
 
 test('read-only without a token: no selects and no preview/apply controls', () => {
