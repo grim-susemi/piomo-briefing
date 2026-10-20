@@ -902,9 +902,9 @@
       s.pending = next;
       s.preview = null;
       s.result = null;
-      s.conflict = false;
-      s.error = '';
-      s.status = '';
+      // A 409 is a stale baseline, not a transient error: edits may be added while the conflict is
+      // latched, but only a successful load() may make the revision fresh again.
+      if (!s.conflict) { s.error = ''; s.status = ''; }
       s.confirmClear = false;
       changed();
       return snapshot();
@@ -913,12 +913,17 @@
       var i = typeof index === 'string' && /^\d+$/.test(index) ? Number(index) : num(index);
       if (i === null || i < 0 || i >= s.pending.length) return snapshot();
       s.pending = s.pending.slice(0, i).concat(s.pending.slice(i + 1));
-      s.preview = null; s.result = null; s.error = ''; s.status = ''; s.confirmClear = false;
+      s.preview = null; s.result = null;
+      if (!s.conflict) { s.error = ''; s.status = ''; }
+      s.confirmClear = false;
       changed();
       return snapshot();
     }
     function clear() {
-      s.pending = []; s.draft = map(); s.preview = null; s.result = null; s.conflict = false; s.error = ''; s.status = ''; s.confirmClear = false;
+      // Discarding removes pending edits but does not make the loaded targets/revision fresh.
+      s.pending = []; s.draft = map(); s.preview = null; s.result = null;
+      if (!s.conflict) { s.error = ''; s.status = ''; }
+      s.confirmClear = false;
       changed();
       return snapshot();
     }
@@ -942,7 +947,9 @@
     function touch() { changed(); return snapshot(); }
     function removeKind(kind) {
       s.pending = s.pending.filter(function (c) { return !obj(c) || c.kind !== kind; });
-      s.preview = null; s.result = null; s.error = ''; s.status = ''; s.confirmClear = false;
+      s.preview = null; s.result = null;
+      if (!s.conflict) { s.error = ''; s.status = ''; }
+      s.confirmClear = false;
       changed();
       return snapshot();
     }
@@ -953,7 +960,7 @@
       var list = Array.isArray(changesOverride) ? changesOverride.slice() : s.pending.slice();
       if (s.busy) return Promise.resolve(snapshot());
       // A 409 makes the loaded roster revision stale: neither preview nor apply may post it again
-      // until a successful state read. Only 새로고침/discard are live in that state.
+      // until a successful state read. The latch survives add/drop/removeKind/clear; only load() lifts it.
       if (s.conflict) return Promise.resolve(snapshot());
       if (typeof fetchFn !== 'function') {
         s.error = '실시간 상황판에서만 보낼 수 있어요'; changed(); return Promise.resolve(snapshot());

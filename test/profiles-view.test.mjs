@@ -684,6 +684,81 @@ test('409: preview/apply are disabled, reload is primary, and a successful load 
   assert.doesNotMatch(/<button[^>]*data-pf="apply"[^>]*>/.exec(after)[0], /\bdisabled\b/);
 });
 
+test('409 latch: edits, drop, removeKind and clear keep the stale baseline blocked until load()', async () => {
+  const P = load();
+  let calls = 0;
+  const bodies = [];
+  const fresh = {
+    ...clone(STATE),
+    targets: { ...STATE.targets, 'fresh-target.json': 'fresh-sha' },
+    roster: { ...STATE.roster, revision: 9 },
+  };
+  const responses = [
+    { status: 200, json: async () => STATE },
+    { status: 409, json: async () => ({ ok: false, code: 'STALE' }) },
+    { status: 200, json: async () => fresh },
+    { status: 200, json: async () => ({ ok: true, action: 'preview', diffs: [], warnings: [], writes: [] }) },
+  ];
+  const c = P.createController({
+    fetch: (url, opts) => {
+      calls += 1;
+      if (opts && opts.body) bodies.push(JSON.parse(opts.body));
+      return Promise.resolve(responses.shift());
+    },
+    token: 't',
+  });
+  await c.load();
+  assert.equal(calls, 1);
+  c.add({ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' });
+  const stale = await c.apply();
+  assert.equal(stale.conflict, true);
+  assert.equal(calls, 2);
+  assert.deepEqual(bodies[0].expected, STATE.targets);
+  assert.equal(bodies[0].rosterRevision, 3);
+
+  // Edits after the 409 keep the latch; they must not make the stale view look fresh.
+  c.add({ kind: 'setRoute', section: 'agents', role: 'explore', provider: 'anthropic', model: 'anthropic/claude-opus-5-5', thinking: 'medium' });
+  assert.equal(c.snapshot().conflict, true);
+  const blockedPreview = await c.preview();
+  const blockedApply = await c.apply();
+  assert.equal(calls, 2, 'preview/apply after a 409 must not fetch');
+  assert.equal(blockedPreview.conflict, true);
+  assert.equal(blockedApply.conflict, true);
+
+  // Dropping and removing intents cannot lift the latch either.
+  c.drop(0);
+  assert.equal(c.snapshot().conflict, true);
+  c.removeKind('setRoute');
+  assert.equal(c.snapshot().conflict, true);
+  assert.equal(c.snapshot().pending.length, 0);
+  await c.preview();
+  assert.equal(calls, 2);
+
+  // Discard removes the pending edits but not the stale-baseline fact.
+  c.add({ kind: 'setAgentLane', agentId: 'prometheus', lane: 'geeky-heavy' });
+  c.clear();
+  assert.equal(c.snapshot().conflict, true);
+  assert.equal(c.snapshot().pending.length, 0);
+  c.add({ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-normal' });
+  assert.equal(c.snapshot().conflict, true);
+  await c.preview();
+  await c.apply();
+  assert.equal(calls, 2, 'a new intent after clear still cannot post the stale baseline');
+
+  // Only a successful state read lifts it and replaces the baseline.
+  const reloaded = await c.load();
+  assert.equal(calls, 3);
+  assert.equal(reloaded.conflict, false);
+  assert.equal(reloaded.status, '');
+  assert.deepEqual(reloaded.view.targets, fresh.targets);
+  assert.equal(reloaded.view.roster.revision, 9);
+  const preview = await c.preview();
+  assert.equal(calls, 4);
+  assert.equal(preview.conflict, false);
+  assert.deepEqual(bodies[1].expected, fresh.targets, 'the post-reload send uses the fresh expected targets');
+  assert.equal(bodies[1].rosterRevision, 9, 'the post-reload send uses the fresh roster revision');
+});
+
 test('pin hint: GPT 계열만 sits inside the pin label before the thinking control', () => {
   const P = load();
   const html = P.render(STATE, live());
