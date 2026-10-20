@@ -14,6 +14,15 @@
     "label": null,
     "readOnly": false
   },
+  "guide": {
+    "title": "OMO 권장 배치 · 설치판 5.1.33",
+    "version": "5.1.38",
+    "snapshotDate": "2026-10-20",
+    "sources": [
+      { "path": "C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.38-r1/package/plugin/extensions/omo.js", "sha256": "4a8aef923825ccd5fbb5ab6d4b3b72e0ae145b670309f1db3ead53827c029476" },
+      { "path": "C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.38-r1/package/plugin/extensions/omo-task.js", "sha256": "2b559bb11f0285072722cffbb7f322756c81aec867f6fb4a683278f075d7f783" }
+    ]
+  },
   "homes": {
     "primary": "C:/Users/USER/.omo",
     "stable": "C:/Users/USER/.omo-stable-500/home/.omo",

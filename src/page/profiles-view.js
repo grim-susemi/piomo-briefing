@@ -33,8 +33,11 @@
     ['lanes', '모델 레인', 'model_profile 선택'],
     ['summarizer', '요약 모델', '압축 요약 모델과 경고'],
     ['memory', '메모리 행', 'Kibitzer·Reflection 공통 행'],
-    ['guide', '권장 가이드', '5.1.38 기준 경로와 sha256']
+    ['guide', '권장 가이드', '경로와 sha256']
   ];
+  // Identity marks are shapes as well as colours, so the fixed roster palette is never the only cue.
+  var SHAPES = { sisyphus: 'circle', hephaestus: 'square', prometheus: 'triangle', atlas: 'diamond' };
+  var SHAPE_KO = { circle: '원형', square: '사각형', triangle: '삼각형', diamond: '마름모' };
   var STATUS_LABEL = {
     recommended: '권장', fallback: '차선', 'variant-different': '변형 다름', different: '다름',
     unresolved: '미해결', unassigned: '미지정', untracked: '추적 안 됨', unknown: '미확인', unset: '미설정'
@@ -130,6 +133,13 @@
     return '<label class="pf-sel' + (cls ? ' ' + cls : '') + '"' + attr('for', id) + '>' +
       '<span class="pf-sel-t">' + esc(text) + '</span>' + control + '</label>';
   }
+  // A field hint lives inside the pin control's own label, after that select and before the
+  // thinking control that follows it, so a stacked 1024/390 pair cannot attach it to 추론.
+  function labelledHint(text, hint, id, control, cls) {
+    return '<label class="pf-sel' + (cls ? ' ' + cls : '') + '"' + attr('for', id) + '>' +
+      '<span class="pf-sel-t">' + esc(text) + '</span>' + control +
+      (hint ? ' <span class="pf-hint">' + esc(hint) + '</span>' : '') + '</label>';
+  }
   function textInput(name, attrs, value, disabled, placeholder) {
     return '<input type="text"' + attr('data-pf', name) + (attrs || '') + attr('value', value) +
       (placeholder ? attr('placeholder', placeholder) : '') + boolAttr('disabled', disabled) + '>';
@@ -139,12 +149,15 @@
       boolAttr('disabled', disabled) + '>' + text + '</button>';
   }
   function valueOrDash(v) { return str(v) ? esc(v) : '<span class="pf-dash" aria-label="없음">—</span>'; }
-  // The model copy is data, not markup: escape it first, then wrap only the known Korean phrases that must
-  // not split across lines (a parenthetical or a modifier + noun is unreadable when broken at 390 px).
+  // The model copy is data, not markup: escape it first, then wrap the phrases that must not split across
+  // lines. One combined pass keeps product names, interpunct compounds and modifier + noun phrases together;
+  // the surrounding text stays selectable and no rendered word is changed.
+  var KEEP_PHRASES = /\(max 추론\)|진짜 max 추론|max 추론|(?:GLM|GPT|Kimi|DeepSeek|Flash|딥시크)\s+\d+(?:\.\d+)?(?:\s+(?:Flash|Pro|Max))?(?:\(max 추론\))?|(?:깊은|개인용|빠른|단순|고강도)\s+[가-힣A-Za-z0-9]+(?:·[가-힣A-Za-z0-9]+)*|[가-힣A-Za-z0-9]+(?:·[가-힣A-Za-z0-9]+)+\s*[가-힣A-Za-z0-9]*/g;
   function summaryText(v) {
-    return esc(v)
-      .replace(/\(max 추론\)/g, '<span class="pf-keep">(max 추론)</span>')
-      .replace(/진짜 max 추론/g, '<span class="pf-keep">진짜 max 추론</span>');
+    return esc(v).replace(KEEP_PHRASES, function (m) { return '<span class="pf-keep">' + m + '</span>'; });
+  }
+  function currentChip() {
+    return '<span class="pf-chip pf-c-green pf-current">' + ic('check', 'ic-sm') + ' ' + esc('현재') + '</span>';
   }
 
   // ---- model helpers -----------------------------------------------------------------------------------------------
@@ -325,22 +338,46 @@
     if (obj(view)) return 'view';
     return edit && str(edit.error) ? 'error' : 'loading';
   }
-  // The loading frame reserves the loaded geometry instead of leaving an empty page: a homes
-  // strip, the pending tray, four agent rows, six profile cards and the routing block. The
-  // glyph pulses only while the request is pending; the reduced-motion rule stops it.
+  // The loading frame uses the loaded view's own row primitives: a homes strip, the compact tray,
+  // four full-width agent rows with the same responsive field grid, six profile cards and the routing
+  // rows. It is not a separate 4/2/1-column matrix, so the loaded view lands where the skeleton was.
   function loadingBlock() {
     var agents = '';
-    for (var i = 0; i < 4; i++) agents += '<div class="pf-skel pf-skel-agent"></div>';
+    for (var i = 0; i < 4; i++) {
+      agents += '<div class="pf-skel pf-skel-agent" data-pf-skel="agent">' +
+        '<span class="pf-skel-field pf-skel-id"><span class="pf-skel-line pf-skel-line-t"></span><span class="pf-skel-line pf-skel-line-c"></span></span>' +
+        '<span class="pf-skel-field"><span class="pf-skel-line pf-skel-line-t"></span><span class="pf-skel-line pf-skel-line-c"></span></span>' +
+        '<span class="pf-skel-field"><span class="pf-skel-line pf-skel-line-t"></span><span class="pf-skel-pin"><span class="pf-skel-line pf-skel-line-c"></span><span class="pf-skel-line pf-skel-line-c"></span></span></span>' +
+        '<span class="pf-skel-field pf-skel-mem"><span class="pf-skel-line pf-skel-line-t"></span><span class="pf-skel-line pf-skel-line-c"></span></span>' +
+        '</div>';
+    }
     var cards = '';
-    for (var j = 0; j < 6; j++) cards += '<div class="pf-skel pf-skel-card"></div>';
+    for (var j = 0; j < 6; j++) {
+      cards += '<div class="pf-skel pf-skel-card" data-pf-skel="card">' +
+        '<span class="pf-skel-line pf-skel-line-t"></span><span class="pf-skel-line pf-skel-line-s"></span>' +
+        '<span class="pf-skel-line pf-skel-line-s"></span><span class="pf-skel-line pf-skel-line-s"></span>' +
+        '<span class="pf-skel-line pf-skel-line-c"></span></div>';
+    }
+    var routes = '';
+    for (var k = 0; k < 20; k++) {
+      routes += '<div class="pf-skel pf-skel-route" data-pf-skel="route">' +
+        '<span class="pf-skel-field pf-skel-id"><span class="pf-skel-line pf-skel-line-t"></span><span class="pf-skel-line pf-skel-line-s"></span></span>' +
+        '<span class="pf-skel-field pf-skel-route-sels"><span class="pf-skel-line pf-skel-line-c"></span><span class="pf-skel-line pf-skel-line-c"></span><span class="pf-skel-line pf-skel-line-c"></span></span>' +
+        '<span class="pf-skel-field pf-skel-rec"><span class="pf-skel-line pf-skel-line-s"></span></span></div>';
+    }
+    var sec = function (key, body) {
+      return '<div class="pf-skel-sec" data-pf-skel="' + key + '" aria-hidden="true"><div class="pf-skel-sec-h">' +
+        '<span class="pf-skel-line pf-skel-line-t"></span><span class="pf-skel-line pf-skel-line-s"></span></div>' +
+        '<div class="pf-skel-sec-b">' + body + '</div></div>';
+    };
     return '<div class="pf-loading" data-pf-loading role="status">' +
-      '<p class="pf-loading-h"><span class="pf-pulse" aria-hidden="true">' + ic('refresh-cw', 'ic-sm') + '</span> 프로필 상태를 불러오는 중…</p>' +
-      '<div class="pf-skeleton" aria-hidden="true">' +
-      '<div class="pf-skel pf-skel-homes"></div>' +
-      '<div class="pf-skel pf-skel-tray"></div>' +
-      '<div class="pf-skel-grid">' + agents + '</div>' +
-      '<div class="pf-skel-cards">' + cards + '</div>' +
-      '<div class="pf-skel pf-skel-routes"></div>' +
+      '<div class="pf-skeleton">' +
+      '<div class="pf-skel pf-skel-homes" data-pf-skel="homes" aria-hidden="true"></div>' +
+      '<div class="pf-skel pf-skel-tray pf-tray-compact" data-pf-skel="tray"><p class="pf-loading-h"><span class="pf-pulse" aria-hidden="true">' +
+      ic('refresh-cw', 'ic-sm') + '</span> 프로필 상태를 불러오는 중…</p></div>' +
+      sec('agents', '<div class="pf-skel-agents">' + agents + '</div>') +
+      sec('profiles', '<div class="pf-skel-cards">' + cards + '</div>') +
+      sec('routing', '<div class="pf-skel-routes">' + routes + '</div>') +
       '</div></div>';
   }
   function errorBlock(edit) {
@@ -371,12 +408,12 @@
   function homes(view) {
     var h = obj(view && view.homes) || {};
     var line = function (tagName, value, cls) {
-      return '<span class="pf-home ' + (cls || '') + '">' + tag(tagName) + ' <code>' + esc(value || '(없음)') + '</code></span>';
+      return '<span class="pf-home ' + (cls || '') + '">' + tag(tagName) + ' <code title="' + esc(value || '(없음)') + '">' + esc(value || '(없음)') + '</code></span>';
     };
     var mirrors = arr(h.mirrors).map(function (m, i) {
       var label = 'mirror ' + (i + 1);
       return '<span class="pf-home' + (m && m.exists === false ? ' pf-home-off' : '') + '">' + tag(label, m && m.exists === false ? '이 미러의 omo.jsonc가 없음' : str(m && m.label)) +
-        ' <code>' + esc(m && m.root) + '</code>' + (m && m.exists === false ? ' <span class="pf-off">[없음]</span>' : '') + '</span>';
+        ' <code title="' + esc(m && m.root) + '">' + esc(m && m.root) + '</code>' + (m && m.exists === false ? ' <span class="pf-off">[없음]</span>' : '') + '</span>';
     }).join('');
     return '<div class="pf-homes" aria-label="대상 홈">' +
       line('primary', h.primary) + (mirrors || line('mirror', '(설정 없음)')) + line('stable-500', h.stable) + '</div>';
@@ -392,10 +429,10 @@
   }
 
   // ---- sections ----------------------------------------------------------------------------------------------------
-  function section(key, body, count, extra) {
+  function section(key, body, count, extra, subOverride) {
     var meta = null;
     SECTIONS.forEach(function (s) { if (s[0] === key) meta = s; });
-    var title = meta ? meta[1] : key, sub = meta ? meta[2] : '';
+    var title = meta ? meta[1] : key, sub = typeof subOverride === 'string' ? subOverride : meta ? meta[2] : '';
     return '<section class="pf-sec" id="pf-sec-' + esc(key) + '"' + attr('data-pf-sec', key) + '>' +
       '<header class="pf-sec-h"><div class="pf-sec-t">' + tag(title) + '<h2>' + esc(title) + '</h2>' +
       (sub ? '<p class="pf-sec-s">' + esc(sub) + '</p>' : '') + '</div>' +
@@ -448,19 +485,21 @@
         ? '<span class="pf-lbl">레인</span><span class="pf-ro-val">' + esc(lane) + '</span>'
         : labelled('레인', laneId, select('agent-lane', withId(laneId, ' data-agent="' + esc(id) + '"'), laneOptions(lane)));
       var pinId = 'pf-agent-pin-' + id, pinThinkId = 'pf-agent-pin-thinking-' + id;
+      var pinHint = id === 'hephaestus' ? 'GPT 계열만' : '';
       var pinControls = ro
         ? '<span class="pf-lbl">핀</span><span class="pf-ro-val">' + (pin ? esc(pinProvider + ' · ' + pinModel + ' / ' + pinThinking) : '없음') + '</span>'
         : '<div class="pf-pin-sels">' +
-          labelled('핀', pinId, select('agent-pin', withId(pinId, ' data-agent="' + esc(id) + '"'), pinOpts)) +
+          labelledHint('핀', pinHint, pinId, select('agent-pin', withId(pinId, ' data-agent="' + esc(id) + '"'), pinOpts)) +
           labelled('추론', pinThinkId, select('agent-pin-thinking', withId(pinThinkId, ' data-agent="' + esc(id) + '"'), thinkingOptions(pinThinking, false), !pin)) +
           '</div>';
       var resetBtn = ro ? '<span class="pf-muted">기억은 확장이 관리</span>' : button('reset-memory', ' data-agent="' + esc(id) + '"', '기억 초기화', false, 'pf-btn pf-btn-ghost');
       if (reset && !ro) resetBtn = button('reset-memory', ' data-agent="' + esc(id) + '"', '초기화 대기', false, 'pf-btn pf-btn-ghost on');
       return '<article class="pf-agent" data-pf-agent="' + esc(id) + '">' +
-        '<div class="pf-agent-id"><span class="pf-dot pf-dot-' + esc(id) + '" aria-hidden="true"></span>' +
+        '<div class="pf-agent-id"><span class="pf-dot pf-dot-' + esc(id) + ' pf-shape-' + esc(SHAPES[id]) + '" role="img" aria-label="' +
+        esc(name + ' · ' + SHAPE_KO[SHAPES[id]] + ' 표식') + '"></span>' +
         '<span class="pf-agent-n">' + esc(name) + '</span><span class="pf-agent-k">[rev ' + esc(num(agent.rev) === null ? 0 : agent.rev) + ']</span></div>' +
         '<div class="pf-field">' + controls + '</div>' +
-        '<div class="pf-field">' + pinControls + (id === 'hephaestus' ? ' <span class="pf-hint">gpt-*만</span>' : '') + '</div>' +
+        '<div class="pf-field">' + pinControls + '</div>' +
         '<div class="pf-field pf-mem-field"><span class="pf-lbl">기억</span><div class="pf-mem-line">' +
         '<span class="pf-ro-val pf-mem">' + (mem ? esc(mem) : '<span class="pf-dash">—</span>') + '</span>' + resetBtn + '</div></div></article>';
     }).join('');
@@ -476,7 +515,7 @@
       if (!obj(p)) return '';
       var on = p.key === current || p.current === true;
       var body = '<span class="pf-card-top"><span class="pf-card-num">' + esc(num(p.num) === null ? '' : p.num) + '</span>' +
-        '<span class="pf-card-name">' + esc(p.nameKr || p.name || p.key) + '</span>' + (on ? chip('pf-c-green', '현재') : '') + '</span>' +
+        '<span class="pf-card-name">' + esc(p.nameKr || p.name || p.key) + '</span>' + (on ? currentChip() : '') + '</span>' +
         '<span class="pf-card-en">' + esc(p.name || '') + '</span>' +
         '<span class="pf-card-tag">' + tag(p.tag || 'profile') + '</span>' +
         '<span class="pf-card-sum">' + summaryText(p.summary || '') + '</span>' +
@@ -643,10 +682,18 @@
     return section('memory', '<div class="pf-mems">' + rows + '</div>', 2);
   }
 
+  function guideTitle(title, version) {
+    // The switcher manifest's title still carries the pre-upgrade edition label. Drop any trailing
+    // edition/version phrase, then print the one runtime inventory version the pins came from.
+    var base = str(title).replace(/\s*[·\-–—]\s*(?:설치판|패키지)\s*v?\d+(?:\.\d+)+(?:\s*\([^)]*\))?\s*$/, '').trim();
+    if (!base) base = 'OMO 모델·역할 권장 가이드';
+    return version ? base + ' · ' + version : base;
+  }
+
   function guide(view) {
-    var guide = obj(view && view.guide) || obj(view && view.recommendationGuide) || null;
+    var guideData = obj(view && view.guide) || obj(view && view.recommendationGuide) || null;
     var inv = obj(view && view.inventory) || {};
-    var sources = guide && arr(guide.sources).length ? arr(guide.sources) : [];
+    var sources = guideData && arr(guideData.sources).length ? arr(guideData.sources) : [];
     var rows = sources.map(function (source) {
       return '<div class="pf-guide-row"><code class="pf-path">' + esc(source.path) + '</code><code class="pf-hash">' + esc(source.sha256) + '</code></div>';
     }).join('');
@@ -656,10 +703,13 @@
         '<div class="pf-guide-row"><code class="pf-path">' + esc(inv.manifestPath || '(inventory 경로 없음)') + '</code><code class="pf-hash">' +
         esc(inv.loadedSha256 || '') + '</code></div>';
     }
-    var version = str(guide && guide.version) || str(inv.version) || '5.1.38';
-    return section('guide', '<div class="pf-guide"><div class="pf-guide-h">' + tag('guide') + '<b>' + esc(str(guide && guide.title) || 'OMO 모델·역할 권장 가이드') + '</b>' +
-      chip('pf-c-gray', version) + (guide && guide.snapshotDate ? chip('pf-c-gray', guide.snapshotDate) : '') + '</div>' + rows +
-      (guide && guide.guideUrl ? '<p class="pf-guide-url"><code>' + esc(guide.guideUrl) + '</code></p>' : '') + '</div>', null);
+    // One inventory value drives the heading, the chip and the section subtitle.
+    var version = str(inv.version) || str(guideData && guideData.version);
+    var title = guideTitle(str(guideData && guideData.title) || 'OMO 모델·역할 권장 가이드', version);
+    return section('guide', '<div class="pf-guide"><div class="pf-guide-h">' + tag('guide') + '<b>' + esc(title) + '</b>' +
+      (version ? chip('pf-c-gray', version) : '') + (guideData && guideData.snapshotDate ? chip('pf-c-gray', guideData.snapshotDate) : '') + '</div>' + rows +
+      (guideData && guideData.guideUrl ? '<p class="pf-guide-url"><code>' + esc(guideData.guideUrl) + '</code></p>' : '') + '</div>', null, '',
+      version ? version + ' 기준 경로와 sha256' : '경로와 sha256');
   }
 
   // ---- pending tray, preview diff and apply result -----------------------------------------------------------------
@@ -685,6 +735,14 @@
     var conflict = !!(edit && edit.conflict);
     var preview = obj(edit && edit.preview);
     var result = obj(edit && edit.result);
+    var confirmClear = !!(edit && edit.confirmClear);
+    // The empty tray is one quiet line: the editor is what the page exists for. Every state that
+    // carries a change, receipt, error, preview or pending recovery keeps the full tray.
+    if (!pending.length && !busy && !status && !err && !conflict && !preview && !result && !confirmClear) {
+      return '<section class="pf-tray pf-tray-compact" id="pf-sec-tray" data-pf-sec="tray" aria-label="바꿀 값">' +
+        '<div class="pf-tray-c" title="바꾼 값이 없어요. 값을 고르면 여기에 모입니다.">' + tag('대기') + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
+        '<span class="pf-muted pf-tray-note">바꾼 값 없음</span></div></section>';
+    }
     var list = pending.length
       ? '<ol class="pf-pending">' + pending.map(function (c, i) {
         return '<li><span class="pf-pending-t">' + esc(changeLabel(c)) + '</span>' +
@@ -697,13 +755,16 @@
       (status ? chip(conflict ? 'pf-c-red' : result ? 'pf-c-green' : 'pf-c-gray', status) : '') + '</div></header>' +
       '<div class="pf-sec-b">' + list +
       '<div class="pf-tray-acts">' +
-      button('preview', ' aria-label="미리보기"', ic('search', 'ic-sm') + ' 미리보기', busy || !pending.length, 'pf-btn') +
-      button('apply', ' aria-label="적용"', ic('check', 'ic-sm') + ' 적용', busy || !pending.length, 'pf-btn pf-btn-primary') +
-      button('clear', ' aria-label="모두 버리기"', '모두 버리기', busy || !pending.length, 'pf-btn pf-btn-ghost') +
+      button('preview', ' aria-label="미리보기"', ic('search', 'ic-sm') + ' 미리보기', busy || !pending.length || conflict, 'pf-btn') +
+      button('apply', ' aria-label="적용"', ic('check', 'ic-sm') + ' 적용', busy || !pending.length || conflict, 'pf-btn pf-btn-primary') +
+      button('clear', ' aria-label="모두 버리기"', '모두 버리기', busy || !pending.length, 'pf-btn pf-btn-danger') +
       '</div>' +
+      (confirmClear ? '<div class="pf-clear" role="group" aria-label="대기 변경 버리기 확인"><p>대기 중인 변경을 모두 버릴까요?</p>' +
+        button('clear-cancel', ' aria-label="계속 보관"', '계속 보관', false, 'pf-btn') + ' ' +
+        button('clear-confirm', ' aria-label="모두 버리기 확인"', '모두 버리기', false, 'pf-btn pf-btn-danger') + '</div>' : '') +
       (busy ? '<p class="pf-note" role="status">처리 중…</p>' : '') +
       (conflict ? '<div class="pf-conflict" role="alert"><b>' + esc(CONFLICT_TEXT) + '</b> ' +
-        button('reload', ' aria-label="새로고침"', ic('refresh-cw', 'ic-sm') + ' 새로고침', false, 'pf-btn') + '</div>' : '') +
+        button('reload', ' aria-label="새로고침"', ic('refresh-cw', 'ic-sm') + ' 새로고침', false, 'pf-btn pf-btn-primary') + '</div>' : '') +
       (err && !conflict ? '<p class="pf-err" role="alert">' + esc(err) + '</p>' : '') +
       (preview ? '<div class="pf-preview"><p class="pf-preview-h">' + ic('file-text', 'ic-sm') + ' 파일별 차이 <span class="pf-count">' +
         arr(preview.diffs).length + '</span></p>' + diffRows(preview) +
@@ -769,14 +830,14 @@
     var fetchFn = opt.fetch;
     var tokenFn = opt.token;
     var notify = typeof opt.onChange === 'function' ? opt.onChange : function () {};
-    var s = { view: null, pending: [], draft: map(), preview: null, conflict: false, error: '', status: '', result: null, loading: false, busy: false };
+    var s = { view: null, pending: [], draft: map(), preview: null, conflict: false, error: '', status: '', result: null, loading: false, busy: false, confirmClear: false };
     var seq = 0;
 
     function snapshot() {
       return {
         view: s.view, pending: s.pending.slice(), draft: copyMap(s.draft), preview: s.preview,
         conflict: s.conflict, error: s.error, status: s.status, result: s.result,
-        loading: s.loading, busy: s.busy
+        loading: s.loading, busy: s.busy, confirmClear: s.confirmClear
       };
     }
     function changed() { notify(snapshot()); }
@@ -804,6 +865,9 @@
         s.view = obj(json);
         s.loading = false;
         s.error = '';
+        // A successful state read is the 409 recovery: the stale conflict and its banner are gone.
+        s.conflict = false;
+        if (s.status === '다른 곳에서 바뀜') s.status = '';
         changed();
         return snapshot();
       }).catch(function (err) {
@@ -841,6 +905,7 @@
       s.conflict = false;
       s.error = '';
       s.status = '';
+      s.confirmClear = false;
       changed();
       return snapshot();
     }
@@ -848,12 +913,23 @@
       var i = typeof index === 'string' && /^\d+$/.test(index) ? Number(index) : num(index);
       if (i === null || i < 0 || i >= s.pending.length) return snapshot();
       s.pending = s.pending.slice(0, i).concat(s.pending.slice(i + 1));
-      s.preview = null; s.result = null; s.error = ''; s.status = '';
+      s.preview = null; s.result = null; s.error = ''; s.status = ''; s.confirmClear = false;
       changed();
       return snapshot();
     }
     function clear() {
-      s.pending = []; s.draft = map(); s.preview = null; s.result = null; s.conflict = false; s.error = ''; s.status = '';
+      s.pending = []; s.draft = map(); s.preview = null; s.result = null; s.conflict = false; s.error = ''; s.status = ''; s.confirmClear = false;
+      changed();
+      return snapshot();
+    }
+    function askClear() {
+      if (!s.pending.length) return snapshot();
+      s.confirmClear = true;
+      changed();
+      return snapshot();
+    }
+    function cancelClear() {
+      s.confirmClear = false;
       changed();
       return snapshot();
     }
@@ -866,7 +942,7 @@
     function touch() { changed(); return snapshot(); }
     function removeKind(kind) {
       s.pending = s.pending.filter(function (c) { return !obj(c) || c.kind !== kind; });
-      s.preview = null; s.result = null; s.error = ''; s.status = '';
+      s.preview = null; s.result = null; s.error = ''; s.status = ''; s.confirmClear = false;
       changed();
       return snapshot();
     }
@@ -876,6 +952,9 @@
       var reapply = opt.reapply === true;
       var list = Array.isArray(changesOverride) ? changesOverride.slice() : s.pending.slice();
       if (s.busy) return Promise.resolve(snapshot());
+      // A 409 makes the loaded roster revision stale: neither preview nor apply may post it again
+      // until a successful state read. Only 새로고침/discard are live in that state.
+      if (s.conflict) return Promise.resolve(snapshot());
       if (typeof fetchFn !== 'function') {
         s.error = '실시간 상황판에서만 보낼 수 있어요'; changed(); return Promise.resolve(snapshot());
       }
@@ -889,7 +968,7 @@
         expected: obj(s.view && s.view.targets) || {},
         rosterRevision: num(obj(s.view && s.view.roster) && s.view.roster.revision) || 0
       };
-      s.busy = true; s.preview = null; s.result = null; s.conflict = false; s.error = '';
+      s.busy = true; s.preview = null; s.result = null; s.conflict = false; s.error = ''; s.confirmClear = false;
       s.status = reapply ? '다시 적용 중…' : action === 'preview' ? '미리보기 중…' : '적용 중…';
       changed();
       return Promise.resolve(fetchFn('/profiles', {
@@ -940,6 +1019,8 @@
       add: add,
       drop: drop,
       clear: clear,
+      askClear: askClear,
+      cancelClear: cancelClear,
       setDraft: setDraft,
       touch: touch,
       removeKind: removeKind,
@@ -995,6 +1076,10 @@
       } else if (act === 'reapply') {
         c.reapply();
       } else if (act === 'clear') {
+        c.askClear();
+      } else if (act === 'clear-cancel') {
+        c.cancelClear();
+      } else if (act === 'clear-confirm') {
         c.clear();
       } else if (act === 'drop') {
         c.drop(num(t.getAttribute('data-index')));

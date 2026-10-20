@@ -217,7 +217,11 @@ test('loading: reserves the loaded geometry and pulses a glyph that stops under 
   assert.match(html, /data-pf-loading/);
   assert.equal((html.match(/class="pf-skel pf-skel-agent"/g) || []).length, 4, 'four agent placeholders');
   assert.equal((html.match(/class="pf-skel pf-skel-card"/g) || []).length, 6, 'six profile-card placeholders');
-  assert.match(html, /class="pf-skeleton" aria-hidden="true"/);
+  assert.match(html, /class="pf-skeleton"/);
+  assert.match(html, /data-pf-loading role="status"/);
+  assert.match(html, /class="pf-skel pf-skel-homes" data-pf-skel="homes" aria-hidden="true"/);
+  assert.match(html, /class="pf-loading-h"/);
+  assert.doesNotMatch(html, /class="pf-skeleton" aria-hidden="true"/, 'the live loading status must not sit inside aria-hidden');
   assert.match(html, /class="pf-pulse" aria-hidden="true"/);
   const css = read('src/page/profiles-view.css');
   assert.match(css, /@keyframes pf-pulse/);
@@ -265,7 +269,7 @@ test('copy: (max 추론), 진짜 max 추론 and 실시간 상황판 stay on one 
   const state = clone(STATE);
   state.profiles[5].summary += ' 올라마는 high가 한계라 진짜 max 추론이 필요할 때 쓰는 경로입니다.';
   const html = P.render(state, live());
-  assert.match(html, /<span class="pf-keep">\(max 추론\)<\/span>/);
+  assert.match(html, /<span class="pf-keep">GLM 5\.3 Flash\(max 추론\)<\/span>/);
   assert.match(html, /<span class="pf-keep">진짜 max 추론<\/span>/);
   assert.match(html, /<span class="pf-keep">실시간 상황판<\/span>/);
   assert.equal((html.match(/class="pf-card-sum"/g) || []).length, 6);
@@ -607,4 +611,198 @@ test('page wiring: the profiles rail click loads GET /profiles/state and a previ
   await new Promise((resolve) => setImmediate(resolve));
   assert.match(e.byId.main.textContent, /\$\.agents\.atlas\.lane/);
   assert.deepEqual(e.errors, []);
+});
+
+test('loading: skeleton agents use the loaded full-width responsive row grid', () => {
+  const P = load();
+  const html = P.render(null, live({ loading: true }));
+  assert.equal((html.match(/data-pf-skel="agent"/g) || []).length, 4);
+  const agentBlocks = [...html.matchAll(/<div class="pf-skel pf-skel-agent"[^>]*>([\s\S]*?)<\/div>/g)];
+  assert.equal(agentBlocks.length, 4);
+  for (const [, body] of agentBlocks) assert.equal((body.match(/class="pf-skel-field/g) || []).length, 4, 'four fields per agent row');
+  assert.equal((html.match(/data-pf-skel="route"/g) || []).length, 20, 'routing skeleton rows');
+  assert.equal((html.match(/class="pf-skel pf-skel-card"/g) || []).length, 6);
+  const css = read('src/page/profiles-view.css');
+  const base = css.slice(0, css.indexOf('@media (max-width: 1040px)'));
+  assert.match(base, /\.pf-skel-agent \{[\s\S]*?grid-template-columns: minmax\(150px, 1\.1fr\) minmax\(120px, \.8fr\)/);
+  assert.doesNotMatch(css, /\.pf-skel-grid/, 'the old 4/2/1-column skeleton matrix is gone');
+  const at1040 = css.slice(css.indexOf('@media (max-width: 1040px)'), css.indexOf('@media (max-width: 760px)'));
+  assert.match(at1040, /\.pf-skel-agent \{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\) minmax\(0, 1\.2fr\)/);
+  assert.match(at1040, /\.pf-skel-agent \.pf-skel-mem \{ grid-column: 1 \/ -1; \}/);
+  const at760 = css.slice(css.indexOf('@media (max-width: 760px)'), css.indexOf('@media (max-width: 599px)'));
+  assert.match(at760, /\.pf-skel-agent \{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\)/);
+  assert.match(at760, /\.pf-skel-id \{ grid-column: 1 \/ -1; \}/);
+  const at599 = css.slice(css.indexOf('@media (max-width: 599px)'));
+  assert.match(at599, /\.pf-skel-agent \{ grid-template-columns: minmax\(0, 1fr\); min-height:/);
+});
+
+test('guide: heading, chip and subtitle derive the one runtime inventory version', () => {
+  const P = load();
+  const state = clone(STATE);
+  state.guide.title = 'OMO 권장 배치 · 설치판 5.1.33';
+  state.guide.version = '5.1.38';
+  state.inventory.version = '9.9.9';
+  const html = P.render(state, live());
+  const sec = /<section class="pf-sec" id="pf-sec-guide"[\s\S]*?<\/section>/.exec(html)[0];
+  const head = textOf(/<div class="pf-guide-h">([\s\S]*?)<\/div>/.exec(sec)[1]);
+  assert.match(head, /OMO 권장 배치 · 9\.9\.9/);
+  assert.match(head, /9\.9\.9/);
+  assert.doesNotMatch(head, /5\.1\.33|5\.1\.38/);
+  assert.equal(textOf(/<p class="pf-sec-s">([\s\S]*?)<\/p>/.exec(sec)[1]), '9.9.9 기준 경로와 sha256');
+  assert.doesNotMatch(sec, /설치판 5\.1\.33/, 'the stale manifest edition label never reaches the guide');
+});
+
+test('409: preview/apply are disabled, reload is primary, and a successful load clears the conflict', async () => {
+  const P = load();
+  let calls = 0;
+  const responses = [
+    { status: 200, json: async () => STATE },
+    { status: 409, json: async () => ({ ok: false, code: 'STALE' }) },
+    { status: 200, json: async () => STATE },
+  ];
+  const c = P.createController({
+    fetch: () => { calls += 1; return Promise.resolve(responses.shift()); },
+    token: 't',
+  });
+  await c.load();
+  c.add({ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' });
+  const stale = await c.apply();
+  assert.equal(stale.conflict, true);
+  const html = P.render(stale.view, { ...stale, live: true });
+  assert.match(/<button[^>]*data-pf="preview"[^>]*>/.exec(html)[0], /\bdisabled\b/);
+  assert.match(/<button[^>]*data-pf="apply"[^>]*>/.exec(html)[0], /\bdisabled\b/);
+  assert.match(/<button[^>]*data-pf="reload"[^>]*>/.exec(html)[0], /pf-btn-primary/);
+  assert.equal(calls, 2);
+  const blocked = await c.apply();
+  assert.equal(calls, 2, 'a stale conflict cannot post the same roster revision again');
+  assert.equal(blocked.conflict, true);
+  const reloaded = await c.load();
+  assert.equal(reloaded.conflict, false);
+  assert.equal(reloaded.status, '');
+  assert.equal(calls, 3);
+  const after = P.render(reloaded.view, { ...reloaded, live: true });
+  assert.doesNotMatch(/<button[^>]*data-pf="apply"[^>]*>/.exec(after)[0], /\bdisabled\b/);
+});
+
+test('pin hint: GPT 계열만 sits inside the pin label before the thinking control', () => {
+  const P = load();
+  const html = P.render(STATE, live());
+  const agent = /<article class="pf-agent" data-pf-agent="hephaestus">[\s\S]*?<\/article>/.exec(html)[0];
+  const label = /<label class="pf-sel"[^>]*for="pf-agent-pin-hephaestus"[^>]*>[\s\S]*?<\/label>/.exec(agent)[0];
+  assert.match(label, /<span class="pf-hint">GPT 계열만<\/span>/);
+  const pin = agent.indexOf('id="pf-agent-pin-hephaestus"');
+  const hint = agent.indexOf('pf-hint');
+  const think = agent.indexOf('id="pf-agent-pin-thinking-hephaestus"');
+  assert.equal((agent.match(/pf-hint/g) || []).length, 1);
+  assert.ok(pin < hint && hint < think, 'hint is after the pin select and before the thinking select');
+});
+
+test('copy: product names, interpunct compounds and modifier phrases stay unbreakable', () => {
+  const P = load();
+  const html = P.render(STATE, live());
+  for (const phrase of ['깊은 구현·검토를', '탐색·단순 작업을', '조율·검증·고강도 추론을',
+    '구현·탐색·빠른 작업을', '개인용 프로필입니다', 'GLM 5.3 Flash(max 추론)']) {
+    assert.ok(html.includes('<span class="pf-keep">' + phrase + '</span>'), phrase);
+  }
+  assert.ok((html.match(/pf-keep/g) || []).length >= 10);
+  for (const [, body] of html.matchAll(/<span class="pf-card-sum">([\s\S]*?)<\/span>\s*<span class="pf-card-main">/g)) {
+    const outside = body.replace(/<span class="pf-keep">[\s\S]*?<\/span>/g, '');
+    assert.doesNotMatch(outside, /·/, 'an interpunct outside a keep span can start a line');
+  }
+});
+
+test('tray: empty is compact; pending, error, conflict, success and confirm keep the full tray', () => {
+  const P = load();
+  let html = P.render(STATE, live());
+  assert.match(html, /class="pf-tray pf-tray-compact"/);
+  assert.doesNotMatch(html, /data-pf="preview"/);
+  assert.match(textOf(html), /바꾼 값 없음/);
+  assert.match(html, /title="바꾼 값이 없어요\. 값을 고르면 여기에 모입니다\."/);
+  const pending = [{ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' }];
+  html = P.render(STATE, live({ pending }));
+  assert.doesNotMatch(html, /pf-tray-compact/);
+  assert.match(html, /data-pf="preview"/);
+  const clear = /<button[^>]*data-pf="clear"[^>]*>/.exec(html)[0];
+  assert.match(clear, /pf-btn-danger/);
+  assert.doesNotMatch(html, /class="pf-clear"/);
+  html = P.render(STATE, live({ pending, confirmClear: true }));
+  assert.match(html, /role="group" aria-label="대기 변경 버리기 확인"/);
+  assert.match(html, /data-pf="clear-cancel"/);
+  assert.match(html, /data-pf="clear-confirm"/);
+  for (const extra of [
+    { result: { ok: true, backups: [], writes: [] } },
+    { error: '보내지 못했어요' },
+    { conflict: true, status: '다른 곳에서 바뀜', error: '다른 곳에서 바뀌었어요 — 새로고침 후 다시 적용' },
+  ]) {
+    const full = P.render(STATE, live(extra));
+    assert.doesNotMatch(full, /pf-tray-compact/);
+  }
+  const interrupted = clone(STATE);
+  interrupted.applyJournal = {
+    status: 'interrupted', label: '중단된 적용',
+    reapply: { changes: [{ kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' }] },
+  };
+  const journal = P.render(interrupted, live());
+  assert.match(journal, /data-pf-journal="interrupted"/);
+  assert.match(journal, /data-pf="reapply"/);
+  assert.match(journal, /pf-tray-compact/);
+});
+
+test('clear confirmation: cancel preserves every pending value; confirm is the only discard', async () => {
+  const P = load();
+  const c = P.createController({ fetch: async () => ({ status: 200, json: async () => STATE }), token: 't' });
+  await c.load();
+  c.add({ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' });
+  c.add({ kind: 'setRoute', section: 'agents', role: 'explore', provider: 'anthropic', model: 'anthropic/claude-opus-5-5', thinking: 'medium' });
+  let snap = c.askClear();
+  assert.equal(snap.confirmClear, true);
+  assert.equal(snap.pending.length, 2);
+  snap = c.cancelClear();
+  assert.equal(snap.confirmClear, false);
+  assert.equal(snap.pending.length, 2, 'cancelling the confirmation keeps both pending changes');
+  assert.deepEqual(plain(snap.pending).map((x) => x.kind).sort(), ['setAgentLane', 'setRoute']);
+  snap = c.clear();
+  assert.equal(snap.pending.length, 0);
+  assert.equal(snap.confirmClear, false);
+});
+
+test('identity: the four fixed colours keep distinct labelled shapes, not status recolouring', () => {
+  const P = load();
+  const html = P.render(STATE, live());
+  const dots = [...html.matchAll(/<span class="pf-dot pf-dot-(\w+) pf-shape-(\w+)" role="img" aria-label="([^"]+)"><\/span>/g)];
+  assert.equal(dots.length, 4);
+  assert.deepEqual(dots.map((m) => m[2]), ['circle', 'square', 'triangle', 'diamond']);
+  assert.deepEqual(dots.map((m) => m[1]), ['sisyphus', 'hephaestus', 'prometheus', 'atlas']);
+  for (const [, id, , label] of dots) assert.match(label, new RegExp('· (원형|사각형|삼각형|마름모) 표식'));
+  const tokens = read('src/page/tokens.css');
+  assert.match(tokens, /--agent-sisyphus: #00ced1;/);
+  assert.match(tokens, /--agent-hephaestus: #d97706;/);
+  assert.match(tokens, /--agent-prometheus: #a78bfa;/);
+  assert.match(tokens, /--agent-atlas: #10b981;/);
+  const css = read('src/page/profiles-view.css');
+  assert.match(css, /\.pf-dot-sisyphus \{ background: var\(--agent-sisyphus\); \}/);
+  assert.doesNotMatch(css, /\.pf-shape-(circle|square|triangle|diamond) \{ background:/);
+});
+
+test('selected card: a green wash and a check glyph join the 현재 text', () => {
+  const P = load();
+  const html = P.render(STATE, live());
+  const on = /<button[^>]*class="pf-card on"[^>]*>[\s\S]*?<\/button>/.exec(html)[0];
+  assert.match(on, /class="pf-chip pf-c-green pf-current"/);
+  assert.match(on, /href="#i-check"/);
+  assert.match(on, /현재/);
+  const css = read('src/page/profiles-view.css');
+  assert.match(css, /\.pf-card\.on \{[^}]*background: var\(--c-green-tint\)/);
+  assert.match(css, /\.pf-card\.on \{[^}]*box-shadow: inset 0 0 0 1px var\(--c-green\)/);
+});
+
+test('compact title and rail contrast: both repairs are scoped to the profiles route', () => {
+  const css = read('src/page/profiles-view.css');
+  const at599 = css.slice(css.indexOf('@media (max-width: 599px)'));
+  assert.match(at599, /\.pf-head \{ position: sticky; top: 0;/);
+  assert.match(at599, /\.pf-title \{ margin: 0; font-size: var\(--fs-lg\)/);
+  assert.match(css, /\.sh-shell:has\(\.pf\) \.sh-rb \{ color: var\(--c-fg-2\); \}/);
+  assert.match(css, /\.sh-shell:has\(\.pf\) \.sh-rb\.on \{ color: var\(--c-fg\); \}/);
+  assert.doesNotMatch(read('src/page/shell.css'), /\.sh-shell:has\(\.pf\)/);
+  assert.doesNotMatch(read('src/page/tokens.css'), /\.sh-shell:has\(\.pf\)/);
 });
