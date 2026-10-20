@@ -68,6 +68,9 @@ const LANE_AGENT = 'atlas';
 const LANE = 'geeky-heavy';
 const ROUTE_CHANGE = { provider: 'anthropic-subscription', model: 'anthropic-subscription/claude-opus-5-5', thinking: 'medium' };
 const CONFLICT_TEXT = '다른 곳에서 바뀌었어요 — 새로고침 후 다시 적용';
+// Negative-control-only render: the candidate fixes dark disabled controls with opacity:1.
+// This temp-only override restores the known UA-style dimming so a reviewer can see the defect.
+const NEGATIVE_CSS = '\n/* QA NEGATIVE CONTROL (expected failure): restored dark disabled opacity dimming */\n.pf select:disabled, .pf input:disabled, .pf-btn:disabled { opacity: .7 !important; }\n';
 
 const argv = process.argv.slice(2);
 const arg = (name) => {
@@ -77,6 +80,7 @@ const arg = (name) => {
 const OUT = arg('--out') ? path.resolve(arg('--out')) : '';
 const EVIDENCE = arg('--evidence') ? path.resolve(arg('--evidence')) : OUT;
 const KEEP = argv.includes('--keep');
+const NEGATIVE = argv.includes('--negative-control');
 const PREFIX = arg('--prefix') || 'task-13-piomo-primary-agents';
 const TASK = /^task-(\d+)-piomo-primary-agents(?:-r\d+)?$/.exec(PREFIX)?.[1] || '';
 const TOKEN = `piomo-t${TASK}-board-token`;
@@ -230,6 +234,7 @@ function pngInfo(file) {
 const sleepFrame = () => 'new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))';
 
 async function main() {
+  if (NEGATIVE) return negativeControl();
   const liveBefore = liveState();
   run.liveBefore = liveBefore;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `piomo-t${TASK}-`));
@@ -1715,6 +1720,281 @@ async function main() {
   }
 }
 
+// Bounded expected-failure control. It serves a TEMP-only copy of the candidate page with the
+// old dark-disabled opacity dimming restored, measures the candidate first, then the defective
+// render, and records one labelled PNG. It is never added to the candidate PASS capture array.
+async function negativeControl() {
+  const candidatePath = path.join(OUT, 'captures.json');
+  if (!fs.existsSync(candidatePath)) {
+    console.error(`negative control needs the candidate captures.json: ${candidatePath}`);
+    process.exit(2);
+  }
+  const candidate = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
+  if (candidate.ok !== true) {
+    console.error('candidate captures.json is not a PASS set; refusing to add a negative control');
+    process.exit(2);
+  }
+  const liveBefore = liveState();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `piomo-t${TASK}-neg-`));
+  const evidence = {
+    expectedFailure: true,
+    negativeControl: true,
+    outsidePassMatrix: true,
+    candidateBuildHash: candidate.build.hash,
+    candidateSourceTree: candidate.source.treeSha256,
+    candidateCaptures: candidate.captures.length,
+    defect: {
+      kind: 'dark disabled control opacity dimming',
+      location: 'src/page/profiles-view.css:216-221 `.pf select:disabled, .pf input:disabled` and :247-253 `.pf-btn:disabled`; the candidate fix sets opacity: 1 there',
+      temporaryOverride: '.pf select:disabled, .pf input:disabled, .pf-btn:disabled { opacity: .7 !important; }',
+      scope: 'TEMP-only served-page copy; append-only style override in the temp server response; no source or live file changed',
+      sourceMutation: false,
+    },
+    intendedRejection: 'The reviewer must explicitly flag the labelled negative-control frame as expectedFailure: its dark disabled control contrast is below 4.5:1. Exclude it from the unmodified candidate PASS set; the main verdict must use only the candidate frames.',
+    reviewerInstruction: 'Flag the negative control as an intentional defect; do not count it as candidate evidence.',
+    before: null,
+    defective: null,
+    capture: null,
+    cleanup: null,
+    tempRoot: root,
+    startedAt: new Date().toISOString(),
+  };
+  let page = null;
+  let server = null;
+  let port = null;
+  let chromePids = [];
+  let failure = null;
+  try {
+    const homes = seedHomes(root);
+    const inventory = JSON.parse(fs.readFileSync(INVENTORY, 'utf8'));
+    const store = openProfilesStore({
+      primaryHome: homes.primary, stableHome: homes.stable, mirrorHomes: [],
+      pluginPath: PLUGIN, inventory, now: () => FIXED_NOW,
+    });
+    const vm = JSON.parse(fs.readFileSync(VM_FILE, 'utf8'));
+    let defective = false;
+    const candidateHtml = pageHtml(vm, 7, { mode: 'server', token: TOKEN });
+    const buildHash = sha256(Buffer.from(candidateHtml.split(TOKEN).join('<board-token>')));
+    assert.equal(buildHash, candidate.build.hash, 'negative control build does not match the candidate captures.json');
+    server = createBoardServer({
+      portBase: PORT_BASE, portCount: 5, generation: 7, token: TOKEN,
+      getPage: () => {
+        const html = pageHtml(vm, 7, { mode: 'server', token: TOKEN });
+        return defective ? html.replace('</style>', NEGATIVE_CSS + '</style>') : html;
+      },
+      getViewModel: () => vm,
+      profilesState: () => store.state(),
+      onProfiles: (body) => store.handle(body),
+    });
+    ({ port } = await server.start());
+    const url = `http://127.0.0.1:${port}/`;
+    page = await launch({ width: 1024, height: 768 });
+    chromePids = [...new Set([page.pid, ...listProfilePids(page.profileDir)])].sort((a, b) => a - b);
+    const waitFor = (predicate, what, timeout = 10000) => page.eval(`new Promise((resolve, reject) => {
+      const check = () => { try { return (${predicate}); } catch (e) { return null; } };
+      const hit = check();
+      if (hit) return resolve(hit);
+      const observer = new MutationObserver(() => { const value = check(); if (value) { done(); resolve(value); } });
+      const timer = setTimeout(() => { done(); reject(new Error(${JSON.stringify('timeout waiting for ' + what)})); }, ${timeout});
+      function done() { observer.disconnect(); clearTimeout(timer); }
+      observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
+    })`);
+    const settle = async () => {
+      await page.eval(`document.fonts && document.fonts.ready ? document.fonts.ready.then(() => true) : true`);
+      await page.eval(sleepFrame());
+      await page.eval(`new Promise((resolve) => {
+        const pending = document.getAnimations().filter((a) => {
+          const timing = a.effect && a.effect.getTiming ? a.effect.getTiming() : null;
+          return a.playState === 'running' && !(timing && timing.iterations === Infinity);
+        });
+        if (!pending.length) return resolve(true);
+        let left = pending.length;
+        const done = () => { if (--left <= 0) resolve(true); };
+        for (const animation of pending) animation.finished.then(done, done);
+        setTimeout(() => resolve(true), 500);
+      })`);
+      await page.eval(sleepFrame());
+    };
+    const applyDark1024 = async () => {
+      await page.client.send('Emulation.setDeviceMetricsOverride', { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false });
+      await page.client.send('Emulation.setTouchEmulationEnabled', { enabled: false, maxTouchPoints: 1 });
+      await page.client.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+    };
+    const openProfiles = async () => {
+      await page.eval(`document.querySelector('[data-sh="view"][data-key="profiles"]').click()`);
+      await waitFor(`document.querySelectorAll('.pf-agent').length === 4 && !document.querySelector('.pf-loading')`, 'profiles view');
+      await settle();
+    };
+    const disabledProbe = () => page.eval(`(() => {
+      const parse = (value) => {
+        const m = /rgba?\\(([^)]+)\\)/.exec(value || '');
+        if (!m) return null;
+        const p = m[1].split(',').map((x) => Number(x.trim()));
+        return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+      };
+      const composite = (fg, bg) => ({ r: fg.r * fg.a + bg.r * (1 - fg.a), g: fg.g * fg.a + bg.g * (1 - fg.a), b: fg.b * fg.a + bg.b * (1 - fg.a), a: 1 });
+      const background = (el) => {
+        const layers = [];
+        for (let node = el; node; node = node.parentElement) {
+          const c = parse(getComputedStyle(node).backgroundColor);
+          if (c && c.a > 0) { layers.push(c); if (c.a >= 0.999) break; }
+        }
+        let bg = { r: 255, g: 255, b: 255, a: 1 };
+        for (let i = layers.length - 1; i >= 0; i -= 1) bg = composite(layers[i], bg);
+        return bg;
+      };
+      const lum = (c) => {
+        const f = (v) => { const s = v / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+        return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+      };
+      const ratio = (a, b) => {
+        const l1 = lum(a), l2 = lum(b);
+        return Math.round(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)) * 100) / 100;
+      };
+      const rows = [...document.querySelectorAll('.pf select:disabled, .pf input:disabled, .pf-btn:disabled')].map((el) => {
+        const cs = getComputedStyle(el);
+        const fg = parse(cs.color);
+        const bg = background(el);
+        const opacity = Number.parseFloat(cs.opacity);
+        const color = composite(fg, bg);
+        const pixel = opacity === 1 ? color : composite({ ...color, a: opacity }, bg);
+        const need = 4.5;
+        return { tag: el.tagName.toLowerCase(), pf: el.getAttribute('data-pf') || '', text: (el.textContent || el.value || '').trim().slice(0, 60),
+          color: cs.color, background: cs.backgroundColor, opacity, ratio: ratio(color, bg), pixelRatio: ratio(pixel, bg), need,
+          pass: ratio(color, bg) >= need && ratio(pixel, bg) >= need };
+      });
+      return { rows, minRatio: rows.length ? Math.min(...rows.map((r) => r.pixelRatio)) : null,
+        pass: rows.length > 0 && rows.every((r) => r.pass) };
+    })()`);
+    await page.goto(url);
+    await waitFor(`!!document.querySelector('[data-shell]')`, 'board shell');
+    await openProfiles();
+    await applyDark1024();
+    await settle();
+    const before = await disabledProbe();
+    assert.ok(before.rows.length > 0, 'no disabled controls measured in the candidate');
+    assert.equal(before.pass, true, 'candidate disabled controls already fail before the control: ' + JSON.stringify(before));
+    evidence.before = before;
+    // Restore the known defect only in the temp server's page copy.
+    defective = true;
+    await page.goto(url);
+    await waitFor(`!!document.querySelector('[data-shell]')`, 'board shell after the negative-control render');
+    await openProfiles();
+    await applyDark1024();
+    await settle();
+    const after = await disabledProbe();
+    assert.equal(after.pass, false, 'the negative control was not detected: ' + JSON.stringify(after));
+    assert.ok(after.minRatio < 4.5, `defective disabled minimum ${after.minRatio}:1 is not below 4.5`);
+    evidence.defective = after;
+    await page.eval(`(() => { const el = document.querySelector('.pf select:disabled'); if (el) el.scrollIntoView({ block: 'center' }); return true; })()`);
+    await settle();
+    const file = path.join(OUT, 'negative-control-dark-disabled-opacity-1024-dark.png');
+    // The frame is unmistakably labelled on-image as well as in the filename and captures.json metadata.
+    await page.eval(`(() => {
+      const label = document.createElement('div');
+      label.id = 'qa-negative-control-label';
+      label.textContent = 'NEGATIVE CONTROL · EXPECTED FAILURE · NOT CANDIDATE';
+      label.style.position = 'fixed';
+      label.style.top = '8px';
+      label.style.left = '50%';
+      label.style.transform = 'translateX(-50%)';
+      label.style.zIndex = '99999';
+      label.style.padding = '6px 10px';
+      label.style.background = '#b3372e';
+      label.style.color = '#ffffff';
+      label.style.font = '600 13px sans-serif';
+      label.style.borderRadius = '6px';
+      label.style.pointerEvents = 'none';
+      document.body.appendChild(label);
+      return true;
+    })()`);
+    await settle();
+    await page.screenshot(file);
+    const info = pngInfo(file);
+    assert.equal(info.width, 1024, 'negative-control capture width');
+    assert.equal(info.height, 768, 'negative-control capture height');
+    assert.ok(info.bytes > 8000, 'negative-control capture is too small');
+    evidence.capture = {
+      file: path.basename(file), width: info.width, height: info.height, bytes: info.bytes,
+      sha256: hashFile(file), expectedFailure: true, negativeControl: true, outsidePassMatrix: true,
+    };
+  } catch (error) {
+    failure = String(error && error.stack || error);
+    evidence.error = failure;
+  } finally {
+    if (page) {
+      const pid = page.pid;
+      const profileDir = page.profileDir;
+      try { await page.close(); } catch (error) { evidence.closeError = String(error && error.message || error); }
+      const pids = chromePids.filter((p) => p !== pid);
+      const alive = pids.filter((p) => isPidAlive(p));
+      let profileExists = true;
+      try { profileExists = fs.existsSync(profileDir); } catch { profileExists = true; }
+      let profilePids = [];
+      try { profilePids = listProfilePids(profileDir); } catch { profilePids = []; }
+      evidence.cleanup = { ...(evidence.cleanup || {}), chrome: {
+        pid, aliveAfterClose: alive, profileExists, profilePidsAfterClose: profilePids,
+        closed: !evidence.closeError && alive.length === 0 && !profileExists && profilePids.length === 0,
+      } };
+    }
+    if (server) {
+      try { await server.close(); } catch (error) { evidence.serverCloseError = String(error); }
+    }
+    let portClosed = false;
+    if (port) {
+      portClosed = await new Promise((resolve) => {
+        const socket = net.connect({ host: '127.0.0.1', port });
+        socket.setTimeout(3000, () => { socket.destroy(); resolve(false); });
+        socket.once('connect', () => { socket.destroy(); resolve(false); });
+        socket.once('error', (error) => resolve(error.code === 'ECONNREFUSED'));
+      });
+    }
+    const liveAfter = liveState();
+    const hashesUnchanged = JSON.stringify(liveAfter.hashes) === JSON.stringify(liveBefore.hashes);
+    const serverUnchanged = JSON.stringify(liveAfter.server) === JSON.stringify(liveBefore.server);
+    try {
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      evidence.tempRootRemoved = !fs.existsSync(root);
+    } catch (error) {
+      evidence.tempRootRemoved = false;
+      evidence.tempRemoveError = String(error);
+    }
+    evidence.cleanup = { ...(evidence.cleanup || {}), server: { port, closed: portClosed },
+      tempRootRemoved: evidence.tempRootRemoved,
+      live: { hashesUnchanged, serverJsonUnchanged: serverUnchanged,
+        liveStateInvariantHolds: liveAfter.liveAgentDirsWithPrimaryAgents.length === 0 && liveAfter.gateAdapterMarkerInLiveOmoTask !== true,
+        hashes: liveAfter.hashes } };
+    evidence.finishedAt = new Date().toISOString();
+    evidence.ok = !failure && evidence.before?.pass === true && evidence.defective?.pass === false
+      && !!evidence.capture && evidence.cleanup.chrome?.closed === true && evidence.cleanup.server?.closed === true
+      && evidence.cleanup.tempRootRemoved === true && hashesUnchanged && serverUnchanged;
+    evidence.result = evidence.ok ? 'PASS (the control was detected as an expected failure)' : 'FAIL';
+    candidate.negativeControl = evidence;
+    fs.writeFileSync(candidatePath, `${JSON.stringify(candidate, null, 2)}\n`);
+    const lines = [
+      'piomo-primary-agents todo 22 - negative control (expected failure)',
+      `run: ${evidence.startedAt} .. ${evidence.finishedAt}`,
+      `candidate build: ${evidence.candidateBuildHash}; source tree ${evidence.candidateSourceTree}; candidate captures ${evidence.candidateCaptures} (normal PASS matrix)`,
+      `control: ${evidence.defect.kind}; ${evidence.defect.scope}`,
+      `exact defect location: ${evidence.defect.location}`,
+      `temporary override: ${evidence.defect.temporaryOverride}`,
+      `before (candidate): pass ${evidence.before?.pass}; min pixelRatio ${evidence.before?.minRatio}; rows ${JSON.stringify(evidence.before?.rows || [])}`,
+      `defective (control): pass ${evidence.defective?.pass}; min pixelRatio ${evidence.defective?.minRatio}; rows ${JSON.stringify(evidence.defective?.rows || [])}`,
+      `capture: ${evidence.capture?.file || '(missing)'} (expectedFailure=true, negativeControl=true, outsidePassMatrix=true; ${evidence.capture?.width}x${evidence.capture?.height}, ${evidence.capture?.sha256 || ''})`,
+      `intended rejection: ${evidence.intendedRejection}`,
+      `cleanup: ${JSON.stringify(evidence.cleanup || {})}`,
+      `result: ${evidence.result}`,
+    ];
+    if (failure) lines.push(`ERROR ${failure}`);
+    fs.writeFileSync(path.join(EVIDENCE, `${PREFIX}-negative.txt`), lines.join('\n') + '\n');
+  }
+  if (!evidence.ok) {
+    console.error('FAIL negative control: ' + (failure || JSON.stringify(evidence)));
+    process.exit(1);
+  }
+  console.log(`PASS negative control: candidate ${evidence.before.minRatio}:1, defective ${evidence.defective.minRatio}:1, capture ${evidence.capture.file}`);
+}
+
 function writeEvidence() {
   const byHash = new Map();
   for (const entry of run.captures) {
@@ -1826,5 +2106,7 @@ function gitHead() {
 }
 
 await main();
-if (!run.ok) process.exit(1);
-console.log(`PASS ${run.captures.length} captures; build ${run.build.hash}; e2e ${path.join(EVIDENCE, `${PREFIX}-e2e.txt`)}`);
+if (!NEGATIVE) {
+  if (!run.ok) process.exit(1);
+  console.log(`PASS ${run.captures.length} captures; build ${run.build.hash}; e2e ${path.join(EVIDENCE, `${PREFIX}-e2e.txt`)}`);
+}
