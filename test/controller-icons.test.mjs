@@ -7,7 +7,7 @@ import { makeController } from './fixtures/controller-dom.mjs';
 
 const model = () => ({ seq: 1, generatedAt: 0, sessions: [{ id: 's1', title: 'Test', alive: true, briefSeq: 1, status: 'in_progress',
   changes: [{ text: 'row', truth: 'reported', applied: 'none' }], done: [], notes: [], decisions: [], answerKinds: ['annotation'] }] });
-const RAIL = ['home', 'conv', 'inbox', 'plans', 'archive', 'settings'];
+const RAIL = ['home', 'conv', 'inbox', 'plans', 'archive', 'profiles', 'settings'];
 const railIcons = (e) => RAIL.map((key) => e.byId.rail.querySelector(`[data-sh="view"][data-key="${key}"] .sh-ri`).innerHTML);
 
 test('controller fixture: the default page modules start with icons.js, as the page does', () => {
@@ -26,7 +26,7 @@ test('no-icon fallback (the one explicit test without icons.js): empty icon slot
   e.page.receive(model());
   assert.deepEqual(railIcons(e), RAIL.map(() => ''), 'every rail icon slot is empty');
   assert.equal(e.document.querySelectorAll('svg').length, 0, 'no icon markup anywhere');
-  assert.deepEqual(RAIL.map((key) => e.byId.rail.querySelector(`[data-key="${key}"]`).getAttribute('aria-label')), ['홈', '대화', '수신함', '계획', '닫힌 창', '설정']);
+  assert.deepEqual(RAIL.map((key) => e.byId.rail.querySelector(`[data-key="${key}"]`).getAttribute('aria-label')), ['홈', '대화', '수신함', '계획', '닫힌 창', '프로필·에이전트', '설정']);
   e.fire(e.byId.rail.querySelector('[data-sh="view"][data-key="inbox"]'), 'click');
   assert.equal(e.page.state.ui.view, 'inbox');
   e.page.open('s1', 'ov');

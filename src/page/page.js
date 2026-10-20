@@ -1,5 +1,5 @@
 /* omo-briefing page controller, classic script (file:// safe, no modules).
- * Load order: view, plan-view, workers-view, convo-view, shell, alarm, annotate, page.
+ * Load order: view, plan-view, workers-view, convo-view, shell, profiles-view, alarm, annotate, page.
  * Transport:
  *  - http(s) origin (live board server): one fetch of /data.json + EventSource('/events').
  *    No polling. A dropped stream shows a banner; the browser reconnects by itself.
@@ -50,6 +50,7 @@
   var root, badge, statusEl, linkEl, errEl, applyTimer = null, releaseTimer = null, sessionJson = {}, glowTimers = {};
   var heldForBusy = false;
   var shell, main, sideList, rail, tabs, trimEl;
+  var profilesCtl = null;
   var regionHtml = Object.create(null), scrollMemory = Object.create(null), renderedKey = null;
 
   function esc(v) { return g.BriefView && g.BriefView.escapeHtml ? g.BriefView.escapeHtml(v) : String(v); }
@@ -132,6 +133,9 @@
       if (k) state.ui.expanded[k] = t.open === true;
     }), true);
     g.BriefShell.bind(shell, { dispatch: dispatch, now: function () { return state.now(); } });
+    if (g.BriefProfiles && typeof g.BriefProfiles.bind === 'function') {
+      g.BriefProfiles.bind(root, { controller: ensureProfiles, reload: function () { g.location.reload(); }, render: render });
+    }
     g.BriefAnnotate.mount(main, { context: annotationContext, send: sendAnnotation, idle: scheduleRelease });
     // "busy" release triggers
     doc.addEventListener('selectionchange', guard('selectionchange', scheduleRelease));
@@ -213,7 +217,7 @@
     for (var i = 0; i < sessions.length; i++) if (sessions[i] && sessions[i].id === state.ui.active) return sessions[i];
     return null;
   }
-  function mainKey() { return state.ui.active ? state.ui.active + '/' + (state.ui.sub[state.ui.active] || 'ov') : 'overview'; }
+  function mainKey() { return state.ui.view === 'profiles' ? 'profiles' : state.ui.active ? state.ui.active + '/' + (state.ui.sub[state.ui.active] || 'ov') : 'overview'; }
   function saveScroll() {
     if (renderedKey !== null) scrollMemory[renderedKey] = { y: main.scrollTop, anchor: captureAnchor() };
   }
@@ -258,6 +262,7 @@
     state.ui = g.BriefShell.reduce(state.ui, action);
     g.BriefShell.persist(undefined, state.ui);
     render();
+    if (action && action.type === 'view' && action.key === 'profiles') openProfiles();
     if (sideToggle && action.type === 'toggleSide') {
       var narrow = g.matchMedia && g.matchMedia('(max-width: 899px)').matches;
       var shown = narrow ? state.ui.peek : state.ui.sideOpen || state.ui.peek;
@@ -272,7 +277,8 @@
   var CONTROLS = 'button,input,textarea,select,summary,a[href],[tabindex]';
   function focusKey(el) {
     var names = ['id', 'name', 'type', 'data-sh', 'data-act', 'data-key', 'data-sid', 'data-sub', 'data-id', 'data-dec',
-      'data-opt', 'data-where', 'data-draft', 'data-field', 'data-session', 'data-copy'];
+      'data-opt', 'data-where', 'data-draft', 'data-field', 'data-session', 'data-copy', 'data-pf', 'data-agent', 'data-route',
+      'data-profile', 'data-main', 'data-memory', 'data-lane', 'data-target', 'data-index'];
     var key = [el.tagName];
     names.forEach(function (n) { key.push(el.getAttribute(n)); });
     if (el.getAttribute('type') === 'radio' || el.getAttribute('type') === 'checkbox') key.push(el.getAttribute('value'));
@@ -332,7 +338,14 @@
       region('side', sideList, g.BriefShell.side(model, state.ui));
       region('tabs', tabs, g.BriefShell.tabs(model, state.ui));
       var s = currentSession();
-      var html = s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision, checked: isChecked })
+      var html;
+      if (state.ui.view === 'profiles') {
+        var ps = state.ui.profilesState || null;
+        var pe = ps ? Object.assign({}, ps, { live: state.ui.live === true }) : { live: state.ui.live === true };
+        html = g.BriefProfiles && typeof g.BriefProfiles.render === 'function'
+          ? g.BriefProfiles.render(ps && ps.view, pe)
+          : '<p class="empty">프로필 화면 모듈이 없어요</p>';
+      } else html = s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision, checked: isChecked })
         : state.ui.active ? '<p class="empty">(지금 안 보임)</p>' : g.BriefView.renderOverview(model, state.ui);
       if (region('main', main, html)) {
         g.BriefAnnotate.decorate();
@@ -515,6 +528,7 @@
 
   function connectLive() {
     initAnswers(); // the board server's page: its write token, and what a 403 reload carried over
+    if (state.ui.view === 'profiles') openProfiles();
     var loc = g.location;
     var paused = false;
     g.fetch('/data.json', { cache: 'no-store' }).then(function (r) {
@@ -598,6 +612,26 @@
     var m = typeof doc.querySelector === 'function' ? doc.querySelector('meta[name="omo-board' + '-token"]') : null;
     var v = m && typeof m.getAttribute === 'function' ? m.getAttribute('content') : null;
     return typeof v === 'string' ? v : '';
+  }
+
+  // The profiles rail view keeps its own controller: GET /profiles/state when the view opens and after each apply
+  // (never on a timer), plus POST /profiles preview/apply with this page's board token.
+  function ensureProfiles() {
+    if (!g.BriefProfiles || typeof g.BriefProfiles.createController !== 'function') return null;
+    if (!profilesCtl) {
+      profilesCtl = g.BriefProfiles.createController({
+        fetch: function (url, opts) { return g.fetch(url, opts); },
+        token: function () { return boardToken(); },
+        onChange: function (snap) { state.ui.profilesState = snap; render(); }
+      });
+    }
+    return profilesCtl;
+  }
+  function openProfiles() {
+    var c = ensureProfiles();
+    if (!c) { state.ui.profilesState = null; render(); return; }
+    if (!state.ui.profilesState) state.ui.profilesState = c.snapshot();
+    if (state.ui.live === true) c.load();
   }
 
   // POST /focus {sessionId}; the result text is kept in state.ui.focus so re-renders keep it.

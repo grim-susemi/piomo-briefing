@@ -5,7 +5,7 @@
  *     {type:'toggleSide', narrow?}   docked open <-> closed; narrow (< 900 px, sidebar = overlay) toggles the overlay
  *     {type:'peek'} / {type:'unpeek'}   the panel a 10 px left-edge hover shows over the content (only while closed)
  *     {type:'resize', px}            width clamped to 200-480 px; anything but a finite number is ignored
- *     {type:'view', key, box?, narrow?}   conv|inbox|plans|home|archive|settings, shown in the one sidebar column;
+ *     {type:'view', key, box?, narrow?}   conv|inbox|plans|home|archive|profiles|settings, shown in the one sidebar column;
  *                                    box = the inbox sub-tab (wait|done|ans|held)
  *     {type:'filter', key}           all|wait|run|done, by view.js tabOf
  *     {type:'search', text}          title, tab label, headline and decision questions, case-insensitive
@@ -22,7 +22,7 @@
  *     {type:'known', ids, now}       after every model: ids missing from it stay (drawn as (지금 안 보임)), are stamped in
  *                                    absent, and are pruned once gone for more than 30 days (alarm.js prune rule)
  *   g.BriefShell.rail(model, st) / side(model, st) / tabs(model, st) -> html   #rail, the sidebar list region, #tabs. The
- *     rail is home, conv, inbox, plans, archive, a spacer, settings; the sidebar opens and closes from its header (close),
+ *     rail is home, conv, inbox, plans, archive, profiles, a spacer, settings; the sidebar opens and closes from its header (close),
  *     the tab bar (open), Ctrl+\ and the edge peek, never from the rail
  *   g.BriefShell.sideFrame(st) -> html   the persistent sidebar frame: resize handle, header, back link, search label and
  *     input, filter chips and the empty list region [data-sh-part="list"]; rendered once, kept current by sync()
@@ -65,9 +65,9 @@
   var NARROW = '(max-width: 899px)';
   var CALM = '(prefers-reduced-motion: reduce)';
   var GONE = '(지금 안 보임)';
-  var VIEWS = ['conv', 'inbox', 'plans', 'home', 'archive', 'settings'];
-  var VIEW_TITLE = { conv: '대화', inbox: '수신함', plans: '계획', home: '홈', archive: '닫힌 창', settings: '설정' };
-  var RAIL = [['home', 'house', '홈'], ['conv', 'message-square', '대화'], ['inbox', 'inbox', '수신함'], ['plans', 'list-todo', '계획'], ['archive', 'archive', '닫힌 창']];
+  var VIEWS = ['conv', 'inbox', 'plans', 'home', 'archive', 'profiles', 'settings'];
+  var VIEW_TITLE = { conv: '대화', inbox: '수신함', plans: '계획', home: '홈', archive: '닫힌 창', profiles: '프로필·에이전트', settings: '설정' };
+  var RAIL = [['home', 'house', '홈'], ['conv', 'message-square', '대화'], ['inbox', 'inbox', '수신함'], ['plans', 'list-todo', '계획'], ['archive', 'archive', '닫힌 창'], ['profiles', 'users', '프로필·에이전트']];
   var FILTERS = [['all', '전체'], ['wait', '나를 기다림'], ['run', '진행 중'], ['done', '끝남']];
   var TAB_BY_LABEL = { '나를 기다림': 'wait', '진행 중': 'run', '끝남': 'done' }; // = view.js
   var BOXES = [['wait', '기다리는 것'], ['done', '끝남 확인'], ['ans', '내가 답함'], ['held', '보류됨']];
@@ -671,6 +671,12 @@
         return '<li><span class="chip ' + l[0] + '">' + esc(l[1]) + '</span> = ' + esc(l[2]) + '</li>';
       }).join('') + '</ul></div>';
   }
+  function profilesView(st) {
+    var P = g.BriefProfiles;
+    if (!P || typeof P.side !== 'function') return empty('프로필 화면 모듈이 없음');
+    var ps = st.profilesState;
+    return P.side(ps && ps.view, ps ? Object.assign({}, ps, { live: st.live === true }) : { live: st.live === true });
+  }
 
   function side(model, st) {
     var c = context(model);
@@ -679,6 +685,7 @@
       case 'plans': return plansView(c);
       case 'home': return homeView(c, st);
       case 'archive': return archiveView(c, st);
+      case 'profiles': return profilesView(st);
       case 'settings': return settingsView();
     }
     return convView(c, st);

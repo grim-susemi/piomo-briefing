@@ -1,0 +1,161 @@
+{
+  "v": 1,
+  "generatedAt": "2026-10-20T12:00:00.000Z",
+  "readOnly": false,
+  "readOnlyReason": null,
+  "banner": null,
+  "inventory": {
+    "version": "5.1.38",
+    "path": "C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.38-r1/package/plugin/extensions/omo.js",
+    "manifestPath": "C:/Users/USER/orca/projects/piomo-briefing-wt/primary-agents-profiles/src/profiles/inventory-5.1.38.json",
+    "pinnedSha256": "4a8aef923825ccd5fbb5ab6d4b3b72e0ae145b670309f1db3ead53827c029476",
+    "loadedSha256": "4a8aef923825ccd5fbb5ab6d4b3b72e0ae145b670309f1db3ead53827c029476",
+    "stale": false,
+    "label": null,
+    "readOnly": false
+  },
+  "homes": {
+    "primary": "C:/Users/USER/.omo",
+    "stable": "C:/Users/USER/.omo-stable-500/home/.omo",
+    "mirrors": [
+      { "root": "C:/Users/USER/.omo-original/home/.omo", "label": "omo-original", "exists": true },
+      { "root": "C:/Users/USER/.somo/home/.omo", "label": "somo", "exists": false }
+    ]
+  },
+  "activeProfile": { "key": "gpt-kimi-deepseek", "omoProfile": "native-gpt-kimi-deepseek" },
+  "profiles": [
+    {
+      "key": "gpt-kimi-deepseek", "num": 1, "name": "GPT + Kimi + DeepSeek", "nameKr": "GPT + Kimi + 딥시크",
+      "tag": "GPT 구독 최적화", "omoProfile": "native-gpt-kimi-deepseek",
+      "mainProvider": "kimi-coding", "mainModel": "k3", "mainThinking": "max",
+      "summary": "Kimi가 세션을 조율하고, GPT가 깊은 구현·검토를, 딥시크가 탐색·단순 작업을 맡습니다.", "current": true
+    },
+    {
+      "key": "gpt-deepseek", "num": 2, "name": "GPT + DeepSeek", "nameKr": "GPT + 딥시크",
+      "tag": "딥시크 Flash 메인", "omoProfile": "native-gpt-deepseek",
+      "mainProvider": "opencode-go", "mainModel": "deepseek-v4-flash", "mainThinking": "max",
+      "summary": "딥시크 Flash가 세션을 이끌고, GPT가 오라클·비판·심층 등 깊은 작업을 맡습니다.", "current": false
+    },
+    {
+      "key": "kimi-deepseek", "num": 3, "name": "Kimi + DeepSeek", "nameKr": "Kimi + 딥시크",
+      "tag": "GPT 구독 없이 사용", "omoProfile": "native-kimi-deepseek",
+      "mainProvider": "kimi-coding", "mainModel": "k3", "mainThinking": "max",
+      "summary": "GPT 없이 Kimi가 조율·검증·고강도 추론을 맡고, 딥시크 플래시가 구현·탐색·빠른 작업을 처리합니다.", "current": false
+    },
+    {
+      "key": "kimi-ollama-deepseek", "num": 4, "name": "GLM + DeepSeek (Ollama)", "nameKr": "GLM + 딥시크 (올라마)",
+      "tag": "Kimi 할당량 백업", "omoProfile": "native-kimi-ollama-deepseek",
+      "mainProvider": "ollama", "mainModel": "glm-5.3-flash", "mainThinking": "max",
+      "summary": "Kimi 구독 할당량이 떨어졌을 때 올라마 구독의 GLM 5.3 Flash가 조율·검증을 맡는 백업 배치입니다.", "current": false
+    },
+    {
+      "key": "experimental-custom", "num": 5, "name": "Experimental Custom", "nameKr": "실험용 자유 설정",
+      "tag": "내가 직접 조합하는 프로필", "omoProfile": "native-experimental-custom",
+      "mainProvider": "ollama", "mainModel": "glm-5.3-flash", "mainThinking": "max",
+      "summary": "구독 서비스, AI 모델, 추론 강도를 직접 바꾸며 자유롭게 실험하는 개인용 프로필입니다.", "current": false
+    },
+    {
+      "key": "cmd-glm-deepseek", "num": 6, "name": "GLM + DeepSeek (CommandCode)", "nameKr": "GLM + 딥시크 (커맨드코드)",
+      "tag": "커맨드코드 max 추론", "omoProfile": "native-cmd-glm-deepseek",
+      "mainProvider": "commandcode", "mainModel": "z-ai/glm-5.3-flash", "mainThinking": "max",
+      "summary": "커맨드코드 구독의 GLM 5.3 Flash(max 추론)가 조율·검증을 맡는 경로입니다.", "current": false
+    }
+  ],
+  "routing": {
+    "rows": [
+      {
+        "section": "agents", "role": "explore", "group": "discovery", "groupLabel": "탐색 · 자료 조사",
+        "labelKo": "탐색", "labelEn": "Explore", "model": "fable", "reasoning": "medium",
+        "recommendation": { "Status": "recommended", "Official": "anthropic/claude-opus-5-5 / medium" }
+      },
+      {
+        "section": "agents", "role": "librarian", "group": "discovery", "groupLabel": "탐색 · 자료 조사",
+        "labelKo": "자료 조사", "labelEn": "Librarian", "model": "kimi", "reasoning": "max",
+        "recommendation": { "Status": "fallback", "Official": "kimi/kimi-k3 / max" }
+      },
+      {
+        "section": "agents", "role": "plan-reviewer", "group": "review", "groupLabel": "검토 · QA",
+        "labelKo": "비판·검증", "labelEn": "momus (plan-reviewer)", "model": "terra", "reasoning": "high",
+        "recommendation": { "Status": "different", "Official": "openai/gpt-6.1-sol / high" }
+      },
+      {
+        "section": "agents", "role": "oracle", "group": "planning", "groupLabel": "계획 · 조언",
+        "labelKo": "오라클", "labelEn": "Oracle", "model": "openai/<script>alert(1)</script>", "reasoning": "high",
+        "recommendation": { "Status": "variant-different", "Official": "openai/gpt-6.1-sol / high" }
+      },
+      {
+        "section": "categories", "role": "quick", "group": "general", "groupLabel": "빠른 작업 · 일반 작업",
+        "labelKo": "빠른 처리", "labelEn": "Quick", "model": "flash-high", "reasoning": "high",
+        "recommendation": { "Status": "recommended", "Official": "deepseek/deepseek-v4 / high" }
+      },
+      {
+        "section": "categories", "role": "deep-low", "group": "reasoning", "groupLabel": "심층 추론",
+        "labelKo": "심층 추론(저)", "labelEn": "Deep low", "model": "openai/<img src=x onerror=alert(2)>", "reasoning": "medium",
+        "recommendation": { "Status": "unresolved", "Official": "anthropic/claude-fable-5-1" }
+      },
+      {
+        "section": "categories", "role": "visual-engineering", "group": "specialism", "groupLabel": "전문 작업",
+        "labelKo": "시각 엔지니어링", "labelEn": "Visual Engineering", "model": "sol", "reasoning": "high",
+        "recommendation": { "Status": "untracked", "Official": "공식 권장 없음" }
+      }
+    ],
+    "layer": {}
+  },
+  "main": {
+    "effective": { "provider": "kimi-coding", "model": "k3", "thinking": "max" },
+    "override": null
+  },
+  "modelProfile": {
+    "model_profile": "daily-heavy",
+    "model_profiles": {
+      "daily-heavy": { "model": "claude-fable-5-1", "reasoning": "xhigh" }
+    }
+  },
+  "summarizer": { "provider": "commandcode", "model": "z-ai/glm-5.3-flash" },
+  "memory": {
+    "kibitzer": {
+      "mode": "quick", "category": "quick", "alias": "flash-high", "model": "opencode-go/deepseek-v4-flash",
+      "reasoning": "high", "owned": false, "external": false, "unresolved": false, "hasDedicated": false
+    },
+    "reflection": {
+      "mode": "quick", "category": "quick", "alias": "flash-high", "model": "opencode-go/deepseek-v4-flash",
+      "reasoning": "high", "owned": false, "external": false, "unresolved": false, "hasDedicated": false
+    }
+  },
+  "catalog": {
+    "fable": { "model": "anthropic/claude-opus-5-5", "variant": "medium" },
+    "kimi": { "model": "kimi-coding/kimi-k3", "variant": "max" },
+    "terra": { "model": "chatgpt-subscription/gpt-6.1-sol", "variant": "high" },
+    "sol": { "model": "chatgpt-subscription/gpt-6.1-sol", "variant": "high" },
+    "flash-high": { "model": "opencode-go/deepseek-v4-flash", "variant": "high" },
+    "glm-high": { "model": "zai/glm-5.3", "variant": "high" }
+  },
+  "roster": {
+    "revision": 3,
+    "agents": {
+      "sisyphus": {
+        "lane": "daily-normal", "pin": null, "rev": 2,
+        "remembered": { "provider": "anthropic-subscription", "modelId": "claude-opus-5-5", "thinking": "medium" }
+      },
+      "hephaestus": {
+        "lane": "geeky-normal",
+        "pin": { "provider": "chatgpt-subscription", "modelId": "gpt-6.1-sol", "thinking": "medium" }, "rev": 4
+      },
+      "prometheus": { "lane": "daily-heavy", "pin": null, "rev": 1 },
+      "atlas": { "lane": "daily-normal", "pin": null, "rev": 0 }
+    },
+    "warning": null
+  },
+  "targets": {
+    "omo.jsonc": "2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70819",
+    "agent/settings.json": "3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a",
+    "agent/models.json": null,
+    "runtime/native-profile-switcher-main.json": null,
+    "native-profile-selection.json": "4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b",
+    "agent/native-profile-selection.json": "5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c",
+    "stable/omo.jsonc": "6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d",
+    "agent/primary-agents/roster.json": "7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e"
+  },
+  "applyJournal": null,
+  "warnings": []
+}

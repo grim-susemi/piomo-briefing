@@ -114,6 +114,12 @@
   --c-gray: light-dark(#5c6068, #a9adb5);
   --c-gray-tint: light-dark(rgb(26 28 31 / 6%), rgb(230 230 233 / 8%));
 
+  /* primary-agent colours (fixed by the plan; profiles-view.css reads these) */
+  --agent-sisyphus: #00ced1;
+  --agent-hephaestus: #d97706;
+  --agent-prometheus: #a78bfa;
+  --agent-atlas: #10b981;
+
   /* primary button: foreground on background (no saturated fill) */
   --c-primary: var(--c-fg);
   --c-on-primary: var(--c-main);

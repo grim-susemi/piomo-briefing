@@ -1026,7 +1026,7 @@ test('tokens.css is the first stylesheet chunk of the page: the later sheets rea
   const styles = [...html.matchAll(/<style>\n([\s\S]*?)\n<\/style>/g)].map((m) => m[1]);
   assert.equal(styles.length, 1, 'the page inlines one stylesheet');
   const sheet = (name) => fs.readFileSync(join(HERE, '..', 'src', 'page', name), 'utf8');
-  const order = ['tokens.css', 'page.css', 'plan-view.css', 'workers-view.css', 'alarm.css', 'shell.css', 'convo.css', 'blocks.css', 'annotate.css'];
+  const order = ['tokens.css', 'page.css', 'plan-view.css', 'workers-view.css', 'alarm.css', 'shell.css', 'profiles-view.css', 'convo.css', 'blocks.css', 'annotate.css'];
   assert.equal(styles[0], order.map(sheet).join('\n'), 'tokens.css first, then the sheets in their old order');
   assert.match(sheet('tokens.css'), /^:root \{\n  color-scheme: light dark;/m, 'the tokens follow the light and the dark scheme');
   assert.doesNotMatch(styles[0], /font-weight:\s*(?:[7-9]00|bold)/, 'weights 400 / 500 / 600 only');
