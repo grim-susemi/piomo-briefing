@@ -357,6 +357,23 @@ async function main() {
         await settle();
       }
     };
+    // A sibling view click at 390 opens the overlay; close it, and if the toggle did not land,
+    // record the unpeek fallback rather than capturing the sidebar over the route.
+    const closePeekStrong = async () => {
+      for (let i = 0; i < 3; i += 1) {
+        if (!(await page.eval(`!!document.querySelector('.sh-shell') && document.querySelector('.sh-shell').getAttribute('data-peek') === 'true'`))) return true;
+        await page.eval(`document.querySelector('.sh-ib') && document.querySelector('.sh-ib').click()`);
+        await settle();
+      }
+      if (await page.eval(`!!document.querySelector('.sh-shell') && document.querySelector('.sh-shell').getAttribute('data-peek') === 'true'`)) {
+        run.checks.peekFallback = (run.checks.peekFallback || 0) + 1;
+        await page.eval(`(() => { const p = window.BriefPage; if (!p) return false;
+          p.state.ui = window.BriefShell.reduce(p.state.ui, { type: 'unpeek' });
+          window.BriefShell.persist(undefined, p.state.ui); p.render(); return true; })()`);
+        await settle();
+      }
+      return !(await page.eval(`!!document.querySelector('.sh-shell') && document.querySelector('.sh-shell').getAttribute('data-peek') === 'true'`));
+    };
     const settle = async () => {
       await page.eval(`document.fonts && document.fonts.ready ? document.fonts.ready.then(() => true) : true`);
       await page.eval(sleepFrame());
@@ -1456,6 +1473,10 @@ async function main() {
       await closePeek();
       await settle();
       await capture(path.join(OUT, `state-empty-${vp.name}-${theme}.png`));
+      await scrollUnderHeader('#pf-sec-profiles');
+      await settle();
+      await capture(path.join(OUT, `state-empty-profiles-${vp.name}-${theme}.png`));
+      await scrollTop();
     }
     profilesStateOverride = null;
     await page.goto(url);
@@ -1896,7 +1917,7 @@ async function main() {
     const reapplyBackupsBefore = fs.existsSync(backupDir) ? fs.readdirSync(backupDir).sort() : [];
     await page.eval(`document.querySelector('[data-pf="reapply"]').click()`);
     await waitFor(`!!document.querySelector('.pf-done') || !!document.querySelector('.pf-conflict') || !!document.querySelector('.pf-err')`, 'journal reapply result');
-    await waitFor(`!document.querySelector('.pf-loading')`, 'journal reapply reload');
+    await waitFor(`!document.querySelector('[data-pf-journal="interrupted"]')`, 'journal banner cleared after reapply');
     const reapplyJournal = readJsonc(journalPath);
     run.checks.journalReapplySuccess = await page.eval(`(() => ({
       done: !!document.querySelector('.pf-done'), conflict: !!document.querySelector('.pf-conflict'),
@@ -2004,8 +2025,15 @@ async function main() {
           await closePeek();
           await page.eval(`document.querySelector('[data-sh="view"][data-key="${key}"]').click()`);
           await waitFor(`window.BriefPage.state.ui.view === '${key}'`, `sibling route ${key}`);
-          await closePeek();
+          await closePeekStrong();
           await settle();
+          run.checks.siblingShell = run.checks.siblingShell || {};
+          const siblingShell = await page.eval(`(() => ({ peek: document.querySelector('.sh-shell').getAttribute('data-peek'),
+            side: document.querySelector('.sh-shell').getAttribute('data-side'),
+            sideVisible: getComputedStyle(document.querySelector('#side')).visibility,
+            sideLeft: Math.round(document.querySelector('#side').getBoundingClientRect().left) }))()`);
+          run.checks.siblingShell[`${key}-${vp.name}-${theme}`] = siblingShell;
+          assert.equal(siblingShell.peek, 'false', `sibling ${key} ${vp.name}-${theme} still has the sidebar overlay open`);
           await capture(path.join(OUT, `sibling-${key}-${vp.name}-${theme}.png`));
           if (vp.name === '390') {
             sample = await railSample();
@@ -2054,6 +2082,7 @@ async function main() {
     required.push(
       'state-loading-390-light-reduced-motion.png', 'state-error-retry-390-light.png',
       'state-empty-390-light.png', 'state-empty-1024-light.png', 'state-empty-1440-dark.png',
+      'state-empty-profiles-390-light.png', 'state-empty-profiles-1024-light.png', 'state-empty-profiles-1440-dark.png',
       'hover-select-390-light.png', 'hover-select-1440-dark.png', 'hover-summary-390-light.png',
       'focus-busy-preview-390-light.png', 'focus-after-preview-390-light.png',
       'focus-busy-apply-1440-light.png', 'focus-after-apply-1440-light.png',
@@ -2469,6 +2498,7 @@ function writeEvidence() {
   e2e.push(`journal reapply success: ${JSON.stringify(run.checks.journalReapplySuccess || null)}`);
   e2e.push(`journal reapply 409: ${JSON.stringify(run.checks.journalReapplyConflict || null)}`);
   e2e.push(`rail scope: ${JSON.stringify(run.checks.railScope || null)}`);
+  e2e.push(`sibling shell: ${JSON.stringify(run.checks.siblingShell || null)}; unpeek fallbacks ${run.checks.peekFallback || 0}`);
   e2e.push(`agent alignment 1440: ${JSON.stringify(run.checks.agentAlign1440 || null)}`);
   e2e.push(`agent alignment 1024: ${JSON.stringify(run.checks.agentAlign1024 || null)}`);
   e2e.push(`pending targets 390: ${JSON.stringify(run.checks.preview390Targets || null)}`);
