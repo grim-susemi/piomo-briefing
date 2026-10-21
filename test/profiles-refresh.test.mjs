@@ -102,7 +102,7 @@ test('the guide pins the two 5.1.38 files by path and sha256, never 5.1.33', () 
     { path: inventory.sources.omoTask.path, sha256: inventory.sources.omoTask.sha256 },
   ]);
   assert.equal(inventory.sources.omo.sha256, '4a8aef923825ccd5fbb5ab6d4b3b72e0ae145b670309f1db3ead53827c029476');
-  assert.equal(inventory.sources.omoTask.sha256, '2b559bb11f0285072722cffbb7f322756c81aec867f6fb4a683278f075d7f783');
+  assert.equal(inventory.sources.omoTask.sha256, '1149550465cbfde272891e27d78087ecb8003c0a3dbf32bef7aaa8dbc237cef0');
   assert.equal(JSON.stringify(guide).includes('5.1.33'), false);
   assert.throws(() => recommendationGuide({ inventory: { sources: {} } }), /path and sha256/);
 });
