@@ -35,6 +35,7 @@ import { setError, hasErrors } from './errors.mjs';
 import { cardStatus, chips as truthChips, tabOf, recheckEvidence } from './truth.mjs';
 import { waitingItems } from './waiting.mjs';
 import { rootAndSlugOf } from './plan-schema.mjs';
+import { readProfilesScript } from './profiles-script.mjs';
 
 const PAGE_DIR = join(dirname(fileURLToPath(import.meta.url)), 'page');
 const DAY_MS = 24 * 3600 * 1000;
@@ -997,7 +998,7 @@ function iconSprite(fs) {
  * the file page, data.js, /data.json and the SSE model never carry it.
  */
 export function pageHtml(vm, generation, { mode = 'file', token, fs = nodeFs } = {}) {
-  const read = (name) => fs.readFileSync(join(PAGE_DIR, name), 'utf8');
+  const read = (name) => name === 'profiles-view.js' ? readProfilesScript(PAGE_DIR, fs) : fs.readFileSync(join(PAGE_DIR, name), 'utf8');
   const css = PAGE_CSS.map((n) => read(n).replace(/<\/style/gi, '<\\/style')).join('\n');
   return '<!doctype html>\n<html lang="ko"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +

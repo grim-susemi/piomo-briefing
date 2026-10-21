@@ -5,6 +5,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, renameSync, statSyn
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { readProfilesScript } from '../src/profiles-script.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = dirname(HERE);
@@ -31,6 +32,8 @@ try {
     if (statSync(src).isDirectory()) cpSync(src, dst, { recursive: true });
     else { mkdirSync(dirname(dst), { recursive: true }); cpSync(src, dst); }
   }
+  // Validate the staged pair, not just the working source, before touching old dist.
+  readProfilesScript(join(STAGE, 'src', 'page'));
   for (const f of listJs(STAGE)) {
     const r = spawnSync(process.execPath, ['--check', f], { encoding: 'utf8' });
     if (r.status !== 0) throw new Error('syntax check failed: ' + f + '\n' + (r.stderr || r.stdout));

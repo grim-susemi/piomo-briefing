@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync, existsSync, readdirSync, statSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,3 +63,33 @@ test('broken .mjs in a temp copy -> build exit 1 and existing dist bytes unchang
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+for (const failure of ['source', 'payload', 'recipe', 'header', 'missing']) {
+  test('invalid generated profiles ' + failure + ' preserves old dist and removes staging', () => {
+    // Given only the build inputs needed to exercise the actual staged-pair seam.
+    const tmp = mkdtempSync(join(tmpdir(), 'briefing-generated-build-'));
+    try {
+      for (const dir of ['scripts', 'src/page/generated', 'assets', 'dist']) mkdirSync(join(tmp, dir), { recursive: true });
+      for (const name of ['package.json', 'scripts/build.mjs', 'src/profiles-script.mjs', 'src/page/profiles-view.js', 'src/page/generated/profiles-view.min.js']) {
+        cpSync(join(REPO, name), join(tmp, name));
+      }
+      for (const name of ['extension.mjs', 'scripts/install.mjs']) writeFileSync(join(tmp, name), 'export {};\n');
+      writeFileSync(join(tmp, 'dist', 'previous.bin'), Buffer.from([0, 1, 255, 2]));
+      const before = snapshotDist(join(tmp, 'dist'));
+      const artifact = join(tmp, 'src/page/generated/profiles-view.min.js');
+      if (failure === 'source') writeFileSync(join(tmp, 'src/page/profiles-view.js'), '// stale\n', 'utf8');
+      if (failure === 'payload') writeFileSync(artifact, readFileSync(artifact, 'utf8') + ' ', 'utf8');
+      if (failure === 'recipe') writeFileSync(artifact, readFileSync(artifact, 'utf8').replace(/recipe=\S+/, 'recipe=unknown-v0'), 'utf8');
+      if (failure === 'header') writeFileSync(artifact, readFileSync(artifact, 'utf8').split('\n').slice(1).join('\n'), 'utf8');
+      if (failure === 'missing') rmSync(artifact);
+      // When the real Node build runs, without access to a compiler executable.
+      const result = spawnSync(process.execPath, ['scripts/build.mjs'], { cwd: tmp, encoding: 'utf8', env: { ...process.env, PATH: '' }, timeout: 10000 });
+      // Then invalid input cannot replace the previous dist, and staging is cleaned.
+      assert.equal(result.status, 1, result.stdout + result.stderr);
+      assert.ok(distEqual(before, snapshotDist(join(tmp, 'dist'))));
+      assert.deepEqual(readdirSync(tmp).filter((name) => /^\.dist-(stage|new)-/.test(name)), []);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+}

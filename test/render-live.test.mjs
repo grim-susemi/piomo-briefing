@@ -161,7 +161,7 @@ test('pageHtml inlines every page module and the first-paint model, with generat
   const html = pageHtml(vm, 4, { mode: 'server' });
   assert.match(html, /<meta name="omo-briefing-generation" content="4">/);
   assert.match(html, /<meta name="omo-briefing-mode" content="server">/);
-  const order = ['g.BriefIcons = ', 'g.BriefView = ', 'g.BriefPlanView = ', 'g.BriefWorkersView = ', 'g.BriefBlocks = ', 'g.BriefConvo = ', 'g.BriefShell = ', 'g.BriefProfiles = ', 'g.BriefAlarm = ', 'g.BriefAnnotate = ', 'g.BriefPage = '].map((n) => html.indexOf(n));
+  const order = ['BriefIcons', 'BriefView', 'BriefPlanView', 'BriefWorkersView', 'BriefBlocks', 'BriefConvo', 'BriefShell', 'BriefProfiles', 'BriefAlarm', 'BriefAnnotate', 'BriefPage'].map((name) => html.search(new RegExp('\\bg\\.' + name + '\\s*=')));
   assert.ok(order.every((i) => i > 0), `all eleven modules are inline: ${order}`);
   assert.deepEqual(order, [...order].sort((a, b) => a - b), 'icons.js first, page.js last');
   for (const css of ['.plan-view', '.w-row', '.alarm-sound', '.sh-shell', '.pf-sec', '.cv-page', '.ann-tray']) assert.ok(html.includes(css), css);
