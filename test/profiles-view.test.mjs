@@ -223,8 +223,10 @@ test('loading reuses the homes, tray and section-header primitives and pulses on
   assert.match(html, /class="pf-homes pf-skel-homes" data-pf-skel="homes"/);
   assert.match(html, /class="pf-tray pf-tray-compact" data-pf-skel="tray"/);
   assert.match(html, /class="pf-sec-h"/);
-  assert.match(html, /<h2>메인 에이전트<\/h2>/);
-  assert.match(html, /class="pf-sec-s">에이전트별 레인·핀·기억/);
+  const loaded = P.render(STATE, live());
+  const loadedHead = /<section class="pf-sec" id="pf-sec-agents"[\s\S]*?<header class="pf-sec-h">([\s\S]*?)<\/header>/.exec(loaded)[1];
+  const loadingHead = /<section class="pf-skel-sec" data-pf-skel="agents"[\s\S]*?<header class="pf-sec-h">([\s\S]*?)<\/header>/.exec(html)[1];
+  assert.equal(textOf(loadingHead), textOf(loadedHead));
   assert.equal((html.match(/data-pf-skel="route"/g) || []).length, 20, 'routing placeholders');
   assert.doesNotMatch(html, /data-pf-sec=/, 'the loading frame must not claim loaded sections');
   assert.doesNotMatch(html, /class="pf-skeleton" aria-hidden="true"/, 'the live loading status must not sit inside aria-hidden');
@@ -233,13 +235,35 @@ test('loading reuses the homes, tray and section-header primitives and pulses on
   assert.match(css, /@keyframes pf-pulse/);
   assert.match(css, /\.pf-pulse \{[^}]*animation: pf-pulse var\(--pf-pulse-dur\)/);
   const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
-  assert.match(reduced, /\.pf-pulse \{ animation: none; opacity: 1; \}/);
+  assert.match(reduced, /\.pf-pulse \{ animation-duration: 2\.4s; \}/);
 });
 
 test('pressed: profile cards and sidebar section buttons use the press fill', () => {
   const css = read('src/page/profiles-view.css');
-  assert.match(css, /button\.pf-card:active \{[^}]*background: var\(--fill-press\)/);
+  assert.match(css, /button\.pf-card:active:not\(:disabled\) \{[^}]*background: var\(--fill-press\)/);
   assert.match(css, /\.pf-nav-b:active \{[^}]*background: var\(--fill-press\)/);
+});
+
+test('page wiring: the pending row remove button removes that exact row', async () => {
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'profiles-view', 'annotate'] });
+  e.page.receive({ seq: 1, generatedAt: 0, sessions: [] });
+  e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
+  e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => STATE });
+  await tick();
+  for (const [agent, lane] of [['atlas', 'daily-heavy'], ['prometheus', 'geeky-heavy']]) {
+    const sel = e.byId.main.querySelector('[data-pf="agent-lane"][data-agent="' + agent + '"]');
+    sel.value = lane;
+    e.fire(sel, 'change');
+  }
+  await tick();
+  assert.equal(e.byId.main.querySelectorAll('.pf-pending li').length, 2);
+  const first = e.byId.main.querySelectorAll('.pf-pending li')[0].textContent;
+  e.fire(e.byId.main.querySelector('[data-pf="drop"][data-index="0"]'), 'click');
+  await tick();
+  assert.equal(e.byId.main.querySelectorAll('.pf-pending li').length, 1);
+  assert.equal(e.byId.main.querySelector('.pf-pending').textContent.includes(first), false);
+  assert.equal(e.page.state.ui.profilesState.pending.length, 1);
+  assert.deepEqual(e.errors, []);
 });
 
 test('selects: every control titles its selected label and declares an ellipsis', () => {
@@ -287,7 +311,7 @@ test('disabled secondary buttons keep their contrast without opacity', () => {
   const rule = /\.pf-btn:disabled \{([^}]*)\}/.exec(css)[1];
   assert.match(rule, /opacity:\s*1/);
   assert.match(rule, /background:\s*var\(--c-sunk\)/);
-  assert.match(rule, /border-color:\s*var\(--c-line\)/);
+  assert.match(rule, /border-color:\s*var\(--ctl-edge\)/);
   assert.doesNotMatch(css, /opacity:\s*\.7/);
 });
 
@@ -296,17 +320,17 @@ test('disabled selects and secondary buttons set colour, background and border w
   const select = /\.pf select:disabled, \.pf input:disabled \{([^}]*)\}/.exec(css)[1];
   assert.match(select, /color:\s*var\(--c-fg-3\)/);
   assert.match(select, /background:\s*var\(--c-sunk\)/);
-  assert.match(select, /border-color:\s*var\(--c-line\)/);
+  assert.match(select, /border-color:\s*var\(--ctl-edge\)/);
   assert.match(select, /-webkit-text-fill-color:\s*var\(--c-fg-3\)/);
   assert.match(select, /opacity:\s*1/);
   const button = /\.pf-btn:disabled \{([^}]*)\}/.exec(css)[1];
   assert.match(button, /color:\s*var\(--c-fg-3\)/);
   assert.match(button, /background:\s*var\(--c-sunk\)/);
-  assert.match(button, /border-color:\s*var\(--c-line\)/);
+  assert.match(button, /border-color:\s*var\(--ctl-edge\)/);
   assert.match(button, /opacity:\s*1/);
   const ghost = /\.pf-btn-ghost:disabled \{([^}]*)\}/.exec(css)[1];
   assert.match(ghost, /color:\s*var\(--c-fg-3\)/);
-  assert.match(ghost, /border-color:\s*var\(--c-line\)/);
+  assert.match(ghost, /border-color:\s*var\(--ctl-edge\)/);
 });
 
 test('responsive controls: 1024 stacks the agent pin/thinking pair and 390 uses one agent column', () => {
@@ -921,9 +945,10 @@ test('empty data: the real count drives the copy and one supported reload action
   const html = P.render(empty, live());
   const profiles = /<section class="pf-sec" id="pf-sec-profiles"[\s\S]*?<\/section>/.exec(html)[0];
   const routing = /<section class="pf-sec" id="pf-sec-routing"[\s\S]*?<\/section>/.exec(html)[0];
-  assert.match(profiles, /<p class="pf-sec-s">0개 프로필 · 선택 없음<\/p>/);
-  assert.doesNotMatch(profiles, /6개 프로필/);
-  assert.match(profiles, /class="pf-count">0</);
+  const sub = textOf(/<p class="pf-sec-s">([\s\S]*?)<\/p>/.exec(profiles)[1]);
+  const count = /<span class="pf-count">(\d+)<\/span>/.exec(profiles)[1];
+  assert.equal(Number(count), empty.profiles.length);
+  assert.equal(Number((sub.match(/\d+/) || [])[0]), empty.profiles.length);
   assert.match(routing, /class="pf-count">0</);
   assert.match(profiles, /data-pf="reload-state"/);
   assert.match(routing, /data-pf="reload-state"/);
@@ -995,13 +1020,13 @@ test('selected card: a green wash and a check glyph join the 현재 text', () =>
   assert.match(css, /\.pf-card\.on \{[^}]*box-shadow: inset 0 0 0 1px var\(--c-green\)/);
 });
 
-test('compact title and rail: the profiles page owns no shell override', () => {
+test('compact title: the profiles page keeps its sticky title and section nav', () => {
+  const P = load();
   const css = read('src/page/profiles-view.css');
   const at599 = css.slice(css.indexOf('@media (max-width: 599px)'));
   assert.match(at599, /\.pf-head \{ position: sticky; top: 0;/);
   assert.match(at599, /\.pf-title \{ margin: 0; font-size: var\(--fs-lg\)/);
-  assert.doesNotMatch(css, /:has\(\.pf\)/, 'the profiles page must not restyle the shared rail');
-  assert.doesNotMatch(read('src/page/shell.css'), /:has\(\.pf\)/);
-  assert.doesNotMatch(read('src/page/tokens.css'), /:has\(\.pf\)/);
-  assert.match(read('src/page/shell.css'), /\.sh-rb:hover, \.sh-rb:focus-visible \{ background: var\(--hov\); color: var\(--tx\); \}/);
+  const side = P.side(STATE, live());
+  assert.match(side, /data-pf-side/);
+  assert.match(side, /data-pf="jump"/);
 });

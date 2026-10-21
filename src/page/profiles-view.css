@@ -121,7 +121,7 @@
   grid-template-columns: minmax(150px, 1.1fr) minmax(120px, .8fr) minmax(190px, 1.4fr) minmax(180px, 1.2fr);
   align-items: start;
   gap: var(--sp-2) var(--sp-3);
-  min-height: calc(var(--sp-12) + var(--sp-8));
+  min-height: calc(var(--sp-12) + var(--sp-5) + 1px);
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--r-lg);
   background: var(--c-main);
@@ -230,7 +230,7 @@
 .pf select:disabled, .pf input:disabled {
   color: var(--c-fg-3);
   background: var(--c-sunk);
-  border-color: var(--c-line);
+  border-color: var(--ctl-edge);
   -webkit-text-fill-color: var(--c-fg-3);
   opacity: 1;
   cursor: not-allowed;
@@ -262,13 +262,13 @@
 .pf-btn:disabled {
   color: var(--c-fg-3);
   background: var(--c-sunk);
-  border-color: var(--c-line);
+  border-color: var(--ctl-edge);
   -webkit-text-fill-color: var(--c-fg-3);
   cursor: not-allowed;
   opacity: 1;
 }
-.pf-btn-ghost:disabled { background: transparent; color: var(--c-fg-3); border-color: var(--c-line); }
-.pf-btn-primary:disabled { border-color: var(--c-line); background: var(--c-sunk); color: var(--c-fg-3); opacity: 1; }
+.pf-btn-ghost:disabled { background: transparent; color: var(--c-fg-3); border-color: var(--ctl-edge); }
+.pf-btn-primary:disabled { border-color: var(--ctl-edge); background: var(--c-sunk); color: var(--c-fg-3); opacity: 1; }
 .pf-btn-primary { border-color: var(--c-primary); background: var(--c-primary); color: var(--c-on-primary); }
 .pf-btn-primary:hover:not(:disabled) { background: var(--c-fg-2); border-color: transparent; }
 .pf-btn-ghost { background: transparent; }
@@ -319,9 +319,11 @@
   font: inherit;
   text-align: left;
 }
-button.pf-card:hover { background: var(--fill-hover); border-color: var(--c-line-strong); }
-button.pf-card:active { background: var(--fill-press); border-color: var(--c-line-strong); }
+button.pf-card:hover:not(:disabled) { background: var(--fill-hover); border-color: var(--c-line-strong); }
+button.pf-card:active:not(:disabled) { background: var(--fill-press); border-color: var(--c-line-strong); }
 .pf-card.on { border-color: var(--c-green); background: var(--c-green-tint); box-shadow: inset 0 0 0 1px var(--c-green); }
+button.pf-card:disabled { cursor: not-allowed; border-color: var(--ctl-edge); background: var(--c-sunk); color: var(--c-fg-3); box-shadow: none; }
+button.pf-card:disabled.on { background: var(--c-green-tint); }
 .pf-current .ic { width: 12px; height: 12px; }
 .pf-card-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); }
 .pf-card-num { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); }
@@ -455,7 +457,8 @@ button.pf-card:active { background: var(--fill-press); border-color: var(--c-lin
   .pf-agent .pf-mem-field { grid-column: 1 / -1; }
   .pf-pin-sels { grid-template-columns: minmax(0, 1fr); }
   .pf-mem-sels { grid-template-columns: minmax(80px, .6fr) minmax(0, 1.4fr) minmax(92px, .7fr); }
-  .pf-skel-agent { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr); min-height: calc(var(--sp-12) * 4); }
+  .pf-skel-agent { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr); min-height: calc(var(--sp-12) * 3 + var(--sp-8) - 2px); }
+  .pf-skel-card { min-height: calc(var(--sp-12) * 4 + var(--sp-2) + 2px); }
   .pf-skel-agent .pf-skel-mem { grid-column: 1 / -1; }
   .pf-skel-pin { grid-template-columns: minmax(0, 1fr); }
   .pf-skel-route { grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.6fr); min-height: calc(var(--sp-12) * 4); }
@@ -507,17 +510,18 @@ button.pf-card:active { background: var(--fill-press); border-color: var(--c-lin
   .pf-homes { display: grid; gap: 2px; }
   .pf-home { display: flex; flex-wrap: nowrap; align-items: baseline; max-width: 100%; }
   .pf-home code { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .pf-skel-agent { grid-template-columns: minmax(0, 1fr); min-height: calc(var(--sp-12) * 7 + var(--sp-6)); }
-  .pf-skel-card { min-height: calc(var(--sp-12) * 5); }
+  .pf-skel-agent { grid-template-columns: minmax(0, 1fr); min-height: calc(var(--sp-12) * 7 + var(--sp-6) - 2px); }
+  .pf-skel-card { min-height: calc(var(--sp-12) * 4 + var(--sp-8) + var(--sp-3) - var(--hair)); }
   .pf-skel-id, .pf-skel-agent .pf-skel-mem { grid-column: auto; }
   .pf-skel-route { min-height: calc(var(--sp-12) * 7); }
 }
 /* C1 desktop floor: the shared --fs-sm token is 12px at wide widths, but these are prose lines.
  * Keep the repair on this page so the denser shared board typography is unchanged. */
 @media (min-width: 600px) {
-  .pf-sub, .pf-sec-s, .pf-card-sum, .pf-tray-next, .pf-ro-val, .pf-active { font-size: 14px; }
+  .pf-sub, .pf-sec-s, .pf-card-sum, .pf-tray-next, .pf-ro-val, .pf-active,
+  .pf-empty-state .pf-empty { font-size: 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .pf-btn { transition: none; }
-  .pf-pulse { animation: none; opacity: 1; }
+  .pf-pulse { animation-duration: 2.4s; }
 }

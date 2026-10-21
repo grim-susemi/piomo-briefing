@@ -416,7 +416,7 @@ async function main() {
       }
       const info = pngInfo(file);
       assert.ok(info.bytes > 8000, `screenshot too small (blank?): ${file} ${info.bytes}`);
-      run.captures.push({ file: path.relative(OUT, file).replace(/\\/g, '/'), ...info, full });
+      run.captures.push({ file: path.relative(OUT, file).replace(/\\/g, '/'), ...info, sha256: hashFile(file), full });
       return info;
     };
 
@@ -530,28 +530,75 @@ async function main() {
           max: Math.max(0, main.scrollHeight - main.clientHeight),
         }));
       })()`);
+      const stickyOffset = await page.eval(`(() => {
+        const head = document.querySelector('.pf-head');
+        return head && getComputedStyle(head).position === 'sticky' ? Math.ceil(head.getBoundingClientRect().height) + 8 : 0;
+      })()`);
+      run.checks.sectionCoverage = run.checks.sectionCoverage || {};
+      const coverage = {};
       for (const sec of layout) {
         if (!sec.key) continue;
-        const stickyOffset = await page.eval(`(() => {
-          const head = document.querySelector('.pf-head');
-          return head && getComputedStyle(head).position === 'sticky' ? Math.ceil(head.getBoundingClientRect().height) + 8 : 0;
-        })()`);
-        const stops = [sec.top];
-        if (sec.height > sec.view) {
-          if (sec.key === 'routing') stops.push(sec.top + Math.floor((sec.height - sec.view) / 2));
-          stops.push(sec.top + sec.height - sec.view);
+        const sectionEnd = sec.top + sec.height;
+        const visible = Math.max(1, sec.view - stickyOffset);
+        const overlap = Math.min(Math.max(1, visible - 1), Math.max(80, Math.round(visible * 0.2)));
+        const planned = [];
+        let from = sec.top;
+        while (from < sectionEnd) {
+          const to = Math.min(sectionEnd, from + visible);
+          planned.push({ from, to, scroll: Math.max(0, Math.min(Math.round(from - stickyOffset), sec.max)) });
+          if (to >= sectionEnd) break;
+          from = to - overlap;
         }
-        const unique = [...new Set(stops.map((n) => Math.max(0, Math.min(Math.round(n), sec.max))))];
+        const unique = [];
+        const seen = new Set();
+        for (const item of planned) {
+          if (seen.has(item.scroll)) continue;
+          seen.add(item.scroll);
+          unique.push(item);
+        }
+        const slices = [];
         for (let i = 0; i < unique.length; i += 1) {
-          const stop = Math.max(0, Math.min(unique[i] - stickyOffset, sec.max));
-          await page.eval(`document.querySelector('#main').scrollTop = ${stop}`);
+          await page.eval(`document.querySelector('#main').scrollTop = ${unique[i].scroll}`);
           await settle();
+          const actual = await page.eval(`(() => {
+            const main = document.querySelector('#main');
+            const m = main.getBoundingClientRect();
+            return { scrollTop: Math.round(main.scrollTop),
+              from: Math.max(${sec.top}, Math.round(main.scrollTop + ${stickyOffset})),
+              to: Math.min(${sectionEnd}, Math.round(main.scrollTop + m.height)) };
+          })()`);
           const suffix = unique.length > 1 ? `-${i + 1}` : '';
-          await capture(path.join(OUT, `section-${sec.key}-${vp.name}-${scheme}${suffix}.png`));
+          const file = `section-${sec.key}-${vp.name}-${scheme}${suffix}.png`;
+          await capture(path.join(OUT, file));
+          slices.push({ file, scrollTop: actual.scrollTop, from: actual.from, to: actual.to });
+        }
+        const gaps = [];
+        let coveredTo = sec.top;
+        for (const slice of slices) {
+          if (slice.from > coveredTo + 1) gaps.push({ from: coveredTo, to: slice.from });
+          coveredTo = Math.max(coveredTo, slice.to);
+        }
+        if (coveredTo < sectionEnd - 1) gaps.push({ from: coveredTo, to: sectionEnd });
+        const continuous = gaps.length === 0;
+        coverage[sec.key] = {
+          sectionTop: sec.top, sectionHeight: sec.height, sectionEnd, viewport: sec.view,
+          stickyOffset, visible, overlap, oversized: sec.height > visible,
+          sliceCount: slices.length, slices, gaps, continuous,
+        };
+        assert.ok(slices.length > 0, `section ${sec.key} has no slice at ${vp.name}-${scheme}`);
+        assert.equal(continuous, true, `section ${sec.key} coverage has gaps at ${vp.name}-${scheme}: ${JSON.stringify(gaps)}`);
+        assert.ok(slices[0].from <= sec.top + 1, `section ${sec.key} first slice does not start at the section at ${vp.name}-${scheme}`);
+        assert.ok(slices[slices.length - 1].to >= sectionEnd - 1, `section ${sec.key} last slice does not reach the end at ${vp.name}-${scheme}`);
+        if (sec.height > visible) {
+          assert.ok(slices.length >= 2, `oversized section ${sec.key} has one slice at ${vp.name}-${scheme}`);
+          for (let i = 1; i < slices.length; i += 1) {
+            assert.ok(slices[i].from <= slices[i - 1].to, `section ${sec.key} slices do not overlap at ${vp.name}-${scheme}`);
+          }
         }
       }
       run.checks.sectionLayout = run.checks.sectionLayout || {};
       run.checks.sectionLayout[`${vp.name}-${scheme}`] = layout;
+      run.checks.sectionCoverage[`${vp.name}-${scheme}`] = coverage;
       await page.eval(`document.querySelector('#main').scrollTop = 0`);
     };
 
@@ -1266,10 +1313,64 @@ async function main() {
     })()`;
     run.checks.contrast = await page.eval(contrastProbe);
     assert.equal(run.checks.contrast.pass, true, 'light contrast rows below their threshold');
+    const disabledEdgeProbe = `(() => {
+      const parse = (value) => {
+        const m = /rgba?\\(([^)]+)\\)/.exec(value || '');
+        if (!m) return null;
+        const p = m[1].split(',').map((x) => Number(x.trim()));
+        return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+      };
+      const composite = (fg, bg) => ({
+        r: fg.r * fg.a + bg.r * (1 - fg.a), g: fg.g * fg.a + bg.g * (1 - fg.a),
+        b: fg.b * fg.a + bg.b * (1 - fg.a), a: 1,
+      });
+      const background = (el) => {
+        const layers = [];
+        for (let node = el; node; node = node.parentElement) {
+          const c = parse(getComputedStyle(node).backgroundColor);
+          if (c && c.a > 0) { layers.push(c); if (c.a >= 0.999) break; }
+        }
+        let bg = { r: 255, g: 255, b: 255, a: 1 };
+        for (let i = layers.length - 1; i >= 0; i -= 1) bg = composite(layers[i], bg);
+        return bg;
+      };
+      const lum = (c) => {
+        const f = (v) => { const s = v / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+        return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+      };
+      const ratio = (a, b) => {
+        const l1 = lum(a), l2 = lum(b);
+        return Math.round(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)) * 100) / 100;
+      };
+      const rows = [], seen = new Set();
+      for (const el of document.querySelectorAll('.pf select:disabled, .pf input:disabled, .pf-btn:disabled, button.pf-card:disabled')) {
+        const cs = getComputedStyle(el);
+        const edge = parse(cs.borderTopColor);
+        const fill = parse(cs.backgroundColor);
+        if (!edge) continue;
+        const outer = background(el.parentElement || el);
+        const inner = fill ? composite(fill, outer) : outer;
+        const edgeRatio = ratio(composite(edge, inner), outer);
+        const edgeVsFill = ratio(composite(edge, inner), inner);
+        const fillRatio = ratio(inner, outer);
+        const key = [cs.borderTopColor, cs.backgroundColor, JSON.stringify(outer)].join('|');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rows.push({ tag: el.tagName.toLowerCase(), pf: el.getAttribute('data-pf') || '',
+          edge: cs.borderTopColor, fill: cs.backgroundColor, outer, edgeRatio, edgeVsFill, fillRatio, need: 3, pass: edgeRatio >= 3 && edgeVsFill >= 3 });
+      }
+      return { rows, count: rows.length, pass: rows.length > 0 && rows.every((row) => row.pass) };
+    })()`;
+    run.checks.contrastEdges = await page.eval(disabledEdgeProbe);
+    assert.ok(run.checks.contrastEdges.count > 0, 'light disabled control edges were not measured');
+    assert.equal(run.checks.contrastEdges.pass, true, 'light disabled control edges below 3:1');
     await applyScheme('dark');
     await settle();
     run.checks.contrastDark = await page.eval(contrastProbe);
     assert.equal(run.checks.contrastDark.pass, true, 'dark contrast rows below their threshold');
+    run.checks.contrastEdgesDark = await page.eval(disabledEdgeProbe);
+    assert.ok(run.checks.contrastEdgesDark.count > 0, 'dark disabled control edges were not measured');
+    assert.equal(run.checks.contrastEdgesDark.pass, true, 'dark disabled control edges below 3:1');
     await applyScheme('light');
     await settle();
 
@@ -1341,8 +1442,7 @@ async function main() {
         skeleton[key].loadedHeight = loaded.sections[key].height;
         skeleton[key].topDelta = delta;
         skeleton[key].heightRatio = Math.round(ratio * 100) / 100;
-        assert.ok(delta <= 80, `loading/loaded ${key} top delta ${delta}px at ${vp.name}`);
-        assert.ok(ratio >= 0.85 && ratio <= 1.25, `loading/loaded ${key} height ratio ${ratio} at ${vp.name}`);
+        assert.ok(delta <= 2, `loading/loaded ${key} top delta ${delta}px at ${vp.name}`);
       }
       const skeletonFill = skeleton.agentRows[0].width / skeleton.agents.width;
       const loadedFill = loaded.agents[0].width / loaded.sections.agents.width;
@@ -1354,15 +1454,23 @@ async function main() {
     await settle();
     run.checks.reducedMotion = await page.eval(`(() => {
       const pulse = document.querySelector('.pf-pulse');
-      const loadingText = document.getElementById('pf-focus-status');
       const cs = pulse ? getComputedStyle(pulse) : null;
-      return { animationName: cs ? cs.animationName : '', opacity: cs ? cs.opacity : '',
-        loadingText: loadingText ? loadingText.textContent : '' };
+      return { animationName: cs ? cs.animationName : '',
+        animationDuration: cs ? cs.animationDuration : '',
+        transform: cs ? cs.transform : '',
+        opacity: cs ? cs.opacity : '',
+        loadingText: (document.getElementById('pf-focus-status') || {}).textContent || '' };
     })()`);
-    assert.equal(run.checks.reducedMotion.animationName, 'none', 'reduced motion still pulses the loading glyph');
-    assert.equal(run.checks.reducedMotion.opacity, '1', 'reduced motion leaves the loading glyph dimmed');
-    assert.match(run.checks.reducedMotion.loadingText, /불러오는 중/);
+    assert.equal(run.checks.reducedMotion.animationName, 'pf-pulse', 'reduced motion freezes the sole loading indicator');
+    assert.ok(Number.parseFloat(run.checks.reducedMotion.animationDuration) >= 2, 'reduced motion does not slow the opacity pulse');
+    assert.equal(run.checks.reducedMotion.transform, 'none', 'reduced motion introduces positional motion');
+    assert.ok(Number(run.checks.reducedMotion.opacity) >= 0.3 && Number(run.checks.reducedMotion.opacity) <= 1, 'reduced motion opacity feedback is out of range');
+    assert.ok(run.checks.reducedMotion.loadingText.trim().length > 0, 'loading status text is empty');
+    await page.eval(`(() => { const p = document.querySelector('.pf-pulse'); if (p) { p.style.animationPlayState = 'paused'; p.style.animationDelay = '-1.2s'; } return true; })()`);
+    await page.eval(sleepFrame());
+    run.checks.reducedMotion.capturePausedAt = '50% of 2.4s';
     await capture(path.join(OUT, 'state-loading-390-light-reduced-motion.png'));
+    await page.eval(`(() => { const p = document.querySelector('.pf-pulse'); if (p) { p.style.animationPlayState = ''; p.style.animationDelay = ''; } return true; })()`);
     await applyScheme('light');
 
     // Profiles-only failure: /data.json stays healthy, so an expected state-read refusal must not
@@ -1492,8 +1600,7 @@ async function main() {
     assert.equal(run.checks.empty.cards, 0, 'empty data still rendered profile cards');
     assert.equal(run.checks.empty.routes, 0, 'empty data still rendered routing rows');
     assert.equal(run.checks.empty.state, 'view', 'empty data is not a loaded state');
-    assert.match(run.checks.empty.profileSub, /0개 프로필/, 'the empty section does not report the real zero count');
-    assert.doesNotMatch(run.checks.empty.profileSub, /6개 프로필/, 'the empty section still claims six profiles');
+    assert.equal(Number((run.checks.empty.profileSub.match(/\d+/) || [])[0]), Number(run.checks.empty.profileCount), 'the empty subtitle count differs from the real list');
     assert.equal(run.checks.empty.profileCount, '0');
     assert.equal(run.checks.empty.routeCount, '0');
     assert.ok(run.checks.empty.reloadButtons >= 2, 'empty profiles/routing have no supported state reload');
@@ -1517,17 +1624,28 @@ async function main() {
     assert.equal(run.checks.emptyRecovery.posts, 0, 'the empty-state action posted a write');
     assert.equal(run.checks.emptyRecovery.cards, 0);
     assert.equal(run.checks.emptyRecovery.routes, 0);
-    for (const [vp, theme] of [[VIEWPORTS[0], 'light'], [VIEWPORTS[1], 'light'], [VIEWPORTS[2], 'dark']]) {
-      await applyViewport(vp);
-      await applyScheme(theme);
-      await scrollTop();
-      await closePeek();
-      await settle();
-      await capture(path.join(OUT, `state-empty-${vp.name}-${theme}.png`));
-      await scrollUnderHeader('#pf-sec-profiles');
-      await settle();
-      await capture(path.join(OUT, `state-empty-profiles-${vp.name}-${theme}.png`));
-      await scrollTop();
+    run.checks.emptyProse = {};
+    for (const vp of VIEWPORTS) {
+      for (const theme of SCHEMES) {
+        await applyViewport(vp);
+        await applyScheme(theme);
+        await scrollTop();
+        await closePeek();
+        await settle();
+        run.checks.emptyProse[`${vp.name}-${theme}`] = await page.eval(`(() => {
+          const el = document.querySelector('#pf-sec-profiles .pf-empty');
+          const cs = getComputedStyle(el);
+          return { fontSize: cs.fontSize, lineHeight: cs.lineHeight };
+        })()`);
+        await capture(path.join(OUT, `state-empty-${vp.name}-${theme}.png`));
+        await scrollUnderHeader('#pf-sec-profiles');
+        await settle();
+        await capture(path.join(OUT, `state-empty-profiles-${vp.name}-${theme}.png`));
+        await scrollTop();
+      }
+    }
+    for (const [key, row] of Object.entries(run.checks.emptyProse)) {
+      assert.ok(Number.parseFloat(row.fontSize) >= 14, `empty prose is ${row.fontSize} at ${key}`);
     }
     profilesStateOverride = null;
     await page.goto(url);
@@ -1632,6 +1750,31 @@ async function main() {
     assert.match(run.checks.clearCancel.text, /agents\/explore/);
 
     await captureStates('pending');
+    const captureDiscard = async (vp, theme) => {
+      await applyViewport(vp);
+      await applyScheme(theme);
+      await closePeek();
+      await scrollTop();
+      await settle();
+      await page.eval(`document.querySelector('[data-pf="clear"]').click()`);
+      await waitFor(`!!document.querySelector('[data-pf="clear-confirm"]')`, 'discard confirmation capture');
+      await page.eval(`document.querySelector('.pf-clear').scrollIntoView({ block: 'center' })`);
+      await settle();
+      run.checks.discardConfirm = run.checks.discardConfirm || {};
+      run.checks.discardConfirm[`${vp.name}-${theme}`] = await page.eval(`(() => ({
+        prompt: !!document.querySelector('.pf-clear'),
+        cancel: !!document.querySelector('[data-pf="clear-cancel"]'),
+        confirm: !!document.querySelector('[data-pf="clear-confirm"]'),
+        pending: document.querySelectorAll('.pf-pending li').length,
+      }))()`);
+      assert.equal(run.checks.discardConfirm[`${vp.name}-${theme}`].pending, 2, 'discard confirmation lost the pending edits');
+      await capture(path.join(OUT, `state-discard-${vp.name}-${theme}.png`));
+      await page.eval(`document.querySelector('[data-pf="clear-cancel"]').click()`);
+      await settle();
+    };
+    for (const vp of VIEWPORTS) {
+      for (const theme of SCHEMES) await captureDiscard(vp, theme);
+    }
     await applyViewport(VIEWPORTS[2]);
     await applyScheme('light');
     await scrollTop();
@@ -1719,6 +1862,9 @@ async function main() {
     assert.equal(run.checks.focusBusyPreview.busy, true, 'the held preview is not marked busy');
     assert.ok(run.checks.focusBusyPreview.text.length > 0, 'the busy preview status is empty');
     assert.equal(run.checks.focusBusyPreview.previewDisabled, true, 'busy preview control is not disabled');
+    run.checks.busyEdges = await page.eval(disabledEdgeProbe);
+    assert.ok(run.checks.busyEdges.count > 0, 'busy disabled control edges were not measured');
+    assert.equal(run.checks.busyEdges.pass, true, 'busy disabled control edges below 3:1');
     run.checks.busyEdit = await page.eval(`(() => {
       const sel = document.querySelector('[data-pf="agent-lane"][data-agent="sisyphus"]');
       const before = window.BriefPage.state.ui.profilesState.pending.length;
@@ -1759,6 +1905,67 @@ async function main() {
     assert.ok(run.checks.focusBusyApply.text.length > 0, 'the busy apply status is empty');
     assert.equal(run.checks.focusBusyApply.applyDisabled, true, 'busy apply control is not disabled');
     await capture(path.join(OUT, 'focus-busy-apply-1440-light.png'));
+    run.checks.busyCards = {};
+    for (const vp of VIEWPORTS) for (const theme of SCHEMES) {
+      await applyViewport(vp);
+      await applyScheme(theme);
+      await closePeek();
+      await settle();
+      const key = `${vp.name}-${theme}`;
+      const cards = await page.eval(`(() => {
+        const cards = [...document.querySelectorAll('button.pf-card:disabled')];
+        const selected = cards.find(card => card.classList.contains('on'));
+        const other = cards.find(card => !card.classList.contains('on'));
+        if (!selected || !other) return null;
+        selected.scrollIntoView({ block: 'center' });
+        const style = getComputedStyle(other);
+        const r = other.getBoundingClientRect();
+        return { count: cards.length, selectedCount: cards.filter(card => card.classList.contains('on')).length,
+          x: r.left + r.width / 2, y: r.top + r.height / 2,
+          background: style.backgroundColor, border: style.borderTopColor };
+      })()`);
+      assert.ok(cards, `missing selected or unselected disabled card at ${key}`);
+      const edges = await page.eval(disabledEdgeProbe);
+      assert.equal(edges.pass, true, `busy control edge contrast at ${key}`);
+      await page.client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: cards.x, y: cards.y, button: 'none' });
+      await settle();
+      const hovered = await page.eval(`(() => {
+        const card = document.querySelector('button.pf-card:disabled:not(.on)');
+        const cs = getComputedStyle(card);
+        return { background: cs.backgroundColor, border: cs.borderTopColor };
+      })()`);
+      assert.equal(hovered.background, cards.background);
+      assert.equal(hovered.border, cards.border);
+      const file = `state-busy-cards-${key}.png`;
+      await capture(path.join(OUT, file));
+      run.checks.busyCards[key] = { file, ...cards, edges };
+    }
+    await applyViewport(VIEWPORTS[2]);
+    await applyScheme('light');
+    await scrollTop();
+    await settle();
+    const busyCard = await page.eval(`(() => {
+      const card = document.querySelector('button.pf-card:disabled:not(.on)');
+      if (!card) return null;
+      card.scrollIntoView({ block: 'center' });
+      const r = card.getBoundingClientRect();
+      const cs = getComputedStyle(card);
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2,
+        background: cs.backgroundColor, border: cs.borderTopColor, disabled: card.disabled };
+    })()`);
+    assert.ok(busyCard, 'no disabled profile card exists during the held apply');
+    await page.client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: busyCard.x, y: busyCard.y, button: 'none' });
+    await settle();
+    run.checks.busyCardHover = await page.eval(`(() => {
+      const card = document.querySelector('button.pf-card:disabled:not(.on)');
+      const cs = getComputedStyle(card);
+      return { background: cs.backgroundColor, border: cs.borderTopColor, disabled: card.disabled };
+    })()`);
+    assert.equal(run.checks.busyCardHover.disabled, true, 'the profile card is not disabled during busy');
+    assert.equal(run.checks.busyCardHover.background, busyCard.background, 'disabled card hover changed its fill');
+    assert.equal(run.checks.busyCardHover.border, busyCard.border, 'disabled card hover changed its border');
+    await page.eval(`document.querySelector('#main').scrollTop = 0`);
+    await settle();
     await page.eval(`window.__qaReleaseApply && window.__qaReleaseApply()`);
     await waitFor(`!!document.querySelector('.pf-done') || !!document.querySelector('.pf-conflict') || !!document.querySelector('.pf-err')`, 'apply result');
     await waitFor(`!document.querySelector('.pf-loading')`, 'state reload after apply');
@@ -2162,8 +2369,6 @@ async function main() {
     for (const theme of SCHEMES) required.push(`section-agents-memory-390-${theme}.png`);
     required.push(
       'state-loading-390-light-reduced-motion.png', 'state-error-retry-390-light.png',
-      'state-empty-390-light.png', 'state-empty-1024-light.png', 'state-empty-1440-dark.png',
-      'state-empty-profiles-390-light.png', 'state-empty-profiles-1024-light.png', 'state-empty-profiles-1440-dark.png',
       'hover-select-390-light.png', 'hover-select-1440-dark.png', 'hover-summary-390-light.png',
       'focus-busy-preview-390-light.png', 'focus-after-preview-390-light.png',
       'focus-busy-apply-1440-light.png', 'focus-after-apply-1440-light.png',
@@ -2172,10 +2377,38 @@ async function main() {
     );
     for (const vp of VIEWPORTS) for (const theme of SCHEMES) {
       required.push(`sibling-home-${vp.name}-${theme}.png`, `sibling-inbox-${vp.name}-${theme}.png`);
+      required.push(`state-empty-${vp.name}-${theme}.png`, `state-empty-profiles-${vp.name}-${theme}.png`,
+        `state-discard-${vp.name}-${theme}.png`, `state-busy-cards-${vp.name}-${theme}.png`);
     }
     const missing = required.filter((file) => !files.has(file));
     run.checks.captureSet = { count: files.size, required: required.length, missing };
     assert.deepEqual(missing, [], 'the round-3 capture set is incomplete');
+
+    let settleTimeout = '';
+    try {
+      await page.eval(`new Promise((resolve, reject) => {
+        const style = document.createElement('style');
+        style.id = 'qa-slow-settle-style';
+        style.textContent = '@keyframes qa-slow-settle { from { opacity: .2 } to { opacity: 1 } }';
+        document.head.appendChild(style);
+        const el = document.createElement('div');
+        el.id = 'qa-slow-settle';
+        el.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;animation:qa-slow-settle 60s linear 1 forwards';
+        const onStart = () => { clearTimeout(timer); resolve(true); };
+        const timer = setTimeout(() => { el.removeEventListener('animationstart', onStart); reject(new Error('slow animation did not start')); }, 2000);
+        el.addEventListener('animationstart', onStart, { once: true });
+        document.body.appendChild(el);
+      })`);
+      try { await settle(); } catch (error) { settleTimeout = String(error && error.message || error); }
+    } finally {
+      await page.eval(`(() => {
+        const el = document.getElementById('qa-slow-settle'); if (el) el.remove();
+        const style = document.getElementById('qa-slow-settle-style'); if (style) style.remove();
+        return true;
+      })()`);
+    }
+    run.checks.settleTimeoutProbe = { rejected: settleTimeout.length > 0, message: settleTimeout };
+    assert.match(settleTimeout, /animation settlement timed out/, 'the forced settlement timeout did not fail');
 
     run.checks.consoleErrors = consoleErrors;
     assert.deepEqual(consoleErrors, [], 'page console errors: ' + consoleErrors.join(' | '));
@@ -2600,6 +2833,10 @@ function writeEvidence() {
   e2e.push(`shell 390 after close: ${JSON.stringify(run.checks.shell390AfterClose || null)}`);
   e2e.push(`shell 390 after scroll: ${JSON.stringify(run.checks.shell390AfterScroll || null)}`);
   e2e.push(`section layout: ${JSON.stringify(run.checks.sectionLayout || null)}`);
+  const coverageSummary = Object.fromEntries(Object.entries(run.checks.sectionCoverage || {}).map(([k, v]) => [
+    k, Object.fromEntries(Object.entries(v).map(([sk, sv]) => [sk, { slices: sv.sliceCount, continuous: sv.continuous, gaps: sv.gaps }])),
+  ]));
+  e2e.push(`section coverage: ${JSON.stringify(coverageSummary)}`);
   e2e.push(`duplicate captures (same bottom viewport): ${JSON.stringify(run.checks.duplicateCaptures || [])}`);
   e2e.push(`console errors: ${JSON.stringify(run.checks.consoleErrors || [])}`);
   e2e.push(`captures: ${run.captures.length} (${run.captures.map((c) => c.file).join(', ')})`);

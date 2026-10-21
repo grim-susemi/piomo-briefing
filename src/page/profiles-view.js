@@ -1192,7 +1192,7 @@
       } else if (act === 'clear-confirm') {
         c.clear();
       } else if (act === 'drop') {
-        c.drop(num(t.getAttribute('data-index')));
+        c.drop(t.getAttribute('data-index'));
       } else if (act === 'reload') {
         // An inline error retry re-reads in place; the conflict recovery keeps the full reload hand-off.
         if (typeof t.closest === 'function' && t.closest('.pf-error')) {
