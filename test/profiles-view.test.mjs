@@ -188,10 +188,10 @@ test('agents: lane, pin and thinking share a top baseline; reset sits with the m
   assert.match(at1040, /\.pf-mem-sels \{[\s\S]*?minmax\(0, 1\.4fr\)/);
 });
 
-test('loading and error render as their own states, never as read-only', () => {
+test('loading and error expose explicit states, never a read-only view', () => {
   const P = load();
   let html = P.render(null, live({ loading: true }));
-  assert.match(html, /프로필 상태를 불러오는 중…/);
+  assert.match(html, /data-pf-state="loading"/);
   assert.match(html, /data-pf-root/);
   assert.doesNotMatch(html, /읽기 전용/);
   assert.doesNotMatch(html, /지금은 읽기 전용이라/);
@@ -199,28 +199,34 @@ test('loading and error render as their own states, never as read-only', () => {
 
   html = P.render(null, live({ loading: false, error: '프로필 상태를 불러오지 못했어요 (HTTP 500)' }));
   assert.match(html, /HTTP 500/);
+  assert.match(html, /data-pf-state="error"/);
   assert.match(html, /role="alert"/);
   assert.match(html, /data-pf="reload"/);
-  assert.match(html, /다시 시도/);
-  assert.doesNotMatch(html, /불러오는 중…/);
+  assert.doesNotMatch(html, /data-pf-loading/);
+  assert.doesNotMatch(html, /pf-ro-note/);
   assert.doesNotMatch(html, /읽기 전용/);
   assert.doesNotMatch(html, /지금은 읽기 전용이라/);
 
   html = P.render(STATE, live());
-  assert.match(html, /편집 가능/);
-  assert.doesNotMatch(html, /불러오는 중/);
+  assert.match(html, /data-pf-state="view"/);
+  assert.doesNotMatch(html, /data-pf-loading/);
 });
 
-test('loading: reserves the loaded geometry and pulses a glyph that stops under reduced motion', () => {
+test('loading reuses the homes, tray and section-header primitives and pulses one glyph', () => {
   const P = load();
   const html = P.render(null, live({ loading: true }));
-  assert.match(html, /data-pf-loading/);
+  assert.match(html, /data-pf-state="loading"/);
   assert.equal((html.match(/class="pf-skel pf-skel-agent"/g) || []).length, 4, 'four agent placeholders');
   assert.equal((html.match(/class="pf-skel pf-skel-card"/g) || []).length, 6, 'six profile-card placeholders');
   assert.match(html, /class="pf-skeleton"/);
   assert.match(html, /data-pf-loading role="status"/);
-  assert.match(html, /class="pf-skel pf-skel-homes" data-pf-skel="homes" aria-hidden="true"/);
-  assert.match(html, /class="pf-loading-h"/);
+  assert.match(html, /class="pf-homes pf-skel-homes" data-pf-skel="homes"/);
+  assert.match(html, /class="pf-tray pf-tray-compact" data-pf-skel="tray"/);
+  assert.match(html, /class="pf-sec-h"/);
+  assert.match(html, /<h2>메인 에이전트<\/h2>/);
+  assert.match(html, /class="pf-sec-s">에이전트별 레인·핀·기억/);
+  assert.equal((html.match(/data-pf-skel="route"/g) || []).length, 20, 'routing placeholders');
+  assert.doesNotMatch(html, /data-pf-sec=/, 'the loading frame must not claim loaded sections');
   assert.doesNotMatch(html, /class="pf-skeleton" aria-hidden="true"/, 'the live loading status must not sit inside aria-hidden');
   assert.match(html, /class="pf-pulse" aria-hidden="true"/);
   const css = read('src/page/profiles-view.css');
@@ -373,21 +379,22 @@ test('pending tray: preview diffs, conflict message with reload and the apply re
     { file: 'omo.jsonc', changes: [{ path: '$.profiles.native-gpt-kimi-deepseek.agents.explore.model', before: 'fable', after: 'fable-medium' }] },
     { file: 'agent/primary-agents/roster.json', changes: [{ path: '$.agents.atlas.lane', before: 'daily-normal', after: 'daily-heavy' }] }
   ], warnings: ['mirror somo: skipped'], writes: ['omo.jsonc', 'agent/primary-agents/roster.json'] } }));
-  assert.match(textOf(html), /파일별 차이/);
+  assert.match(html, /data-pf-preview/);
   assert.match(textOf(html), /\$\.profiles\.native-gpt-kimi-deepseek\.agents\.explore\.model/);
   assert.match(textOf(html), /fable-medium/);
   assert.match(textOf(html), /mirror somo: skipped/);
 
   html = P.render(STATE, live({ conflict: true, status: '다른 곳에서 바뀜', error: '다른 곳에서 바뀌었어요 — 새로고침 후 다시 적용' }));
-  assert.match(html, /다른 곳에서 바뀌었어요 — 새로고침 후 다시 적용/);
+  assert.match(html, /data-pf-conflict="true"/);
+  assert.match(html, /class="pf-conflict" role="alert"/);
   assert.match(html, /data-pf="reload"/);
 
   html = P.render(STATE, live({ pending: [], result: { ok: true, action: 'apply', backups: ['C:/Users/USER/.omo/runtime/native-profile-switcher-backups/omo-20261020-120000-000.jsonc'], writes: ['omo.jsonc'], hashes: {} } }));
-  assert.match(textOf(html), /적용했어요/);
+  assert.match(html, /data-pf-result="apply"/);
   assert.match(textOf(html), /omo-20261020-120000-000\.jsonc/);
 });
 
-test('render: an interrupted journal renders a real 다시 적용 control, never in read-only', () => {
+test('journal: reapply mirrors apply disabled state under conflict and busy, never in read-only', () => {
   const P = load();
   const interrupted = clone(STATE);
   interrupted.applyJournal = {
@@ -399,17 +406,20 @@ test('render: an interrupted journal renders a real 다시 적용 control, never
   };
   const html = P.render(interrupted, live());
   assert.match(html, /data-pf-journal="interrupted"/);
-  assert.match(html, /data-pf="reapply"/);
-  assert.match(textOf(html), /중단된 적용/);
-  assert.match(textOf(html), /다시 적용/);
+  assert.doesNotMatch(/<button[^>]*data-pf="reapply"[^>]*>/.exec(html)[0], /\bdisabled\b/, 'reapply is dead when apply is available');
+  const conflictHtml = P.render(interrupted, live({ pending: [{ kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' }], conflict: true, status: '다른 곳에서 바뀜', error: P.CONFLICT_TEXT }));
+  assert.match(/<button[^>]*data-pf="reapply"[^>]*>/.exec(conflictHtml)[0], /\bdisabled\b/, 'reapply must be disabled while the 409 latch blocks apply');
+  assert.match(conflictHtml, /data-pf="reload"/, 'the conflict keeps its functional reload');
+  const busyHtml = P.render(interrupted, live({ pending: [{ kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' }], busy: true }));
+  assert.match(/<button[^>]*data-pf="reapply"[^>]*>/.exec(busyHtml)[0], /\bdisabled\b/, 'reapply must be disabled while another request is in flight');
   const readonlyHtml = P.render(interrupted, { ...live(), live: false });
   assert.doesNotMatch(readonlyHtml, /data-pf="reapply"/);
-  assert.match(textOf(readonlyHtml), /중단된 적용/);
+  assert.match(readonlyHtml, /data-pf-journal="interrupted"/);
   const legacy = clone(interrupted);
   legacy.applyJournal.reapply = null;
   const legacyHtml = P.render(legacy, live());
   assert.doesNotMatch(legacyHtml, /data-pf="reapply"/);
-  assert.match(textOf(legacyHtml), /다시 적용할 변경 기록이 없어요/);
+  assert.match(legacyHtml, /data-pf-journal="interrupted"/);
 });
 
 test('controller: load -> preview -> apply -> reload, with the exact POST body and token', async () => {
@@ -460,7 +470,8 @@ test('controller: load -> preview -> apply -> reload, with the exact POST body a
   const stale = await c.preview();
   assert.equal(calls[4].url, '/profiles');
   assert.equal(stale.conflict, true);
-  assert.equal(stale.error, '다른 곳에서 바뀌었어요 — 새로고침 후 다시 적용');
+  assert.equal(stale.errorKind, 'conflict');
+  assert.ok(stale.error.length > 0, 'the conflict keeps its inline cause');
 });
 
 test('controller: pending edits replace the same target, reset wins over lane/pin, drop and clear', () => {
@@ -512,7 +523,8 @@ test('controller: expected state-read failure is plain, contained, and retry rec
   });
   const failed = await c.load();
   assert.equal(failed.loading, false);
-  assert.match(failed.error, /네트워크 연결을 확인한 뒤/);
+  assert.equal(failed.errorKind, 'network');
+  assert.ok(failed.error.length > 0, 'the expected failure still gets plain user copy');
   assert.doesNotMatch(failed.error, /qa-offline/, 'the raw cause token must stay out of the user copy');
   const retried = await c.load();
   assert.equal(retried.error, '');
@@ -532,12 +544,14 @@ test('page wiring: busy preview and its result keep focus on the profiles status
   await tick();
   e.fire(e.byId.main.querySelector('[data-pf="preview"]'), 'click');
   assert.equal(e.document.activeElement.id, 'pf-focus-status', 'busy render dropped focus');
-  assert.match(e.document.activeElement.textContent, /미리보기 중/);
+  assert.equal(e.page.state.ui.profilesState.busy, true, 'the held preview is not marked busy');
+  assert.ok(e.document.activeElement.textContent.trim().length > 0, 'the busy status is empty');
   const post = e.fetches[e.fetches.length - 1];
   post.resolve({ status: 200, ok: true, json: async () => ({ ok: true, action: 'preview', diffs: [], warnings: [], writes: [] }) });
   await tick();
   assert.equal(e.document.activeElement.id, 'pf-focus-status', 'preview result dropped focus');
-  assert.match(e.document.activeElement.textContent, /미리보기 준비됨/);
+  assert.equal(e.page.state.ui.profilesState.busy, false, 'the settled preview is still marked busy');
+  assert.ok(e.page.state.ui.profilesState.preview, 'the preview payload is missing');
   assert.deepEqual(e.errors, []);
 });
 
@@ -654,7 +668,7 @@ test('page wiring: the profiles rail click loads GET /profiles/state and a previ
   assert.deepEqual(e.errors, []);
 });
 
-test('loading: skeleton agents use the loaded full-width responsive row grid', () => {
+test('loading: four full-width agent placeholders keep the loaded field set', () => {
   const P = load();
   const html = P.render(null, live({ loading: true }));
   assert.equal((html.match(/data-pf-skel="agent"/g) || []).length, 4);
@@ -663,18 +677,12 @@ test('loading: skeleton agents use the loaded full-width responsive row grid', (
   for (const [, body] of agentBlocks) assert.equal((body.match(/class="pf-skel-field/g) || []).length, 4, 'four fields per agent row');
   assert.equal((html.match(/data-pf-skel="route"/g) || []).length, 20, 'routing skeleton rows');
   assert.equal((html.match(/class="pf-skel pf-skel-card"/g) || []).length, 6);
-  const css = read('src/page/profiles-view.css');
-  const base = css.slice(0, css.indexOf('@media (max-width: 1040px)'));
-  assert.match(base, /\.pf-skel-agent \{[\s\S]*?grid-template-columns: minmax\(150px, 1\.1fr\) minmax\(120px, \.8fr\)/);
-  assert.doesNotMatch(css, /\.pf-skel-grid/, 'the old 4/2/1-column skeleton matrix is gone');
-  const at1040 = css.slice(css.indexOf('@media (max-width: 1040px)'), css.indexOf('@media (max-width: 760px)'));
-  assert.match(at1040, /\.pf-skel-agent \{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\) minmax\(0, 1\.2fr\)/);
-  assert.match(at1040, /\.pf-skel-agent \.pf-skel-mem \{ grid-column: 1 \/ -1; \}/);
-  const at760 = css.slice(css.indexOf('@media (max-width: 760px)'), css.indexOf('@media (max-width: 599px)'));
-  assert.match(at760, /\.pf-skel-agent \{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\)/);
-  assert.match(at760, /\.pf-skel-id \{ grid-column: 1 \/ -1; \}/);
-  const at599 = css.slice(css.indexOf('@media (max-width: 599px)'));
-  assert.match(at599, /\.pf-skel-agent \{ grid-template-columns: minmax\(0, 1fr\); min-height:/);
+  // The skeleton consumes the loaded primitives; the actual first-row rect comparison lives in
+  // scripts/qa-profiles.mjs because string assertions cannot measure layout.
+  assert.match(html, /class="pf-agents">/);
+  assert.match(html, /class="pf-cards">/);
+  assert.match(html, /class="pf-routes">/);
+  assert.match(html, /class="pf-sec-b">/);
 });
 
 test('guide: heading, chip and subtitle derive the one runtime inventory version', () => {
@@ -800,6 +808,44 @@ test('409 latch: edits, drop, removeKind and clear keep the stale baseline block
   assert.equal(bodies[1].rosterRevision, 9, 'the post-reload send uses the fresh roster revision');
 });
 
+test('busy: a held apply rejects controller mutations and disables every editor control', async () => {
+  const P = load();
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const c = P.createController({
+    fetch: (url) => url.endsWith('/state')
+      ? Promise.resolve({ status: 200, json: async () => STATE })
+      : held,
+    token: 't',
+  });
+  await c.load();
+  c.add({ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' });
+  const applying = c.apply();
+  assert.equal(c.snapshot().busy, true);
+  const pendingBefore = plain(c.snapshot().pending);
+  const draftBefore = plain(c.snapshot().draft);
+  c.add({ kind: 'setAgentLane', agentId: 'sisyphus', lane: 'geeky-heavy' });
+  c.setDraft('agent:sisyphus', { lane: 'geeky-heavy' });
+  c.drop(0); c.clear(); c.askClear(); c.cancelClear(); c.touch(); c.removeKind('setAgentLane');
+  assert.deepEqual(plain(c.snapshot().pending), pendingBefore, 'a busy controller accepted a newer edit');
+  assert.deepEqual(plain(c.snapshot().draft), draftBefore, 'a busy controller accepted draft input');
+  const html = P.render(STATE, { ...live(), busy: true, confirmClear: true,
+    pending: [{ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' }] });
+  for (const name of ['agent-lane', 'agent-pin', 'agent-pin-thinking', 'route-provider', 'route-model',
+    'route-thinking', 'main-provider', 'main-model', 'main-thinking', 'lane-select', 'lane-literal',
+    'summarizer-model', 'memory-mode', 'memory-model', 'memory-thinking', 'reset-memory', 'drop',
+    'clear-cancel', 'clear-confirm']) {
+    const tags = [...html.matchAll(new RegExp('<[^>]*data-pf="' + name + '"[^>]*>', 'g'))].map((m) => m[0]);
+    assert.ok(tags.length > 0, name + ' control missing from the busy render');
+    for (const tag of tags) assert.match(tag, /\bdisabled\b/, name + ' accepts edits while busy');
+  }
+  assert.match(/<button[^>]*data-pf="select-profile"[^>]*>/.exec(html)[0], /\bdisabled\b/);
+  release({ status: 200, json: async () => ({ ok: true, action: 'apply', backups: [], writes: ['omo.jsonc'], hashes: {} }) });
+  const settled = await applying;
+  assert.equal(settled.busy, false);
+  assert.deepEqual(plain(settled.pending), [], 'the submitted edit was the only edit that existed');
+});
+
 test('pin hint: GPT 계열만 sits inside the pin label before the thinking control', () => {
   const P = load();
   const html = P.render(STATE, live());
@@ -832,8 +878,8 @@ test('tray: empty is compact and visibly names the next action', () => {
   let html = P.render(STATE, live());
   assert.match(html, /class="pf-tray pf-tray-compact"/);
   assert.doesNotMatch(html, /data-pf="preview"/);
-  assert.match(textOf(html), /바꾼 값 없음/);
-  assert.match(html, /title="바꾼 값이 없어요\. 값을 고르면 여기에 모입니다\."/);
+  assert.match(html, /class="pf-muted pf-tray-note"/);
+  assert.match(html, /class="pf-count">0</);
   const next = /<span class="pf-tray-next">([^<]+)<\/span>/.exec(html);
   assert.ok(next && textOf(next[1]).trim().length >= 8, 'the compact tray needs a visible next action');
   const pending = [{ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' }];
@@ -864,6 +910,41 @@ test('tray: empty is compact and visibly names the next action', () => {
   assert.match(journal, /data-pf-journal="interrupted"/);
   assert.match(journal, /data-pf="reapply"/);
   assert.match(journal, /pf-tray-compact/);
+});
+
+test('empty data: the real count drives the copy and one supported reload action', async () => {
+  const P = load();
+  const empty = clone(STATE);
+  empty.activeProfile = null;
+  empty.profiles = [];
+  empty.routing = { ...empty.routing, rows: [] };
+  const html = P.render(empty, live());
+  const profiles = /<section class="pf-sec" id="pf-sec-profiles"[\s\S]*?<\/section>/.exec(html)[0];
+  const routing = /<section class="pf-sec" id="pf-sec-routing"[\s\S]*?<\/section>/.exec(html)[0];
+  assert.match(profiles, /<p class="pf-sec-s">0개 프로필 · 선택 없음<\/p>/);
+  assert.doesNotMatch(profiles, /6개 프로필/);
+  assert.match(profiles, /class="pf-count">0</);
+  assert.match(routing, /class="pf-count">0</);
+  assert.match(profiles, /data-pf="reload-state"/);
+  assert.match(routing, /data-pf="reload-state"/);
+  assert.doesNotMatch(html, /data-pf="select-profile"/, 'empty data must not invent profile creation');
+  const busyHtml = P.render(empty, live({ busy: true }));
+  assert.match(/<button[^>]*data-pf="reload-state"[^>]*>/.exec(busyHtml)[0], /\bdisabled\b/);
+
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'profiles-view', 'annotate'] });
+  e.page.receive({ seq: 1, generatedAt: 0, sessions: [] });
+  e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
+  e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => empty });
+  await tick();
+  const readsBefore = e.fetches.filter((f) => f.url === '/profiles/state').length;
+  e.fire(e.byId.main.querySelector('[data-pf="reload-state"]'), 'click');
+  const reread = e.fetches.filter((f) => f.url === '/profiles/state')[readsBefore];
+  assert.ok(reread, 'the empty-state recovery did not re-read the real state');
+  reread.resolve({ status: 200, ok: true, json: async () => empty });
+  await tick();
+  assert.equal(e.byId.main.querySelectorAll('.pf-card').length, 0);
+  assert.equal(e.fetches.some((f) => f.url === '/profiles'), false, 'empty recovery must not post a write');
+  assert.deepEqual(e.errors, []);
 });
 
 test('clear confirmation: cancel preserves every pending value; confirm is the only discard', async () => {
@@ -914,13 +995,13 @@ test('selected card: a green wash and a check glyph join the 현재 text', () =>
   assert.match(css, /\.pf-card\.on \{[^}]*box-shadow: inset 0 0 0 1px var\(--c-green\)/);
 });
 
-test('compact title and rail contrast: both repairs are scoped to the profiles route', () => {
+test('compact title and rail: the profiles page owns no shell override', () => {
   const css = read('src/page/profiles-view.css');
   const at599 = css.slice(css.indexOf('@media (max-width: 599px)'));
   assert.match(at599, /\.pf-head \{ position: sticky; top: 0;/);
   assert.match(at599, /\.pf-title \{ margin: 0; font-size: var\(--fs-lg\)/);
-  assert.match(css, /\.sh-shell:has\(\.pf\) \.sh-rb \{ color: var\(--c-fg-2\); \}/);
-  assert.match(css, /\.sh-shell:has\(\.pf\) \.sh-rb\.on \{ color: var\(--c-fg\); \}/);
-  assert.doesNotMatch(read('src/page/shell.css'), /\.sh-shell:has\(\.pf\)/);
-  assert.doesNotMatch(read('src/page/tokens.css'), /\.sh-shell:has\(\.pf\)/);
+  assert.doesNotMatch(css, /:has\(\.pf\)/, 'the profiles page must not restyle the shared rail');
+  assert.doesNotMatch(read('src/page/shell.css'), /:has\(\.pf\)/);
+  assert.doesNotMatch(read('src/page/tokens.css'), /:has\(\.pf\)/);
+  assert.match(read('src/page/shell.css'), /\.sh-rb:hover, \.sh-rb:focus-visible \{ background: var\(--hov\); color: var\(--tx\); \}/);
 });

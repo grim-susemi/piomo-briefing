@@ -97,11 +97,10 @@
 .pf-hint { font-size: var(--fs-2xs); }
 .pf-empty { margin: 0; display: flex; align-items: baseline; gap: var(--sp-1); }
 .pf-ro-note { padding: var(--sp-2) 0 0; }
-/* The loading frame uses the loaded view's own row primitives (homes, compact tray, four full-width
- * agent rows, six cards and the routing rows) so the loaded view lands in the same place. The glyph
- * pulses only while the request is pending; the reduced-motion rule below stops it. */
+/* The loading frame uses the loaded view's own top-level primitives. The homes strip, compact tray
+ * and section headers carry the same padding, type and wrapping; the first agent row is measured
+ * against the loaded row by the browser QA after document.fonts.ready. */
 .pf-loading { --pf-pulse-dur: 1.6s; display: grid; gap: var(--sp-3); padding: 0; }
-.pf-loading-h { display: flex; align-items: center; gap: var(--sp-1); margin: 0; color: var(--c-fg-3); font-size: var(--fs-sm); }
 .pf-pulse { display: inline-flex; animation: pf-pulse var(--pf-pulse-dur) var(--ease-out) infinite; }
 @keyframes pf-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
 .pf-skeleton { display: grid; gap: var(--sp-3); }
@@ -110,12 +109,13 @@
 .pf-skel-line-t { width: 38%; height: 12px; }
 .pf-skel-line-s { width: 72%; height: 9px; }
 .pf-skel-line-c { width: 100%; height: var(--ctl-h); border-radius: var(--r-lg); background: var(--c-line); opacity: 1; }
-.pf-skel-homes { min-height: var(--sp-12); }
-.pf-skel-tray { display: flex; align-items: center; min-height: calc(var(--sp-12) - var(--sp-2)); padding: var(--sp-2) var(--sp-3); border-color: var(--c-amber-line); }
+.pf-skel-homes { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2) var(--sp-3); }
+.pf-skel-home { min-height: 19px; align-items: center; }
+.pf-skel-home code { display: flex; flex: 1 1 auto; align-items: center; min-width: 0; }
+.pf-skel-home-line { width: min(100%, 56ch); height: 10px; }
+.pf-skel-active { min-height: 21px; align-items: center; }
+.pf-skel-active .pf-skel-line { width: 150px; height: 10px; }
 .pf-skel-sec { border: var(--hair) solid var(--c-line); border-radius: var(--r-xl); background: var(--c-elev); box-shadow: var(--shadow-card); }
-.pf-skel-sec-h { display: grid; gap: var(--sp-1); padding: var(--sp-3) var(--sp-4) var(--sp-2); border-bottom: var(--hair) solid var(--c-line-soft); }
-.pf-skel-sec-b { padding: var(--sp-3) var(--sp-4) var(--sp-4); }
-.pf-skel-agents, .pf-skel-routes { display: grid; gap: var(--sp-2); }
 .pf-skel-agent {
   display: grid;
   grid-template-columns: minmax(150px, 1.1fr) minmax(120px, .8fr) minmax(190px, 1.4fr) minmax(180px, 1.2fr);
@@ -128,7 +128,6 @@
 }
 .pf-skel-field { display: grid; gap: 2px; min-width: 0; }
 .pf-skel-pin { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .8fr); gap: var(--sp-1); }
-.pf-skel-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
 .pf-skel-card { display: grid; gap: var(--sp-1); min-height: calc(var(--sp-12) * 4); padding: var(--sp-3); background: var(--c-main); }
 .pf-skel-route {
   display: grid;
@@ -141,6 +140,10 @@
   background: var(--c-main);
 }
 .pf-skel-route-sels { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.8fr) minmax(0, .7fr); gap: var(--sp-1); }
+@media (min-width: 600px) {
+  .pf-skel-homes { grid-template-columns: minmax(0, 1fr) auto; }
+  .pf-skel-home:nth-child(3) { grid-column: 1 / -1; }
+}
 .pf-error {
   display: flex;
   flex-wrap: wrap;
@@ -155,6 +158,8 @@
   background: var(--c-red-tint);
 }
 .pf-error .pf-err { flex: 1 1 12ch; min-width: 0; overflow-wrap: anywhere; }
+.pf-empty-state { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.pf-empty-state .pf-empty { flex: 1 1 24ch; }
 .pf-dash { color: var(--c-fg-4); }
 .pf-ro-val { min-width: 0; overflow-wrap: anywhere; color: var(--c-fg); font-size: var(--fs-sm); }
 .pf-warnings { display: grid; gap: var(--sp-1); }
@@ -442,10 +447,7 @@ button.pf-card:active { background: var(--fill-press); border-color: var(--c-lin
 .pf-nav-t { min-width: 0; overflow-wrap: anywhere; }
 .pf-nav-warn { margin: var(--sp-1) var(--sp-1) 0; color: var(--c-red); font-size: var(--fs-xs); }
 
-/* B1 rail contrast repair: the shared rail's inactive glyph token is below 3:1 in this build.
- * The rule is scoped to the profiles route by :has(.pf); every other board view keeps shell.css. */
-.sh-shell:has(.pf) .sh-rb { color: var(--c-fg-2); }
-.sh-shell:has(.pf) .sh-rb:hover, .sh-shell:has(.pf) .sh-rb:focus-visible, .sh-shell:has(.pf) .sh-rb.on { color: var(--c-fg); }
+/* The rail keeps the shared shell treatment on every route; the profiles page owns no override. */
 
 @media (max-width: 1040px) {
   .pf-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -456,7 +458,6 @@ button.pf-card:active { background: var(--fill-press); border-color: var(--c-lin
   .pf-skel-agent { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr); min-height: calc(var(--sp-12) * 4); }
   .pf-skel-agent .pf-skel-mem { grid-column: 1 / -1; }
   .pf-skel-pin { grid-template-columns: minmax(0, 1fr); }
-  .pf-skel-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pf-skel-route { grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.6fr); min-height: calc(var(--sp-12) * 4); }
   .pf-skel-route-sels { grid-template-columns: minmax(0, 1fr); }
   .pf-skel-rec { grid-column: 1 / -1; }
@@ -478,11 +479,9 @@ button.pf-card:active { background: var(--fill-press); border-color: var(--c-lin
   .pf-skel-agent { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: calc(var(--sp-12) * 5); }
   .pf-skel-id { grid-column: 1 / -1; }
   .pf-skel-agent .pf-skel-mem { grid-column: 1 / -1; }
-  .pf-skel-cards { grid-template-columns: minmax(0, 1fr); }
   .pf-skel-route { grid-template-columns: minmax(0, 1fr); min-height: calc(var(--sp-12) * 5); }
   .pf-skel-route-sels { grid-template-columns: minmax(0, 1fr); }
   .pf-skel-rec { grid-column: auto; }
-  .pf-skel-sec-b { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
   .pf-sec-b { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
 }
 @media (max-width: 599px) {
@@ -503,11 +502,12 @@ button.pf-card:active { background: var(--fill-press); border-color: var(--c-lin
   .pf-sub { margin-top: 2px; }
   .pf-title { margin: 0; font-size: var(--fs-lg); line-height: 1.3; white-space: nowrap; }
   .pf-head-r { flex: 0 0 auto; max-width: 100%; margin-left: auto; }
-  .pf-skel-homes { min-height: calc(var(--sp-12) * 2); }
+  .pf-skel-homes { gap: 2px; }
+  .pf-skel-home { min-height: 23px; }
   .pf-homes { display: grid; gap: 2px; }
   .pf-home { display: flex; flex-wrap: nowrap; align-items: baseline; max-width: 100%; }
   .pf-home code { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .pf-skel-agent { grid-template-columns: minmax(0, 1fr); min-height: calc(var(--sp-12) * 8); }
+  .pf-skel-agent { grid-template-columns: minmax(0, 1fr); min-height: calc(var(--sp-12) * 7 + var(--sp-6)); }
   .pf-skel-card { min-height: calc(var(--sp-12) * 5); }
   .pf-skel-id, .pf-skel-agent .pf-skel-mem { grid-column: auto; }
   .pf-skel-route { min-height: calc(var(--sp-12) * 7); }

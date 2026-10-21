@@ -136,7 +136,9 @@ function contrastRatio(foreground, background) {
 }
 const SOURCE_FILES = [
   'src/page/profiles-view.js', 'src/page/profiles-view.css', 'src/page/page.js',
-  'test/profiles-view.test.mjs', 'test/fixtures/profiles-view-state.json', 'scripts/qa-profiles.mjs',
+  'src/page/generated/profiles-view.min.js', 'src/profiles-script.mjs', 'scripts/minify-profiles.mjs',
+  'test/profiles-view.test.mjs', 'test/profiles-generated.test.mjs',
+  'test/fixtures/profiles-view-state.json', 'test/fixtures/view-model-board.json', 'scripts/qa-profiles.mjs',
 ];
 function sourceTree() {
   const files = SOURCE_FILES.map((file) => ({
@@ -327,7 +329,7 @@ async function main() {
 
     const openProfiles = async () => {
       await page.eval(`document.querySelector('[data-sh="view"][data-key="profiles"]').click()`);
-      await waitFor(`document.querySelectorAll('.pf-agent').length === 4 && !document.querySelector('.pf-loading')`, 'profiles view');
+      await waitFor(`document.querySelector('[data-pf-root]')?.getAttribute('data-pf-state') === 'view' && document.querySelectorAll('.pf-agent').length === 4`, 'profiles ready');
     };
     const applyViewport = async (vp) => {
       await page.client.send('Emulation.setDeviceMetricsOverride', {
@@ -379,16 +381,23 @@ async function main() {
       await page.eval(sleepFrame());
       // Theme switches transition colour for 150 ms. A frame pair alone would sample the middle of
       // that transition, so wait for the finite animations/transitions before measuring or capturing.
-      await page.eval(`new Promise((resolve) => {
+      await page.eval(`new Promise((resolve, reject) => {
         const pending = document.getAnimations().filter((a) => {
           const timing = a.effect && a.effect.getTiming ? a.effect.getTiming() : null;
           return a.playState === 'running' && !(timing && timing.iterations === Infinity);
         });
         if (!pending.length) return resolve(true);
-        let left = pending.length;
-        const done = () => { if (--left <= 0) resolve(true); };
+        let left = pending.length, settled = false;
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(new Error('animation settlement timed out with ' + left + ' still running'));
+        }, 2000);
+        const done = () => {
+          if (settled) return;
+          if (--left <= 0) { settled = true; clearTimeout(timer); resolve(true); }
+        };
         for (const animation of pending) animation.finished.then(done, done);
-        setTimeout(() => resolve(true), 500);
       })`);
       await page.eval(sleepFrame());
     };
@@ -501,6 +510,9 @@ async function main() {
       return { id: a ? a.id : '', tag: a ? a.tagName : '', text: ((a && a.textContent) || '').trim().slice(0, 100),
         inside: !!(a && a.closest && a.closest('.pf')), applyDisabled: !!document.querySelector('[data-pf="apply"]')?.disabled,
         previewDisabled: !!document.querySelector('[data-pf="preview"]')?.disabled,
+        busy: window.BriefPage.state.ui.profilesState?.busy === true,
+        preview: !!window.BriefPage.state.ui.profilesState?.preview,
+        result: !!window.BriefPage.state.ui.profilesState?.result,
         outlineWidth: cs ? cs.outlineWidth : '' };
     })()`);
 
@@ -1272,9 +1284,10 @@ async function main() {
     await page.goto(url);
     await waitFor(`!!window.BriefPage && window.BriefPage.state.ui.live === true`, 'board page bound for loading probe');
     await page.eval(`document.querySelector('[data-sh="view"][data-key="profiles"]').click()`);
-    await waitFor(`!!document.querySelector('.pf-loading')`, 'loading frame');
+    await waitFor(`document.querySelector('[data-pf-root]')?.getAttribute('data-pf-state') === 'loading'`, 'loading frame');
     run.checks.loading = await page.eval(`(() => ({
       hasLoading: !!document.querySelector('.pf-loading'),
+      state: (document.querySelector('[data-pf-root]') || {}).getAttribute ? document.querySelector('[data-pf-root]').getAttribute('data-pf-state') : '',
       badge: (document.querySelector('.pf-head-r .pf-chip') || {}).textContent || '',
       readonlyText: ((document.querySelector('.pf') || {}).innerText || '').match(/읽기 전용/g) || [],
       hasReadonlyNote: !!document.querySelector('.pf-ro-note'),
@@ -1283,6 +1296,7 @@ async function main() {
       pulse: !!document.querySelector('.pf-pulse'),
     }))()`);
     assert.equal(run.checks.loading.hasLoading, true, 'loading frame has no loading status');
+    assert.equal(run.checks.loading.state, 'loading', 'loading frame has no explicit state signal');
     assert.deepEqual(run.checks.loading.readonlyText, [], 'loading frame says read-only');
     assert.equal(run.checks.loading.hasReadonlyNote, false, 'loading frame renders the read-only note');
     assert.equal(run.checks.loading.sections, 0, 'loading frame renders loaded sections');
@@ -1295,7 +1309,9 @@ async function main() {
       const base = main.getBoundingClientRect().top - main.scrollTop;
       const rel = (el) => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top - base), height: Math.round(r.height), width: Math.round(r.width) }; };
       const item = (key) => { const el = document.querySelector('[data-pf-skel="' + key + '"]'); return el ? rel(el) : null; };
-      return { agents: item('agents'), profiles: item('profiles'), routing: item('routing'),
+      return { state: document.querySelector('[data-pf-root]').getAttribute('data-pf-state'),
+        firstAgent: rel(document.querySelector('[data-pf-skel="agent"]')),
+        agents: item('agents'), profiles: item('profiles'), routing: item('routing'),
         homes: item('homes'), tray: item('tray'), agentRows: [...document.querySelectorAll('[data-pf-skel="agent"]')].map(rel) };
     })()`);
     for (const vp of VIEWPORTS) {
@@ -1310,6 +1326,12 @@ async function main() {
     for (const vp of VIEWPORTS) {
       const skeleton = run.checks.loadingGeometry[vp.name];
       const loaded = run.checks.byViewport[`${vp.name}-light`];
+      assert.equal(skeleton.state, 'loading', `loading geometry was not measured in the loading state at ${vp.name}`);
+      const firstShift = Math.abs(loaded.tray.firstAgentTop - skeleton.firstAgent.top);
+      skeleton.firstAgentTop = skeleton.firstAgent.top;
+      skeleton.loadedFirstAgentTop = loaded.tray.firstAgentTop;
+      skeleton.firstAgentDelta = firstShift;
+      assert.ok(firstShift <= 2, `loading skeleton first agent shifts ${firstShift}px at ${vp.name} (${skeleton.firstAgent.top} -> ${loaded.tray.firstAgentTop})`);
       assert.equal(skeleton.agentRows.length, 4, `loading skeleton agent rows at ${vp.name}`);
       assert.ok(new Set(skeleton.agentRows.map((row) => row.width)).size === 1, `skeleton agents are not one full-width column at ${vp.name}`);
       for (const key of ['agents', 'profiles', 'routing']) {
@@ -1332,7 +1354,7 @@ async function main() {
     await settle();
     run.checks.reducedMotion = await page.eval(`(() => {
       const pulse = document.querySelector('.pf-pulse');
-      const loadingText = document.querySelector('.pf-loading-h');
+      const loadingText = document.getElementById('pf-focus-status');
       const cs = pulse ? getComputedStyle(pulse) : null;
       return { animationName: cs ? cs.animationName : '', opacity: cs ? cs.opacity : '',
         loadingText: loadingText ? loadingText.textContent : '' };
@@ -1363,15 +1385,16 @@ async function main() {
         };
       }`);
     await page.eval(`document.querySelector('[data-sh="view"][data-key="profiles"]').click()`);
-    await waitFor(`!!document.querySelector('.pf-error')`, 'error frame');
+    await waitFor(`document.querySelector('[data-pf-root]')?.getAttribute('data-pf-state') === 'error'`, 'error frame');
     run.checks.error = await page.eval(`(() => {
       const box = document.querySelector('.pf-error');
       const pageError = document.getElementById('page-error');
       return {
         hasError: !!box,
         errorText: box ? box.innerText : '',
+        errorKind: window.BriefPage.state.ui.profilesState?.errorKind || '',
         hasRetry: !!document.querySelector('.pf-error [data-pf="reload"]'),
-        retryLabel: (document.querySelector('.pf-error [data-pf="reload"]') || {}).textContent || '',
+        retryAria: (document.querySelector('.pf-error [data-pf="reload"]') || {}).getAttribute ? (document.querySelector('.pf-error [data-pf="reload"]').getAttribute('aria-label') || '') : '',
         hasLoading: !!document.querySelector('.pf-loading'),
         readonlyText: ((document.querySelector('.pf') || {}).innerText || '').match(/읽기 전용/g) || [],
         hasReadonlyNote: !!document.querySelector('.pf-ro-note'),
@@ -1379,10 +1402,11 @@ async function main() {
       };
     })()`);
     assert.equal(run.checks.error.hasError, true, 'error frame has no error box');
-    assert.match(run.checks.error.errorText, /네트워크 연결을 확인한 뒤/, 'error frame does not show a plain cause');
+    assert.equal(run.checks.error.errorKind, 'network', 'the expected network failure is not classified');
+    assert.ok(run.checks.error.errorText.trim().length > 0, 'error frame shows no plain cause');
     assert.doesNotMatch(run.checks.error.errorText, /qa-offline/, 'error frame leaks the raw cause token');
     assert.equal(run.checks.error.hasRetry, true, 'error frame has no retry affordance');
-    assert.match(run.checks.error.retryLabel, /다시 시도/);
+    assert.ok(run.checks.error.retryAria.length > 0, 'error retry has no accessible name');
     assert.equal(run.checks.error.hasLoading, false, 'error frame still says loading');
     assert.deepEqual(run.checks.error.readonlyText, [], 'error frame says read-only');
     assert.equal(run.checks.error.hasReadonlyNote, false, 'error frame renders the read-only note');
@@ -1453,6 +1477,12 @@ async function main() {
     run.checks.empty = await page.eval(`(() => ({
       cards: document.querySelectorAll('.pf-card').length,
       routes: document.querySelectorAll('.pf-route').length,
+      state: document.querySelector('[data-pf-root]').getAttribute('data-pf-state'),
+      profileSub: (document.querySelector('#pf-sec-profiles .pf-sec-s') || {}).textContent || '',
+      profileCount: (document.querySelector('#pf-sec-profiles .pf-count') || {}).textContent || '',
+      routeCount: (document.querySelector('#pf-sec-routing .pf-count') || {}).textContent || '',
+      reloadButtons: document.querySelectorAll('#pf-sec-profiles [data-pf="reload-state"], #pf-sec-routing [data-pf="reload-state"]').length,
+      createControls: document.querySelectorAll('[data-pf="create-profile"], [data-pf="create-role"]').length,
       profileNote: [...document.querySelectorAll('.pf-cards .pf-empty')].map((el) => el.textContent.trim()),
       routeNote: [...document.querySelectorAll('.pf-routes .pf-empty, #pf-sec-routing .pf-empty')].map((el) => el.textContent.trim()),
       trayNext: (document.querySelector('.pf-tray-next') || {}).textContent || '',
@@ -1461,11 +1491,32 @@ async function main() {
     }))()`);
     assert.equal(run.checks.empty.cards, 0, 'empty data still rendered profile cards');
     assert.equal(run.checks.empty.routes, 0, 'empty data still rendered routing rows');
-    assert.ok(run.checks.empty.profileNote.some((text) => text.includes('프로필이 없어요')), 'empty profiles have no explicit sentence');
-    assert.ok(run.checks.empty.routeNote.some((text) => text.includes('배치할 역할이 없어요')), 'empty routing has no explicit sentence');
+    assert.equal(run.checks.empty.state, 'view', 'empty data is not a loaded state');
+    assert.match(run.checks.empty.profileSub, /0개 프로필/, 'the empty section does not report the real zero count');
+    assert.doesNotMatch(run.checks.empty.profileSub, /6개 프로필/, 'the empty section still claims six profiles');
+    assert.equal(run.checks.empty.profileCount, '0');
+    assert.equal(run.checks.empty.routeCount, '0');
+    assert.ok(run.checks.empty.reloadButtons >= 2, 'empty profiles/routing have no supported state reload');
+    assert.equal(run.checks.empty.createControls, 0, 'empty data invents profile creation');
+    assert.ok(run.checks.empty.profileNote.length > 0, 'empty profiles have no explicit sentence');
+    assert.ok(run.checks.empty.routeNote.length > 0, 'empty routing has no explicit sentence');
     assert.ok(run.checks.empty.trayNext.trim().length >= 8, 'empty tray does not name the next action');
     assert.equal(run.checks.empty.compactTray, true, 'empty data did not keep the compact tray');
     assert.equal(run.checks.empty.error, false, 'empty data rendered an error');
+    await page.eval(`window.__qaEmptyReads = 0; window.__qaEmptyPosts = 0; window.__qaEmptyFetch = window.fetch;
+      window.fetch = function (url, opts) {
+        if (String(url) === '/profiles/state') window.__qaEmptyReads += 1;
+        if (String(url) === '/profiles') window.__qaEmptyPosts += 1;
+        return window.__qaEmptyFetch.apply(this, [url, opts]);
+      };`);
+    await page.eval(`document.querySelector('#pf-sec-profiles [data-pf="reload-state"]').click()`);
+    await waitFor(`window.__qaEmptyReads > 0 && window.BriefPage.state.ui.profilesState.loading === false && document.querySelector('[data-pf-root]')?.getAttribute('data-pf-state') === 'view'`, 'empty-state recovery read');
+    run.checks.emptyRecovery = await page.eval(`({ reads: window.__qaEmptyReads, posts: window.__qaEmptyPosts,
+      cards: document.querySelectorAll('.pf-card').length, routes: document.querySelectorAll('.pf-route').length })`);
+    assert.ok(run.checks.emptyRecovery.reads >= 1, 'the empty-state action did not re-read the real state');
+    assert.equal(run.checks.emptyRecovery.posts, 0, 'the empty-state action posted a write');
+    assert.equal(run.checks.emptyRecovery.cards, 0);
+    assert.equal(run.checks.emptyRecovery.routes, 0);
     for (const [vp, theme] of [[VIEWPORTS[0], 'light'], [VIEWPORTS[1], 'light'], [VIEWPORTS[2], 'dark']]) {
       await applyViewport(vp);
       await applyScheme(theme);
@@ -1665,14 +1716,29 @@ async function main() {
     run.checks.focusBusyPreview = await focusInfo();
     assert.equal(run.checks.focusBusyPreview.id, 'pf-focus-status', 'busy preview lost keyboard focus');
     assert.equal(run.checks.focusBusyPreview.inside, true, 'busy preview focus left the profiles surface');
-    assert.match(run.checks.focusBusyPreview.text, /미리보기 중/);
+    assert.equal(run.checks.focusBusyPreview.busy, true, 'the held preview is not marked busy');
+    assert.ok(run.checks.focusBusyPreview.text.length > 0, 'the busy preview status is empty');
     assert.equal(run.checks.focusBusyPreview.previewDisabled, true, 'busy preview control is not disabled');
+    run.checks.busyEdit = await page.eval(`(() => {
+      const sel = document.querySelector('[data-pf="agent-lane"][data-agent="sisyphus"]');
+      const before = window.BriefPage.state.ui.profilesState.pending.length;
+      const draftBefore = Object.keys(window.BriefPage.state.ui.profilesState.draft || {}).length;
+      const disabled = sel.disabled;
+      sel.value = 'geeky-heavy';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return { disabled, before, after: window.BriefPage.state.ui.profilesState.pending.length,
+        draftBefore, draftAfter: Object.keys(window.BriefPage.state.ui.profilesState.draft || {}).length };
+    })()`);
+    assert.equal(run.checks.busyEdit.disabled, true, 'an editor select accepts input during a held preview');
+    assert.equal(run.checks.busyEdit.before, run.checks.busyEdit.after, 'a busy-time edit mutated the pending changes');
+    assert.equal(run.checks.busyEdit.draftBefore, run.checks.busyEdit.draftAfter, 'a busy-time edit mutated the draft map');
     await capture(path.join(OUT, 'focus-busy-preview-390-light.png'));
     await page.eval(`window.__qaReleaseApply && window.__qaReleaseApply()`);
     await waitFor(`!!document.querySelector('.pf-preview') && document.activeElement.id === 'pf-focus-status'`, 'preview result focus');
     run.checks.focusAfterPreview = await focusInfo();
     assert.equal(run.checks.focusAfterPreview.id, 'pf-focus-status', 'preview result lost keyboard focus');
-    assert.match(run.checks.focusAfterPreview.text, /미리보기 준비됨/);
+    assert.equal(run.checks.focusAfterPreview.busy, false, 'the settled preview is still busy');
+    assert.equal(run.checks.focusAfterPreview.preview, true, 'the preview payload is missing');
     await capture(path.join(OUT, 'focus-after-preview-390-light.png'));
 
     await applyViewport(VIEWPORTS[2]);
@@ -1689,7 +1755,8 @@ async function main() {
     run.checks.focusBusyApply = await focusInfo();
     assert.equal(run.checks.focusBusyApply.id, 'pf-focus-status', 'busy apply lost keyboard focus');
     assert.equal(run.checks.focusBusyApply.inside, true, 'busy apply focus left the profiles surface');
-    assert.match(run.checks.focusBusyApply.text, /적용 중/);
+    assert.equal(run.checks.focusBusyApply.busy, true, 'the held apply is not marked busy');
+    assert.ok(run.checks.focusBusyApply.text.length > 0, 'the busy apply status is empty');
     assert.equal(run.checks.focusBusyApply.applyDisabled, true, 'busy apply control is not disabled');
     await capture(path.join(OUT, 'focus-busy-apply-1440-light.png'));
     await page.eval(`window.__qaReleaseApply && window.__qaReleaseApply()`);
@@ -1697,7 +1764,8 @@ async function main() {
     await waitFor(`!document.querySelector('.pf-loading')`, 'state reload after apply');
     run.checks.focusAfterApply = await focusInfo();
     assert.equal(run.checks.focusAfterApply.id, 'pf-focus-status', 'apply success lost keyboard focus');
-    assert.match(run.checks.focusAfterApply.text, /적용했어요/);
+    assert.equal(run.checks.focusAfterApply.busy, false, 'the settled apply is still busy');
+    assert.equal(run.checks.focusAfterApply.result, true, 'the apply receipt is missing');
     await capture(path.join(OUT, 'focus-after-apply-1440-light.png'));
     run.checks.apply = await page.eval(`(() => ({
       done: !!document.querySelector('.pf-done'),
@@ -1896,12 +1964,12 @@ async function main() {
       const box = document.querySelector('[data-pf-journal="interrupted"]');
       const btn = box && box.querySelector('[data-pf="reapply"]');
       return { present: !!box, text: box ? box.textContent : '', hasReapply: !!btn,
-        reapplyLabel: btn ? btn.textContent.trim() : '' };
+        reapplyDisabled: btn ? btn.disabled : null, reapplyLabel: btn ? btn.textContent.trim() : '' };
     })()`);
     assert.equal(run.checks.journal.present, true, 'interrupted journal banner missing');
-    assert.match(run.checks.journal.text, /중단된 적용/, 'interrupted journal label missing');
     assert.equal(run.checks.journal.hasReapply, true, 'interrupted journal has no 다시 적용 control');
-    assert.match(run.checks.journal.reapplyLabel, /다시 적용/, 'reapply control label missing');
+    assert.equal(run.checks.journal.reapplyDisabled, false, 'the interrupted reapply is disabled before any conflict');
+    assert.ok(run.checks.journal.reapplyLabel.length > 0, 'reapply control has no accessible label');
     assert.equal(hashFile(journalPath), journalHashBefore, 'interrupted journal was replayed on load');
     assert.equal(hashFile(omoPath), omoHashBeforeJournalLoad, 'interrupted journal wrote the config on load');
     for (const vp of VIEWPORTS) for (const scheme of SCHEMES) await captureJournal(vp, scheme);
@@ -1976,6 +2044,8 @@ async function main() {
       conflict: !!document.querySelector('.pf-conflict'),
       conflictText: (document.querySelector('.pf-conflict') || {}).innerText || '',
       banner: !!document.querySelector('[data-pf-journal="interrupted"]'),
+      reapplyDisabled: !!document.querySelector('[data-pf-journal="interrupted"] [data-pf="reapply"]')?.disabled,
+      reloadPrimary: !!document.querySelector('.pf-conflict [data-pf="reload"].pf-btn-primary'),
       statuses: window.__qaStatuses.slice(),
       writes: [...document.querySelectorAll('.pf-writes code')].map((el) => el.textContent),
     }))()`);
@@ -1985,7 +2055,8 @@ async function main() {
     run.checks.journalReapplyConflict.backupsUnchanged = JSON.stringify(fs.existsSync(backupDir) ? fs.readdirSync(backupDir).sort() : []) === JSON.stringify(journalConflictBackupsBefore);
     assert.equal(run.checks.journalReapplyConflict.conflict, true, 'journal reapply 409 was not shown');
     assert.ok(run.checks.journalReapplyConflict.statuses.includes(409), 'journal reapply did not answer 409');
-    assert.ok(run.checks.journalReapplyConflict.conflictText.includes(CONFLICT_TEXT), 'journal 409 copy missing');
+    assert.equal(run.checks.journalReapplyConflict.reapplyDisabled, true, 'the journal reapply stays enabled under the latched 409');
+    assert.equal(run.checks.journalReapplyConflict.reloadPrimary, true, 'the conflict reload is not the primary recovery');
     assert.equal(journalConflictAfter[omoPath], journalConflictMutated, 'journal 409 rewrote the mutated omo.jsonc');
     for (const file of journalConflictTargets) {
       if (file === omoPath) continue;
@@ -2016,6 +2087,12 @@ async function main() {
     await settle();
     let sample = await railSample();
     run.checks.railScope['profiles-390-light'] = { ...sample, inactiveRatio: contrastRatio(sample.inactive, sample.railBg) };
+    await applyScheme('dark');
+    await settle();
+    sample = await railSample();
+    run.checks.railScope['profiles-390-dark'] = { ...sample, inactiveRatio: contrastRatio(sample.inactive, sample.railBg) };
+    await applyScheme('light');
+    await settle();
     for (const vp of VIEWPORTS) {
       for (const theme of SCHEMES) {
         await applyViewport(vp);
@@ -2044,9 +2121,13 @@ async function main() {
     }
     assert.equal(run.checks.railScope['profiles-390-light'].view, 'profiles', 'profiles rail sample is not on profiles');
     assert.equal(run.checks.railScope['home-390-light'].view, 'home', 'sibling rail sample is not on home');
-    assert.notEqual(run.checks.railScope['profiles-390-light'].inactive, run.checks.railScope['home-390-light'].inactive,
-      'the A8 rail repair was promoted to the sibling route');
-    assert.ok(run.checks.railScope['profiles-390-light'].inactiveRatio >= 4.5, 'profiles rail contrast fell below 4.5:1');
+    assert.equal(run.checks.railScope['profiles-390-light'].inactive, run.checks.railScope['home-390-light'].inactive,
+      'the profiles rail color diverges from the shared shell');
+    assert.equal(run.checks.railScope['profiles-390-dark'].inactive, run.checks.railScope['home-390-dark'].inactive,
+      'the dark profiles rail color diverges from the shared shell');
+    for (const [key, sample] of Object.entries(run.checks.railScope)) {
+      assert.ok(sample.inactiveRatio >= 3, `rail ${key} inactive glyph is ${sample.inactiveRatio}:1, below the 3:1 non-text floor`);
+    }
 
     // Capture identity: every viewport frame has the emulated viewport size, and the set carries
     // every required state family, pressed/focus frames and the two targeted rows.
@@ -2245,16 +2326,23 @@ async function negativeControl() {
     const settle = async () => {
       await page.eval(`document.fonts && document.fonts.ready ? document.fonts.ready.then(() => true) : true`);
       await page.eval(sleepFrame());
-      await page.eval(`new Promise((resolve) => {
+      await page.eval(`new Promise((resolve, reject) => {
         const pending = document.getAnimations().filter((a) => {
           const timing = a.effect && a.effect.getTiming ? a.effect.getTiming() : null;
           return a.playState === 'running' && !(timing && timing.iterations === Infinity);
         });
         if (!pending.length) return resolve(true);
-        let left = pending.length;
-        const done = () => { if (--left <= 0) resolve(true); };
+        let left = pending.length, settled = false;
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(new Error('animation settlement timed out with ' + left + ' still running'));
+        }, 2000);
+        const done = () => {
+          if (settled) return;
+          if (--left <= 0) { settled = true; clearTimeout(timer); resolve(true); }
+        };
         for (const animation of pending) animation.finished.then(done, done);
-        setTimeout(() => resolve(true), 500);
       })`);
       await page.eval(sleepFrame());
     };

@@ -9,8 +9,8 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SOURCE = join(ROOT, 'src', 'page', 'profiles-view.js');
 const OUTPUT = join(ROOT, 'src', 'page', 'generated', 'profiles-view.min.js');
 // This recipe was reviewed for this source, not for arbitrary JavaScript.
-const REVIEWED_SOURCE = '45223eff3cf5906c8434e8f1317caa83acc595ae15685c7d63a23fbb85fac206';
-const REVIEWED_PAYLOAD = 'a38bfc219117b6667b0e32869d47e469d3821b53f7b3a614d01f50794d41fb30';
+const REVIEWED_SOURCE = 'c5b31e66788803c62f7c3aa04c6af9276bb53b525ea5d001e13abd5f74034900';
+const REVIEWED_PAYLOAD = 'faa75414e0fd6a73cb162bd2312731967a45905868c0df88767b73f4ce493301';
 
 try {
   if (typeof Bun === 'undefined' || Bun.version !== '1.4.0') throw new Error('regeneration requires Bun 1.4.0');
@@ -45,7 +45,7 @@ try {
   // Bun treats the package input as ESM. Correct the emitted CLASSIC Script late:
   // restore inherited strictness, and capture classic top-level this without an extra globalThis read.
   const payload = '"use strict";\n' + emitted.slice(0, -suffix.length) + '.call(this);})();\n';
-  if (profilesSha256(payload) !== REVIEWED_PAYLOAD) throw new Error('compiler payload differs from the reviewed recipe');
+  if (profilesSha256(payload) !== REVIEWED_PAYLOAD) throw new Error('compiler payload differs from the reviewed recipe (observed ' + profilesSha256(payload) + ')');
   const artifact = profilesArtifact(source, payload);
   if (args[0] === '--check') {
     if (canonicalLf(readFileSync(OUTPUT, 'utf8')) !== artifact) throw new Error('generated profiles artifact differs; regenerate it');

@@ -27,7 +27,7 @@
   var THINKING = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
   var SECTIONS = [
     ['agents', '메인 에이전트', '에이전트별 레인·핀·기억'],
-    ['profiles', '프로필', '6개 프로필과 현재 선택'],
+    ['profiles', '프로필', '프로필과 현재 선택'],
     ['routing', '역할 배치', '에이전트·카테고리별 서비스/모델/추론'],
     ['main', '메인 모델', '세션을 여는 기본 모델'],
     ['lanes', '모델 레인', 'model_profile 선택'],
@@ -309,6 +309,15 @@
 
   // ---- shared fragments --------------------------------------------------------------------------------------------
   function emptyNote(text, cls) { return '<p class="pf-empty ' + (cls || '') + '">' + ic('info', 'ic-sm') + ' ' + esc(text) + '</p>'; }
+  // Empty data is a read-only fact, not a missing create feature: the one supported recovery is
+  // re-reading the store's real state through the same GET the view already uses.
+  function emptyState(text, edit, cls) {
+    var live = edit && edit.live === true;
+    var busy = !!(edit && edit.busy === true);
+    return '<div class="pf-empty-state ' + (cls || '') + '">' + emptyNote(text) +
+      (live ? button('reload-state', ' aria-label="상태 다시 불러오기"',
+        ic('refresh-cw', 'ic-sm') + ' 상태 다시 불러오기', busy) : '') + '</div>';
+  }
   function readOnlyNote(edit, view) {
     if (edit && edit.live !== true) return emptyNote(READONLY_FILE, 'pf-ro-note');
     if (view && view.banner === STALE_BANNER) return emptyNote('인벤토리를 갱신할 때까지 수정할 수 없어요', 'pf-ro-note');
@@ -320,17 +329,23 @@
   // An interrupted apply is a real state, not a sentence: the owner must be able to trigger
   // the explicit replay. The payload is the journal's recorded changes (never the pending
   // tray), and the click posts them once through the same guarded apply route.
-  function journalBanner(view, ro) {
+  function journalBanner(view, edit, ro) {
     var journal = obj(view && view.applyJournal);
     if (!journal || journal.status !== 'interrupted') return '';
     var payload = obj(journal.reapply);
     var changes = arr(payload && payload.changes);
+    var busy = !!(edit && edit.busy === true);
+    var conflict = !!(edit && edit.conflict === true);
     var head = '<div class="pf-banner pf-banner-warn" data-pf-journal="interrupted" role="status">' +
       ic('info', 'ic-sm') + ' <b>' + esc('중단된 적용') + '</b>';
     if (ro) return head + ' <span class="pf-muted">' + esc('읽기 전용') + '</span></div>';
     if (!changes.length) return head + ' <span class="pf-muted">' + esc('다시 적용할 변경 기록이 없어요') + '</span></div>';
-    return head + ' ' + button('reapply', ' aria-label="' + esc(REAPPLY_LABEL) + '"',
-      ic('refresh-cw', 'ic-sm') + ' ' + esc(REAPPLY_LABEL), false, 'pf-btn') + '</div>';
+    // The reapply button is a real apply: it must mirror apply's disabled state. A latched 409
+    // needs the reload hand-off first; an in-flight request must settle before another write.
+    var why = conflict ? '새로고침 후 다시 적용할 수 있어요' : busy ? '처리 중…' : '';
+    return head + ' ' + button('reapply', ' aria-label="' + esc(REAPPLY_LABEL) + '"' + (why ? attr('title', why) : ''),
+      ic('refresh-cw', 'ic-sm') + ' ' + esc(REAPPLY_LABEL), busy || conflict, 'pf-btn') +
+      (why ? ' <span class="pf-muted">' + esc(why) + '</span>' : '') + '</div>';
   }
   // Loading, error and a loaded view are three states. A missing view is never a read-only view: the
   // read-only badge and note may only appear once a state exists and says writes are refused.
@@ -338,13 +353,14 @@
     if (obj(view)) return 'view';
     return edit && str(edit.error) ? 'error' : 'loading';
   }
-  // The loading frame uses the loaded view's own row primitives: a homes strip, the compact tray,
-  // four full-width agent rows with the same responsive field grid, six profile cards and the routing
-  // rows. It is not a separate 4/2/1-column matrix, so the loaded view lands where the skeleton was.
+  // The loading frame reuses the loaded view's own top-level primitives: the homes strip, the
+  // compact tray, the real section header (tag, title, subtitle), four full-width agent rows with
+  // the same responsive field grid, six cards and the routing rows. The browser QA measures the
+  // actual first skeleton row against the loaded first agent row after fonts are ready.
   function loadingBlock() {
     var agents = '';
     for (var i = 0; i < 4; i++) {
-      agents += '<div class="pf-skel pf-skel-agent" data-pf-skel="agent">' +
+      agents += '<div class="pf-skel pf-skel-agent" data-pf-skel="agent" aria-hidden="true">' +
         '<span class="pf-skel-field pf-skel-id"><span class="pf-skel-line pf-skel-line-t"></span><span class="pf-skel-line pf-skel-line-c"></span></span>' +
         '<span class="pf-skel-field"><span class="pf-skel-line pf-skel-line-t"></span><span class="pf-skel-line pf-skel-line-c"></span></span>' +
         '<span class="pf-skel-field"><span class="pf-skel-line pf-skel-line-t"></span><span class="pf-skel-pin"><span class="pf-skel-line pf-skel-line-c"></span><span class="pf-skel-line pf-skel-line-c"></span></span></span>' +
@@ -353,31 +369,44 @@
     }
     var cards = '';
     for (var j = 0; j < 6; j++) {
-      cards += '<div class="pf-skel pf-skel-card" data-pf-skel="card">' +
+      cards += '<div class="pf-skel pf-skel-card" data-pf-skel="card" aria-hidden="true">' +
         '<span class="pf-skel-line pf-skel-line-t"></span><span class="pf-skel-line pf-skel-line-s"></span>' +
         '<span class="pf-skel-line pf-skel-line-s"></span><span class="pf-skel-line pf-skel-line-s"></span>' +
         '<span class="pf-skel-line pf-skel-line-c"></span></div>';
     }
     var routes = '';
     for (var k = 0; k < 20; k++) {
-      routes += '<div class="pf-skel pf-skel-route" data-pf-skel="route">' +
+      routes += '<div class="pf-skel pf-skel-route" data-pf-skel="route" aria-hidden="true">' +
         '<span class="pf-skel-field pf-skel-id"><span class="pf-skel-line pf-skel-line-t"></span><span class="pf-skel-line pf-skel-line-s"></span></span>' +
         '<span class="pf-skel-field pf-skel-route-sels"><span class="pf-skel-line pf-skel-line-c"></span><span class="pf-skel-line pf-skel-line-c"></span><span class="pf-skel-line pf-skel-line-c"></span></span>' +
         '<span class="pf-skel-field pf-skel-rec"><span class="pf-skel-line pf-skel-line-s"></span></span></div>';
     }
-    var sec = function (key, body) {
-      return '<div class="pf-skel-sec" data-pf-skel="' + key + '" aria-hidden="true"><div class="pf-skel-sec-h">' +
-        '<span class="pf-skel-line pf-skel-line-t"></span><span class="pf-skel-line pf-skel-line-s"></span></div>' +
-        '<div class="pf-skel-sec-b">' + body + '</div></div>';
+    var loadingSection = function (key, body, count) {
+      var meta = null;
+      SECTIONS.forEach(function (s) { if (s[0] === key) meta = s; });
+      var title = meta ? meta[1] : key, sub = meta ? meta[2] : '';
+      return '<section class="pf-skel-sec" data-pf-skel="' + key + '" aria-hidden="true">' +
+        '<header class="pf-sec-h"><div class="pf-sec-t">' + tag(title) + '<h2>' + esc(title) + '</h2>' +
+        '<p class="pf-sec-s">' + esc(sub) + '</p></div><div class="pf-sec-r">' +
+        (count === null ? '' : '<span class="pf-count">' + count + '</span>') + '</div></header>' +
+        '<div class="pf-sec-b">' + body + '</div></section>';
+    };
+    var home = function (label) {
+      return '<span class="pf-home pf-skel-home" aria-hidden="true">' + tag(label) +
+        ' <code><span class="pf-skel-line pf-skel-home-line"></span></code></span>';
     };
     return '<div class="pf-loading" data-pf-loading role="status">' +
       '<div class="pf-skeleton">' +
-      '<div class="pf-skel pf-skel-homes" data-pf-skel="homes" aria-hidden="true"></div>' +
-      '<div class="pf-skel pf-skel-tray pf-tray-compact" data-pf-skel="tray"><p class="pf-loading-h" id="pf-focus-status" tabindex="-1"><span class="pf-pulse" aria-hidden="true">' +
-      ic('refresh-cw', 'ic-sm') + '</span> 프로필 상태를 불러오는 중…</p></div>' +
-      sec('agents', '<div class="pf-skel-agents">' + agents + '</div>') +
-      sec('profiles', '<div class="pf-skel-cards">' + cards + '</div>') +
-      sec('routing', '<div class="pf-skel-routes">' + routes + '</div>') +
+      '<div class="pf-homes pf-skel-homes" data-pf-skel="homes" aria-hidden="true">' +
+      home('primary') + home('mirror') + home('stable-500') + '</div>' +
+      '<section class="pf-tray pf-tray-compact" data-pf-skel="tray" aria-label="바꿀 값"><div class="pf-tray-c">' +
+      tag('대기') + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
+      '<span class="pf-muted pf-tray-note">바꾼 값 없음</span>' +
+      '<span class="pf-tray-next" id="pf-focus-status" tabindex="-1"><span class="pf-pulse" aria-hidden="true">' +
+      ic('refresh-cw', 'ic-sm') + '</span> 프로필 상태를 불러오는 중…</span></div></section>' +
+      loadingSection('agents', '<div class="pf-agents">' + agents + '</div>', AGENTS.length) +
+      loadingSection('profiles', '<div class="pf-cards">' + cards + '</div>', null) +
+      loadingSection('routing', '<div class="pf-routes">' + routes + '</div>', null) +
       '</div></div>';
   }
   function errorBlock(edit) {
@@ -397,12 +426,13 @@
     if (active) {
       arr(view.profiles).forEach(function (p) { if (obj(p) && p.key === active.key) activeCard = p; });
     }
+    var activeLine = activeCard
+      ? '<span class="pf-active">현재 ' + esc(activeCard.nameKr || activeCard.name || activeCard.key) + '</span>'
+      : state === 'loading' ? '<span class="pf-active pf-skel-active" aria-hidden="true"><span class="pf-skel-line"></span></span>' : '';
     return '<header class="pf-head">' +
       '<div class="pf-head-l"><p class="pf-kicker">[프로필·에이전트]</p><h1 class="pf-title">프로필·에이전트</h1>' +
       '<p class="pf-sub">WinForms 스위처의 역할 배치와 모델 레인, <span class="pf-keep">메모리 행을 상황판에서 확인하고</span>, <span class="pf-keep">실시간 상황판</span>에서 미리보기 후 적용합니다.</p></div>' +
-      '<div class="pf-head-r">' + badge +
-      (activeCard ? '<span class="pf-active">현재 ' + esc(activeCard.nameKr || activeCard.name || active.key) + '</span>' : '') +
-      '</div></header>';
+      '<div class="pf-head-r">' + badge + activeLine + '</div></header>';
   }
 
   function homes(view) {
@@ -450,6 +480,7 @@
     var agents = obj(roster.agents) || {};
     var entries = catalogEntries(view);
     var pending = pendingOf(edit);
+    var busy = !!(edit && edit.busy === true);
     var rows = AGENTS.map(function (pair) {
       var id = pair[0], name = idOf(AGENTS, id);
       var agent = obj(agents[id]) || {};
@@ -483,17 +514,17 @@
       var laneId = 'pf-agent-lane-' + id;
       var controls = ro
         ? '<span class="pf-lbl">레인</span><span class="pf-ro-val">' + esc(lane) + '</span>'
-        : labelled('레인', laneId, select('agent-lane', withId(laneId, ' data-agent="' + esc(id) + '"'), laneOptions(lane)));
+        : labelled('레인', laneId, select('agent-lane', withId(laneId, ' data-agent="' + esc(id) + '"'), laneOptions(lane), busy));
       var pinId = 'pf-agent-pin-' + id, pinThinkId = 'pf-agent-pin-thinking-' + id;
       var pinHint = id === 'hephaestus' ? 'GPT 계열만' : '';
       var pinControls = ro
         ? '<span class="pf-lbl">핀</span><span class="pf-ro-val">' + (pin ? esc(pinProvider + ' · ' + pinModel + ' / ' + pinThinking) : '없음') + '</span>'
         : '<div class="pf-pin-sels">' +
-          labelledHint('핀', pinHint, pinId, select('agent-pin', withId(pinId, ' data-agent="' + esc(id) + '"'), pinOpts)) +
-          labelled('추론', pinThinkId, select('agent-pin-thinking', withId(pinThinkId, ' data-agent="' + esc(id) + '"'), thinkingOptions(pinThinking, false), !pin)) +
+          labelledHint('핀', pinHint, pinId, select('agent-pin', withId(pinId, ' data-agent="' + esc(id) + '"'), pinOpts, busy)) +
+          labelled('추론', pinThinkId, select('agent-pin-thinking', withId(pinThinkId, ' data-agent="' + esc(id) + '"'), thinkingOptions(pinThinking, false), busy || !pin)) +
           '</div>';
-      var resetBtn = ro ? '<span class="pf-muted">기억은 확장이 관리</span>' : button('reset-memory', ' data-agent="' + esc(id) + '"', '기억 초기화', false, 'pf-btn pf-btn-ghost');
-      if (reset && !ro) resetBtn = button('reset-memory', ' data-agent="' + esc(id) + '"', '초기화 대기', false, 'pf-btn pf-btn-ghost on');
+      var resetBtn = ro ? '<span class="pf-muted">기억은 확장이 관리</span>' : button('reset-memory', ' data-agent="' + esc(id) + '"', '기억 초기화', busy, 'pf-btn pf-btn-ghost');
+      if (reset && !ro) resetBtn = button('reset-memory', ' data-agent="' + esc(id) + '"', '초기화 대기', busy, 'pf-btn pf-btn-ghost on');
       return '<article class="pf-agent" data-pf-agent="' + esc(id) + '">' +
         '<div class="pf-agent-id"><span class="pf-dot pf-dot-' + esc(id) + ' pf-shape-' + esc(SHAPES[id]) + '" role="img" aria-label="' +
         esc(name + ' · ' + SHAPE_KO[SHAPES[id]] + ' 표식') + '"></span>' +
@@ -509,8 +540,11 @@
 
   function profileCards(view, edit, ro) {
     var pending = pendingOf(edit);
+    var busy = !!(edit && edit.busy === true);
     var selected = firstOf(pending, 'selectProfile');
-    var current = selected ? str(selected.profileKey) : str(obj(view && view.activeProfile) && view.activeProfile.key);
+    var activeKey = str(obj(view && view.activeProfile) && view.activeProfile.key);
+    var current = selected ? str(selected.profileKey) : activeKey;
+    var list = arr(view && view.profiles);
     var cards = arr(view && view.profiles).map(function (p) {
       if (!obj(p)) return '';
       var on = p.key === current || p.current === true;
@@ -522,14 +556,17 @@
         '<span class="pf-card-main">' + esc(str(p.mainProvider) + ' · ' + str(p.mainModel) + ' / ' + str(p.mainThinking)) + '</span>';
       if (ro) return '<article class="pf-card' + (on ? ' on' : '') + '">' + body + '</article>';
       return '<button type="button" class="pf-card' + (on ? ' on' : '') + '"' + attr('data-pf', 'select-profile') +
-        attr('data-profile', p.key) + ' aria-pressed="' + on + '">' + body + '</button>';
+        attr('data-profile', p.key) + ' aria-pressed="' + on + '"' + boolAttr('disabled', busy) + '>' + body + '</button>';
     }).join('');
-    return section('profiles', '<div class="pf-cards">' + (cards || emptyNote('프로필이 없어요')) + '</div>', arr(view && view.profiles).length);
+    return section('profiles', '<div class="pf-cards">' +
+      (cards || emptyState('프로필이 없어요. omo.jsonc의 프로필을 확인한 뒤 상태를 다시 불러와 주세요.', edit)) + '</div>', list.length, '',
+    list.length + '개 프로필 · ' + (current ? '현재 선택' : '선택 없음'));
   }
 
   function routingRows(view, edit, ro) {
     var rows = arr(obj(view && view.routing) && view.routing.rows);
     var entries = catalogEntries(view);
+    var busy = !!(edit && edit.busy === true);
     var groups = [], index = map();
     rows.forEach(function (r) {
       if (!obj(r)) return;
@@ -557,11 +594,11 @@
           ? '<span class="pf-ro-val">' + valueOrDash(provider) + ' · ' + valueOrDash(bareModel(full)) + ' / ' + valueOrDash(thinking) + '</span>'
           : '<div class="pf-route-sels">' +
             labelled('서비스', rid + '-provider', providerSelect('route-provider',
-              withId(rid + '-provider', ' data-route="' + esc(r.section + '/' + r.role) + '"'), providers, provider, false)) +
+              withId(rid + '-provider', ' data-route="' + esc(r.section + '/' + r.role) + '"'), providers, provider, busy)) +
             labelled('모델', rid + '-model', modelSelect('route-model',
-              withId(rid + '-model', ' data-route="' + esc(r.section + '/' + r.role) + '"'), entries, provider, full, false)) +
+              withId(rid + '-model', ' data-route="' + esc(r.section + '/' + r.role) + '"'), entries, provider, full, busy)) +
             labelled('추론', rid + '-thinking', select('route-thinking',
-              withId(rid + '-thinking', ' data-route="' + esc(r.section + '/' + r.role) + '"'), thinkingOptions(thinking, true), false)) +
+              withId(rid + '-thinking', ' data-route="' + esc(r.section + '/' + r.role) + '"'), thinkingOptions(thinking, true), busy)) +
             '</div>';
         return '<div class="pf-route" data-pf-route="' + esc(r.section + '/' + r.role) + '">' +
           '<div class="pf-route-id">' + tag(r.section === 'agents' ? 'agent' : 'category') +
@@ -575,11 +612,12 @@
       return '<div class="pf-group"><h3 class="pf-group-h">' + tag(group.section === 'agents' ? 'agents' : 'categories') +
         esc(group.label) + ' <span class="pf-count">' + group.rows.length + '</span></h3><div class="pf-routes">' + body + '</div></div>';
     }).join('');
-    return section('routing', html || emptyNote('배치할 역할이 없어요'), rows.length);
+    return section('routing', html || emptyState('배치할 역할이 없어요. 프로필 설정을 확인한 뒤 상태를 다시 불러와 주세요.', edit), rows.length);
   }
 
   function mainModel(view, edit, ro) {
     var pending = mainChangeOf(pendingOf(edit));
+    var busy = !!(edit && edit.busy === true);
     var draft = draftOf(edit, 'main');
     var current = obj(view && view.main) || {};
     var effective = obj(current.effective) || {};
@@ -597,9 +635,9 @@
         (override ? chip('pf-c-green', '직접 지정') : chip('pf-c-gray', '프로필 기본')) + '</div>';
     } else {
       body = '<div class="pf-main" data-pf-main>' +
-        '<div class="pf-field">' + labelled('서비스', 'pf-main-provider', providerSelect('main-provider', withId('pf-main-provider', ' data-main="1"'), providers, provider, false)) + '</div>' +
-        '<div class="pf-field">' + labelled('모델', 'pf-main-model', mainModelSelect('main-model', withId('pf-main-model', ' data-main="1"'), entries, provider, model, false)) + '</div>' +
-        '<div class="pf-field">' + labelled('추론', 'pf-main-thinking', select('main-thinking', withId('pf-main-thinking', ' data-main="1"'), thinkingOptions(thinking, true), false)) + '</div>' +
+        '<div class="pf-field">' + labelled('서비스', 'pf-main-provider', providerSelect('main-provider', withId('pf-main-provider', ' data-main="1"'), providers, provider, busy)) + '</div>' +
+        '<div class="pf-field">' + labelled('모델', 'pf-main-model', mainModelSelect('main-model', withId('pf-main-model', ' data-main="1"'), entries, provider, model, busy)) + '</div>' +
+        '<div class="pf-field">' + labelled('추론', 'pf-main-thinking', select('main-thinking', withId('pf-main-thinking', ' data-main="1"'), thinkingOptions(thinking, true), busy)) + '</div>' +
         '<div class="pf-field pf-field-act">' + (override ? chip('pf-c-green', '직접 지정') : chip('pf-c-gray', '프로필 기본')) + '</div></div>';
     }
     return section('main', body, null);
@@ -607,6 +645,7 @@
 
   function modelLane(view, edit, ro) {
     var pending = firstOf(pendingOf(edit), 'setModelProfile');
+    var busy = !!(edit && edit.busy === true);
     var draft = draftOf(edit, 'lane');
     var current = str(obj(view && view.modelProfile) && view.modelProfile.model_profile);
     var known = obj(view && view.modelProfile) && obj(view.modelProfile.model_profiles) ? Object.keys(view.modelProfile.model_profiles) : [];
@@ -625,15 +664,16 @@
       ? '<div class="pf-lane-ro"><span class="pf-ro-val">' + valueOrDash(selection === 'custom-literal' ? literal : selection) + '</span>' +
         (selection === 'custom-literal' ? chip('pf-c-amber', '직접 입력') : '') + '</div>'
       : '<div class="pf-lane" data-pf-lane>' +
-        '<div class="pf-field">' + labelled('model_profile', 'pf-lane-select', select('lane-select', withId('pf-lane-select', ' data-lane="1"'), options, false)) + '</div>' +
+        '<div class="pf-field">' + labelled('model_profile', 'pf-lane-select', select('lane-select', withId('pf-lane-select', ' data-lane="1"'), options, busy)) + '</div>' +
         '<div class="pf-field pf-field-grow">' +
-        labelled('직접 입력 값', 'pf-lane-literal', textInput('lane-literal', withId('pf-lane-literal', ' data-lane="1"'), literal, selection !== 'custom-literal', '예: custom-literal-id')) + '</div>' +
+        labelled('직접 입력 값', 'pf-lane-literal', textInput('lane-literal', withId('pf-lane-literal', ' data-lane="1"'), literal, busy || selection !== 'custom-literal', '예: custom-literal-id')) + '</div>' +
         '<div class="pf-field pf-field-act">' + chip('pf-c-gray', 'preview에서 검증') + '</div></div>';
     return section('lanes', body, null);
   }
 
   function summarizer(view, edit, ro) {
     var pending = firstOf(pendingOf(edit), 'setSummarizer');
+    var busy = !!(edit && edit.busy === true);
     var s = obj(view && view.summarizer) || null;
     var current = pending ? str(pending.modelId) : s ? str(s.provider) + '/' + str(s.model) : '';
     var entries = catalogEntries(view);
@@ -641,7 +681,7 @@
     var body = ro
       ? '<div class="pf-sum-ro"><span class="pf-ro-val">' + valueOrDash(current || '설정 안 함') + '</span></div>'
       : '<div class="pf-sum" data-pf-sum><div class="pf-field pf-field-grow">' +
-        labelled('요약 모델', 'pf-summarizer-model', select('summarizer-model', withId('pf-summarizer-model', ' data-sum="1"'), summarizerOptions(entries, current), false)) + '</div>' +
+        labelled('요약 모델', 'pf-summarizer-model', select('summarizer-model', withId('pf-summarizer-model', ' data-sum="1"'), summarizerOptions(entries, current), busy)) + '</div>' +
         '<div class="pf-field pf-field-act">' + chip('pf-c-gray', 'compaction.model') + '</div></div>' +
         warnings.map(function (w) { return '<p class="pf-warn pf-warn-' + esc(w.level) + '">' + ic('info', 'ic-sm') + ' ' + esc(w.text) + '</p>'; }).join('');
     return section('summarizer', body, null);
@@ -649,6 +689,7 @@
 
   function memoryRows(view, edit, ro) {
     var draft = obj(edit && edit.draft);
+    var busy = !!(edit && edit.busy === true);
     var mem = obj(view && view.memory) || {};
     var rows = ['kibitzer', 'reflection'].map(function (key) {
       var m = obj(mem[key]) || {};
@@ -665,9 +706,9 @@
         controls = '<div class="pf-mem-sels" data-pf-memory="' + esc(key) + '">' +
           labelled('모드', memId + '-mode', select('memory-mode', withId(memId + '-mode', ' data-memory="' + esc(key) + '"'),
             '<option value="quick"' + (mode === 'quick' ? ' selected' : '') + '>quick</option>' +
-            '<option value="custom"' + (mode === 'custom' ? ' selected' : '') + '>custom</option>', false)) +
-          labelled('모델', memId + '-model', textInput('memory-model', withId(memId + '-model', ' data-memory="' + esc(key) + '"'), model, mode !== 'custom', '예: opencode-go/deepseek-v4-flash')) +
-          labelled('추론', memId + '-thinking', select('memory-thinking', withId(memId + '-thinking', ' data-memory="' + esc(key) + '"'), thinkingOptions(reasoning, true), mode !== 'custom')) +
+            '<option value="custom"' + (mode === 'custom' ? ' selected' : '') + '>custom</option>', busy)) +
+          labelled('모델', memId + '-model', textInput('memory-model', withId(memId + '-model', ' data-memory="' + esc(key) + '"'), model, busy || mode !== 'custom', '예: opencode-go/deepseek-v4-flash')) +
+          labelled('추론', memId + '-thinking', select('memory-thinking', withId(memId + '-thinking', ' data-memory="' + esc(key) + '"'), thinkingOptions(reasoning, true), busy || mode !== 'custom')) +
           '</div>';
       }
       var chips = [];
@@ -762,16 +803,16 @@
       button('clear', ' aria-label="모두 버리기"', '모두 버리기', busy || !pending.length, 'pf-btn pf-btn-danger') +
       '</div>' +
       (confirmClear ? '<div class="pf-clear" role="group" aria-label="대기 변경 버리기 확인"><p>대기 중인 변경을 모두 버릴까요?</p>' +
-        button('clear-cancel', ' aria-label="계속 보관"', '계속 보관', false, 'pf-btn') + ' ' +
-        button('clear-confirm', ' aria-label="모두 버리기 확인"', '모두 버리기', false, 'pf-btn pf-btn-danger') + '</div>' : '') +
+        button('clear-cancel', ' aria-label="계속 보관"', '계속 보관', busy, 'pf-btn') + ' ' +
+        button('clear-confirm', ' aria-label="모두 버리기 확인"', '모두 버리기', busy, 'pf-btn pf-btn-danger') + '</div>' : '') +
       (busy ? '<p class="pf-note" role="status">처리 중…</p>' : '') +
       (conflict ? '<div class="pf-conflict" role="alert"><b>' + esc(CONFLICT_TEXT) + '</b> ' +
         button('reload', ' aria-label="새로고침"', ic('refresh-cw', 'ic-sm') + ' 새로고침', false, 'pf-btn pf-btn-primary') + '</div>' : '') +
       (err && !conflict ? '<p class="pf-err" role="alert">' + esc(err) + '</p>' : '') +
-      (preview ? '<div class="pf-preview"><p class="pf-preview-h">' + ic('file-text', 'ic-sm') + ' 파일별 차이 <span class="pf-count">' +
+      (preview ? '<div class="pf-preview" data-pf-preview><p class="pf-preview-h">' + ic('file-text', 'ic-sm') + ' 파일별 차이 <span class="pf-count">' +
         arr(preview.diffs).length + '</span></p>' + diffRows(preview) +
         arr(preview.warnings).map(function (w) { return '<p class="pf-warn">' + ic('info', 'ic-sm') + ' ' + esc(w) + '</p>'; }).join('') + '</div>' : '') +
-      (result ? '<div class="pf-done"><p class="pf-done-h">' + ic('circle-check', 'ic-sm') + ' 적용했어요</p>' +
+      (result ? '<div class="pf-done" data-pf-result="apply"><p class="pf-done-h">' + ic('circle-check', 'ic-sm') + ' 적용했어요</p>' +
         '<p class="pf-done-s">백업</p><ul class="pf-backups">' + (arr(result.backups).length ? arr(result.backups).map(function (b) {
           return '<li><code>' + esc(b) + '</code></li>';
         }).join('') : '<li class="pf-muted">없음 (바뀐 파일 없음)</li>') + '</ul>' +
@@ -787,14 +828,14 @@
     var state = viewState(v, e);
     var ro = state === 'view' ? readonly(v, e) : true;
     var stale = !!(v && (v.banner === STALE_BANNER || (obj(v.inventory) && v.inventory.stale === true) || v.readOnlyReason === 'INVENTORY_STALE'));
-    var html = '<div class="pf" data-pf-root data-readonly="' + ro + '">' + header(v, e) + (v ? homes(v) : '') +
+    var html = '<div class="pf" data-pf-root data-pf-state="' + state + '" data-pf-busy="' + (e.busy === true) + '" data-pf-conflict="' + (e.conflict === true) + '" data-readonly="' + ro + '">' + header(v, e) + (v ? homes(v) : '') +
       (stale ? banner(STALE_BANNER, 'pf-banner-warn', 'alert') : '') +
       (state === 'loading' ? loadingBlock() : '') +
       (state === 'error' ? errorBlock(e) : '') +
       (v && arr(v.warnings).length ? '<div class="pf-warnings">' + arr(v.warnings).map(function (w) {
         return '<p class="pf-warn">' + ic('info', 'ic-sm') + ' ' + esc(w) + '</p>';
       }).join('') + '</div>' : '') +
-      journalBanner(v, ro) +
+      journalBanner(v, e, ro) +
       (state === 'view' ? tray(v, e) + agentRows(v, e, ro) + profileCards(v, e, ro) + routingRows(v, e, ro) +
         mainModel(v, e, ro) + modelLane(v, e, ro) + summarizer(v, e, ro) + memoryRows(v, e, ro) + guide(v) : '') +
       '</div>';
@@ -812,7 +853,7 @@
       else if (s[0] === 'routing') count = arr(obj(v && v.routing) && v.routing.rows).length;
       else if (s[0] === 'memory') count = 2;
       return '<button type="button" class="pf-nav-b" data-pf="jump" data-target="' + esc(s[0]) + '">' +
-        '<span class="pf-nav-t">' + esc(s[1]) + '</span>' + (count ? '<span class="pf-count">' + count + '</span>' : '') + '</button>';
+        '<span class="pf-nav-t">' + esc(s[1]) + '</span>' + (count !== '' ? '<span class="pf-count">' + count + '</span>' : '') + '</button>';
     }).join('');
     var loadState = viewState(v, e);
     var state = loadState === 'loading' ? chip('pf-c-gray', '불러오는 중')
@@ -832,13 +873,13 @@
     var fetchFn = opt.fetch;
     var tokenFn = opt.token;
     var notify = typeof opt.onChange === 'function' ? opt.onChange : function () {};
-    var s = { view: null, pending: [], draft: map(), preview: null, conflict: false, error: '', status: '', result: null, loading: false, busy: false, confirmClear: false };
+    var s = { view: null, pending: [], draft: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false };
     var seq = 0;
 
     function snapshot() {
       return {
         view: s.view, pending: s.pending.slice(), draft: copyMap(s.draft), preview: s.preview,
-        conflict: s.conflict, error: s.error, status: s.status, result: s.result,
+        conflict: s.conflict, error: s.error, errorKind: s.errorKind, status: s.status, result: s.result,
         loading: s.loading, busy: s.busy, confirmClear: s.confirmClear
       };
     }
@@ -850,6 +891,12 @@
     }
     function statusOf(res) { return res && num(res.status) !== null ? res.status : (res && res.ok ? 200 : 0); }
 
+    function failureKind(err) {
+      var message = str(err && err.message);
+      if (/^HTTP \d{3}$/.test(message)) return 'http';
+      if (/abort|failed to fetch|network|offline|fetch/i.test(message)) return 'network';
+      return 'unknown';
+    }
     function failureCopy(err) {
       var message = str(err && err.message);
       if (/^HTTP \d{3}$/.test(message)) return '프로필 상태를 불러오지 못했어요. 서버가 응답하지 않았어요. 다시 시도해 주세요.';
@@ -859,9 +906,9 @@
 
     function load() {
       if (typeof fetchFn !== 'function') {
-        s.error = '상태를 불러올 수 없어요'; s.loading = false; changed(); return Promise.resolve(snapshot());
+        s.error = '상태를 불러올 수 없어요'; s.errorKind = 'unavailable'; s.loading = false; changed(); return Promise.resolve(snapshot());
       }
-      s.loading = true; s.error = ''; changed();
+      s.loading = true; s.error = ''; s.errorKind = ''; changed();
       var mine = ++seq;
       function settleFailure(err) {
         if (mine !== seq) return snapshot();
@@ -869,6 +916,7 @@
         // Unexpected exceptions raised while handling a response are not caught here.
         if (g.console && g.console.warn) g.console.warn('[profiles] state read failed', err);
         s.loading = false;
+        s.errorKind = failureKind(err);
         s.error = failureCopy(err);
         changed();
         return snapshot();
@@ -886,6 +934,7 @@
           s.view = obj(json);
           s.loading = false;
           s.error = '';
+          s.errorKind = '';
           // A successful state read is the 409 recovery: the stale conflict and its banner are gone.
           s.conflict = false;
           if (s.status === '다른 곳에서 바뀜') s.status = '';
@@ -907,6 +956,7 @@
     function agentKind(kind) { return kind === 'setAgentLane' || kind === 'setAgentPin' || kind === 'resetAgentMemory'; }
 
     function add(change) {
+      if (s.busy) return snapshot();
       if (!obj(change) || typeof change.kind !== 'string') return snapshot();
       var next = s.pending.filter(function (c) {
         if (!obj(c)) return false;
@@ -926,6 +976,7 @@
       return snapshot();
     }
     function drop(index) {
+      if (s.busy) return snapshot();
       var i = typeof index === 'string' && /^\d+$/.test(index) ? Number(index) : num(index);
       if (i === null || i < 0 || i >= s.pending.length) return snapshot();
       s.pending = s.pending.slice(0, i).concat(s.pending.slice(i + 1));
@@ -937,6 +988,7 @@
     }
     function clear() {
       // Discarding removes pending edits but does not make the loaded targets/revision fresh.
+      if (s.busy) return snapshot();
       s.pending = []; s.draft = map(); s.preview = null; s.result = null;
       if (!s.conflict) { s.error = ''; s.status = ''; }
       s.confirmClear = false;
@@ -944,24 +996,28 @@
       return snapshot();
     }
     function askClear() {
+      if (s.busy) return snapshot();
       if (!s.pending.length) return snapshot();
       s.confirmClear = true;
       changed();
       return snapshot();
     }
     function cancelClear() {
+      if (s.busy) return snapshot();
       s.confirmClear = false;
       changed();
       return snapshot();
     }
     function setDraft(key, patch) {
+      if (s.busy) return snapshot();
       var k = str(key);
       if (!k) return snapshot();
       s.draft[k] = Object.assign({}, draftOf({ draft: s.draft }, k) || {}, obj(patch) || {});
       return snapshot();
     }
-    function touch() { changed(); return snapshot(); }
+    function touch() { if (s.busy) return snapshot(); changed(); return snapshot(); }
     function removeKind(kind) {
+      if (s.busy) return snapshot();
       s.pending = s.pending.filter(function (c) { return !obj(c) || c.kind !== kind; });
       s.preview = null; s.result = null;
       if (!s.conflict) { s.error = ''; s.status = ''; }
@@ -979,10 +1035,11 @@
       // until a successful state read. The latch survives add/drop/removeKind/clear; only load() lifts it.
       if (s.conflict) return Promise.resolve(snapshot());
       if (typeof fetchFn !== 'function') {
-        s.error = '실시간 상황판에서만 보낼 수 있어요'; changed(); return Promise.resolve(snapshot());
+        s.error = '실시간 상황판에서만 보낼 수 있어요'; s.errorKind = 'unavailable'; changed(); return Promise.resolve(snapshot());
       }
       if (!list.length) {
         s.error = reapply ? '다시 적용할 변경 기록이 없어요' : '바꾼 값을 먼저 골라 주세요';
+        s.errorKind = 'input';
         changed(); return Promise.resolve(snapshot());
       }
       var body = {
@@ -991,7 +1048,7 @@
         expected: obj(s.view && s.view.targets) || {},
         rosterRevision: num(obj(s.view && s.view.roster) && s.view.roster.revision) || 0
       };
-      s.busy = true; s.preview = null; s.result = null; s.conflict = false; s.error = ''; s.confirmClear = false;
+      s.busy = true; s.preview = null; s.result = null; s.conflict = false; s.error = ''; s.errorKind = ''; s.confirmClear = false;
       s.status = reapply ? '다시 적용 중…' : action === 'preview' ? '미리보기 중…' : '적용 중…';
       changed();
       var request;
@@ -1012,22 +1069,23 @@
         s.busy = false;
         if (res.status === 200 && json && json.ok === true) {
           if (action === 'preview') {
-            s.preview = json; s.status = '미리보기 준비됨'; s.conflict = false; s.error = '';
+            s.preview = json; s.status = '미리보기 준비됨'; s.conflict = false; s.error = ''; s.errorKind = '';
             changed();
             return snapshot();
           }
-          s.result = json; s.preview = null; s.conflict = false; s.error = '';
+          s.result = json; s.preview = null; s.conflict = false; s.error = ''; s.errorKind = '';
           if (!reapply) { s.pending = []; s.draft = map(); }
           s.status = reapply ? '다시 적용했어요' : '적용했어요';
           changed();
           return load().then(function () { return snapshot(); });
         }
         if (res.status === 409) {
-          s.conflict = true; s.status = '다른 곳에서 바뀜'; s.error = CONFLICT_TEXT;
+          s.conflict = true; s.status = '다른 곳에서 바뀜'; s.error = CONFLICT_TEXT; s.errorKind = 'conflict';
           changed();
           return snapshot();
         }
         s.status = '실패';
+        s.errorKind = 'server';
         s.error = (json && (str(json.message) || str(json.code))) || ('HTTP ' + res.status + ' - 다시 시도해 주세요');
         changed();
         return snapshot();
@@ -1035,6 +1093,7 @@
         s.busy = false;
         s.status = '실패';
         if (g.console && g.console.warn) g.console.warn('[profiles] send failed', err);
+        s.errorKind = 'network';
         s.error = '보내지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.';
         changed();
         return snapshot();
@@ -1055,6 +1114,7 @@
       preview: function () { return send('preview'); },
       apply: function () { return send('apply'); },
       reapply: function () {
+        if (s.busy || s.conflict) return Promise.resolve(snapshot());
         var journal = obj(s.view && s.view.applyJournal);
         var payload = obj(journal && journal.reapply);
         var changes = arr(payload && payload.changes);
@@ -1101,6 +1161,11 @@
       var act = t.getAttribute('data-pf');
       var c = controller();
       if (!c) return;
+      // A held apply/preview owns the state until its response settles. Disabled controls also
+      // reject synthetic change/input events here, so a newer edit cannot be discarded by the
+      // older response's pending/draft reset.
+      if (c.snapshot().busy && ['select-profile', 'reset-memory', 'preview', 'apply', 'reapply',
+        'clear', 'clear-cancel', 'clear-confirm', 'drop', 'reload-state'].indexOf(act) >= 0) return;
       if (act === 'jump') {
         var id = 'pf-sec-' + str(t.getAttribute('data-target'));
         var doc = root.ownerDocument;
@@ -1135,13 +1200,16 @@
           restoreStatusFocus();
         } else if (typeof h.reload === 'function') h.reload();
         else if (g.location && typeof g.location.reload === 'function') g.location.reload();
+      } else if (act === 'reload-state') {
+        c.load();
+        restoreStatusFocus();
       }
     }
     function onInput(ev) {
       var t = ev && ev.target;
       if (!t || t.getAttribute('data-pf') !== 'lane-literal') return;
       var c = controller();
-      if (!c) return;
+      if (!c || c.snapshot().busy) return;
       c.setDraft('lane', { literal: str(t.value) });
     }
     function firstOptionFor(selectEl, provider) {
@@ -1157,7 +1225,7 @@
       if (!t || typeof t.getAttribute !== 'function') return;
       var act = t.getAttribute('data-pf');
       var c = controller();
-      if (!c) return;
+      if (!c || c.snapshot().busy) return;
       if (act === 'agent-lane') {
         c.setDraft('agent:' + t.getAttribute('data-agent'), { lane: t.value });
         c.add({ kind: 'setAgentLane', agentId: t.getAttribute('data-agent'), lane: t.value });
