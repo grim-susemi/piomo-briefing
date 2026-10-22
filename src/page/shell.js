@@ -65,9 +65,9 @@
   var NARROW = '(max-width: 899px)';
   var CALM = '(prefers-reduced-motion: reduce)';
   var GONE = '(지금 안 보임)';
-  var VIEWS = ['conv', 'inbox', 'plans', 'home', 'archive', 'settings'];
-  var VIEW_TITLE = { conv: '대화', inbox: '수신함', plans: '계획', home: '홈', archive: '닫힌 창', settings: '설정' };
-  var RAIL = [['home', 'house', '홈'], ['conv', 'message-square', '대화'], ['inbox', 'inbox', '수신함'], ['plans', 'list-todo', '계획'], ['archive', 'archive', '닫힌 창']];
+  var VIEWS = ['conv', 'inbox', 'plans', 'home', 'archive', 'settings', 'memento'];
+  var VIEW_TITLE = { conv: '대화', inbox: '수신함', plans: '계획', home: '홈', archive: '닫힌 창', settings: '설정', memento: '메멘토' };
+  var RAIL = [['home', 'house', '홈'], ['conv', 'message-square', '대화'], ['inbox', 'inbox', '수신함'], ['plans', 'list-todo', '계획'], ['memento', 'lightbulb', '메멘토'], ['archive', 'archive', '닫힌 창']];
   var FILTERS = [['all', '전체'], ['wait', '나를 기다림'], ['run', '진행 중'], ['done', '끝남']];
   var TAB_BY_LABEL = { '나를 기다림': 'wait', '진행 중': 'run', '끝남': 'done' }; // = view.js
   var BOXES = [['wait', '기다리는 것'], ['done', '끝남 확인'], ['ans', '내가 답함'], ['held', '보류됨']];
@@ -680,6 +680,7 @@
       case 'home': return homeView(c, st);
       case 'archive': return archiveView(c, st);
       case 'settings': return settingsView();
+      case 'memento': return '<p class="sh-empty">카드는 오른쪽 메멘토 탭에서 볼 수 있어요</p>';
     }
     return convView(c, st);
   }

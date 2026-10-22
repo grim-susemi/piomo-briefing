@@ -142,12 +142,12 @@ test('no pictographic emoji left in the rail, the sidebar or the tab bar, in tex
   }
 });
 
-// Baseline: Buffer.byteLength(pageHtml(test/fixtures/view-model-board.json, 7, { mode: 'file' })) rendered from the accepted
-// tree f1ec878480a7fb52f0340770e9065cdcd7a1b42c (independently re-measured via read-tree + checkout-index into a temp copy,
-// LF, 2026-10-18). Todo 9 scope exception (typed input decisions grow the page on purpose): re-point the accepted starting page,
-// keeping the 16384 B budget unchanged.
-const BASELINE_TREE = 'f1ec878480a7fb52f0340770e9065cdcd7a1b42c';
-const BASELINE_PAGE_BYTES = 383302;
+// TASK15's explicit scope exception: accepted S1 main 71979fa plus the byte-frozen approved TASK14 cards-view.js/css
+// and their single asset entries. The starting page uses main's page.js/shell.js, not the new wiring.
+// Measured with the same fixture, generation 7 and file mode by task-15/attempt-1/measure-budget.mjs (2026-10-22):
+// 444680 B; the 16384 B wiring-growth budget stays unchanged.
+const BASELINE_TREE = '71979fa627a5123d8561e85d43e1ad6ebf5b5ca2+approved-TASK14-assets';
+const BASELINE_PAGE_BYTES = 444680;
 
 test('fixture page growth over the accepted tree stays within 16 KB (whole page; icon payload printed too)', (t) => {
   const notice = /<!--\nIcons: Lucide[\s\S]*?-->\n/.exec(PAGE)[0];

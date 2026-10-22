@@ -783,6 +783,40 @@ const withToken = (seen) => (vm, token) => {
   return `${pageOf(vm)}<meta name="omo-board-token" content="${token}">`;
 };
 
+test('memento host forwards separate state/write callbacks and gates paused calls without leaking cards', async () => {
+  const dir = tempState();
+  let host;
+  try {
+    seed(dir);
+    const calls = [];
+    const state = { schema: 'memento.board-state.v1', cards: [{ original: 'PRIVATE_CARD_BYTES' }] };
+    const h = makeHost(dir, { portBase: 47700, opts: {
+      getPage: withToken([]),
+      mementoState: () => { calls.push('state'); return { status: 200, json: state }; },
+      memento: body => { calls.push(body); return { status: 500, json: { ok: false, code: 'WRITE_FAILED' } }; },
+    } });
+    host = h.host;
+    const port = portOf((await host.ensure()).url);
+    const token = tokenOfPage((await get(port, '/')).body);
+    assert.deepEqual(JSON.parse((await get(port, '/memento/state')).body), state);
+    const body = { action: 'setStatus', id: '20261022-abcd', status: 'done', rev: 1, requestId: 'same' };
+    assert.deepEqual(await postJson(port, '/memento', body, token), { status: 500, json: { ok: false, code: 'WRITE_FAILED' } });
+    const feed = await sse(port);
+    try {
+      await feed.waitFor(x => x.text.includes('event: data'), 3000, 'first SSE frame');
+      assert.ok(!feed.text.includes('PRIVATE_CARD_BYTES'));
+      assert.ok(!(await get(port, '/data.json')).body.includes('PRIVATE_CARD_BYTES'));
+    } finally { feed.close(); }
+    h.store.writeSettings({ enabled: false });
+    assert.equal((await get(port, '/memento/state')).status, 503);
+    assert.deepEqual(await postJson(port, '/memento', body, token), { status: 503, json: { ok: false, code: 'PAUSED' } });
+    assert.deepEqual(calls, ['state', body]);
+  } finally {
+    await host?.release();
+    removeState(dir);
+  }
+});
+
 test('board write token: new for every serving start, handed only to the served page; a stale token writes nothing', async () => {
   const dir = tempState();
   try {

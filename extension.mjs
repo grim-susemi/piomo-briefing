@@ -38,6 +38,7 @@ import { applyDecide, applyBoardAnswer, applyBoardAnnotation, formatDecideResult
 import { renderPageMaybe, buildViewModel, pageHtml, serverInfoOf, withReports, OWN_GENERATION } from './src/render.mjs';
 import { importImage, gcAssets } from './src/assets.mjs';
 import { createServerHost, readInstalledGeneration } from './src/server-host.mjs';
+import { getMementoApi } from './src/memento-bridge.mjs';
 import { createWorkersLive } from './src/workers-live.mjs';
 import { createPlanTool } from './src/plan-tool.mjs';
 import { createAskBridge } from './src/ask-bridge.mjs';
@@ -1121,6 +1122,16 @@ export function createBriefingExtension(opts = {}) {
           getPage: (vm, token, nonce) => pageHtml(vm, generation, { mode: 'server', token, nonce }),
           answer: boardAnswer,
           focus: boardFocus,
+          mementoState: async () => {
+            const api = getMementoApi();
+            return api.ok ? { status: 200, json: await api.value.state() } : { status: 501, json: { ok: false, code: api.code } };
+          },
+          memento: async (body) => {
+            const api = getMementoApi();
+            if (!api.ok) return { status: 501, json: { ok: false, code: api.code } };
+            const result = await api.value.handle(body);
+            return { status: result.status, json: result.body };
+          },
           reclaimStale: (rel, rec) => store.reclaimStale(rel, rec),
           onError: hostError,
           onRecover: hostRecover,

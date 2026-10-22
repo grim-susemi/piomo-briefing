@@ -17,7 +17,7 @@ function shell() {
 test('polish: rail starts with home, retains every destination, and toggles only from the header and tab bar', () => {
   const S = shell(), st = S.defaults();
   const rail = S.rail(fixture, st);
-  assert.deepEqual([...rail.matchAll(/data-key="([^"]+)"/g)].map(m => m[1]), ['home', 'conv', 'inbox', 'plans', 'archive', 'settings']);
+  assert.deepEqual([...rail.matchAll(/data-key="([^"]+)"/g)].map(m => m[1]), ['home', 'conv', 'inbox', 'plans', 'memento', 'archive', 'settings']);
   assert.doesNotMatch(rail, /data-sh="toggleSide"/);
   assert.match(S.sideFrame(st), /class="sh-head"[\s\S]*data-sh="toggleSide"/);
   assert.match(S.tabs(fixture, st), /class="sh-topen" data-sh="toggleSide"/);

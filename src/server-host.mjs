@@ -178,6 +178,8 @@ export function createServerHost(options) {
     getPage,
     answer,
     focus,
+    mementoState,
+    memento,
     reclaimStale,
     onError = () => {},
     onRecover = () => {},
@@ -347,6 +349,8 @@ export function createServerHost(options) {
     // board write hooks (POST /answer, POST /focus): paused = 503 and the hook is never called
     answer: typeof answer === 'function' ? (body) => (enabledNow() ? answer(body) : PAUSED_REPLY) : undefined,
     focus: typeof focus === 'function' ? (body) => (enabledNow() ? focus(body) : PAUSED_REPLY) : undefined,
+    mementoState: typeof mementoState === 'function' ? () => (enabledNow() ? mementoState() : PAUSED_REPLY) : undefined,
+    memento: typeof memento === 'function' ? (body) => (enabledNow() ? memento(body) : PAUSED_REPLY) : undefined,
   };
 
   async function replaceFile(path, text) {
@@ -710,7 +714,8 @@ export function createServerHost(options) {
   function writeVia(e, name, body) {
     if (e.handingOver || e.graceTimer) return BUSY_REPLY;
     const hook = e.driver[name];
-    return typeof hook === 'function' ? hook(body) : NOT_SUPPORTED_REPLY;
+    return typeof hook === 'function' ? hook(body)
+      : name === 'memento' ? { status: 501, json: { ok: false, code: 'MEMENTO_UNAVAILABLE' } } : NOT_SUPPORTED_REPLY;
   }
 
   // Runs inside serial(key). Returns {url}, null (could not serve) or LOST (another process created the lock first).
@@ -802,6 +807,11 @@ export function createServerHost(options) {
       assetAllowed: (name) => assetAllowed(e, name),
       onAnswer: (body) => writeVia(e, 'answer', body),
       onFocus: (body) => writeVia(e, 'focus', body),
+      onMementoState: () => {
+        const hook = e.driver.mementoState;
+        return typeof hook === 'function' ? hook() : { status: 501, json: { ok: false, code: 'MEMENTO_UNAVAILABLE' } };
+      },
+      onMemento: (body) => writeVia(e, 'memento', body),
       generation: e.driver.generation,
       portBase,
       portCount: PORT_COUNT,

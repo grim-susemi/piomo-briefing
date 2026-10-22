@@ -1,5 +1,5 @@
 /* omo-briefing page controller, classic script (file:// safe, no modules).
- * Load order: view, plan-view, workers-view, convo-view, shell, alarm, annotate, page.
+ * Load order: view, plan-view, workers-view, convo-view, shell, alarm, annotate, cards-view, page.
  * Transport:
  *  - http(s) origin (live board server): one fetch of /data.json + EventSource('/events').
  *    No polling. A dropped stream shows a banner; the browser reconnects by itself.
@@ -51,6 +51,9 @@
   var heldForBusy = false;
   var shell, main, sideList, rail, tabs, trimEl;
   var regionHtml = Object.create(null), scrollMemory = Object.create(null), renderedKey = null;
+  var cardsView = null, cardsEpoch = 0, cardsRead = 0, cardsOwnerAction = null;
+  // A constant region keeps TASK14's own DOM, filters and expanded rows outside string-rendered agent updates.
+  var CARDS_REGION = '<section aria-label="메멘토"><p id="memento-load" role="status"></p><div id="memento-cards"></div></section>';
 
   // Fail closed: without view.js, model text still cannot become markup (same mapping as view.js escapeHtml).
   function esc(v) {
@@ -133,6 +136,13 @@
     root.addEventListener('click', guard('click', onClick));
     root.addEventListener('input', guard('input', onInput));
     root.addEventListener('change', guard('checklist', onCheck));
+    // TASK14 calls setStatus synchronously from click/change handlers, then again for a BUSY retry.
+    // eventPhase becomes NONE after dispatch, including when capture consumes the event.
+    ['click', 'change'].forEach(function (type) {
+      doc.addEventListener(type, function (ev) {
+        cardsOwnerAction = cardsView && main.contains(ev.target) ? ev : null;
+      }, true);
+    });
     root.addEventListener('toggle', guard('details toggle', function (ev) {
       var t = ev.target, k = t && t.getAttribute && t.getAttribute('data-open-key');
       if (k) state.ui.expanded[k] = t.open === true;
@@ -219,7 +229,7 @@
     for (var i = 0; i < sessions.length; i++) if (sessions[i] && sessions[i].id === state.ui.active) return sessions[i];
     return null;
   }
-  function mainKey() { return state.ui.active ? state.ui.active + '/' + (state.ui.sub[state.ui.active] || 'ov') : 'overview'; }
+  function mainKey() { return state.ui.view === 'memento' ? 'memento' : state.ui.active ? state.ui.active + '/' + (state.ui.sub[state.ui.active] || 'ov') : 'overview'; }
   function saveScroll() {
     if (renderedKey !== null) scrollMemory[renderedKey] = { y: main.scrollTop, anchor: captureAnchor() };
   }
@@ -261,6 +271,9 @@
     var active = doc.activeElement;
     var sideToggle = active && active.getAttribute && active.getAttribute('data-sh') === 'toggleSide';
     var overlay = overlayOpen();
+    if (state.ui.view === 'memento' && (action.type === 'open' || action.type === 'active')) {
+      state.ui = g.BriefShell.reduce(state.ui, { type: 'view', key: 'conv' });
+    }
     state.ui = g.BriefShell.reduce(state.ui, action);
     g.BriefShell.persist(undefined, state.ui);
     render();
@@ -338,12 +351,33 @@
       region('side', sideList, g.BriefShell.side(model, state.ui));
       region('tabs', tabs, g.BriefShell.tabs(model, state.ui));
       var s = currentSession();
-      var html = s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision, checked: isChecked })
+      var cards = state.ui.view === 'memento';
+      if (!cards && cardsView) { cardsView.destroy(); cardsView = null; cardsEpoch++; }
+      var html = cards ? CARDS_REGION : s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision, checked: isChecked })
         : state.ui.active ? '<p class="empty">(지금 안 보임)</p>' : g.BriefView.renderOverview(model, state.ui);
       if (region('main', main, html)) {
         g.BriefAnnotate.decorate();
         // a #main drawn later than the apply shows the current elapsed times at once, not the apply's (the 1 s ticker goes on)
         if (g.BriefWorkersView) g.BriefWorkersView.tick(main, state.now());
+      }
+      if (cards && !cardsView) {
+        var cardBodies = Object.create(null);
+        cardsView = g.BriefCards.mount(doc.getElementById('memento-cards'), {
+          live: state.ui.live,
+          setStatus: function (id, status, rev) {
+            var body = cardBodies[id];
+            if ((cardsOwnerAction && cardsOwnerAction.eventPhase > 0) || !body) {
+              body = { action: 'setStatus', id: id, status: status, rev: rev, requestId: g.crypto.randomUUID() };
+              cardBodies[id] = body;
+            }
+            return postJson('/memento', body).then(function (res) {
+              refreshMemento();
+              return { status: res.status, body: res.json };
+            });
+          },
+          refresh: refreshMemento
+        });
+        refreshMemento();
       }
       var trimmed = model.trimmed;
       var n = trimmed && trimmed.cards;
@@ -357,6 +391,23 @@
     var memory = scrollMemory[key];
     if (memory) restoreAnchor(memory.anchor, memory.y); else main.scrollTop = 0;
     renderedKey = key;
+  }
+
+  function refreshMemento() {
+    if (!cardsView || state.ui.view !== 'memento' || state.transport !== 'http') return Promise.resolve();
+    var epoch = cardsEpoch, read = ++cardsRead, view = cardsView;
+    var notice = doc.getElementById('memento-load');
+    return g.fetch('/memento/state', { cache: 'no-store' }).then(function (res) {
+      if (!res.ok) throw new Error('memento unavailable');
+      return res.json();
+    }).then(function (value) {
+      if (epoch !== cardsEpoch || read !== cardsRead || view !== cardsView) return;
+      notice.textContent = '';
+      view.update(value);
+    }, function () {
+      if (epoch !== cardsEpoch || read !== cardsRead || view !== cardsView) return;
+      notice.textContent = '지금은 메멘토를 쓸 수 없어요';
+    });
   }
 
   function runHooks(list, arg) {
@@ -1056,6 +1107,10 @@
     var http = !!(loc && /^https?:$/.test(loc.protocol) && g.EventSource && g.fetch);
     state.transport = http ? 'http' : 'file';
     state.ui.live = http && !!boardToken();
+    g.addEventListener('focus', guard('memento focus', refreshMemento));
+    doc.addEventListener('visibilitychange', guard('memento visible', function () {
+      if (doc.visibilityState === 'visible') refreshMemento();
+    }));
     if (!state.model) render();
     if (http) { connectLive(); return; }
     inject();
