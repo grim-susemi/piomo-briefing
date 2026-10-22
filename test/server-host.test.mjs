@@ -9,7 +9,7 @@ import * as fsp from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServerHost, readInstalledGeneration, SERVER_LOCK, SERVER_JSON, CHECK_EVERY_MS, POLL_MS } from '../src/server-host.mjs';
-import { createBoardServer } from '../src/server.mjs';
+import { createBoardServer, cspHeader } from '../src/server.mjs';
 import { openStore, isPidAlive } from '../src/store.mjs';
 
 const HELPER = fileURLToPath(new URL('./helpers/server-child.mjs', import.meta.url));
@@ -120,6 +120,17 @@ function get(port, path = '/') {
       res.setEncoding('utf8');
       res.on('data', (c) => { body += c; });
       res.on('end', () => resolve({ status: res.statusCode, body }));
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+  });
+}
+
+function getHeaders(port, path = '/') {
+  return new Promise((resolve, reject) => {
+    const req = http.get({ host: '127.0.0.1', port, path, agent: false, headers: { Connection: 'close' } }, (res) => {
+      res.resume();
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers }));
       res.on('error', reject);
     });
     req.on('error', reject);
@@ -809,6 +820,34 @@ test('board write token: new for every serving start, handed only to the served 
     assert.equal(calls.length, 2, 'the old token reached no hook');
     assert.equal((await postJson(second, '/answer', { id: 1, sessionId: 's1', option: 'A' }, b)).status, 200);
     assert.ok(allFiles(dir).every((f) => !readFileSync(f, 'utf8').includes(b)), 'the second token is not on disk either');
+    await t.host.release();
+  } finally {
+    removeState(dir);
+  }
+});
+
+test('the response CSP nonce is the one the driver getPage received', async () => {
+  const dir = tempState();
+  try {
+    seed(dir);
+    const seen = [];
+    const t = makeHost(dir, { opts: {
+      getPage: (vm, token, nonce) => { seen.push({ vm, token, nonce }); return pageOf(vm); },
+    } });
+    const port = portOf((await t.host.ensure()).url);
+    const first = await getHeaders(port, '/');
+    assert.equal(first.status, 200);
+    const policy = first.headers['content-security-policy'];
+    const nonce = /script-src 'nonce-([^']+)'/.exec(policy)?.[1];
+    assert.match(nonce, /^[A-Za-z0-9+/]{22}==$/, '16 random bytes as base64');
+    assert.equal(policy, cspHeader(nonce), 'the response carries the exported policy for its nonce');
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].nonce, nonce, 'the driver saw the header nonce');
+    assert.match(seen[0].token, /^[A-Za-z0-9_-]{43}$/, 'the driver still receives the write token');
+    const second = await getHeaders(port, '/');
+    const nonce2 = /script-src 'nonce-([^']+)'/.exec(second.headers['content-security-policy'])?.[1];
+    assert.notEqual(nonce2, nonce, 'a new response gets a new nonce');
+    assert.equal(seen[1].nonce, nonce2, 'the second page callback saw its own nonce');
     await t.host.release();
   } finally {
     removeState(dir);

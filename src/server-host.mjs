@@ -26,7 +26,7 @@
 //   process's notifyPublished(), rebuilds the view model with readSnapshot + buildViewModel (this generation's code) and
 //   broadcasts it. A data.js written by any generation is never forwarded.
 // - Board writes: every time this process starts serving it makes a new random write token (memory only: not in the lock,
-//   server.json, a log or a model) and hands it to the board server and, as getPage(vm, token), to the served page.
+//   server.json, a log or a model) and hands it to the board server and, as getPage(vm, token, nonce), to the served page.
 //   answer(body) / focus(body) -> Promise|{status, json} are the extension's hooks for POST /answer and /focus; while the
 //   board is paused the host answers 503 PAUSED itself and calls neither.
 // - File I/O here is async; every timer and socket is unref'd; nothing here throws into the caller's session.
@@ -337,7 +337,7 @@ export function createServerHost(options) {
     now: () => now(),
     readSnapshot: () => readSnapshot(),
     buildViewModel: (snap, t) => buildViewModel(snap, t),
-    getPage: (vm, token) => getPage(vm, token),
+    getPage: (vm, token, nonce) => getPage(vm, token, nonce),
     report,
     recover,
     isEnabled: enabledNow,
@@ -795,7 +795,7 @@ export function createServerHost(options) {
   async function listen(e, preferPort) {
     e.token = randomBytes(32).toString('base64url');
     const board = createBoardServer({
-      getPage: async () => e.driver.getPage(await buildVm(e), e.token),
+      getPage: async ({ nonce } = {}) => e.driver.getPage(await buildVm(e), e.token, nonce),
       getViewModel: () => buildVm(e),
       token: e.token,
       assetsDir: join(stateDir, 'assets'),

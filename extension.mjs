@@ -1118,7 +1118,7 @@ export function createBriefingExtension(opts = {}) {
             return buildViewModel(changed ? withReports(store, store.readSnapshot()) : snap, t, { generation, server: info.server, serverError: info.error, stateDir: store.root });
           },
           readSnapshot: () => withReports(store, store.readSnapshot()),
-          getPage: (vm, token) => pageHtml(vm, generation, { mode: 'server', token }),
+          getPage: (vm, token, nonce) => pageHtml(vm, generation, { mode: 'server', token, nonce }),
           answer: boardAnswer,
           focus: boardFocus,
           reclaimStale: (rel, rec) => store.reclaimStale(rel, rec),

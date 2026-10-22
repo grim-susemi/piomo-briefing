@@ -1,6 +1,8 @@
 // Loopback-only board server: GET / (page), /data.json (view model), /events (SSE), /health, and exactly two
 // guarded write routes, POST /answer and POST /focus. `node:http` only. No CORS (no Access-Control-* header,
 // OPTIONS stays 405), never serves data.js (a cross-site <script> could read it). Every other method/path is 405/404.
+// GET / is the only HTML route: every response carries exactly one Content-Security-Policy whose fresh nonce is also
+// on the page's combined <style>, every page script and the bootstrap script; other routes and refusals carry no CSP.
 //
 // A write route runs only when ALL of these hold, checked in this order; the first failure is answered and
 // no callback runs (Host is checked first, for every route):
@@ -32,7 +34,7 @@
 import http from 'node:http';
 import { open as openFile, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { timingSafeEqual, createHash } from 'node:crypto';
+import { timingSafeEqual, createHash, randomBytes } from 'node:crypto';
 import { ASSET_NAME_RE, MIME, MAX_IMAGE_BYTES, sniffImage } from './assets.mjs';
 
 const HOST = '127.0.0.1';
@@ -63,6 +65,14 @@ const SECURE = {
   'X-Content-Type-Options': 'nosniff',
 };
 const SOCKET_DISCONNECT_CODES = new Set(['ECONNRESET', 'EPIPE']);
+
+// Exact Content-Security-Policy for the served HTML page: the fresh per-response nonce is the only script/style authority.
+// Inline style attributes stay allowed (the page's style= sites and the data: favicon), and the page connects only to itself.
+export function cspHeader(nonce) {
+  return "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'; " +
+    `script-src 'nonce-${nonce}'; script-src-attr 'none'; style-src 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; ` +
+    "connect-src 'self'; img-src 'self' data:; frame-src 'none'; worker-src 'none'";
+}
 
 // JSON.parse checks the grammar first. Walk its raw tokens without recursion so a repeated member cannot be
 // hidden by last-wins parsing, string contents, escaped quotes, or alternate Unicode spellings of a key.
@@ -494,8 +504,9 @@ export function createBoardServer(options) {
     }
     switch (pathname) {
       case '/': {
-        const page = await getPage();
-        send(res, 200, 'text/html; charset=utf-8', String(page));
+        const nonce = randomBytes(16).toString('base64');
+        const page = await getPage({ nonce });
+        send(res, 200, 'text/html; charset=utf-8', String(page), { 'Content-Security-Policy': cspHeader(nonce) });
         recoverSse();
         return;
       }

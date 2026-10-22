@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
-import { createBoardServer } from '../src/server.mjs';
+import { createBoardServer, cspHeader } from '../src/server.mjs';
 
 // Server tests use 48120-48839, disjoint from server-host.test.mjs even when child pids have the same modulo.
 // Tests read the bound port from start().
@@ -138,6 +138,55 @@ test('GET / serves the page with the hardening headers and no CORS', async () =>
   });
 });
 
+test('GET / carries one CSP header with a fresh nonce that the same page also carries', async () => {
+  const pageFor = ({ nonce } = {}) =>
+    `<!doctype html><style${nonce ? ` nonce="${nonce}"` : ''}></style>` +
+    Array.from({ length: 11 }, () => `<script${nonce ? ` nonce="${nonce}"` : ''}></script>`).join('');
+  await withServer({ getPage: pageFor }, async ({ port }) => {
+    const a = await request({ port, path: '/' });
+    const policy = a.headers['content-security-policy'];
+    assert.equal(typeof policy, 'string', 'one CSP header');
+    const nonce = /script-src 'nonce-([^']+)'/.exec(policy)?.[1];
+    assert.match(nonce, /^[A-Za-z0-9+/]{22}==$/, '16 random bytes as base64');
+    assert.equal(
+      policy,
+      "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'; " +
+        `script-src 'nonce-${nonce}'; script-src-attr 'none'; style-src 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; ` +
+        "connect-src 'self'; img-src 'self' data:; frame-src 'none'; worker-src 'none'",
+      'the exact policy is the contract, with the nonce in script-src and style-src',
+    );
+    assert.equal(policy, cspHeader(nonce), 'the route uses the exported policy builder');
+    const bodyNonces = [...a.body.matchAll(/nonce="([^"]+)"/g)].map((m) => m[1]);
+    assert.equal(bodyNonces.length, 12, 'one style + eleven scripts carry the nonce');
+    assert.ok(bodyNonces.every((n) => n === nonce), 'the page carries the header nonce');
+    const b = await request({ port, path: '/' });
+    const nonceB = /script-src 'nonce-([^']+)'/.exec(b.headers['content-security-policy'])?.[1];
+    assert.notEqual(nonceB, nonce, 'two consecutive responses carry different nonces');
+    assert.equal(b.headers['content-security-policy'], cspHeader(nonceB));
+  });
+});
+
+test('only GET / carries CSP: /data.json, /health, /events, a 404 and a Host refusal have none', async () => {
+  await withServer({}, async ({ port }) => {
+    for (const p of ['/data.json', '/health']) {
+      const r = await request({ port, path: p });
+      assert.equal(r.status, 200, p);
+      assert.equal(r.headers['content-security-policy'], undefined, `${p} has no CSP`);
+    }
+    const feed = await sse(port);
+    assert.equal(feed.status, 200);
+    assert.equal(feed.headers['content-security-policy'], undefined, '/events has no CSP');
+    feed.req.destroy();
+    const nope = await request({ port, path: '/nope' });
+    assert.equal(nope.status, 404);
+    assert.equal(nope.headers['content-security-policy'], undefined, 'a 404 has no CSP');
+    const forbidden = await request({ port, path: '/', headers: { Host: 'evil.example' } });
+    assert.equal(forbidden.status, 403);
+    assert.equal(forbidden.headers['content-security-policy'], undefined, 'a Host refusal has no CSP');
+    assert.doesNotMatch(forbidden.body, /<html/i, 'a Host refusal serves no page');
+  });
+});
+
 test('/data.json is JSON + nosniff, /health has its fields, /data.js and unknown paths are 404', async () => {
   await withServer({}, async ({ port }) => {
     const h0 = await request({ port, path: '/health' });
@@ -178,6 +227,11 @@ test('Host header: foreign / missing / wrong-port hosts are 403, localhost:<port
       assert.equal(r.status, 403, host);
       const p = await request({ port, path: '/', headers: { Host: host } });
       assert.equal(p.status, 403, `GET / with ${host}`);
+      const d = await request({ port, path: '/data.json', headers: { Host: host } });
+      assert.equal(d.status, 403, `GET /data.json with ${host}`);
+      const e = await sse(port, { Host: host });
+      assert.equal(e.status, 403, `GET /events with ${host}`);
+      e.req.destroy();
     }
     assert.equal((await request({ port, path: '/health', headers: { Host: `localhost:${port}` } })).status, 200);
     assert.equal((await request({ port, path: '/health', headers: { Host: `127.0.0.1:${port}` } })).status, 200);

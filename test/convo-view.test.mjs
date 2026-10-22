@@ -830,3 +830,54 @@ test('the conversation page draws the open-question line as one sentence beside 
   assert.ok(line);
   assert.match(line[1], /^<span class="sym"><svg [^>]*><use href="#i-circle-question-mark"><\/use><\/svg><\/span><span class="oq-b">질문 알림 열림 - [\s\S]*<span class="oq-t">문서 말투는 존댓말로 할까요\?<\/span> <span class="time">[\s\S]*<\/span>$/);
 });
+
+// todo 2: each of the five reviewed hostile strings is placed in every named conversation surface at once,
+// and each surface's own element must carry it as text on the sub-tab that draws that surface
+test('hostile fixture strings stay text per surface: title, headline, report title/summary and decision question/option', () => {
+  const ctx = load();
+  const H = JSON.parse(read('test/fixtures/hostile-strings.json'));
+  const build = (s) => {
+    const sess = clone(A);
+    sess.tabLabel = ''; // the header names a herdr label when there is one; without it the h1 is the title
+    sess.title = s;
+    sess.headline = s;
+    sess.reports[0].title = s;
+    sess.reports[0].summary = s;
+    const d = sess.decisions.find((x) => x.id === 97);
+    d.question = s;
+    d.options.A.text = s;
+    return sess;
+  };
+  // real tags and real event attributes only: the strict parser keeps escaped text inside a quoted value as text
+  const structure = (html) => {
+    const root = parse(html);
+    let tags = 0, events = 0;
+    for (const el of els(root)) {
+      if (/^(b|script|img|svg|textarea)$/.test(el.tag)) tags++;
+      events += Object.keys(el.attrs).filter((k) => /^on[a-z]+$/.test(k)).length;
+    }
+    return [tags, events];
+  };
+  for (const s of H) {
+    const sess = build(s);
+    const ov = parse(render(ctx, sess, 'ov'));
+    assert.equal(flat(cls(ov, 'cv-h1')[0]), s, 'title: ' + s);
+    assert.ok(flat(cls(ov, 'cv-hl')[0]).includes(s), 'headline: ' + s);
+    const rep = parse(render(ctx, sess, 'rep'));
+    assert.ok(flat(cls(rep, 'rep-t')[0]).includes(s), 'report title: ' + s);
+    assert.equal(flat(cls(rep, 'rep-sum')[0]), s, 'report summary: ' + s);
+    const dec = parse(render(ctx, sess, 'dec'));
+    const card = attrs(dec, 'data-decision', '97')[0];
+    assert.ok(card, 'decision #97 card is drawn');
+    assert.ok(flat(cls(card, 'dq')[0]).includes(s), 'decision question: ' + s);
+    const optA = attrs(card, 'data-opt', 'A')[0];
+    assert.ok(optA, 'option A button is drawn');
+    assert.ok(flat(optA).includes(s), 'option: ' + s);
+    const neutral = build('NEUTRAL');
+    for (const sub of ['ov', 'rep', 'dec']) {
+      // injected markup would add a real tag or an event attribute; escaped text adds neither
+      assert.deepEqual(structure(render(ctx, build(s), sub)), structure(render(ctx, neutral, sub)),
+        sub + ' structure: ' + s);
+    }
+  }
+});

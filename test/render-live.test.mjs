@@ -212,6 +212,35 @@ test('pageHtml carries the board write token as one meta in server mode only', (
   assert.ok(odd.includes('content="&quot;&gt;&lt;script&gt;x&lt;/script&gt;"'), 'an attribute-breaking token stays inside its attribute');
 });
 
+const PAGE_NONCE = 'AbCdEfGhIjKlMnOpQrStUv=='; // 22 base64 chars + '==': the only shape pageHtml accepts
+const pageTags = (html) => [...html.matchAll(/<(?:script|style)\b[^>]*>/g)].map((m) => m[0]);
+
+test('pageHtml server mode stamps the style and every script with the same nonce; file mode bytes ignore it', () => {
+  const vm = { schema: 1, seq: 7, gen: 4, sessions: [], waiting: [], server: null };
+  const file = pageHtml(vm, 4, { mode: 'file' });
+  const served = pageHtml(vm, 4, { mode: 'server', token: 't', nonce: PAGE_NONCE });
+  const fileTags = pageTags(file), servedTags = pageTags(served);
+  assert.equal(servedTags.filter((t) => t.startsWith('<style')).length, 1, 'one combined style');
+  assert.equal(servedTags.filter((t) => t.startsWith('<script')).length, 11, 'ten modules + the first paint');
+  assert.equal(servedTags.length, fileTags.length, 'the nonce changes no tag count');
+  for (const tag of servedTags) assert.ok(tag.includes(`nonce="${PAGE_NONCE}"`), `missing nonce: ${tag.slice(0, 40)}`);
+  assert.equal(pageHtml(vm, 4, { mode: 'file', nonce: PAGE_NONCE }), file, 'file mode ignores the nonce');
+});
+
+test('pageHtml emits no nonce for absent or malformed nonces and keeps today\'s server markup', () => {
+  const vm = { schema: 1, seq: 7, gen: 4, sessions: [{ id: 'x', title: '</script><script>alert(1)</script>' }], waiting: [], server: null };
+  const plain = pageHtml(vm, 4, { mode: 'server', token: 't' });
+  assert.equal(pageHtml(vm, 4, { mode: 'server', token: 't', nonce: undefined }), plain, 'absent nonce: today\'s bytes');
+  assert.doesNotMatch(plain, /nonce=/);
+  for (const bad of ['', 'A'.repeat(21), '"><x', 'A'.repeat(23) + '=', 'A'.repeat(24)]) {
+    assert.equal(pageHtml(vm, 4, { mode: 'server', token: 't', nonce: bad }), plain, `malformed nonce ${JSON.stringify(bad)} is ignored`);
+  }
+  const nonced = pageHtml(vm, 4, { mode: 'server', token: 't', nonce: PAGE_NONCE });
+  assert.equal(pageTags(nonced).length, pageTags(plain).length, 'same tags, now nonced');
+  assert.ok(pageTags(nonced).every((t) => t.includes(`nonce="${PAGE_NONCE}"`)));
+  assert.ok(!nonced.includes('</script><script>alert(1)'), 'hostile model text still cannot break out');
+});
+
 // ------------------------------------------------------------------ async publish
 
 const holdLock = (store, pid = process.pid) => store.writeNew('render.lock', { pid, at: 1, nonce: 'held-by-test' });

@@ -52,7 +52,13 @@
   var shell, main, sideList, rail, tabs, trimEl;
   var regionHtml = Object.create(null), scrollMemory = Object.create(null), renderedKey = null;
 
-  function esc(v) { return g.BriefView && g.BriefView.escapeHtml ? g.BriefView.escapeHtml(v) : String(v); }
+  // Fail closed: without view.js, model text still cannot become markup (same mapping as view.js escapeHtml).
+  function esc(v) {
+    if (g.BriefView && g.BriefView.escapeHtml) return g.BriefView.escapeHtml(v);
+    return String(v).replace(/[&<>"'`]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c];
+    });
+  }
   function seqOf(d) { return d && typeof d.seq === 'number' && isFinite(d.seq) ? d.seq : 0; }
 
   // Page script errors are never swallowed: console.error + a small 'screen error' mark.

@@ -27,7 +27,7 @@ let id, vm, page, browserPids = [], fatal = null;
 const layoutOnly = process.env.OMO_INPUT_LAYOUT_ONLY === '1';
 const results = { pid: process.pid, captures: [], keyboard: [], layout: [], geometry: [], refusals: [], cleanup: {} };
 const server = createBoardServer({ portBase: Number(process.env.OMO_BRIEFING_PORT_BASE || 47400), portCount: 10, generation: 9, token: 'owned-field-test',
-  getPage: () => pageHtml(vm, 9, { mode: 'server', token: 'owned-field-test' }), getViewModel: () => vm,
+  getPage: ({ nonce } = {}) => pageHtml(vm, 9, { mode: 'server', token: 'owned-field-test', nonce }), getViewModel: () => vm,
   onAnswer: async body => {
     const r = applyBoardAnswer(store, body, now);
     if (r.ok) { await deliver.wake(ctx, 'input'); session.emit('d' + body.id); await deliver.wake(ctx, 'message_end'); }

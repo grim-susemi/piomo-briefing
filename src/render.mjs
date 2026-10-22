@@ -994,22 +994,25 @@ function iconSprite(fs) {
  * The whole board page (all scripts, styles and icons inline, first paint from `vm`). mode 'file' = STATE/index.html,
  * 'server' = GET / of the board server; both are built from the same template of this generation.
  * `token` (the board server's per-process write token) is emitted as <meta name="omo-board-token"> in server mode ONLY:
- * the file page, data.js, /data.json and the SSE model never carry it.
+ * the file page, data.js, /data.json and the SSE model never carry it. `nonce`, also server mode only, is the fresh
+ * per-response CSP nonce: it is put on the combined <style>, every page script and the bootstrap script. Any nonce that
+ * is not 16 bytes as base64 is ignored, so a legacy caller's bytes stay exactly today's.
  */
-export function pageHtml(vm, generation, { mode = 'file', token, fs = nodeFs } = {}) {
+export function pageHtml(vm, generation, { mode = 'file', token, nonce, fs = nodeFs } = {}) {
   const read = (name) => fs.readFileSync(join(PAGE_DIR, name), 'utf8');
   const css = PAGE_CSS.map((n) => read(n).replace(/<\/style/gi, '<\\/style')).join('\n');
+  const nonceAttr = mode === 'server' && typeof nonce === 'string' && /^[A-Za-z0-9+/]{22}==$/.test(nonce) ? ` nonce="${nonce}"` : '';
   return '<!doctype html>\n<html lang="ko"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
     '<link rel="icon" href="data:,">' + // inline icon: the board server has no /favicon.ico and its 404 would be a console error on every load
     (Number.isInteger(generation) ? `<meta name="omo-briefing-generation" content="${generation}">` : '') +
     `<meta name="omo-briefing-mode" content="${mode === 'server' ? 'server' : 'file'}">` +
     (mode === 'server' && typeof token === 'string' && token !== '' ? `<meta name="omo-board-token" content="${attrEscape(token)}">` : '') +
-    '<title>OMO 상황판</title>\n<style>\n' + css + '\n</style></head>\n<body>\n' + iconSprite(fs) + '<div id="app"></div>\n' +
-    PAGE_JS.map((n) => '<script>\n' + inlineJs(read(n)) + '\n</script>\n').join('') +
+    '<title>OMO 상황판</title>\n<style' + nonceAttr + '>\n' + css + '\n</style></head>\n<body>\n' + iconSprite(fs) + '<div id="app"></div>\n' +
+    PAGE_JS.map((n) => '<script' + nonceAttr + '>\n' + inlineJs(read(n)) + '\n</script>\n').join('') +
     // Runs after page.js's own DOMContentLoaded start(): first paint uses the inline data,
     // data.js re-injection then only raises the badge for a larger seq.
-    '<script>\ndocument.addEventListener("DOMContentLoaded", function () { window.__briefData && window.__briefData(' +
+    '<script' + nonceAttr + '>\ndocument.addEventListener("DOMContentLoaded", function () { window.__briefData && window.__briefData(' +
     scriptJson(vm) + '); });\n</script>\n</body></html>\n';
 }
 
