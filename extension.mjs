@@ -35,7 +35,7 @@ import { validateBrief, REPORT_BLOCK_SCHEMA, DECISION_FIELDS_SCHEMA } from './sr
 import { openStore } from './src/store.mjs';
 import { collectAuto } from './src/collect.mjs';
 import { applyDecide, applyBoardAnswer, applyBoardAnnotation, formatDecideResult } from './src/decide.mjs';
-import { renderPageMaybe, buildViewModel, pageHtml, serverInfoOf, withReports, OWN_GENERATION } from './src/render.mjs';
+import { renderPageMaybe, buildViewModel, projectBoardModel, pageHtml, serverInfoOf, withReports, OWN_GENERATION } from './src/render.mjs';
 import { importImage, gcAssets } from './src/assets.mjs';
 import { createServerHost, readInstalledGeneration } from './src/server-host.mjs';
 import { getMementoApi } from './src/memento-bridge.mjs';
@@ -1106,18 +1106,21 @@ export function createBriefingExtension(opts = {}) {
       });
       if (serverOn && (!host || hostSid !== sid)) {
         hostSid = sid;
+        const buildServerModel = (snap, t, full = false) => {
+          const info = serverInfoOf(store);
+          // A record read may change errors; build from a fresh snapshot in that case.
+          const changed = noteServerRecord(info);
+          return buildViewModel(changed ? withReports(store, store.readSnapshot()) : snap, t, { generation, server: info.server, serverError: info.error, stateDir: store.root, full });
+        };
         host = (opts.createServerHost ?? createServerHost)({
           stateDir,
           sessionId: sid,
           generation,
           installedGeneration,
           isEnabled: enabled, // never throws: an unreadable settings file is recorded as the 'settings' error and reads as paused
-          buildViewModel: (snap, t) => {
-            const info = serverInfoOf(store);
-            // a failed record read is recorded in this very operation; when that changed the errors the model is built from a fresh snapshot
-            const changed = noteServerRecord(info);
-            return buildViewModel(changed ? withReports(store, store.readSnapshot()) : snap, t, { generation, server: info.server, serverError: info.error, stateDir: store.root });
-          },
+          buildViewModel: (snap, t) => buildServerModel(snap, t),
+          buildFull: (snap, t) => buildServerModel(snap, t, true),
+          project: (full, t) => projectBoardModel(full, t),
           readSnapshot: () => withReports(store, store.readSnapshot()),
           getPage: (vm, token, nonce) => pageHtml(vm, generation, { mode: 'server', token, nonce }),
           answer: boardAnswer,

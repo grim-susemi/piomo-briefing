@@ -174,6 +174,8 @@ export function createServerHost(options) {
     installedGeneration = async () => null,
     isEnabled,
     buildViewModel,
+    buildFull,
+    project,
     readSnapshot,
     getPage,
     answer,
@@ -339,6 +341,8 @@ export function createServerHost(options) {
     now: () => now(),
     readSnapshot: () => readSnapshot(),
     buildViewModel: (snap, t) => buildViewModel(snap, t),
+    buildFull,
+    project,
     getPage: (vm, token, nonce) => getPage(vm, token, nonce),
     report,
     recover,
@@ -420,10 +424,16 @@ export function createServerHost(options) {
   async function buildVm(e) {
     const d = e.driver;
     const snap = await d.readSnapshot();
-    const vm = await d.buildViewModel(snap, d.now());
-    // '<sha>.<ext>' of every report image of this model: the board serves /assets/<name> only for these
+    const now = d.now();
+    const full = typeof d.buildFull === 'function' && typeof d.project === 'function'
+      ? await d.buildFull(snap, now) : await d.buildViewModel(snap, now);
+    const vm = typeof d.buildFull === 'function' && typeof d.project === 'function'
+      ? await d.project(full, now) : full;
+    const cards = Array.isArray(full?.sessions) ? full.sessions : [];
+    e.fullById = new Map(cards.map((s) => [s.id, s]));
+    // Asset authorization includes reports hidden by folding or capping in the board projection.
     const refs = new Set();
-    for (const s of Array.isArray(vm?.sessions) ? vm.sessions : []) {
+    for (const s of cards) {
       for (const r of Array.isArray(s?.reports) ? s.reports : []) {
         for (const img of Array.isArray(r?.images) ? r.images : []) {
           if (typeof img?.src === 'string' && img.src.startsWith('assets/')) refs.add(img.src.slice('assets/'.length));
@@ -435,6 +445,7 @@ export function createServerHost(options) {
       if (!Number.isInteger(vm.seq)) vm.seq = snap && snap.published && Number.isInteger(snap.published.seq) ? snap.published.seq : 0;
       if (vm.gen === undefined) vm.gen = d.generation;
     }
+    e.vm = vm;
     return vm;
   }
 
@@ -447,6 +458,17 @@ export function createServerHost(options) {
       e.assetKey = k;
     }
     return e.assetRefs.has(name);
+  }
+
+  async function getConvo(e, sid) {
+    const k = await statKey();
+    if (!e.assetRefs || e.assetKey !== k) {
+      await buildVm(e);
+      e.assetKey = k;
+    }
+    const row = e.vm?.sessions?.find((s) => s.id === sid);
+    if (!row) return null;
+    return { schema: 1, gen: e.vm.gen, key: row.folded ? row.folded.key : null, session: structuredClone(e.fullById.get(sid)) };
   }
 
   function entryError(e, k, err) {
@@ -792,7 +814,12 @@ export function createServerHost(options) {
     let driver = self;
     Object.defineProperty(e, 'driver', {
       get: () => driver,
-      set: (next) => { if (rank(next.generation) >= rank(driver.generation)) driver = next; },
+      set: (next) => {
+        if (rank(next.generation) >= rank(driver.generation)) {
+          driver = next;
+          e.assetRefs = null;
+        }
+      },
     });
     return e;
   }
@@ -802,6 +829,7 @@ export function createServerHost(options) {
     const board = createBoardServer({
       getPage: async ({ nonce } = {}) => e.driver.getPage(await buildVm(e), e.token, nonce),
       getViewModel: () => buildVm(e),
+      getConvo: (sid) => getConvo(e, sid),
       token: e.token,
       assetsDir: join(stateDir, 'assets'),
       assetAllowed: (name) => assetAllowed(e, name),

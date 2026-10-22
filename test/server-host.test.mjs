@@ -23,6 +23,77 @@ if (process.env.OMO_TEST_MUTANT_HOOKS) console.log(`TEST-PID ${process.pid}`);
 let windowNo = 0;
 const nextBase = () => 47400 + (process.pid % 30) * 24 + (windowNo++ % 2) * 12;
 
+test('folded report images are authorized from the full model across rebuilds; an unknown asset stays 404', async (t) => {
+  const dir = tempState();
+  const store = seed(dir);
+  const name = '84fecfda2b6702dc6015b4307ae048524399b4d6493664f11ecc3fc124a7ce37.png';
+  await fsp.mkdir(join(dir, 'assets'), { recursive: true });
+  await fsp.copyFile(new URL('./fixtures/board-assets/' + name, import.meta.url), join(dir, 'assets', name));
+  let builds = 0;
+  let getConvo;
+  let include = true;
+  let onBoard = true;
+  const full = { id: 's1', reports: [{ images: [{ src: 'assets/' + name }], summary: 'x'.repeat(614401) }], notes: [], decisions: [] };
+  const h = makeHost(dir, { opts: {
+    createBoardServer: (options) => { getConvo = options.getConvo; return createBoardServer(options); },
+    buildFull: () => { builds++; return { sessions: [{ ...full, reports: include ? full.reports : [] }] }; },
+    project: () => ({ sessions: onBoard ? [{ id: 's1', folded: { key: 'fold-key', reports: 1, decisions: 0 } }] : [] }),
+  } });
+  t.after(async () => { await h.host.release(); removeState(dir); });
+  const port = portOf((await h.host.ensure()).url);
+  const before = builds;
+  assert.equal((await get(port, '/assets/' + name)).status, 200);
+  const detail = JSON.parse((await get(port, '/convo/s1.json')).body);
+  assert.deepEqual(detail, { schema: 1, gen: 4, key: 'fold-key', session: full });
+  assert.equal(builds, before + 1, 'asset and convo reuse the same stat key');
+  const loaded = await getConvo('s1');
+  assert.notStrictEqual(loaded.session.reports, full.reports, 'the returned reports must not alias the full-model cache');
+  loaded.session.reports.length = 0;
+  assert.deepEqual(JSON.parse((await get(port, '/convo/s1.json')).body).session, full);
+  assert.equal((await get(port, '/assets/' + '0'.repeat(64) + '.png')).status, 404);
+  include = false;
+  onBoard = false;
+  store.replace('published.json', { seq: 6000, dataHash: 'changed', at: 2 });
+  assert.equal((await get(port, '/assets/' + name)).status, 404);
+  assert.equal((await get(port, '/convo/s1.json')).status, 404, 'full map alone does not establish board membership');
+  assert.equal(builds, before + 2);
+});
+
+test('convo route uses the current driver after handover', async (t) => {
+  const dir = tempState();
+  seed(dir);
+  const opts = (id) => ({
+    buildFull: () => ({ sessions: [{ id: 's1', reports: [{ id }], decisions: [], notes: [] }] }),
+    project: () => ({ sessions: [{ id: 's1' }] }),
+  });
+  const a = makeHost(dir, { opts: opts('old') });
+  const b = makeHost(dir, { opts: opts('new') });
+  t.after(async () => { await a.host.release(); await b.host.release(); removeState(dir); });
+  const port = portOf((await a.host.ensure()).url);
+  assert.equal(JSON.parse((await get(port, '/convo/s1.json')).body).session.reports[0].id, 'old');
+  await a.host.release('reload');
+  assert.equal(portOf((await b.host.ensure()).url), port);
+  const r = JSON.parse((await get(port, '/convo/s1.json')).body);
+  assert.equal(r.session.reports[0].id, 'new');
+  assert.equal(r.key, null);
+  assert.equal(r.gen, 4);
+});
+
+test("an old driver without buildFull keeps today's model and asset refs", async (t) => {
+  const dir = tempState();
+  seed(dir);
+  const name = '84fecfda2b6702dc6015b4307ae048524399b4d6493664f11ecc3fc124a7ce37.png';
+  await fsp.mkdir(join(dir, 'assets'), { recursive: true });
+  await fsp.copyFile(new URL('./fixtures/board-assets/' + name, import.meta.url), join(dir, 'assets', name));
+  const card = { id: 's1', reports: [{ images: [{ src: 'assets/' + name }] }] };
+  const h = makeHost(dir, { opts: { buildViewModel: () => ({ sessions: [card] }) } });
+  t.after(async () => { await h.host.release(); removeState(dir); });
+  const port = portOf((await h.host.ensure()).url);
+  assert.deepEqual(JSON.parse((await get(port, '/data.json')).body), { sessions: [card], seq: 5, gen: 4 });
+  assert.equal((await get(port, '/assets/' + name)).status, 200);
+  assert.deepEqual(JSON.parse((await get(port, '/convo/s1.json')).body), { schema: 1, gen: 4, key: null, session: card });
+});
+
 const tempState = () => mkdtempSync(join(os.tmpdir(), 'omo-server-host-'));
 const removeState = (dir) => rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 const lockPath = (dir) => join(dir, SERVER_LOCK);

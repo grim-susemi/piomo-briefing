@@ -20,8 +20,10 @@
 // assetAllowed(name) says the current model references it; the bytes come only from `assetsDir/<name>` (a regular file of
 // <= 8 MiB whose sha256 is the name and whose magic bytes match the extension) with nosniff, a Content-Type from the
 // extension and an immutable cache. Without assetsDir it is always 404.
+// GET /convo/<sid>.json uses the same Host-first and Sec-Fetch-Site gates as assets and returns getConvo(sid)
+// with SECURE headers, or 404 without a callback/card. The sid is validated, never decoded or used as a file path.
 //
-// createBoardServer({getPage, getViewModel, generation, portBase, portCount=10, preferPort?, assetsDir?, assetAllowed?,
+// createBoardServer({getPage, getViewModel, getConvo?, generation, portBase, portCount=10, preferPort?, assetsDir?, assetAllowed?,
 //                    onError, onRecover, pingMs?, onClientCount?, createServer?,
 //                    token?, onAnswer?, onFocus?, bodyTimeoutMs=2000, writeTimeoutMs=10000})
 //   -> {start(): Promise<{port}>, broadcast(vm), sendPaused(), close(): Promise<void>, clientCount(), address()}
@@ -45,6 +47,8 @@ const CLOSE_BOUND_MS = 500;
 const MAX_CLIENT_BACKLOG = 2 * 1024 * 1024; // a stalled SSE reader is dropped instead of buffering forever
 const GATED_PATHS = new Set(['/data.json', '/events', '/health', '/memento/state']);
 const ASSET_PREFIX = '/assets/';
+const CONVO_PREFIX = '/convo/';
+const CONVO_SID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const SITE_OK = new Set(['same-origin', 'none']);
 const MAX_BODY_BYTES = 4096;
 const MAX_ANSWER_BYTES = 65536;
@@ -107,6 +111,7 @@ export function createBoardServer(options) {
   const {
     getPage,
     getViewModel,
+    getConvo,
     generation,
     portBase,
     portCount = 10,
@@ -522,7 +527,7 @@ export function createBoardServer(options) {
       plain(res, 405, 'method not allowed', { Allow: writeHandler ? 'POST' : 'GET' });
       return;
     }
-    if (GATED_PATHS.has(pathname) || pathname.startsWith(ASSET_PREFIX)) {
+    if (GATED_PATHS.has(pathname) || pathname.startsWith(ASSET_PREFIX) || pathname.startsWith(CONVO_PREFIX)) {
       const site = req.headers['sec-fetch-site'];
       if (site !== undefined && !SITE_OK.has(site)) {
         plain(res, 403, 'forbidden origin');
@@ -561,6 +566,18 @@ export function createBoardServer(options) {
         await serveEvents(req, res);
         return;
       default:
+        if (pathname.startsWith(CONVO_PREFIX)) {
+          const sid = pathname.endsWith('.json') ? pathname.slice(CONVO_PREFIX.length, -5) : '';
+          if (!CONVO_SID.test(sid) || typeof getConvo !== 'function') {
+            plain(res, 404, 'not found');
+            return;
+          }
+          const card = await getConvo(sid);
+          if (card === null) plain(res, 404, 'not found');
+          else json(res, 200, card);
+          recoverSse();
+          return;
+        }
         if (pathname.startsWith(ASSET_PREFIX)) {
           await serveAsset(res, pathname);
           return;

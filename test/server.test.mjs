@@ -13,6 +13,66 @@ function nextBase() {
 }
 
 const VM = { gen: 4, seq: 7, sessions: [{ id: 's1', title: 'a\nb "quoted" \u2028 end' }] };
+
+test('convo route: a board sid returns its full card with the /data.json gates and SECURE headers', async () => {
+  const card = { id: 's1', reports: [{ id: 'r1', summary: 'whole' }] };
+  const payload = { schema: 1, gen: 4, key: 'fold-key', session: card };
+  await withServer({ getConvo: (sid) => sid === 's1' ? payload : null }, async ({ port }) => {
+    for (const site of [undefined, 'same-origin', 'none']) {
+      const r = await request({ port, path: '/convo/s1.json', headers: site ? { 'Sec-Fetch-Site': site } : {} });
+      assert.equal(r.status, 200);
+      assert.deepEqual(JSON.parse(r.body), payload);
+      for (const [name, value] of Object.entries({ 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'content-type': 'application/json; charset=utf-8' })) assert.equal(r.headers[name], value);
+      assert.equal(r.headers['content-security-policy'], undefined);
+    }
+    assert.equal((await request({ port, path: '/convo/s1.json', method: 'POST' })).status, 405);
+  });
+});
+
+test('convo route: foreign Host 403, cross-site 403, malformed, percent-encoded, extra-segment or other-suffix paths 404, unknown sid 404', async () => {
+  const reads = [];
+  const spyStore = { readSnapshot() { reads.push('snapshot'); return {}; } };
+  await withServer({ getConvo: (sid) => { spyStore.readSnapshot(); assert.equal(sid, 'unknown'); return null; } }, async ({ port }) => {
+    assert.equal((await request({ port, path: '/convo/..%2Fmeta.json', headers: { Host: 'evil.example', 'Sec-Fetch-Site': 'cross-site' } })).body, 'forbidden host');
+    for (const site of ['cross-site', 'same-site']) assert.equal((await request({ port, path: '/convo/s1.json', headers: { 'Sec-Fetch-Site': site } })).status, 403);
+    for (const path of ['/convo/.json', '/convo/_bad.json', '/convo/../meta.json', '/convo/..%2Fmeta.json', '/convo/%73.json', '/convo/s1/x.json', '/convo/s1.js', '/convo/s1.json/extra', '/convo/' + 'a'.repeat(129) + '.json']) {
+      assert.equal((await request({ port, path })).status, 404, path);
+    }
+    assert.deepEqual(reads, [], 'invalid paths and gates never reach the spy store');
+    assert.equal((await request({ port, path: '/convo/unknown.json' })).status, 404);
+    assert.deepEqual(reads, ['snapshot']);
+  });
+});
+
+test('convo route: data.js and folded.js stay unserved', async () => {
+  await withServer({ getConvo: () => assert.fail('not a conversation') }, async ({ port }) => {
+    for (const path of ['/data.js', '/folded.js']) assert.equal((await request({ port, path })).status, 404);
+  });
+});
+
+test('convo route: a builder throw is a 500 through the existing error path', async () => {
+  const failure = new Error('full builder failed');
+  await withServer({ getConvo: () => { throw failure; } }, async ({ port, errors }) => {
+    assert.equal((await request({ port, path: '/convo/s1.json' })).status, 500);
+    assert.deepEqual(errors, [{ key: 'server:sse', err: failure }]);
+  });
+});
+
+test('convo route: without getConvo the route is 404', async () => {
+  await withServer({}, async ({ port }) => {
+    assert.equal((await request({ port, path: '/convo/s1.json' })).status, 404);
+  });
+});
+
+test('convo route: a folded card larger than 614400 bytes is served whole and deep-equal to its full card', async () => {
+  const card = { id: 'big', reports: [{ summary: 'x'.repeat(614401) }], decisions: [], notes: [] };
+  await withServer({ getConvo: () => ({ schema: 1, gen: 4, key: 'big-key', session: card }) }, async ({ port }) => {
+    const r = await request({ port, path: '/convo/big.json' });
+    assert.equal(r.status, 200);
+    assert.ok(Buffer.byteLength(r.body) > 614400);
+    assert.deepEqual(JSON.parse(r.body).session, card);
+  });
+});
 if (process.env.OMO_TEST_MUTANT_HOOKS) console.log(`TEST-PID ${process.pid}`);
 
 function makeServer(over = {}) {
