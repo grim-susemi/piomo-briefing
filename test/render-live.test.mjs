@@ -12,6 +12,10 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { openStore } from '../src/store.mjs';
 import { validateBrief } from '../src/schema.mjs';
 import { buildViewModel, projectBoardModel, renderPage, renderPageAsync, renderPageMaybe, pageHtml, serverInfoOf, withReports, MAX_VM_BYTES, OMITTED_CHIP } from '../src/render.mjs';
+import { createServerHost } from '../src/server-host.mjs';
+import { decisionFields, decisionValues } from './fixtures/decision-fields.mjs';
+import { make as make200, makeOverCapacity, makeIrreducible, NOW as FIXTURE_NOW, renderOptions as fixtureOptions,
+  deadIds, aliveIds, decisionIds, mirrorIds, blockedIds, planIds, recentIds, expectedFoldedIds, expectedUnfoldedIds } from './fixtures/stale-cards-200.mjs';
 
 const NOW = 1_800_000_000_000;
 const DAY = 24 * 3600 * 1000;
@@ -1747,4 +1751,179 @@ test('fold stage B: a final sequence digit overflow folds before any trim', (t) 
   assert.deepEqual(result.presentation.sessions, [{
     sessionId: 'recent', folded: { reports: 0, decisions: 0 }, cut: { reports: 0, blocks: 0, details: false },
   }]);
+});
+
+// ------------------------------------------------------------------ seeded 200-card real-store regression
+const fixtureFull = (f) => buildViewModel(withReports(f.store, f.store.readSnapshot()), FIXTURE_NOW,
+  { ...fixtureOptions, stateDir: f.store.root, full: true });
+const fixtureRow = (model, id) => model.sessions.find((s) => s.id === id);
+const scriptBytes = (value) => Buffer.byteLength(JSON.stringify(value).replace(/</g, '\\u003c')
+  .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029'));
+const decodedBundle = (store, name, callback) => {
+  let result;
+  vmMod.runInNewContext(store.readText(name), { window: { [callback]: (v) => { result = JSON.parse(JSON.stringify(v)); } } });
+  return result;
+};
+const openDecisions200 = (model) => Object.fromEntries(model.sessions.map((s) =>
+  [s.id, s.decisions.filter((d) => !d.answered && !d.closed)]).filter(([, ds]) => ds.length));
+const publish200 = (f) => {
+  const result = renderPage(f.store, FIXTURE_NOW, fixtureOptions);
+  assert.equal(result.ok, true, result.error);
+  return { result, model: dataOf(f.store), bytes: Buffer.byteLength(f.store.readText('data.js')) };
+};
+
+test('200 cards: the unfolded model exceeds the cap (the regression is real)', (t) => {
+  // Given a seeded store, When the uncapped builder reads it, Then the real serialized workload exceeds the cap.
+  const f = make200(fresh(t).root);
+  const source = fixtureFull(f);
+  assert.equal(source.sessions.length, 200);
+  assert.equal(deadIds.length, 160);
+  assert.equal(deadIds.filter((id) => fixtureRow(source, id).status === 'done').length, 80);
+  assert.equal(f.reportsById.big.length, 25);
+  const snapshot = f.store.readSnapshot();
+  const oldDecisions = snapshot.decisions.filter((d) => deadIds.includes(d.sessionId));
+  const answers = new Map(snapshot.answers.map((a) => [a.id, a]));
+  const closures = new Map(snapshot.closures.map((c) => [c.id, c]));
+  const classes = {
+    answered: oldDecisions.filter((d) => answers.get(d.id)?.option === 'B'),
+    held: oldDecisions.filter((d) => closures.get(d.id)?.reason === 'held'),
+    freeText: oldDecisions.filter((d) => typeof answers.get(d.id)?.text === 'string'),
+    fields: oldDecisions.filter((d) => Array.isArray(d.fields)),
+  };
+  for (const [kind, records] of Object.entries(classes)) assert.ok(records.length > 0, `old fixture must include ${kind} decisions`);
+  const at = FIXTURE_NOW - 22 * DAY;
+  const visible = (d) => fixtureRow(source, d.sessionId).decisions.find((v) => v.id === d.id);
+  assert.deepEqual(visible(classes.answered[0]).answer, { option: 'B', text: '', at });
+  assert.deepEqual(visible(classes.held[0]).held, { at });
+  assert.equal(visible(classes.held[0]).closed, true);
+  assert.deepEqual(visible(classes.freeText[0]).answer, { option: '', text: '오래된 자유 입력 답 <\u2028\u2029 끝', at });
+  assert.deepEqual(visible(classes.fields[0]).fields, decisionFields());
+  assert.deepEqual(visible(classes.fields[0]).answer.values, decisionValues());
+  for (const records of Object.values(classes)) {
+    for (const d of records) {
+      assert.equal(visible(d).receipt.proven, true);
+      if (answers.has(d.id)) assert.match(visible(d).delivery, /^전달됨/);
+    }
+  }
+  assert.ok(scriptBytes(source) > MAX_VM_BYTES);
+  assert.ok(scriptBytes(fixtureRow(source, 'big')) > MAX_VM_BYTES);
+});
+
+test('200 cards: folding keeps every alive report and alive within the data.js cap', (t) => {
+  // Given the independent full-builder oracle, When publishing, Then every live report survives in a bounded bundle.
+  const f = make200(fresh(t).root);
+  const source = fixtureFull(f);
+  const { model, bytes, result } = publish200(f);
+  assert.ok(bytes <= MAX_VM_BYTES, `data.js is ${bytes} bytes`);
+  assert.equal(result.presentation.overCap, false);
+  assert.deepEqual(model.sessions.filter((s) => s.folded).map((s) => s.id).sort(), [...expectedFoldedIds].sort());
+  for (const id of aliveIds) {
+    const row = fixtureRow(model, id);
+    assert.equal(row.alive, true, id);
+    assert.equal(row.reports.length, 3, id);
+    assert.deepEqual(row.reports, fixtureRow(source, id).reports, id);
+    assert.ok(!row.chips.includes(OMITTED_CHIP), id);
+    assert.equal(row.folded, undefined, id);
+  }
+});
+
+test('200 cards: exempt conversations stay unfolded and every folded one expands to its full card', async (t) => {
+  // Given actual state and the actual host driver, When requesting each folded route, Then HTTP and offline entries agree.
+  const f = make200(fresh(t).root);
+  const source = fixtureFull(f);
+  const { model } = publish200(f);
+  assert.deepEqual(model.sessions.filter((s) => !s.folded).map((s) => s.id).sort(), [...expectedUnfoldedIds].sort());
+  for (const id of [...decisionIds, ...mirrorIds, ...blockedIds, ...planIds, ...recentIds, 'boundary-exact']) {
+    assert.equal(fixtureRow(model, id).folded, undefined, id);
+  }
+  assert.ok(fixtureRow(model, 'boundary-plus').folded);
+  assert.ok(fixtureRow(source, 'plan-owner').plan);
+  assert.ok(fixtureRow(source, 'plan-carrier').planLink);
+  assert.ok(fixtureRow(source, 'plan-name').workName);
+  assert.equal(fixtureRow(source, 'plan-stage').auto.stage, 'review');
+  const bundle = decodedBundle(f.store, 'folded.js', '__briefFolded');
+  assert.deepEqual(Object.keys(bundle.sessions).sort(), [...expectedFoldedIds].sort());
+  const errors = [];
+  const host = createServerHost({
+    stateDir: f.store.root, sessionId: 'fixture-host', generation: 8, now: () => FIXTURE_NOW,
+    isEnabled: () => true, env: { OMO_BRIEFING_PORT_BASE: '49100' },
+    readSnapshot: () => withReports(f.store, f.store.readSnapshot()),
+    buildViewModel: (snap, now) => buildViewModel(snap, now, { ...fixtureOptions, stateDir: f.store.root }),
+    buildFull: (snap, now) => buildViewModel(snap, now, { ...fixtureOptions, stateDir: f.store.root, full: true }),
+    project: (full, now) => projectBoardModel(full, now),
+    getPage: () => '<!doctype html><title>fixture</title>',
+    reclaimStale: (rel, rec) => f.store.reclaimStale(rel, rec),
+    onError: (key, err) => errors.push([key, err.message]),
+  });
+  t.after(() => host.release());
+  const address = await host.ensure();
+  assert.ok(address.url, JSON.stringify(address));
+  for (const id of expectedFoldedIds) {
+    const response = await fetch(`${address.url}convo/${id}.json`, { signal: AbortSignal.timeout(10_000) });
+    assert.equal(response.status, 200, id);
+    const body = await response.json();
+    assert.deepEqual(body.session, fixtureRow(source, id), `HTTP ${id}`);
+    assert.deepEqual(bundle.sessions[id], fixtureRow(source, id), `offline ${id}`);
+    assert.equal(body.key, fixtureRow(model, id).folded.key);
+  }
+  assert.ok(scriptBytes(bundle.sessions.big) > MAX_VM_BYTES);
+  assert.deepEqual(errors, []);
+});
+
+test('200 cards: every open decision is deep-equal to its source', (t) => {
+  // Given decisions read from the uncapped builder, When publishing, Then all content remains byte-for-byte representable.
+  const f = make200(fresh(t).root);
+  const source = fixtureFull(f);
+  const { model } = publish200(f);
+  assert.equal(Object.values(openDecisions200(source)).flat().length, 4);
+  assert.deepEqual(openDecisions200(model), openDecisions200(source));
+  for (const [n, expected] of Object.entries(f.sourceDecisions)) {
+    const actual = Object.values(openDecisions200(model)).flat().find((d) => d.id === Number(n));
+    for (const key of ['question', 'options', 'recommend', 'reason']) assert.deepEqual(actual[key], expected[key]);
+  }
+});
+
+test("200 cards over capacity, reducible: recent reports of closed cards go before anything of an alive card, alive cards follow today's order, and data.js ends within the cap with overCap false", (t) => {
+  // Given reports alone exceed the budget, When publishing, Then P1 is exhausted before P2's finished-first oldest order.
+  const f = makeOverCapacity(fresh(t).root);
+  const source = fixtureFull(f);
+  assert.ok(scriptBytes(aliveIds.flatMap((id) => fixtureRow(source, id).reports)) > MAX_VM_BYTES);
+  const newerFinished = fixtureRow(source, 'alive-00');
+  const olderUnfinished = fixtureRow(source, 'alive-01');
+  assert.ok(source.sessions.some((s) => aliveIds.includes(s.id) && s.tab === '끝남'), 'alive finished tab must be represented');
+  assert.ok(source.sessions.some((s) => aliveIds.includes(s.id) && s.tab !== '끝남'), 'alive unfinished tab must be represented');
+  assert.equal(newerFinished.tab, '끝남');
+  assert.notEqual(olderUnfinished.tab, '끝남');
+  assert.ok(newerFinished.lastActivityAt > olderUnfinished.lastActivityAt);
+  const { model, bytes, result } = publish200(f);
+  assert.ok(bytes <= MAX_VM_BYTES, `${bytes}`);
+  assert.equal(result.presentation.overCap, false);
+  for (const id of recentIds) assert.deepEqual(fixtureRow(model, id).reports, [], id);
+  assert.deepEqual(fixtureRow(model, newerFinished.id).reports, [], 'newer finished alive card must be cut first');
+  assert.ok(fixtureRow(model, olderUnfinished.id).reports.length > 0, 'older unfinished alive card must retain reports');
+  const ordered = source.sessions.filter((s) => aliveIds.includes(s.id)).sort((a, b) =>
+    Number(b.tab === '끝남') - Number(a.tab === '끝남') || a.lastActivityAt - b.lastActivityAt || a.id.localeCompare(b.id));
+  const reportCuts = ordered.map((s) => s.reports.length - (fixtureRow(model, s.id).reports?.length ?? 0));
+  const blockCuts = ordered.map((s) => s.reports.reduce((n, r) => n + r.blocks.length, 0) -
+    (fixtureRow(model, s.id).reports ?? []).reduce((n, r) => n + (r.blocks?.length ?? 0), 0));
+  assert.ok(reportCuts.some((n) => n > 0) || blockCuts.some((n) => n > 0), 'P2 must actually run');
+  // Pass 1b only strips blocks from finished cards. Whole-report pass 2 then follows the complete age order.
+  assert.ok(reportCuts.some((n) => n > 0), 'whole-report order must actually be exercised');
+  const firstKept = reportCuts.findIndex((n) => n < 3);
+  assert.ok(firstKept >= 0);
+  assert.ok(reportCuts.slice(0, firstKept).every((n) => n === 3));
+  assert.ok(reportCuts.slice(firstKept + 1).every((n) => n === 0), JSON.stringify(reportCuts));
+  assert.deepEqual(openDecisions200(model), openDecisions200(source));
+});
+
+test('200 cards irreducible: open decisions alone exceed the cap; data.js is still written with overCap true, and every open decision is deep-equal to its source', (t) => {
+  // Given schema-limited decisions alone exceed the cap, When publishing, Then the over-cap publication still preserves them.
+  const f = makeIrreducible(fresh(t).root);
+  const source = fixtureFull(f);
+  const decisions = openDecisions200(source);
+  assert.ok(scriptBytes(Object.values(decisions).flat()) > MAX_VM_BYTES);
+  const { model, bytes, result } = publish200(f);
+  assert.ok(bytes > MAX_VM_BYTES);
+  assert.equal(result.presentation.overCap, true);
+  assert.deepEqual(openDecisions200(model), decisions);
 });
