@@ -429,6 +429,7 @@ test('fixture drift guard: real buildViewModel produces every board fixture key 
     });
   }
   const actual = buildViewModel(snapshot, fixture.generatedAt, { generation: fixture.gen, stateDir: 'C:/fixture/state',
+    fold: false, // U1: this guard checks the full-row fixture; folded rows are covered by render.test.mjs's fold tests
     isAlive: pid => pid === 1, fs: { statSync(p) { if (p.includes('/senpi-task/tasks/')) return { isFile: () => true }; throw new Error('fixture evidence not on disk'); } } });
   function sameType(expected, got, at) {
     if (expected === null) { assert.equal(got, null, at); return; }

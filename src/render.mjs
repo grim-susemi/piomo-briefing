@@ -47,6 +47,10 @@ export const MAX_VM_BYTES = 600 * 1024;
 const PAUSED = Symbol('paused'); // thrown inside the publish when opts.canPublish() turned false: nothing was written
 const PAUSED_ERROR = '브리핑이 꺼져 있어 게시하지 않았습니다';
 export const OMITTED_CHIP = '용량 때문에 일부 생략';
+// C-FOLD stage A: an idle closed conversation is shown as a compact row; nothing is deleted and the full card stays one
+// click away. The predicate below is the owner's rule (see isFoldable); stage B (over the cap) belongs to the cap work.
+export const FOLD_AFTER_MS = 2 * DAY_MS;
+export const FOLDED_CHIP = '접어 둠';
 // C-CAP2 bookkeeping on the model objects (symbols are never serialized)
 const CAP_TOUCHED = Symbol('capTouched');
 const CAP_NO_COUNTER = Symbol('capNoCounter');
@@ -487,8 +491,10 @@ function capSize(vm) {
     replace(s, 'blockSources', {});
   }
   const chipCost = (s, chip = OMITTED_CHIP) => (s.chips.includes(chip) ? 0 : bytes(chip) + (s.chips.length ? 1 : 0));
-  // pass 1b: preserve finished reports before pass 2 can remove them wholesale.
+  // pass 1b: preserve finished reports before pass 2 can remove them wholesale. A folded row carries no reports array
+  // (C-FOLD) and is skipped here exactly as pass 2's own predicate skips it.
   for (const s of vm.sessions.filter((x) => x.tab === '끝남' && x.alive === false).sort(byAge)) {
+    if (!Array.isArray(s.reports)) continue;
     for (const r of s.reports) {
       if (fit()) return;
       if (!Array.isArray(r.blocks) || r.blocks.length === 0) continue;
@@ -574,6 +580,71 @@ function capSize(vm) {
   }
 }
 
+// ---- C-FOLD: the compact row for an idle closed conversation --------------------------------------------------------
+// A row may fold only when ALL hold (the page's own plan test plus the owner's rules): not alive, not blocked or on the
+// waiting tab, no open decision or question, nothing waiting for an answer, every decision and note delivered or without a
+// delivery line, no plan signal, no read error or unavailable mirror, idle for FOLD_AFTER_MS, and every visible report
+// older than a day. Folding keeps the whole row except the heavy fields; the full card stays one click away.
+const HEAVY_KEYS = ['reports', 'changes', 'done', 'flow', 'todo', 'attachments', 'blockSources', 'briefPath', 'sessionFile', 'autoSummaryText'];
+const READ_ERROR_CHIP = '기록 읽기 실패';
+const MIRROR_UNAVAILABLE_CHIP = '질문 미러 사용 불가';
+const jsonBytes = (v) => Buffer.byteLength(scriptJson(v));
+const sha20 = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 20);
+
+/** True when this full card may be shown as a folded row at `now`. */
+export function isFoldable(view, waitingSids, now) {
+  if (!isObj(view) || view.alive === true) return false;
+  if (view.status === 'blocked' || view.tab === '나를 기다림') return false;
+  const decisions = arr(view.decisions);
+  if (decisions.some((d) => isObj(d) && !d.answered && !d.closed)) return false;
+  if (view.openQuestion !== undefined && view.openQuestion !== null) return false;
+  // the caller passes vm.waiting's session ids: an item waiting for the owner keeps its card whole
+  if (waitingSids instanceof Set ? waitingSids.has(view.id) : arr(waitingSids).includes(view.id)) return false;
+  // a delivery still pending ('대기: …', '전달 중', '질문창에서 답 받음') loses information when the card folds
+  const delivered = (x) => isObj(x) && (x.delivery === undefined || (typeof x.delivery === 'string' && x.delivery.startsWith('전달됨')));
+  if (!decisions.every(delivered) || !arr(view.notes).every(delivered)) return false;
+  // the page's hasPlan test (src/page/shell.js): plan, planLink, workName, auto.work, auto.stage
+  const auto = isObj(view.auto) ? view.auto : null;
+  if (view.plan || view.planLink || str(view.workName) || (auto && (auto.work || str(auto.stage)))) return false;
+  const chips = arr(view.chips); // truth.mjs renders readError / mirrorUnavailable as these chips
+  if (chips.includes(READ_ERROR_CHIP) || chips.includes(MIRROR_UNAVAILABLE_CHIP)) return false;
+  if (!isNum(view.lastActivityAt) || !(view.lastActivityAt < now - FOLD_AFTER_MS)) return false;
+  return arr(view.reports).every((r) => isObj(r) && isNum(r.at) && r.at < now - DAY_MS);
+}
+
+// The folded row: the full row minus HEAVY_KEYS, plus the counts/key of the full card and the fold chip.
+function foldRow(full) {
+  const row = structuredClone(full);
+  for (const k of HEAVY_KEYS) delete row[k];
+  row.folded = { reports: arr(full.reports).length, decisions: arr(full.decisions).length, key: sha20(full) };
+  row.chips = [...arr(full.chips), FOLDED_CHIP];
+  return row;
+}
+
+/**
+ * The publishable model from the full one: a clone with the stage-A rows folded (unless opts.fold === false), vm.foldedKey
+ * when anything folded (absent otherwise), then the cap. The input model is never touched; the full model itself is what
+ * the expand paths serve (todo 4/5), so folding is a presentation change only.
+ */
+export function projectBoardModel(fullVm, now = Date.now(), opts = {}) {
+  const vm = structuredClone(fullVm);
+  if (opts.fold !== false) {
+    const waitingSids = new Set(arr(vm.waiting).map((w) => (isObj(w) ? w.sessionId : null)).filter((sid) => typeof sid === 'string'));
+    vm.sessions = arr(vm.sessions).map((full) => {
+      if (!isObj(full) || !isFoldable(full, waitingSids, now)) return full;
+      const row = foldRow(full);
+      return jsonBytes(row) < jsonBytes(full) ? row : full; // fold only when the row strictly shrinks
+    });
+    const folded = vm.sessions.filter((s) => isObj(s.folded));
+    if (folded.length) {
+      const pairs = folded.slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((s) => `${s.id}:${s.folded.key}`);
+      vm.foldedKey = sha20(pairs);
+    }
+  }
+  capSize(vm);
+  return vm;
+}
+
 /**
  * {server: {url, generation} | null, error: boolean}: the live board address from STATE/server.json (no network).
  * A record whose owner pid is dead is not an address. An unreadable file is reported (error), never read as 'no server'.
@@ -600,7 +671,8 @@ export function serverInfoOf(store, isAlive = isPidAlive) {
  * @param {object} snapshot store.readSnapshot()
  * @param {number} now ms
  * @param {{isAlive?: (pid:number)=>boolean, fs?: object, pendingDeliveries?: Iterable<number>, generation?: number|null,
- *   server?: {url:string, generation:number|null}|null, serverError?: boolean}} [opts]
+ *   server?: {url:string, generation:number|null}|null, serverError?: boolean, stateDir?: string, full?: boolean,
+ *   fold?: boolean}} [opts] `full: true` returns the uncapped, unfolded model; a false `fold` turns stage-A folding off.
  */
 export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
   const isAlive = opts.isAlive ?? isPidAlive;
@@ -911,8 +983,8 @@ export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
     waiting: waitingItems(snap).filter((w) => shown.has(w.sessionId)),
     sessions: ordered,
   };
-  capSize(vm);
-  return vm;
+  if (opts.full === true) return vm; // uncapped and unfolded: what the expand paths and the fold projection build on
+  return projectBoardModel(vm, now, opts);
 }
 
 // JSON that is safe inside <script> and as a JS expression: no '<' (so no </script>, <!--),
@@ -1151,6 +1223,7 @@ function makeRenderer(store, now, opts) {
       if (typeof opts.onServerInfo === 'function') opts.onServerInfo(info); // the caller notes a failed record read after the publish
       const vm = buildViewModel(snap, now, {
         isAlive, fs, pendingDeliveries: opts.pendingDeliveries, generation, server: info.server, serverError: info.error, stateDir: store.root,
+        fold: opts.fold,
       });
       vm.seq = lastPublishedSeq(store, snap) + 1;
       capSize(vm); // the seq text is part of data.js: confirm the cap on the final text
@@ -1256,7 +1329,7 @@ function makeRenderer(store, now, opts) {
  * @param {ReturnType<import('./store.mjs').openStore>} store
  * @param {number} [now]
  * @param {{sessionId?: string, sleep?: (ms:number)=>void, isAlive?: (pid:number)=>boolean, fs?: object,
- *   pendingDeliveries?: Iterable<number>, generation?: number|null}} [opts]
+ *   pendingDeliveries?: Iterable<number>, generation?: number|null, fold?: boolean}} [opts]
  * @returns {{ok: boolean, seqs: number[], error?: string}}
  */
 export function renderPage(store, now = Date.now(), opts = {}) {

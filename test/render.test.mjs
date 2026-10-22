@@ -5,10 +5,14 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { fork, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import vm from 'node:vm';
 import { openStore } from '../src/store.mjs';
 import { validateBrief } from '../src/schema.mjs';
-import { buildViewModel, renderPage, pageHtml, withReports, realKey, realCacheFor, MAX_VM_BYTES, OMITTED_CHIP } from '../src/render.mjs';
+import {
+  buildViewModel, renderPage, pageHtml, withReports, realKey, realCacheFor, MAX_VM_BYTES, OMITTED_CHIP,
+  isFoldable, projectBoardModel, FOLD_AFTER_MS, FOLDED_CHIP,
+} from '../src/render.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CHILD = join(HERE, 'helpers', 'render-child.mjs');
@@ -1058,4 +1062,380 @@ test('realKey memo keeps a missing path as null until it expires', (t) => {
   assert.equal(realCacheFor(fakeFs).has('C:/gone/x.txt'), true);
   clock += 31_000;
   assert.equal(realCacheFor(fakeFs).has('C:/gone/x.txt'), false);
+});
+
+// ---------------------------------------------------------------- fold (stage A)
+const HOUR = 60 * MIN;
+const HEAVY = ['reports', 'changes', 'done', 'flow', 'todo', 'attachments', 'blockSources', 'briefPath', 'sessionFile', 'autoSummaryText'];
+const sha20 = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 20);
+const rowOf = (model, id) => model.sessions.find((s) => s.id === id);
+const built = (store, opts = {}) => buildViewModel(withReports(store, store.readSnapshot()), NOW, { isAlive: () => false, stateDir: store.root, ...opts });
+
+// one idle closed row (folds) beside one row active a minute ago (never folds)
+function foldStore(t) {
+  const store = openStore(tempRoot(t));
+  meta(store, 'idle', { cwd: 'C:/w/fold', title: '유휴', lastActivityAt: NOW - 3 * DAY });
+  brief(store, 'idle', 1, NOW - 3 * DAY, { title: '유휴', status: 'done', headline: 'h', done: [{ text: 'd', truth: 'reported', applied: 'none' }] });
+  meta(store, 'busy', { cwd: 'C:/w/fold', title: '최근', lastActivityAt: NOW - MIN });
+  brief(store, 'busy', 1, NOW - MIN, { title: '최근', headline: 'h' });
+  return store;
+}
+
+test('fold: predicate folds an idle closed conversation and keeps each exempt one', async (t) => {
+  // one closed, idle conversation with every other signal absent (the foldable baseline)
+  const idle = (t, { m = {}, b = {}, decisions: ds = [], reports, mirror } = {}) => {
+    const store = openStore(tempRoot(t));
+    meta(store, 'idle', { cwd: 'C:/w/fold', title: '유휴', lastActivityAt: NOW - 3 * DAY, ...m });
+    brief(store, 'idle', 1, NOW - 3 * DAY, { title: '유휴', status: 'done', headline: 'h', done: [{ text: 'd', truth: 'reported', applied: 'none' }], ...b });
+    for (const d of ds) decision(store, { id: 0, sessionId: 'idle', question: 'q', createdAt: NOW - 3 * DAY, ...d });
+    if (reports) store.replace('sessions/idle/reports.json', reports);
+    if (mirror) store.replace('mirror/idle.json', mirror);
+    return store;
+  };
+
+  await t.test('folds the idle closed row and leaves the recent row whole', (t) => {
+    const model = built(foldStore(t));
+    const folded = rowOf(model, 'idle');
+    assert.ok(folded.folded, 'the idle closed row is folded');
+    assert.equal(folded.folded.reports, 0);
+    assert.equal(folded.folded.decisions, 0);
+    assert.equal(rowOf(model, 'busy').folded, undefined, 'a row active a minute ago keeps its card');
+  });
+
+  await t.test('alive', (t) => {
+    const store = idle(t, { m: { hostPid: process.pid } });
+    const model = built(store, { isAlive: () => true });
+    assert.equal(rowOf(model, 'idle').alive, true);
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'an alive card never folds');
+  });
+
+  await t.test('blocked', (t) => {
+    const model = built(idle(t, { b: { status: 'blocked' } }));
+    assert.equal(rowOf(model, 'idle').status, 'blocked');
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'a blocked card never folds');
+  });
+
+  await t.test('waiting tab', (t) => {
+    const whole = rowOf(built(foldStore(t), { fold: false }), 'idle');
+    assert.equal(isFoldable(whole, new Set(), NOW), true, 'precondition: the same row is foldable');
+    assert.equal(isFoldable({ ...whole, tab: '나를 기다림' }, new Set(), NOW), false, 'a card on the waiting tab never folds');
+  });
+
+  await t.test('open decision', (t) => {
+    const model = built(idle(t, { decisions: [{ id: 31, question: '열린 결정' }] }));
+    assert.equal(rowOf(model, 'idle').tab, '나를 기다림', 'an open decision puts the card on the waiting tab');
+    assert.equal(rowOf(model, 'idle').folded, undefined);
+  });
+
+  await t.test('open question', (t) => {
+    const model = built(idle(t, { mirror: { open: true, question: '남은 질문', at: NOW - 3 * DAY } }));
+    assert.ok(rowOf(model, 'idle').openQuestion, 'the mirror question is on the card');
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'an open question never folds');
+  });
+
+  await t.test('waiting item without an open decision or question', (t) => {
+    const store = idle(t, { mirror: { open: false, unconverted: [{ requestId: 'r1', at: NOW - HOUR, questions: [{ question: '남은 질문' }] }] } });
+    const model = built(store);
+    assert.deepEqual(model.waiting.map((w) => w.sessionId), ['idle'], 'the unconverted request is waiting');
+    assert.equal(rowOf(model, 'idle').openQuestion, undefined);
+    assert.equal(rowOf(model, 'idle').tab, '끝남');
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'a waiting item keeps the card whole');
+    const whole = rowOf(built(store, { fold: false }), 'idle');
+    assert.equal(isFoldable(whole, new Set(), NOW), true, 'nothing but the waiting item keeps it whole');
+  });
+
+  await t.test('undelivered decision', (t) => {
+    const store = idle(t, { decisions: [{ id: 32, question: '답한 결정' }] });
+    store.writeNew('answers/000032.json', { id: 32, option: 'A', at: NOW - 3 * DAY });
+    const model = built(store);
+    assert.equal(rowOf(model, 'idle').decisions[0].delivery, '대기: 그 대화가 다시 열리면 전달');
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'a delivery still pending never folds');
+  });
+
+  await t.test('undelivered note', (t) => {
+    const store = idle(t);
+    const key = 'a-00000001-0000-4000-8000-000000000001';
+    store.writeNew(`answers/${key}.json`, { key, kind: 'annotation', sessionId: 'idle', text: '메모', at: NOW - HOUR });
+    const model = built(store);
+    assert.match(rowOf(model, 'idle').notes[0].delivery, /^대기:/);
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'a note still waiting for delivery never folds');
+  });
+
+  await t.test('plan signal: plan', (t) => {
+    const store = idle(t);
+    store.writePlanRev('p0123456789ab', { at: NOW - 3 * DAY, ownerSessionId: 'idle', plan: { goal: 'g', tasks: [] }, source: { slug: 's' } });
+    const model = built(store);
+    assert.ok(rowOf(model, 'idle').plan, 'the plan reaches the card');
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'a card holding a plan never folds');
+  });
+
+  await t.test('plan signal: planLink', (t) => {
+    const store = openStore(tempRoot(t));
+    for (const sid of ['runner-a', 'runner-b']) {
+      meta(store, sid, { cwd: 'C:/w/fold', title: sid, lastActivityAt: NOW - 3 * DAY });
+      brief(store, sid, 1, NOW - 3 * DAY, { title: sid, status: 'done', headline: 'h' });
+    }
+    store.writePlanRev('p0123456789ab', { at: NOW - 3 * DAY, ownerSessionId: 'gone-owner', plan: { goal: 'g', tasks: [] }, source: { slug: 's' } });
+    store.writePlanStatus('p0123456789ab', { at: NOW - 3 * DAY, work: { status: 'running', sessionIds: ['runner-a', 'runner-b'] } });
+    const model = built(store);
+    assert.ok(rowOf(model, 'runner-a').plan, 'the first runner (ties by id) is the holder and carries the plan');
+    assert.equal(rowOf(model, 'runner-a').folded, undefined, 'a card holding a plan never folds');
+    assert.ok(rowOf(model, 'runner-b').planLink, 'the second runner carries the plan link');
+    assert.equal(rowOf(model, 'runner-b').folded, undefined, 'a card linking another plan never folds');
+  });
+
+  await t.test('plan signal: workName', (t) => {
+    const store = idle(t, { m: { auto: { work: { name: '작업 이름' } } } });
+    const model = built(store);
+    assert.equal(rowOf(model, 'idle').workName, '작업 이름');
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'workName alone keeps the card whole');
+  });
+
+  await t.test('plan signal: auto.stage', (t) => {
+    const store = idle(t, { m: { auto: { work: { phase: '실행' } } } });
+    const model = built(store);
+    assert.equal(rowOf(model, 'idle').auto.stage, '실행');
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'auto.stage alone keeps the card whole');
+  });
+
+  await t.test('plan signal: auto.work', (t) => {
+    const whole = rowOf(built(foldStore(t), { fold: false }), 'idle');
+    assert.equal(isFoldable(whole, new Set(), NOW), true, 'precondition: the same row is foldable');
+    assert.equal(isFoldable({ ...whole, auto: { ...(whole.auto ?? {}), work: { name: 'w' } } }, new Set(), NOW), false,
+      'an auto.work object is a plan signal even when stage and workName are empty');
+  });
+
+  await t.test('readError', (t) => {
+    const store = idle(t);
+    fs.writeFileSync(join(store.root, 'sessions', 'idle', 'reports.json'), '{');
+    const model = built(store);
+    assert.ok(rowOf(model, 'idle').chips.includes('기록 읽기 실패'));
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'a card with a read error never folds');
+  });
+
+  await t.test('mirrorUnavailable', (t) => {
+    const model = built(idle(t, { m: { mirrorUnavailable: true } }));
+    assert.ok(rowOf(model, 'idle').chips.includes('질문 미러 사용 불가'));
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'a card whose mirror is unavailable never folds');
+  });
+
+  await t.test('report under 24 h', (t) => {
+    const model = built(idle(t, { reports: [{ id: 'r1', title: '최근 보고', summary: 's', at: NOW - HOUR, images: [] }] }));
+    assert.equal(rowOf(model, 'idle').reports.length, 1);
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'a report under 24 h keeps the card whole');
+  });
+
+  await t.test('missing report at', (t) => {
+    const model = built(idle(t, { reports: [{ id: 'r2', title: '시각 없음', summary: 's', images: [] }] }));
+    assert.equal(rowOf(model, 'idle').reports[0].at, null);
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'a report without a time keeps the card whole');
+  });
+
+  await t.test('future report at', (t) => {
+    const model = built(idle(t, { reports: [{ id: 'r3', title: '미래', summary: 's', at: NOW + DAY, images: [] }] }));
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'a report in the future keeps the card whole');
+  });
+});
+
+test('fold: 48 hours idle does not fold; 48 hours plus 1 ms folds', (t) => {
+  const store = openStore(tempRoot(t));
+  const edge = NOW - FOLD_AFTER_MS;
+  meta(store, 'edge', { cwd: 'C:/w/fold', title: '경계', lastActivityAt: edge });
+  brief(store, 'edge', 1, edge - MIN, { title: '경계', status: 'done', headline: 'h' });
+  meta(store, 'over', { cwd: 'C:/w/fold', title: '경계+1ms', lastActivityAt: edge - 1 });
+  brief(store, 'over', 1, edge - MIN, { title: '경계+1ms', status: 'done', headline: 'h' });
+  const model = built(store);
+  assert.equal(FOLD_AFTER_MS, 2 * DAY);
+  assert.equal(rowOf(model, 'edge').lastActivityAt, edge);
+  assert.equal(rowOf(model, 'edge').folded, undefined, 'exactly 48 hours is not yet idle');
+  assert.equal(rowOf(model, 'over').lastActivityAt, edge - 1);
+  assert.ok(rowOf(model, 'over').folded, '48 hours plus 1 ms folds');
+});
+
+test('fold: a folded row is the full row minus exactly the heavy fields plus folded and the chip', (t) => {
+  const store = openStore(tempRoot(t));
+  meta(store, 'idle', {
+    cwd: 'C:/w/fold', title: '유휴', lastActivityAt: NOW - 3 * DAY, sessionFile: 'C:/w/idle.jsonl', autoSummary: '한 줄\n둘 줄',
+    auto: { todoItems: { items: [{ text: '할 일', status: 'done' }], more: 0 }, workers: { running: 0, completed: 2, error: 0 } },
+  });
+  brief(store, 'idle', 1, NOW - 3 * DAY, {
+    title: '유휴', status: 'done', headline: 'h', next: '다음', flow: [{ label: '단계', state: 'done' }],
+    changes: [{ text: '바뀜', truth: 'reported', applied: 'candidate', evidence: 'C:/w/ev.txt' }],
+    done: [{ text: '끝', truth: 'reported', applied: 'none' }],
+  });
+  decision(store, { id: 51, sessionId: 'idle', question: '답한 결정', createdAt: NOW - 3 * DAY });
+  store.writeNew('answers/000051.json', { id: 51, option: 'A', at: NOW - 3 * DAY });
+  store.writeNew('receipts/000051.json', { id: 51, sessionId: 'idle', deliveredAt: NOW - 3 * DAY + MIN, kind: 'started', mode: 'immediate', proven: true });
+  store.replace('sessions/idle/reports.json', [
+    { id: 'old1', title: '보고 하나', summary: '요약', decisionId: 51, at: NOW - 3 * DAY,
+      images: [{ sha: 'a'.repeat(64), ext: 'png', mime: 'image/png', bytes: 70, w: 2, h: 2, path: 'C:/shots/a.png', alt: '안', option: null }],
+      blocks: [{ kind: 'kv', title: '표', items: [{ key: 'k', value: 'v' }] }] },
+    { id: 'old2', title: '보고 둘', summary: '요약', at: NOW - 2 * DAY, images: [] },
+  ]);
+  const full = rowOf(built(store, { full: true }), 'idle');
+  const after = rowOf(built(store), 'idle');
+  assert.ok(after.folded, 'the row is folded');
+  assert.equal(after.folded.reports, 2);
+  assert.equal(after.folded.decisions, 1);
+  assert.equal(after.folded.key, sha20(full));
+  assert.equal(after.folded.key.length, 20);
+  assert.match(after.folded.key, /^[0-9a-f]{20}$/);
+  const expected = structuredClone(full);
+  for (const k of HEAVY) delete expected[k];
+  expected.folded = { reports: 2, decisions: 1, key: sha20(full) };
+  expected.chips = [...full.chips, FOLDED_CHIP];
+  assert.deepEqual(after, expected, 'the folded row is exactly the full row minus the heavy fields');
+  assert.equal(FOLDED_CHIP, '접어 둠');
+  assert.deepEqual(after.decisions, full.decisions, 'decisions stay whole');
+  assert.deepEqual(after.notes, full.notes, 'notes stay whole');
+  assert.equal(full.chips.includes(FOLDED_CHIP), false, 'the full row never carries the fold chip');
+  for (const k of HEAVY) assert.equal(k in after, false, `${k} is gone from the folded row`);
+  assert.equal(after.tab, full.tab, 'the tab keeps its pre-fold value');
+  assert.equal(after.statusKey, full.statusKey, 'statusKey keeps its pre-fold value');
+});
+
+test('fold: a row that would not get smaller stays unfolded', (t) => {
+  // a hand-built card without the heavy fields at all: folding it could only add bytes
+  const row = { id: 'thin', alive: false, status: 'done', statusKey: 'done', tab: '끝남', chips: [], decisions: [], notes: [], reports: [], lastActivityAt: NOW - 3 * DAY };
+  const model = {
+    schema: 1, seq: 0, gen: null, generatedAt: NOW, summary: { openDecisions: 0, blocked: 0, stale: 0 },
+    readErrors: [], server: null, waiting: [], sessions: [row],
+  };
+  const projected = projectBoardModel(model, NOW);
+  assert.equal(projected.sessions[0].folded, undefined, 'the size check refuses a row that would grow');
+  assert.equal('foldedKey' in projected, false, 'nothing folded: no foldedKey');
+  const wouldBe = { ...row, folded: { reports: 0, decisions: 0, key: '0'.repeat(20) }, chips: [FOLDED_CHIP] };
+  assert.ok(Buffer.byteLength(JSON.stringify(wouldBe)) > Buffer.byteLength(JSON.stringify(row)), 'precondition: folding this row adds bytes');
+  assert.equal(isFoldable(row, new Set(), NOW), true, 'the size check is the only reason it stays whole');
+});
+
+test('fold: folded-row contract: a folded row has exactly the unfolded keys minus HEAVY_KEYS plus folded', (t) => {
+  const model = built(foldStore(t));
+  const folded = rowOf(model, 'idle');
+  const unfolded = rowOf(model, 'busy');
+  assert.ok(folded.folded, 'precondition: one row folds');
+  assert.equal(unfolded.folded, undefined, 'precondition: one row stays whole');
+  const CONTRACT = JSON.parse(fs.readFileSync(join(HERE, 'fixtures', 'view-model.json'), 'utf8'));
+  const OPTIONAL = new Set(['auto', 'autoSummary', 'openQuestion', 'answerTrimmed']);
+  const NULLABLE = new Set(['tabNumber']);
+  const kind = (v) => (Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v);
+  const added = {
+    notes: 'array', reports: 'array', alive: 'boolean', briefSeq: 'number', briefPath: 'null', sessionFile: 'null',
+    todo: 'object', attachments: 'array', blockSources: 'object',
+  };
+  const contractKeys = new Set([...CONTRACT.sessions.flatMap((s) => Object.keys(s)), ...Object.keys(added)]);
+  const sample = { ...Object.fromEntries([...contractKeys].filter((k) => !(k in added)).map((k) => [k, kind(CONTRACT.sessions.find((s) => k in s)[k])])), ...added };
+  for (const s of model.sessions.filter((x) => !x.folded)) {
+    for (const k of contractKeys) {
+      if (OPTIONAL.has(k) && !(k in s)) continue;
+      assert.ok(k in s, `${s.id} lacks ${k}`);
+      if (sample[k] !== 'null' && !(NULLABLE.has(k) && s[k] === null)) assert.equal(kind(s[k]), sample[k], `${s.id}.${k} type`);
+    }
+    for (const k of Object.keys(s)) assert.ok(contractKeys.has(k), `${s.id} emits non-contract key ${k}`);
+  }
+  const foldedKeys = Object.keys(folded).sort();
+  const expectedKeys = [...Object.keys(unfolded).filter((k) => !HEAVY.includes(k)), 'folded'].sort();
+  assert.deepEqual(foldedKeys, expectedKeys, 'folded keys = unfolded keys - HEAVY_KEYS + folded');
+  assert.equal(HEAVY.length, 10);
+  for (const k of foldedKeys) if (k !== 'folded') assert.equal(kind(folded[k]), kind(unfolded[k]), `${k} keeps its JSON type`);
+  assert.deepEqual(Object.keys(folded.folded).sort(), ['decisions', 'key', 'reports']);
+  assert.match(folded.folded.key, /^[0-9a-f]{20}$/);
+});
+
+test('fold: the full model is identical with and without projection', (t) => {
+  const store = foldStore(t);
+  store.replace('sessions/idle/reports.json', [{ id: 'r1', title: '보고', summary: 's', at: NOW - 3 * DAY, images: [] }]);
+  const full = built(store, { full: true });
+  const copy = structuredClone(full);
+  const projected = projectBoardModel(full, NOW);
+  assert.deepEqual(full, copy, 'projectBoardModel never mutates the full model');
+  assert.notEqual(projected, full);
+  assert.equal(rowOf(full, 'idle').reports.length, 1, 'the full model keeps the reports');
+  assert.equal(rowOf(full, 'idle').folded, undefined, 'the full model stays unfolded');
+  assert.equal(rowOf(projected, 'idle').reports, undefined, 'the projected model folds it');
+  assert.ok(rowOf(projected, 'idle').folded);
+});
+
+test('fold: vm.summary and vm.waiting are identical with folding on and off', (t) => {
+  const store = foldStore(t);
+  decision(store, { id: 61, sessionId: 'busy', question: '열린 결정', createdAt: NOW - MIN });
+  const on = built(store);
+  const off = built(store, { fold: false });
+  assert.ok(rowOf(on, 'idle').folded, 'precondition: one row folds');
+  assert.equal(rowOf(off, 'idle').folded, undefined, 'folding off keeps every card whole');
+  assert.equal(on.waiting.length, 1);
+  assert.deepEqual(on.summary, off.summary);
+  assert.deepEqual(on.waiting, off.waiting);
+});
+
+test('fold: nothing folded leaves no foldedKey and the key changes when a folded card changes', (t) => {
+  const recent = openStore(tempRoot(t));
+  meta(recent, 'busy', { cwd: 'C:/w/fold', title: '최근', lastActivityAt: NOW - MIN });
+  brief(recent, 'busy', 1, NOW - MIN, { title: '최근', headline: 'h' });
+  const on = built(recent);
+  const off = built(recent, { fold: false });
+  assert.equal('foldedKey' in on, false, 'nothing folded: no foldedKey key at all');
+  assert.deepEqual(on, off, 'folding on with nothing folded is exactly folding off');
+
+  const store = foldStore(t);
+  const a = built(store);
+  const b = built(store);
+  assert.match(a.foldedKey, /^[0-9a-f]{20}$/);
+  assert.equal(a.foldedKey, b.foldedKey, 'the key is deterministic for an unchanged board');
+  meta(store, 'idle', { cwd: 'C:/w/fold', title: '유휴', lastActivityAt: NOW - 3 * DAY, paneId: 'w9-p9' });
+  const c = built(store);
+  assert.ok(rowOf(c, 'idle').folded);
+  assert.notEqual(rowOf(c, 'idle').folded.key, rowOf(a, 'idle').folded.key, 'the card key follows the card content');
+  assert.notEqual(c.foldedKey, a.foldedKey, 'the board key follows the folded cards');
+});
+
+test('fold: a folded row on an over-cap board builds and publishes (B1 regression)', (t) => {
+  // The acceptance case is the real builder and its cap, not a hand-built model: a closed idle row folds while another
+  // row's schema-valid report pushes the MODEL over 600KB. Before the pass-1b guard this threw `s.reports is not iterable`.
+  const store = openStore(tempRoot(t));
+  const text = (n) => '<'.repeat(n);
+  const blocks = Array.from({ length: 6 }, () => ({
+    kind: 'table', title: text(80), columns: Array(8).fill(text(40)),
+    rows: Array.from({ length: 30 }, () => Array(8).fill(text(120))),
+  }));
+  const payload = {
+    title: 'busy', status: 'in_progress', headline: 'h', changes: [], done: [], next: '', decisions: [],
+    reports: [{ id: 'r1', title: 'r1', summary: 'retained', images: [], blocks }],
+  };
+  assert.equal(validateBrief(payload).ok, true, 'precondition: the over-cap report is schema-valid');
+  meta(store, 'idle', { cwd: 'C:/w/fold', title: '유휴', lastActivityAt: NOW - 3 * DAY });
+  brief(store, 'idle', 1, NOW - 3 * DAY, { title: '유휴', status: 'done', headline: 'h', done: [{ text: 'd', truth: 'reported', applied: 'none' }] });
+  meta(store, 'busy', { cwd: 'C:/w/fold', title: 'busy', lastActivityAt: NOW - MIN });
+  brief(store, 'busy', 1, NOW - MIN, { title: 'busy', status: 'in_progress', headline: 'h' });
+  store.replace('sessions/busy/reports.json', payload.reports.map((r) => ({ ...r, at: NOW - MIN })));
+  const opts = { isAlive: () => false, stateDir: store.root };
+  const wire = (m) => Buffer.byteLength(`/* seq:${m.seq} */\nwindow.__briefData && window.__briefData(${JSON.stringify(m)
+    .replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')});\n`);
+  const snapshot = withReports(store, store.readSnapshot());
+  const full = buildViewModel(snapshot, NOW, { ...opts, full: true });
+  assert.ok(rowOf(full, 'idle').folded === undefined, 'the full model is not folded');
+  assert.ok(wire(full) > MAX_VM_BYTES + 100_000, `precondition: the full model is well over the cap (${wire(full)})`);
+
+  // the default builder: stage A folds the idle row, then the existing cap runs over a model that contains it
+  const model = buildViewModel(snapshot, NOW, opts);
+  const folded = rowOf(model, 'idle');
+  assert.ok(folded.folded, 'the idle closed row folded');
+  assert.equal(Object.hasOwn(folded, 'reports'), false, 'a folded row carries no reports array (never restored to [])');
+  assert.match(model.foldedKey, /^[0-9a-f]{20}$/);
+  assert.ok(Array.isArray(rowOf(model, 'busy').reports), 'the busy row keeps its reports array');
+  assert.ok(wire(model) <= MAX_VM_BYTES, `the capped model fits (${wire(model)})`);
+
+  // the real publication into this temporary store: same publish path as the board
+  const res = renderPage(store, NOW, opts);
+  assert.equal(res.ok, true, JSON.stringify(res));
+  const data = fs.readFileSync(join(store.root, 'data.js'), 'utf8');
+  assert.ok(Buffer.byteLength(data) <= MAX_VM_BYTES, `data.js is ${Buffer.byteLength(data)} bytes`);
+  const published = runDataJs(data);
+  const pubIdle = published.sessions.find((s) => s.id === 'idle');
+  assert.ok(pubIdle.folded, 'the published board carries the folded row');
+  assert.equal('reports' in pubIdle, false, 'the published folded row has no reports array');
+  assert.match(published.foldedKey, /^[0-9a-f]{20}$/);
+  const pubBusy = published.sessions.find((s) => s.id === 'busy');
+  assert.ok(pubBusy.chips.includes(OMITTED_CHIP) || pubBusy.reports.length === 1, 'the busy card is trimmed (chip) or whole');
+  t.diagnostic(`B1 ok=${res.ok} seqs=${JSON.stringify(res.seqs)} full=${wire(full)} capped=${wire(model)} data.js=${Buffer.byteLength(data)} foldedKey=${published.foldedKey} busyChips=${JSON.stringify(pubBusy.chips)}`);
 });
