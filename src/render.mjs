@@ -1372,13 +1372,23 @@ function makeRenderer(store, now, opts) {
       if (typeof opts.onServerInfo === 'function') opts.onServerInfo(info); // the caller notes a failed record read after the publish
       // Project the actual publication sequence so a digit-boundary overflow can still fold before any trim.
       const seq = lastPublishedSeq(store, snap) + 1;
-      const vm = buildViewModel({ ...snap, published: { seq } }, now, {
+      const full = buildViewModel({ ...snap, published: { seq } }, now, {
         isAlive, fs, pendingDeliveries: opts.pendingDeliveries, generation, server: info.server, serverError: info.error, stateDir: store.root,
-        fold: opts.fold,
+        full: true,
       });
+      const vm = projectBoardModel(full, now, { fold: opts.fold });
       vm.seq = seq;
       capSize(vm); // the seq text is part of data.js: confirm the cap on the final text
       if (!canPublish()) throw PAUSED;
+      if (vm.foldedKey) {
+        const foldedSids = new Set(vm.sessions.filter((s) => s.folded).map((s) => s.id));
+        const payload = {
+          schema: 1, gen: vm.gen, key: vm.foldedKey,
+          sessions: Object.fromEntries(full.sessions.filter((s) => foldedSids.has(s.id)).map((s) => [s.id, s])),
+        };
+        const text = `window.__briefFolded&&window.__briefFolded(${scriptJson(payload)});`;
+        if (store.readText('folded.js') !== text) store.replace('folded.js', text);
+      }
       const data = dataJsText(vm);
       store.replace('data.js', data);
       writtenPresentation = vm[PRESENTATION] ?? null;

@@ -1081,6 +1081,138 @@ function foldStore(t) {
   return store;
 }
 
+const foldPublishOpts = { isAlive: () => false, generation: 7 };
+function foldPublishStore(t) {
+  const store = foldStore(t);
+  store.replace('sessions/idle/reports.json', [{
+    id: 'r1', title: 'whole', summary: 'history <\u2028\u2029', at: NOW - 3 * DAY,
+    images: [], blocks: [{ kind: 'table', columns: ['x'], rows: [['kept']] }],
+  }]);
+  return store;
+}
+function runFoldedJs(text) {
+  assert.equal(typeof text, 'string', 'folded.js exists');
+  const got = [];
+  vm.runInNewContext(text, { window: { __briefFolded: (d) => got.push(d) } }, { timeout: 1000 });
+  assert.equal(got.length, 1);
+  return JSON.parse(JSON.stringify(got[0]));
+}
+function stateManifest(root) {
+  return Object.fromEntries(fs.readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => {
+      const file = join(entry.parentPath, entry.name);
+      return [file.slice(root.length + 1).replace(/\\/g, '/'), createHash('sha256').update(fs.readFileSync(file)).digest('hex')];
+    }).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+test('fold publish: folded.js is written before data.js and only when its text changes', (t) => {
+  const store = foldPublishStore(t);
+  const calls = [];
+  const replace = store.replace.bind(store);
+  store.replace = (rel, data) => { calls.push(rel); return replace(rel, data); };
+  assert.equal(renderPage(store, NOW, foldPublishOpts).ok, true);
+  assert.ok(calls.includes('folded.js'));
+  assert.ok(calls.indexOf('folded.js') < calls.indexOf('data.js'));
+  const first = store.readText('folded.js');
+  calls.length = 0;
+  assert.equal(renderPage(store, NOW, foldPublishOpts).ok, true);
+  assert.equal(calls.includes('folded.js'), false);
+  assert.equal(store.readText('folded.js'), first);
+  store.replace('sessions/idle/reports.json', [{ id: 'r2', title: 'changed', at: NOW - 3 * DAY, summary: 'changed', images: [] }]);
+  calls.length = 0;
+  assert.equal(renderPage(store, NOW, foldPublishOpts).ok, true);
+  assert.ok(calls.indexOf('folded.js') >= 0 && calls.indexOf('folded.js') < calls.indexOf('data.js'));
+  assert.notEqual(store.readText('folded.js'), first);
+});
+
+test('fold publish: a folded.js write failure fails the publish and leaves data.js as it was', (t) => {
+  const store = foldPublishStore(t);
+  assert.equal(renderPage(store, NOW, { ...foldPublishOpts, fold: false }).ok, true);
+  const hash = () => createHash('sha256').update(store.readText('data.js')).digest('hex');
+  const before = hash();
+  const replace = store.replace.bind(store);
+  store.replace = (rel, data) => {
+    if (rel === 'folded.js') throw new Error('injected folded.js write failure');
+    return replace(rel, data);
+  };
+  const result = renderPage(store, NOW, foldPublishOpts);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /injected folded.js write failure/);
+  assert.equal(result.presentation, null);
+  assert.deepEqual(result.seqs, []);
+  assert.equal(hash(), before);
+  t.diagnostic(`data.js sha256 before=${before} after=${hash()}`);
+});
+
+test('fold publish: unfold and refold never delete or move a file', (t) => {
+  const store = foldPublishStore(t);
+  const before = stateManifest(store.root);
+  for (const fold of [true, false, true]) {
+    assert.equal(renderPage(store, NOW, { ...foldPublishOpts, fold }).ok, true);
+    const after = stateManifest(store.root);
+    for (const [rel, hash] of Object.entries(before)) assert.equal(after[rel], hash, rel);
+    assert.ok(Object.keys(after).filter((rel) => !(rel in before))
+      .every((rel) => ['data.js', 'index.html', 'published.json', 'folded.js'].includes(rel)));
+  }
+  assert.ok(store.readText('folded.js'));
+});
+
+test('fold publish: folded.js text is script-safe and carries no token', (t) => {
+  const store = foldPublishStore(t);
+  const token = 'secret-fold-publication-token';
+  store.replace('server.json', { pid: process.pid, port: 49120, token });
+  assert.equal(renderPage(store, NOW, foldPublishOpts).ok, true);
+  const text = store.readText('folded.js');
+  assert.equal(typeof text, 'string');
+  assert.doesNotMatch(text, /[<\u2028\u2029]/);
+  assert.equal(text.includes(token), false);
+  const payload = runFoldedJs(text);
+  assert.equal(payload.sessions.idle.reports[0].summary, 'history <\u2028\u2029');
+  assert.deepEqual(Object.keys(payload).sort(), ['gen', 'key', 'schema', 'sessions']);
+  assert.equal(payload.gen, 7);
+  assert.equal(payload.schema, 1);
+  assert.equal(payload.key, runDataJs(store.readText('data.js')).foldedKey);
+});
+
+test('fold publish: nothing folded leaves an existing folded.js untouched and unreferenced', (t) => {
+  const store = foldPublishStore(t);
+  assert.equal(renderPage(store, NOW, foldPublishOpts).ok, true);
+  const first = store.readText('folded.js');
+  const replace = store.replace.bind(store);
+  const calls = [];
+  store.replace = (rel, data) => { calls.push(rel); return replace(rel, data); };
+  assert.equal(renderPage(store, NOW, { ...foldPublishOpts, fold: false }).ok, true);
+  assert.equal(typeof first, 'string');
+  assert.equal(store.readText('folded.js'), first);
+  assert.equal(calls.includes('folded.js'), false);
+  assert.equal('foldedKey' in runDataJs(store.readText('data.js')), false);
+  assert.equal(store.readText('index.html').includes('folded.js'), false);
+});
+
+test('fold publish: folded.js carries every folded card whole, including one larger than 614400 bytes', (t) => {
+  const store = foldPublishStore(t);
+  meta(store, 'big', { cwd: 'C:/w/fold', title: 'big', lastActivityAt: NOW - 3 * DAY });
+  brief(store, 'big', 1, NOW - 3 * DAY, { title: 'big', status: 'done', headline: 'big' });
+  store.replace('sessions/big/reports.json', Array.from({ length: 20 }, (_, i) => ({
+    id: `r${i}`, title: `report ${i}`, summary: 'whole', at: NOW - 3 * DAY, images: [],
+    blocks: Array.from({ length: 6 }, () => ({
+      kind: 'table', columns: Array(8).fill('x'),
+      rows: Array.from({ length: 30 }, () => Array(8).fill('가'.repeat(120))),
+    })),
+  })));
+  const full = built(store, { full: true, generation: 7 });
+  assert.ok(Buffer.byteLength(JSON.stringify(rowOf(full, 'big'))) > MAX_VM_BYTES);
+  assert.equal(renderPage(store, NOW, foldPublishOpts).ok, true);
+  const data = runDataJs(store.readText('data.js'));
+  const payload = runFoldedJs(store.readText('folded.js'));
+  const folded = data.sessions.filter((s) => s.folded);
+  assert.equal(folded.length, 2);
+  assert.deepEqual(Object.keys(payload.sessions).sort(), Array.from(folded, (s) => s.id).sort());
+  for (const row of folded) assert.deepEqual(payload.sessions[row.id], rowOf(full, row.id));
+  assert.ok(Buffer.byteLength(store.readText('folded.js')) > MAX_VM_BYTES);
+});
+
 test('fold: predicate folds an idle closed conversation and keeps each exempt one', async (t) => {
   // one closed, idle conversation with every other signal absent (the foldable baseline)
   const idle = (t, { m = {}, b = {}, decisions: ds = [], reports, mirror } = {}) => {
