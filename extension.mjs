@@ -814,7 +814,21 @@ export function createBriefingExtension(opts = {}) {
         : `보고는 저장됐지만 상황판은 갱신되지 못함${newText}: ${res.error}`];
       for (const w of v.warnings) lines.push(`경고: ${w}`);
       if (reportWarning) lines.push(`경고: ${reportWarning}`);
-      return { content: [{ type: 'text', text: lines.join('\n') }], details: { seq, newDecisionIds: created.map((d) => d.id), pagePath } };
+      // The caller's own card only: the last written publication names this session when its row was folded or trimmed.
+      // Other conversations' entries stay in details.boardTrim and never produce a line here.
+      const presentation = res.presentation ?? null;
+      const own = presentation ? presentation.sessions.find((e) => e.sessionId === sid) ?? null : null;
+      if (own) {
+        if (own.folded) lines.push(`경고: 이 대화는 상황판에서 접혀 있습니다(보고서 ${own.folded.reports}개). 펼치면 전체 기록이 보입니다.`);
+        if (own.cut.reports > 0) lines.push(`경고: 상황판 용량(600KB) 때문에 이 대화의 보고서 ${own.cut.reports}개가 상황판에서 빠졌습니다. 원본은 그대로 있습니다.`);
+        if (own.cut.blocks > 0) lines.push(`경고: 상황판 용량(600KB) 때문에 이 대화 보고서의 표·그래프 ${own.cut.blocks}개가 빠졌습니다. 원본은 그대로 있습니다.`);
+        if (own.cut.details) lines.push('경고: 상황판 용량(600KB) 때문에 이 대화의 부가 정보 일부가 줄었습니다.');
+        if (presentation.overCap) lines.push('경고: 줄일 수 있는 것을 다 줄여도 상황판 데이터가 600KB를 넘었습니다(지금처럼 게시함).');
+      }
+      return { content: [{ type: 'text', text: lines.join('\n') }], details: {
+        seq, newDecisionIds: created.map((d) => d.id), pagePath,
+        boardTrim: presentation ? { seq: presentation.seq, overCap: presentation.overCap, session: own } : null,
+      } };
     }
 
     // ---- commands ----

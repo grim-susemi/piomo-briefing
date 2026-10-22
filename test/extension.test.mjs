@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import * as nodeFs from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
@@ -1380,6 +1380,171 @@ test('reports: the live board serves a referenced asset and 404s it once the cur
   assert.equal(gone.status, 404, 'no page connected: the host still rebuilds when published.json changed');
   await gone.arrayBuffer();
   assert.ok(existsSync(join(s.stateDir, 'assets', name)), 'the file itself stays until gc ages it out');
+});
+
+// ---------------------------------------------------------------- brief: own-card trim warnings
+
+const TRIM_DAY = 24 * 60 * 60 * 1000;
+const TRIM_BASE = 1_700_000_000_000;
+const seedJson = (stateDir, rel, value) => {
+  const file = join(stateDir, rel);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(value));
+};
+// The brief writes at TRIM_BASE; the board publish reads the clock again after the brief record exists,
+// so the caller's own card is already 3 days idle in that publication.
+const delayedBoard = (stateDir) => () => existsSync(join(stateDir, 'sessions', 'sess-A', 'briefs', '000001.json'))
+  ? TRIM_BASE + 3 * TRIM_DAY
+  : TRIM_BASE;
+const oldReport = (id, blocks) => ({
+  id, title: `보고 ${id}`, summary: '오래된 보고', at: TRIM_BASE - 10 * TRIM_DAY,
+  decisionId: null, images: [], ...(blocks ? { blocks } : {}),
+});
+const bigOpenDecision = (stateDir, sid) => seedJson(stateDir, 'decisions/000001.json', {
+  id: 1, sessionId: sid, question: 'x'.repeat(700_000), options: {}, recommend: '', reason: '',
+  blocks: false, createdAt: TRIM_BASE - 10 * TRIM_DAY, source: 'brief',
+});
+// lead() leaves the fake pi without an events bus, so the mirror module marks every session unavailable and no
+// caller row can fold. The bus exists once the session starts; the task-bus subscription is not needed here.
+
+
+// The caller's own row must be folded at the publish, while an open decision elsewhere keeps the model over 600KB.
+test('brief: own folded, cut and overCap entries add 경고 lines and details.boardTrim while the first line is unchanged', async (t) => {
+  let foldedDir;
+  const folded = lead(t, {
+    now: () => (foldedDir ? delayedBoard(foldedDir)() : TRIM_BASE),
+    renderOpts: { sleep: () => {}, isAlive: () => false },
+  });
+  foldedDir = folded.stateDir;
+  folded.host.pi.events = { on: () => () => {} };
+  seedJson(folded.stateDir, 'sessions/sess-HUGE/meta.json', {
+    sessionId: 'sess-HUGE', cwd: 'C:/work/huge', title: 'huge', lastActivityAt: TRIM_BASE, hostPid: 1,
+  });
+  bigOpenDecision(folded.stateDir, 'sess-HUGE');
+  seedJson(folded.stateDir, 'sessions/sess-A/reports.json', [oldReport('r1')]);
+  await folded.start();
+  const foldedRes = await folded.brief(goodBrief());
+  const foldedLines = textOfResult(foldedRes).split('\n');
+  assert.equal(foldedLines[0], `상황판 갱신됨: ${folded.pagePath}`, 'the first line is byte-identical to today');
+  assert.deepEqual(foldedLines.slice(1), [
+    '경고: 이 대화는 상황판에서 접혀 있습니다(보고서 1개). 펼치면 전체 기록이 보입니다.',
+    '경고: 상황판 용량(600KB) 때문에 이 대화의 부가 정보 일부가 줄었습니다.',
+    '경고: 줄일 수 있는 것을 다 줄여도 상황판 데이터가 600KB를 넘었습니다(지금처럼 게시함).',
+  ]);
+  assert.equal(foldedRes.details.boardTrim.overCap, true);
+  assert.ok(Number.isInteger(foldedRes.details.boardTrim.seq));
+  assert.deepEqual(foldedRes.details.boardTrim.session, {
+    sessionId: 'sess-A', folded: { reports: 1, decisions: 0 }, cut: { reports: 0, blocks: 0, details: true },
+  });
+
+  // A caller that cannot fold (mirror unavailable) loses old reports and their blocks to the cap.
+  let cutDir;
+  const cut = lead(t, {
+    now: () => (cutDir ? delayedBoard(cutDir)() : TRIM_BASE),
+    renderOpts: { sleep: () => {}, isAlive: () => false },
+  });
+  cutDir = cut.stateDir;
+  cut.host.pi.events = { on: () => () => {} };
+  seedJson(cut.stateDir, 'sessions/sess-A/meta.json', {
+    sessionId: 'sess-A', cwd: 'C:/work/proj', title: 'A', lastActivityAt: TRIM_BASE - 10 * TRIM_DAY,
+    hostPid: 1, workName: '진행 중 작업',
+  });
+  seedJson(cut.stateDir, 'sessions/sess-A/reports.json', [
+    oldReport('r1', [{ kind: 'text', title: '표', text: 'y'.repeat(20_000) }]),
+    oldReport('r2', [{ kind: 'text', title: '표', text: 'z'.repeat(20_000) }]),
+  ]);
+  seedJson(cut.stateDir, 'sessions/sess-HUGE/meta.json', {
+    sessionId: 'sess-HUGE', cwd: 'C:/work/huge', title: 'huge', lastActivityAt: TRIM_BASE, hostPid: 1,
+  });
+  bigOpenDecision(cut.stateDir, 'sess-HUGE');
+  await cut.start();
+  const cutRes = await cut.brief(goodBrief({ status: 'done' }));
+  const cutLines = textOfResult(cutRes).split('\n');
+  assert.equal(cutLines[0], `상황판 갱신됨: ${cut.pagePath}`);
+  assert.deepEqual(cutLines.slice(1), [
+    '경고: 상황판 용량(600KB) 때문에 이 대화의 보고서 2개가 상황판에서 빠졌습니다. 원본은 그대로 있습니다.',
+    '경고: 상황판 용량(600KB) 때문에 이 대화의 부가 정보 일부가 줄었습니다.',
+    '경고: 줄일 수 있는 것을 다 줄여도 상황판 데이터가 600KB를 넘었습니다(지금처럼 게시함).',
+  ]);
+  assert.equal(cutRes.details.boardTrim.overCap, true);
+  assert.deepEqual(cutRes.details.boardTrim.session, {
+    sessionId: 'sess-A', folded: null, cut: { reports: 2, blocks: 0, details: true },
+  });
+
+  // A report that stays on the board loses only its blocks: the block line is the sole cut line.
+  let blocksDir;
+  const blocks = lead(t, {
+    now: () => (blocksDir ? delayedBoard(blocksDir)() : TRIM_BASE),
+    renderOpts: { sleep: () => {}, isAlive: () => false },
+  });
+  blocksDir = blocks.stateDir;
+  blocks.host.pi.events = { on: () => () => {} };
+  seedJson(blocks.stateDir, 'sessions/sess-A/meta.json', {
+    sessionId: 'sess-A', cwd: 'C:/work/proj', title: 'A', lastActivityAt: TRIM_BASE - 10 * TRIM_DAY,
+    hostPid: 1, workName: '진행 중 작업',
+  });
+  seedJson(blocks.stateDir, 'sessions/sess-A/reports.json', [
+    oldReport('r1', [{ kind: 'text', title: '큰 표', text: 'v'.repeat(650_000) }]),
+  ]);
+  await blocks.start();
+  const blocksRes = await blocks.brief(goodBrief({ status: 'done' }));
+  const blocksLines = textOfResult(blocksRes).split('\n');
+  assert.equal(blocksLines[0], `상황판 갱신됨: ${blocks.pagePath}`);
+  assert.deepEqual(blocksLines.slice(1), [
+    '경고: 상황판 용량(600KB) 때문에 이 대화 보고서의 표·그래프 1개가 빠졌습니다. 원본은 그대로 있습니다.',
+    '경고: 상황판 용량(600KB) 때문에 이 대화의 부가 정보 일부가 줄었습니다.',
+  ]);
+  assert.equal(blocksRes.details.boardTrim.overCap, false);
+  assert.deepEqual(blocksRes.details.boardTrim.session, {
+    sessionId: 'sess-A', folded: null, cut: { reports: 0, blocks: 1, details: true },
+  });
+});
+
+// Another conversation's trim is in details.boardTrim but never produces a line for this caller.
+test('brief: a cut of another conversation adds nothing', async (t) => {
+  let dir;
+  const s = lead(t, {
+    now: () => (dir ? delayedBoard(dir)() : TRIM_BASE),
+    renderOpts: { sleep: () => {}, isAlive: () => false },
+  });
+  dir = s.stateDir;
+  s.host.pi.events = { on: () => () => {} };
+  seedJson(s.stateDir, 'sessions/sess-A/meta.json', {
+    sessionId: 'sess-A', cwd: 'C:/work/proj', title: 'A', lastActivityAt: TRIM_BASE - 10 * TRIM_DAY,
+    hostPid: 1, workName: '진행 중 작업',
+  });
+  seedJson(s.stateDir, 'sessions/sess-OTHER/meta.json', {
+    sessionId: 'sess-OTHER', cwd: 'C:/work/other', title: 'O', lastActivityAt: TRIM_BASE - 10 * TRIM_DAY,
+    hostPid: 1, workName: '바쁜 작업',
+  });
+  seedJson(s.stateDir, 'sessions/sess-OTHER/reports.json', [
+    oldReport('big', [{ kind: 'text', title: '큰 표', text: 'w'.repeat(650_000) }]),
+  ]);
+  await s.start();
+  const res = await s.brief(goodBrief());
+  const text = textOfResult(res);
+  assert.equal(text.split('\n')[0], `상황판 갱신됨: ${s.pagePath}`);
+  assert.ok(!text.includes('경고:'), text);
+  assert.equal(res.details.boardTrim.overCap, false);
+  assert.equal(res.details.boardTrim.session, null);
+  assert.ok(Number.isInteger(res.details.boardTrim.seq));
+});
+
+// A publish that never wrote data.js has no presentation to report.
+test('brief: no data written gives details.boardTrim null and no warning', async (t) => {
+  const s = lead(t);
+  await s.start();
+  const dataFile = join(s.stateDir, 'data.js');
+  const before = existsSync(dataFile) ? readFileSync(dataFile, 'utf8') : null;
+  writeFileSync(join(s.stateDir, 'render.lock'), JSON.stringify({ pid: process.pid, at: 1, nonce: 'live-lock' }));
+  const r = await s.brief(goodBrief());
+  const text = textOfResult(r);
+  assert.ok(!text.startsWith('상황판 갱신됨'), text);
+  assert.ok(text.includes('갱신되지 못함'));
+  assert.ok(!text.includes('경고:'), text);
+  assert.equal(r.details.boardTrim, null);
+  const after = existsSync(dataFile) ? readFileSync(dataFile, 'utf8') : null;
+  assert.equal(after, before, 'the blocked publish wrote no data.js');
 });
 
 test('C-VM meta: session_start stores sessionFile and hostPid; shutdown removes hostPid only; the model carries both', async (t) => {
