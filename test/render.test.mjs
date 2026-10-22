@@ -10,7 +10,7 @@ import vm from 'node:vm';
 import { openStore } from '../src/store.mjs';
 import { validateBrief } from '../src/schema.mjs';
 import {
-  buildViewModel, renderPage, pageHtml, withReports, realKey, realCacheFor, MAX_VM_BYTES, OMITTED_CHIP,
+  buildViewModel, renderPage, renderPageMaybe, renderPageAsync, pageHtml, withReports, realKey, realCacheFor, MAX_VM_BYTES, OMITTED_CHIP,
   isFoldable, projectBoardModel, FOLD_AFTER_MS, FOLDED_CHIP,
 } from '../src/render.mjs';
 
@@ -811,7 +811,7 @@ describe('sessions[].reports', () => {
   test('reports stay inside the 600 KB cap: finished, then oldest cards lose their reports first, marked by the chip', (t) => {
     const store = openStore(join(tempRoot(t), 'state'));
     const full = (n) => Array.from({ length: 3 }, (_, k) => ({
-      id: `r${k}`, title: '가'.repeat(80), summary: '<'.repeat(1000), decisionId: null, at: NOW - n * MIN,
+      id: `r${k}`, title: '가'.repeat(80), summary: '<'.repeat(1000), decisionId: null, at: NOW - 2 * DAY - n * MIN,
       images: Array.from({ length: 6 }, () => img({ alt: '<'.repeat(200), path: `C:/${'p'.repeat(1017)}.png` })),
     }));
     for (let n = 0; n < 30; n++) {
@@ -820,7 +820,7 @@ describe('sessions[].reports', () => {
       brief(store, sid, 1, NOW - (n + 1) * MIN, { title: sid, headline: 'h', status: n % 2 ? 'done' : 'in_progress' });
       store.replace(`sessions/${sid}/reports.json`, full(n));
     }
-    const vm = buildViewModel(withReports(store, store.readSnapshot()), NOW, { isAlive: () => false });
+    const vm = buildViewModel(withReports(store, store.readSnapshot()), NOW, { isAlive: () => false, fold: false });
     assert.ok(Buffer.byteLength(JSON.stringify(vm)) <= MAX_VM_BYTES, 'model over the cap');
     const cut = vm.sessions.filter((s) => s.chips.includes(OMITTED_CHIP));
     assert.ok(cut.length > 0 && cut.every((s) => Array.isArray(s.reports) && s.reports.length === 0));
@@ -829,7 +829,7 @@ describe('sessions[].reports', () => {
     const finished = (s) => s.tab === '끝남';
     if (cut.some((s) => !finished(s))) assert.ok(kept.every((s) => !finished(s)), 'an active card lost reports while a finished one kept them');
     for (const k of kept) for (const c of cut) if (finished(k) === finished(c)) assert.ok(c.lastActivityAt <= k.lastActivityAt, 'newer card cut before an older one');
-    const res = renderPage(store, NOW, { sleep: () => {}, isAlive: () => false });
+    const res = renderPage(store, NOW, { sleep: () => {}, isAlive: () => false, fold: false });
     assert.equal(res.ok, true);
     assert.ok(fs.statSync(join(store.root, 'data.js')).size <= MAX_VM_BYTES, 'published data.js over the cap');
   });
@@ -855,7 +855,7 @@ describe('sessions[].reports', () => {
       meta(store, sid, { lastActivityAt: NOW - age * MIN });
       brief(store, sid, 1, NOW - age * MIN, { title: sid, headline: 'h', status });
       store.replace(`sessions/${sid}/reports.json`, [{
-        id: 'max', title: 'maximal report', summary: 'retained summary', at: NOW - age * MIN,
+        id: 'max', title: 'maximal report', summary: 'retained summary', at: NOW - 2 * DAY - age * MIN,
         decisionId: sid === 'old' ? 1 : null, images: [img({ path: '' })],
         blocks: sid === 'live' ? [{ kind: 'kv', items: [{ key: 'k', value: 'v' }] }] : blocks,
       }]);
@@ -869,7 +869,7 @@ describe('sessions[].reports', () => {
     const snapshot = withReports(store, store.readSnapshot());
     snapshot.published = { seq: 1 };
     snapshot.readErrors = [{ rel: '' }]; // inert, byte-exact padding, not a session's read error
-    const options = { isAlive: () => false, stateDir: store.root };
+    const options = { isAlive: () => false, stateDir: store.root, fold: false };
     const dataText = (model) => `/* seq:${model.seq} */\nwindow.__briefData && window.__briefData(${JSON.stringify(model)
       .replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')});\n`;
     const bytes = (model) => Buffer.byteLength(dataText(model));
@@ -956,12 +956,12 @@ describe('C-CAP2 block protections', () => {
   const snapshot = (sessions, seq = 1) => ({ sessions, decisions: [], readErrors: [{ rel: '' }], published: { seq }, maxMtime: 0 });
   function publish(t, input, target, isAlive = () => false) {
     const store = openStore(join(tempRoot(t), 'state'));
-    const baseline = buildViewModel(input, NOW, { isAlive });
+    const baseline = buildViewModel(input, NOW, { isAlive, fold: false });
     const padded = structuredClone(input);
     padded.readErrors[0].rel = 'p'.repeat(target - size(baseline));
-    const firstCap = buildViewModel(padded, NOW, { isAlive });
+    const firstCap = buildViewModel(padded, NOW, { isAlive, fold: false });
     store.readSnapshot = () => structuredClone(padded);
-    assert.equal(renderPage(store, NOW, { isAlive, sleep: () => {} }).ok, true);
+    assert.equal(renderPage(store, NOW, { isAlive, sleep: () => {}, fold: false }).ok, true);
     const source = store.readText('data.js');
     const model = JSON.parse(source.slice(source.lastIndexOf('window.__briefData(') + 'window.__briefData('.length, source.lastIndexOf(');')));
     assert.ok(Buffer.byteLength(source) <= MAX_VM_BYTES);
@@ -1008,7 +1008,7 @@ describe('C-CAP2 block protections', () => {
 
   test('B02: final sequence cap reentry updates six to twelve across a digit boundary', (t) => {
     const input = snapshot([card('finished', [6, 6])], 9);
-    const before = buildViewModel(input, NOW, { isAlive: () => false });
+    const before = buildViewModel(input, NOW, { isAlive: () => false, fold: false });
     const after = structuredClone(before);
     delete after.sessions[0].reports[0].blocks;
     after.sessions[0].chips.push('표·그래프 생략 6개');
@@ -1405,7 +1405,7 @@ test('fold: a folded row on an over-cap board builds and publishes (B1 regressio
   assert.equal(validateBrief(payload).ok, true, 'precondition: the over-cap report is schema-valid');
   meta(store, 'idle', { cwd: 'C:/w/fold', title: '유휴', lastActivityAt: NOW - 3 * DAY });
   brief(store, 'idle', 1, NOW - 3 * DAY, { title: '유휴', status: 'done', headline: 'h', done: [{ text: 'd', truth: 'reported', applied: 'none' }] });
-  meta(store, 'busy', { cwd: 'C:/w/fold', title: 'busy', lastActivityAt: NOW - MIN });
+  meta(store, 'busy', { cwd: 'C:/w/fold', title: 'busy', lastActivityAt: NOW - MIN, workName: 'B1 cap fixture' });
   brief(store, 'busy', 1, NOW - MIN, { title: 'busy', status: 'in_progress', headline: 'h' });
   store.replace('sessions/busy/reports.json', payload.reports.map((r) => ({ ...r, at: NOW - MIN })));
   const opts = { isAlive: () => false, stateDir: store.root };
@@ -1438,4 +1438,121 @@ test('fold: a folded row on an over-cap board builds and publishes (B1 regressio
   const pubBusy = published.sessions.find((s) => s.id === 'busy');
   assert.ok(pubBusy.chips.includes(OMITTED_CHIP) || pubBusy.reports.length === 1, 'the busy card is trimmed (chip) or whole');
   t.diagnostic(`B1 ok=${res.ok} seqs=${JSON.stringify(res.seqs)} full=${wire(full)} capped=${wire(model)} data.js=${Buffer.byteLength(data)} foldedKey=${published.foldedKey} busyChips=${JSON.stringify(pubBusy.chips)}`);
+});
+
+test('publish: presentation describes the last data.js written; a follow-up busy, paused or failed attempt keeps it; no write means null', (t) => {
+  const makeSnap = () => ({
+    sessions: [{
+      sid: 'cut',
+      meta: { sessionId: 'cut', cwd: 'C:/p', title: 'cut', lastActivityAt: NOW - MIN,
+        auto: { work: { name: 'keep' }, live: { workers: [{ id: 'st_c', name: 'c'.repeat(3000), state: 'running' }] } } },
+      briefs: [{ seq: 1, data: { at: NOW - MIN, brief: { title: 'cut', status: 'done', headline: 'h', changes: [], done: [], next: '', decisions: [] } } }],
+      reports: [],
+    }],
+    decisions: [],
+    readErrors: [{ rel: 'p'.repeat(MAX_VM_BYTES + 5000) }],
+    published: { seq: 0 },
+    maxMtime: 0,
+  });
+  const prep = (mode) => {
+    const store = openStore(join(tempRoot(t), 'state'));
+    const snap = makeSnap();
+    let calls = 0;
+    store.readSnapshot = () => { calls++; const s = structuredClone(snap); s.maxMtime = calls > 1 ? 1 : 0; return s; };
+    let dataWrites = 0;
+    let paused = false;
+    const origReplace = store.replace.bind(store);
+    store.replace = (rel, value, ...rest) => {
+      if (rel === 'data.js') {
+        dataWrites++;
+        if (mode === 'fail' && dataWrites === 2) throw new Error('injected data.js write failure');
+      }
+      const out = origReplace(rel, value, ...rest);
+      if (rel === 'data.js' && dataWrites === 1 && mode === 'pause') paused = true;
+      return out;
+    };
+    let lockAttempts = 0;
+    const origWriteNew = store.writeNew.bind(store);
+    store.writeNew = (rel, value, ...rest) => {
+      if (rel === 'render.lock') {
+        lockAttempts++;
+        if (mode === 'busy' && lockAttempts >= 2) { const err = new Error('injected busy lock'); err.code = 'EEXIST'; throw err; }
+      }
+      return origWriteNew(rel, value, ...rest);
+    };
+    return { store, opts: { soft: true, isAlive: () => false, sleep: () => {}, canPublish: () => !paused } };
+  };
+  // A changed store triggers the follow-up publication. In normal mode it writes again; the result then describes seq 2.
+  const normal = prep('normal');
+  const rn = renderPage(normal.store, NOW, normal.opts);
+  const dn = runDataJs(normal.store.readText('data.js'));
+  assert.equal(rn.ok, true, JSON.stringify(rn));
+  assert.equal(rn.seqs.length, 2);
+  assert.equal(dn.seq, 2);
+  assert.equal(rn.presentation.seq, 2, 'the last written data.js wins');
+  assert.equal(rn.presentation.overCap, true);
+  assert.deepEqual(rn.presentation.sessions.map((s) => s.sessionId), ['cut'], 'the presentation carries the cut card');
+  assert.equal('presentation' in dn, false, 'presentation is never serialized');
+  for (const mode of ['fail', 'pause', 'busy']) {
+    const { store, opts } = prep(mode);
+    const res = renderPage(store, NOW, opts);
+    const data = runDataJs(store.readText('data.js'));
+    assert.equal(data.seq, 1, `${mode}: only the first publication was written`);
+    assert.equal(res.presentation.seq, 1, `${mode}: the follow-up attempt keeps the last written presentation`);
+    assert.equal(res.presentation.overCap, true);
+    if (mode === 'fail') assert.equal(res.ok, false);
+    else assert.equal(res.ok, true);
+  }
+  const noWrite = openStore(join(tempRoot(t), 'state'));
+  const r0 = renderPage(noWrite, NOW, { canPublish: () => false });
+  assert.equal(r0.paused, true);
+  assert.equal(r0.presentation, null, 'no data.js write means null');
+});
+
+test('publish: every wrapper accounts for a written data.js even when a later file write fails', async (t) => {
+  for (const publish of [renderPage, renderPageMaybe, renderPageAsync]) {
+    for (const failure of ['data.js', 'index.html']) {
+      const store = openStore(join(tempRoot(t), 'state'));
+      meta(store, 'a', { cwd: 'C:/p', lastActivityAt: NOW - MIN });
+      brief(store, 'a', 1, NOW - MIN, { title: 'a', headline: 'h' });
+      const replace = store.replace.bind(store);
+      store.replace = (rel, value, ...rest) => {
+        if (rel === failure) throw new Error(`injected ${rel} failure`);
+        return replace(rel, value, ...rest);
+      };
+      const result = await publish(store, NOW, { soft: true, isAlive: () => false });
+      assert.equal(result.ok, false);
+      if (failure === 'data.js') {
+        assert.equal(store.readText('data.js'), null);
+        assert.equal(result.presentation, null);
+      } else {
+        const written = runDataJs(store.readText('data.js'));
+        assert.deepEqual(result.presentation, { seq: written.seq, overCap: false, sessions: [] });
+        assert.equal('presentation' in written, false);
+        assert.deepEqual(result.seqs, [], 'later failure does not pretend the entire publication succeeded');
+      }
+    }
+  }
+});
+
+test('publish: repeated pause and resume never reuse the previous invocation presentation', async (t) => {
+  for (const publish of [renderPage, renderPageMaybe, renderPageAsync]) {
+    const store = openStore(join(tempRoot(t), 'state'));
+    meta(store, 'idle', { cwd: 'C:/p', lastActivityAt: NOW - 3 * DAY });
+    brief(store, 'idle', 1, NOW - 3 * DAY, { title: 'idle', headline: 'h', status: 'done' });
+    store.replace('sessions/idle/reports.json', [{ id: 'r', title: 'r', at: NOW - 3 * DAY, summary: 'r'.repeat(500), images: [] }]);
+    for (let seq = 1; seq <= 3; seq++) {
+      const resumed = await publish(store, NOW, { isAlive: () => false, canPublish: () => true });
+      const text = store.readText('data.js');
+      assert.equal(resumed.ok, true);
+      assert.deepEqual(resumed.presentation, {
+        seq, overCap: false,
+        sessions: [{ sessionId: 'idle', folded: { reports: 1, decisions: 0 }, cut: { reports: 0, blocks: 0, details: false } }],
+      });
+      const paused = await publish(store, NOW, { isAlive: () => false, canPublish: () => false });
+      assert.equal(paused.paused, true);
+      assert.equal(paused.presentation, null, 'the existing data.js was not written by this paused invocation');
+      assert.equal(store.readText('data.js'), text);
+    }
+  }
 });

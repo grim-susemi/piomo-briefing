@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { openStore } from '../src/store.mjs';
 import { validateBrief } from '../src/schema.mjs';
-import { buildViewModel, renderPage, renderPageAsync, renderPageMaybe, pageHtml, serverInfoOf, withReports, MAX_VM_BYTES, OMITTED_CHIP } from '../src/render.mjs';
+import { buildViewModel, projectBoardModel, renderPage, renderPageAsync, renderPageMaybe, pageHtml, serverInfoOf, withReports, MAX_VM_BYTES, OMITTED_CHIP } from '../src/render.mjs';
 
 const NOW = 1_800_000_000_000;
 const DAY = 24 * 3600 * 1000;
@@ -668,7 +668,7 @@ test('C-VM cap: blockSources of finished conversations go first, before live det
       changes: Array.from({ length: 10 }, (_, i) => ({ text: 'c', truth: 'reported', applied: 'none', evidence: ev(sid, i) })),
     } });
   }
-  const opts = { isAlive: () => false, stateDir: store.root };
+  const opts = { isAlive: () => false, stateDir: store.root, fold: false };
   const vm = buildViewModel(store.readSnapshot(), NOW, opts);
   assert.ok(Buffer.byteLength(JSON.stringify(vm)) <= MAX_VM_BYTES, 'model over the cap');
   const done = vm.sessions.filter((s) => s.tab === '끝남');
@@ -683,7 +683,7 @@ test('C-VM cap: blockSources of finished conversations go first, before live det
   // the uncapped model really is over the cap: a dropped set is as big as an active one
   const one = Buffer.byteLength(JSON.stringify(active[0].blockSources));
   assert.ok(Buffer.byteLength(JSON.stringify(vm)) + dropped.length * one > MAX_VM_BYTES, 'the uncapped model fits: the test proves nothing');
-  const res = renderPage(store, NOW, { isAlive: () => false });
+  const res = renderPage(store, NOW, { isAlive: () => false, fold: false });
   assert.equal(res.ok, true);
   assert.ok(Buffer.byteLength(store.readText('data.js')) <= MAX_VM_BYTES, 'published data.js over the cap');
 });
@@ -706,7 +706,7 @@ test('C-VM cap B1: native todo items are trimmed under the cap and counted once 
   const store = fresh(t);
   const items = (n) => Array.from({ length: 40 }, (_, i) => ({ text: `${n}-${i} `.padEnd(207, '가'), status: 'pending' }));
   for (let n = 0; n < 30; n++) session(store, `s${String(n).padStart(2, '0')}`, { at: NOW - (n + 1) * 1000, status: n % 2 ? 'done' : 'in_progress', auto: { todoItems: { items: items(n), more: 3 } } });
-  const vm = buildViewModel(store.readSnapshot(), NOW, { isAlive: () => false, stateDir: store.root });
+  const vm = buildViewModel(store.readSnapshot(), NOW, { isAlive: () => false, stateDir: store.root, fold: false });
   assert.ok(Buffer.byteLength(JSON.stringify(vm)) <= MAX_VM_BYTES, `model is ${Buffer.byteLength(JSON.stringify(vm))} bytes`);
   const cut = vm.sessions.filter((s) => s.todo.items.length === 0);
   assert.ok(cut.length > 0 && cut.length < 30, 'some, not all, todo lists dropped');
@@ -720,7 +720,7 @@ test('C-VM cap B1: native todo items are trimmed under the cap and counted once 
   for (const k of kept) assert.equal(k.todo.items.length, 40);
   const done = (s) => s.tab === '끝남';
   if (cut.some((s) => !done(s))) assert.ok(kept.every((s) => !done(s)), 'finished cards are trimmed first');
-  const res = renderPage(store, NOW, { isAlive: () => false });
+  const res = renderPage(store, NOW, { isAlive: () => false, fold: false });
   assert.equal(res.ok, true);
   assert.ok(Buffer.byteLength(store.readText('data.js')) <= MAX_VM_BYTES, 'published data.js over the cap');
 });
@@ -732,10 +732,10 @@ test('C-VM cap B1: distinct report image paths still fit after the reports are d
   for (let n = 0; n < 30; n++) {
     const sid = `s${String(n).padStart(2, '0')}`;
     session(store, sid, { at: NOW - (n + 1) * 1000 });
-    store.replace(`sessions/${sid}/reports.json`, Array.from({ length: 3 }, (_, r) => ({ id: `r${r}`, title: 't', summary: '', decisionId: null, at: NOW,
+    store.replace(`sessions/${sid}/reports.json`, Array.from({ length: 3 }, (_, r) => ({ id: `r${r}`, title: 't', summary: '', decisionId: null, at: NOW - 2 * DAY,
       images: Array.from({ length: 6 }, (_, i) => ({ sha: H, ext: 'png', alt: 'a', w: 1, h: 1, path: `C:/shots/${'가'.repeat(950)}/${sid}-${r}-${i}.png` })) })));
   }
-  const vm = buildViewModel(withReports(store, store.readSnapshot()), NOW, { isAlive: () => false, stateDir: store.root });
+  const vm = buildViewModel(withReports(store, store.readSnapshot()), NOW, { isAlive: () => false, stateDir: store.root, fold: false });
   assert.ok(Buffer.byteLength(JSON.stringify(vm)) <= MAX_VM_BYTES, `model is ${Buffer.byteLength(JSON.stringify(vm))} bytes`);
   const trimmed = vm.sessions.filter((s) => s.attachments.length === 1);
   assert.ok(trimmed.length > 0, 'some attachment lists were dropped');
@@ -745,7 +745,7 @@ test('C-VM cap B1: distinct report image paths still fit after the reports are d
   }
   assert.ok(vm.trimmed && vm.trimmed.cards >= trimmed.length, 'the trimmed cards are counted');
   for (const s of vm.sessions) for (const a of s.attachments.slice(1)) assert.ok(a.path.length > 950, 'kept paths are whole');
-  const res = renderPage(store, NOW, { isAlive: () => false });
+  const res = renderPage(store, NOW, { isAlive: () => false, fold: false });
   assert.equal(res.ok, true);
   assert.ok(Buffer.byteLength(store.readText('data.js')) <= MAX_VM_BYTES, 'published data.js over the cap');
 });
@@ -881,7 +881,7 @@ async function publishBoth(t, template) {
   nodeFs.cpSync(template, a, { recursive: true });
   nodeFs.cpSync(template, b, { recursive: true });
   const ro = O.render.renderPage(O.store.openStore(a), NOW, { isAlive: () => false, sleep: () => {} });
-  const rn = renderPage(openStore(b), NOW, { isAlive: () => false, sleep: () => {} });
+  const rn = renderPage(openStore(b), NOW, { isAlive: () => false, sleep: () => {}, fold: false });
   assert.equal(ro.ok, true, 'oracle published');
   assert.equal(rn.ok, true, 'new renderer published');
   const o = readData(a), n = readData(b);
@@ -1034,7 +1034,7 @@ test('C-CAP2 verifier repro: 30 sessions with 8999-code-point session files fit;
   const sessions = Array.from({ length: 30 }, (_, i) => ({ sid: `sf${i}`, meta: { sessionId: `sf${i}`, cwd: 'C:/project', lastActivityAt: NOW,
     sessionFile: `C:/sessions/${Array.from({ length: 47 }, () => '가'.repeat(190)).join('/')}/sf${i}.jsonl` },
     briefs: [{ seq: 1, data: { at: NOW, brief: { title: `sf${i}`, status: i % 2 ? 'done' : 'in_progress', headline: 'h', changes: [], done: [], next: '', decisions: [] } } }] }));
-  const vm = buildViewModel({ sessions }, NOW, { stateDir: 'C:/board/state', isAlive: () => false });
+  const vm = buildViewModel({ sessions }, NOW, { stateDir: 'C:/board/state', isAlive: () => false, fold: false });
   assert.ok(Buffer.byteLength(JSON.stringify(vm)) <= MAX_VM_BYTES);
   const cleared = vm.sessions.filter((s) => !('sessionFile' in s));
   assert.ok(cleared.length > 0 && cleared.length < 30);
@@ -1086,7 +1086,7 @@ for (const [name, c] of Object.entries(LEGACY_CASES)) {
       while (ok(o(hi))) hi *= 2;
       while (hi - lo > 1) { const m = (lo + hi) >> 1; if (ok(o(m))) lo = m; else hi = m; }
       const ov = o(lo);
-      const nv = buildViewModel(memSnap(lo, c), NOW, opts);
+      const nv = buildViewModel(memSnap(lo, c), NOW, { ...opts, fold: false });
       const ns = memSize(nv);
       assert.ok(memFits(ns), `${name} (${label}): N=${lo} accepted ${memSize(ov).data} B fits, new ${ns.data} B does not`);
       // once every todo-3 key is gone, nothing the new renderer did may leave it bigger than the accepted one
@@ -1290,13 +1290,13 @@ for (const [name, c] of Object.entries(HELD_CASES)) {
       assert.ok(ok(o(lo)));
       while (ok(o(hi))) hi *= 2;
       while (hi - lo > 1) { const m = (lo + hi) >> 1; if (ok(o(m))) lo = m; else hi = m; }
-      const nv = buildViewModel(heldSnap(lo, c), NOW, opts);
+      const nv = buildViewModel(heldSnap(lo, c), NOW, { ...opts, fold: false });
       const ns = memSize(nv);
       assert.ok(memFits(ns), `${name} vs ${label}: N=${lo} accepted ${memSize(o(lo)).data} B fits, new ${ns.data} B does not`);
       const held = nv.sessions.flatMap((s) => s.decisions.filter((d) => d.held));
       assert.equal(held.length, lo * [...Array(c.k).keys()].filter(c.held).length, 'every held decision is still marked held');
       assert.ok(nv.sessions.every((s) => s.decisions.every((d) => d.held !== false)), 'no held:false bytes');
-      const past = buildViewModel(heldSnap(hi, c), NOW, opts);
+      const past = buildViewModel(heldSnap(hi, c), NOW, { ...opts, fold: false });
       assert.ok(memSize(past).data <= memSize(o(hi)).data, `${name} vs ${label}: N=${hi} new ${memSize(past).data} B > accepted ${memSize(o(hi)).data} B`);
       if (!memFits(memSize(past))) assert.ok(past.sessions.every((s) => !('heldCount' in s) && s.decisions.every((d) => !d.held || Object.keys(d.held).length === 0)), 'exhausted: pass 9 removed heldCount and every hold time');
     }
@@ -1311,7 +1311,7 @@ test('C-CAP2 pass 9 order: hold details go only after every C-VM key, finished t
   let lo = 1, hi = 64;
   while (ok(O.render.buildViewModel(heldSnap(hi, c), NOW, opts))) hi *= 2;
   while (hi - lo > 1) { const m = (lo + hi) >> 1; if (ok(O.render.buildViewModel(heldSnap(m, c), NOW, opts))) lo = m; else hi = m; }
-  const nv = buildViewModel(heldSnap(lo, c), NOW, opts);
+  const nv = buildViewModel(heldSnap(lo, c), NOW, { ...opts, fold: false });
   const cut = nv.sessions.filter((s) => !('heldCount' in s));
   if (cut.length) {
     assert.ok(nv.sessions.every((s) => CVM_KEYS.every((k) => !(k in s))), 'pass 9 runs only after passes 1-7 removed every C-VM key');
@@ -1355,4 +1355,396 @@ test('C-CAP2 pass 8 still drops askLive oldest first when every card has a live 
   const lastDrop = restored.sessions.slice().sort((a, b) => b.lastActivityAt - a.lastActivityAt).find((s) => s.decisions[0].askLive !== true);
   lastDrop.decisions[0].askLive = true;
   assert.ok(!memFits(memSize(restored)), 'restoring the last drop must exceed the cap');
+});
+
+// ---- todo 3: protected-last cap, stage-B fold and presentation accounting
+// Fixtures are hand-built snapshots (same shape withReports feeds the builder) so exact byte boundaries are deterministic.
+const MIN = 60 * 1000;
+const capWire = (m) => Buffer.byteLength(`/* seq:${m.seq} */\nwindow.__briefData && window.__briefData(${JSON.stringify(m)
+  .replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')});\n`);
+const capRowBytes = (row) => Buffer.byteLength(JSON.stringify(row).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029'));
+const capRow = (vm, id) => vm.sessions.find((s) => s.id === id);
+const CAP_KEEP = { auto: { work: { name: 'keep' } } }; // a plan signal: not foldable, tab still follows status
+const capSession = (sid, { at = NOW - MIN, status = 'done', meta = {}, brief = {}, reports = [] } = {}) => ({
+  sid,
+  meta: { sessionId: sid, cwd: 'C:/p', title: sid, lastActivityAt: at, ...meta },
+  briefs: [{ seq: 1, data: { at, brief: { title: sid, status, headline: 'h', changes: [], done: [], next: '', decisions: [], ...brief } } }],
+  reports,
+});
+const capSnap = (sessions, decisions = [], seq = 1) => ({ sessions, decisions, readErrors: [], published: { seq }, maxMtime: 0 });
+const capDecision = (id, sessionId, { question = 'q'.repeat(40), reason = 'r'.repeat(40), fields } = {}) => ({
+  id, sessionId, source: 'brief', question, recommend: 'A', reason, blocks: false, createdAt: NOW - 2 * MIN,
+  options: { A: { text: '가'.repeat(20), consequence: '결과 가'.repeat(10) }, B: { text: '나'.repeat(20), consequence: '결과 나'.repeat(10) } },
+  ...(fields ? { fields } : {}),
+});
+// Pads the model with inert top-level bytes (readErrors) to an exact data.js size, measured on the UNCAPPED, unfolded model.
+function capPad(snap, target, buildOpts = { isAlive: () => false }) {
+  const { full, ...rest } = buildOpts;
+  const probe = structuredClone(snap);
+  probe.readErrors = [{ rel: '' }];
+  const baseBytes = capWire(buildViewModel(probe, NOW, { ...rest, full: true }));
+  const pad = target - baseBytes;
+  assert.ok(pad >= 0, `target ${target} is below the base model ${baseBytes}`);
+  snap.readErrors = [{ rel: 'p'.repeat(pad) }];
+  return pad;
+}
+function capPublish(t, snap, opts = {}) {
+  const store = fresh(t);
+  store.readSnapshot = () => structuredClone(snap);
+  const full = buildViewModel(structuredClone(snap), NOW, { isAlive: () => false, ...opts, stateDir: store.root, full: true });
+  const res = renderPage(store, NOW, { isAlive: () => false, ...opts });
+  const text = store.readText('data.js');
+  assert.ok(text, `data.js was written: ${JSON.stringify(res)}`);
+  const vm = JSON.parse(text.slice(text.lastIndexOf('window.__briefData(') + 'window.__briefData('.length, text.lastIndexOf(');')));
+  return { store, res, text, vm, full };
+}
+
+test('cap priority: every unprotected byte goes before any protected report or alive card loses bytes', (t) => {
+  const alive = (pid) => pid === 777;
+  const keepReport = { id: 'keep-r', title: 'keep', summary: 'k'.repeat(2000), at: NOW - MIN, images: [], blocks: [] };
+  const aliveReport = { id: 'alive-r', title: 'alive', summary: 'a'.repeat(2000), at: NOW - MIN, images: [], blocks: [] };
+  const sessions = [
+    capSession('a-dead-cut', { at: NOW - MIN, status: 'done', meta: { auto: { work: { name: 'keep' }, live: { workers: [{ id: 'st_a', name: 'w'.repeat(6000), state: 'running' }] } } } }),
+    capSession('b-dead-keep', { at: NOW - 2 * DAY, status: 'done', meta: CAP_KEEP, reports: [keepReport] }),
+    capSession('c-alive', { at: NOW - MIN, status: 'done', meta: { hostPid: 777 }, reports: [aliveReport] }),
+  ];
+  const snap = capSnap(sessions);
+  capPad(snap, MAX_VM_BYTES + 5000, { isAlive: alive });
+  const { res, text, vm, full } = capPublish(t, snap, { isAlive: alive });
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.ok(Buffer.byteLength(text) <= MAX_VM_BYTES, `data.js ${Buffer.byteLength(text)} B`);
+  const cut = capRow(vm, 'a-dead-cut');
+  assert.equal(cut.live, undefined, 'the unprotected live detail was dropped first');
+  assert.ok(cut.chips.includes(OMITTED_CHIP), 'the dropped unprotected detail carries the chip');
+  assert.deepEqual(capRow(vm, 'b-dead-keep').reports, capRow(full, 'b-dead-keep').reports, 'the protected recent report is byte-identical');
+  assert.deepEqual(capRow(vm, 'c-alive'), capRow(full, 'c-alive'), 'the alive card lost nothing');
+  assert.equal(res.presentation.overCap, false);
+  assert.deepEqual(res.presentation.sessions.map((s) => s.sessionId), ['a-dead-cut'], 'only the unprotected card is reported cut');
+});
+
+test('cap priority: two closed cards that cannot fold, each holding old and recent reports, lose all their old reports before either loses a recent one', (t) => {
+  // round-1 counterexample: both cards are closed (status done) and hold an open decision, so they cannot fold.
+  const bigBlock = () => ({ kind: 'kv', title: 't', items: Array.from({ length: 30 }, (_, i) => ({ key: `k${i}`.padEnd(200, 'k'), value: 'v'.repeat(200) })) });
+  const oldReport = (sid, n) => ({ id: `${sid}-old${n}`, title: 'old', summary: 'old', at: NOW - 2 * DAY, images: [], blocks: Array.from({ length: 6 }, bigBlock) });
+  const recentReport = (sid, n) => ({ id: `${sid}-new${n}`, title: 'new', summary: 'n'.repeat(500), at: NOW - 2 * MIN, images: [], blocks: [] });
+  const sessions = [
+    capSession('a-closed', { at: NOW - 30 * MIN, status: 'done', reports: [oldReport('a', 1), recentReport('a', 1), oldReport('a', 2), recentReport('a', 2)] }),
+    capSession('b-closed', { at: NOW - 20 * MIN, status: 'done', reports: [oldReport('b', 1), recentReport('b', 1), oldReport('b', 2), recentReport('b', 2)] }),
+  ];
+  const decisions = [capDecision(1, 'a-closed'), capDecision(2, 'b-closed')];
+  const snap = capSnap(sessions, decisions);
+  capPad(snap, MAX_VM_BYTES + 160000, { isAlive: () => false });
+  const { res, text, vm, full } = capPublish(t, snap);
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.ok(Buffer.byteLength(text) <= MAX_VM_BYTES, `data.js ${Buffer.byteLength(text)} B`);
+  for (const sid of ['a-closed', 'b-closed']) {
+    const got = capRow(vm, sid);
+    const source = capRow(full, sid);
+    const recentIds = source.reports.filter((r) => r.at >= NOW - DAY).map((r) => r.id);
+    assert.deepEqual(got.reports.map((r) => r.id), recentIds, `${sid}: every old report is gone, every recent one stays`);
+    assert.deepEqual(got.reports, source.reports.filter((r) => r.at >= NOW - DAY), `${sid}: recent reports are deep-equal to the source`);
+    assert.ok(got.chips.includes(OMITTED_CHIP), `${sid}: old-report removal carries the chip`);
+    const entry = res.presentation.sessions.find((s) => s.sessionId === sid);
+    assert.equal(entry.cut.reports, 2, `${sid}: two removed reports are counted`);
+    assert.equal(entry.cut.blocks, 0, `${sid}: removed reports take their blocks, they are not block-only cuts`);
+    assert.equal(entry.cut.details, false, `${sid}: the report drops fit before any other detail is lost`);
+  }
+  assert.deepEqual(capRow(vm, 'a-closed').decisions, capRow(full, 'a-closed').decisions, 'open decisions are untouched');
+  assert.deepEqual(capRow(vm, 'b-closed').decisions, capRow(full, 'b-closed').decisions, 'open decisions are untouched');
+});
+
+test('cap priority: recent reports of closed cards go oldest first, and before anything of an alive card', (t) => {
+  const alive = (pid) => pid === 777;
+  const report = (id, at, count = 6) => ({ id, title: id, summary: 'r', at, images: Array.from({ length: count }, () => ({ sha: 'a'.repeat(64), ext: 'png', alt: 'a', w: 1, h: 1, path: 'C:/' + '가'.repeat(1000) })), blocks: [] });
+  const sessions = [
+    capSession('a-oldest-report', { at: NOW - 10 * MIN, status: 'done', meta: CAP_KEEP, reports: [report('a-r', NOW - 2 * 3600 * 1000)] }),
+    capSession('b-newer-report', { at: NOW - 9 * MIN, status: 'done', meta: CAP_KEEP, reports: [report('b-r', NOW - 3600 * 1000)] }),
+    capSession('c-alive', { at: NOW - 8 * MIN, status: 'done', meta: { hostPid: 777, auto: { live: { workers: [{ id: 'st_c', name: 'c'.repeat(30000), state: 'running' }] } } }, reports: [report('c-r', NOW - MIN)] }),
+  ];
+  const snap = capSnap(sessions);
+  capPad(snap, MAX_VM_BYTES + 20000, { isAlive: alive });
+  const { res, text, vm, full } = capPublish(t, snap, { isAlive: alive });
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.ok(Buffer.byteLength(text) <= MAX_VM_BYTES, `data.js ${Buffer.byteLength(text)} B`);
+  assert.deepEqual(capRow(vm, 'a-oldest-report').reports, [], 'the oldest protected report of a closed card goes first');
+  assert.deepEqual(capRow(vm, 'b-newer-report').reports, capRow(full, 'b-newer-report').reports, 'the newer report is kept');
+  assert.deepEqual(capRow(vm, 'c-alive'), capRow(full, 'c-alive'), 'the alive card lost none of its bytes');
+  const a = res.presentation.sessions.find((s) => s.sessionId === 'a-oldest-report');
+  const b = res.presentation.sessions.find((s) => s.sessionId === 'b-newer-report');
+  assert.equal(a.cut.reports, 1);
+  assert.equal(b.cut.reports, 0);
+  assert.equal(b.cut.details, true, 'its unprotected details went before the protected reports');
+  assert.equal(res.presentation.sessions.some((s) => s.sessionId === 'c-alive'), false, 'the alive card is not in the cut accounting');
+});
+
+test('cap priority: an alive card whose tab is 끝남 is protected', (t) => {
+  const alive = (pid) => pid === 777;
+  const sessions = [
+    capSession('done-alive', { at: NOW - MIN, status: 'done', meta: { hostPid: 777, auto: { live: { workers: [{ id: 'st_l', name: 'l'.repeat(20000), state: 'running' }] } } } }),
+    capSession('dead', { at: NOW - 2 * MIN, status: 'done', meta: { auto: { work: { name: 'keep' }, live: { workers: [{ id: 'st_d', name: 'd'.repeat(20000), state: 'running' }] } } } }),
+  ];
+  const snap = capSnap(sessions);
+  capPad(snap, MAX_VM_BYTES + 10000, { isAlive: alive });
+  const { res, vm, full } = capPublish(t, snap, { isAlive: alive });
+  assert.equal(res.ok, true, JSON.stringify(res));
+  const kept = capRow(vm, 'done-alive');
+  assert.equal(kept.tab, '끝남');
+  assert.equal(kept.alive, true, 'alive survives even though its tab is 끝남');
+  assert.deepEqual(kept.live, capRow(full, 'done-alive').live, 'its live details are untouched');
+  assert.deepEqual(kept, capRow(full, 'done-alive'), 'the alive card is byte-identical');
+  const cut = capRow(vm, 'dead');
+  assert.equal(cut.live, undefined);
+  assert.ok(cut.chips.includes(OMITTED_CHIP));
+});
+
+test('cap priority: inside a stage the order is today\'s (finished first, then oldest), then id', (t) => {
+  const sessions = () => [
+    capSession('z-done', { at: NOW - 10 * MIN, status: 'done', meta: { auto: { work: { name: 'keep' }, live: { workers: [{ id: 'st_z', name: 'z'.repeat(20000), state: 'running' }] } } } }),
+    capSession('a-done', { at: NOW - 10 * MIN, status: 'done', meta: { auto: { work: { name: 'keep' }, live: { workers: [{ id: 'st_a', name: 'a'.repeat(20000), state: 'running' }] } } } }),
+    capSession('m-live', { at: NOW - 20 * MIN, status: 'in_progress', meta: { auto: { work: { name: 'keep' }, live: { workers: [{ id: 'st_m', name: 'm'.repeat(20000), state: 'running' }] } } } }),
+  ];
+  const one = capSnap(sessions());
+  capPad(one, MAX_VM_BYTES + 10000);
+  const first = capPublish(t, one);
+  assert.equal(first.res.ok, true, JSON.stringify(first.res));
+  assert.equal(capRow(first.vm, 'a-done').live, undefined, 'the id tie-break drops a-done first');
+  assert.ok(capRow(first.vm, 'z-done').live, 'z-done waits');
+  assert.ok(capRow(first.vm, 'm-live').live, 'an unfinished older card waits for a finished one');
+  const two = capSnap(sessions());
+  capPad(two, MAX_VM_BYTES + 25000);
+  const second = capPublish(t, two);
+  assert.equal(second.res.ok, true, JSON.stringify(second.res));
+  assert.equal(capRow(second.vm, 'a-done').live, undefined);
+  assert.equal(capRow(second.vm, 'z-done').live, undefined, 'both finished cards go before the older unfinished one');
+  assert.ok(capRow(second.vm, 'm-live').live, 'the unfinished card still waits');
+});
+
+test('cap priority: an alive card\'s alive is deleted only by stage P2\'s pass 7', (t) => {
+  const alive = (pid) => pid === 777;
+  const warm = capSnap([capSession('live-a', { at: NOW - MIN, status: 'done', meta: { hostPid: 777, auto: { live: { workers: [{ id: 'st_l', name: 'l'.repeat(20000), state: 'running' }] } } } })]);
+  capPad(warm, MAX_VM_BYTES + 10000, { isAlive: alive });
+  const before = capPublish(t, warm, { isAlive: alive });
+  assert.equal(before.res.ok, true, JSON.stringify(before.res));
+  assert.equal(capRow(before.vm, 'live-a').alive, true, 'pass 2 trimming does not touch alive');
+  assert.equal(capRow(before.vm, 'live-a').live, undefined);
+  const cold = capSnap([capSession('live-a', { at: NOW - MIN, status: 'done', meta: { hostPid: 777 }, brief: { headline: 'h'.repeat(700000) } })]);
+  const after = capPublish(t, cold, { isAlive: alive });
+  assert.equal(after.res.ok, true, JSON.stringify(after.res));
+  const row = capRow(after.vm, 'live-a');
+  assert.equal('alive' in row, false, 'only the exhausted stage-P2 pass 7 removes alive');
+  assert.equal('briefSeq' in row, false, 'pass 7 removes the sequence in the same step');
+  assert.equal(after.res.presentation.overCap, true, 'the irreducible headline really exceeds the cap');
+  assert.equal(after.res.presentation.sessions.find((s) => s.sessionId === 'live-a').cut.details, true);
+});
+
+test('cap priority: protection survives report deletion and the final-seq reentry', (t) => {
+  const keepReport = { id: 'keep-r', title: 'keep', summary: 'k'.repeat(1000), at: NOW - 2 * MIN, images: [], blocks: [] };
+  const sessions = [
+    capSession('keep', { at: NOW - 30 * MIN, status: 'done', meta: CAP_KEEP, reports: [keepReport] }),
+    capSession('cut', { at: NOW - 20 * MIN, status: 'done', meta: { auto: { work: { name: 'keep' }, live: { workers: [{ id: 'st_cut', name: 'c'.repeat(50000), state: 'running' }] } } } }),
+  ];
+  const snap = capSnap(sessions, [], 999);
+  const store = fresh(t);
+  capPad(snap, MAX_VM_BYTES, { isAlive: () => false, stateDir: store.root });
+  const full = buildViewModel(structuredClone(snap), NOW, { isAlive: () => false, stateDir: store.root, full: true });
+  store.readSnapshot = () => structuredClone(snap);
+  store.replace('published.json', { seq: 999 });
+  const res = renderPage(store, NOW, { isAlive: () => false });
+  assert.equal(res.ok, true, JSON.stringify(res));
+  const text = store.readText('data.js');
+  const vm = JSON.parse(text.slice(text.lastIndexOf('window.__briefData(') + 'window.__briefData('.length, text.lastIndexOf(');')));
+  assert.equal(vm.seq, 1000, 'the final seq is one byte wider');
+  assert.ok(Buffer.byteLength(text) <= MAX_VM_BYTES, `final data.js ${Buffer.byteLength(text)} B`);
+  assert.deepEqual(capRow(vm, 'keep').reports, capRow(full, 'keep').reports, 'the protected report survives report deletion');
+  assert.equal(capRow(vm, 'cut').live, undefined, 'the final-seq overflow is paid by unprotected bytes');
+  assert.equal(res.presentation.seq, 1000);
+  assert.equal(res.presentation.sessions.find((s) => s.sessionId === 'keep'), undefined, 'the protected report is not accounted as cut');
+});
+
+test('fold stage B: over the cap, closed conversations without recent reports fold oldest first, then those with recent reports, before any trim', (t) => {
+  const g1 = (id, at) => capSession(id, { at, status: 'done', brief: { flow: [{ label: 'f'.repeat(8000), state: 'done' }] } });
+  const g2 = (id, at) => capSession(id, { at, status: 'done', reports: [{ id: `${id}-r`, title: 'r', summary: '<'.repeat(40000), at: NOW - 2 * MIN, images: [], blocks: [] }] });
+  const sessions = () => [g1('g1-a', NOW - 30 * MIN), g1('g1-b', NOW - 20 * MIN), g1('g1-c', NOW - 10 * MIN), g2('g2-a', NOW - 25 * MIN), g2('g2-b', NOW - 15 * MIN), g2('g2-c', NOW - 5 * MIN)];
+  const phase1 = capSnap(sessions());
+  capPad(phase1, MAX_VM_BYTES + 12000);
+  const r1 = capPublish(t, phase1);
+  assert.equal(r1.res.ok, true, JSON.stringify(r1.res));
+  assert.deepEqual(r1.vm.sessions.filter((s) => s.folded).map((s) => s.id).sort(), ['g1-a', 'g1-b'], 'the two oldest report-less cards fold first');
+  assert.equal(r1.vm.sessions.filter((s) => s.id.startsWith('g2') && s.folded).length, 0, 'no recent-report card folds while report-less ones can');
+  assert.ok(r1.vm.sessions.find((s) => s.id === 'g1-b').folded, 'the exact-byte stop folded the second card');
+  assert.equal(r1.vm.sessions.find((s) => s.id === 'g1-c').folded, undefined, 'the newest report-less card was not needed');
+  assert.ok(r1.res.presentation.sessions.every((s) => s.folded && s.cut.reports === 0 && s.cut.blocks === 0 && s.cut.details === false), 'stage B ran before any trim');
+  const phase2 = capSnap(sessions());
+  capPad(phase2, MAX_VM_BYTES + 29000);
+  const r2 = capPublish(t, phase2);
+  assert.equal(r2.res.ok, true, JSON.stringify(r2.res));
+  assert.deepEqual(r2.vm.sessions.filter((s) => s.folded).map((s) => s.id).sort(), ['g1-a', 'g1-b', 'g1-c', 'g2-a'], 'all report-less cards fold before the oldest recent-report card');
+  assert.equal(r2.vm.sessions.find((s) => s.id === 'g2-b').folded, undefined, 'newer recent-report cards wait');
+  assert.ok(r2.res.presentation.sessions.every((s) => s.folded && s.cut.reports === 0 && s.cut.blocks === 0 && s.cut.details === false), 'still no trim');
+  assert.match(r2.vm.foldedKey, /^[0-9a-f]{20}$/);
+});
+
+test('fold stage B: nothing folds in stage B when the model fits after stage A', (t) => {
+  const sessions = [
+    capSession('idle-big', { at: NOW - 3 * DAY, status: 'done', brief: { flow: [{ label: 'i'.repeat(700000), state: 'done' }] } }),
+    capSession('recent', { at: NOW - MIN, status: 'done', brief: { flow: [{ label: 'r'.repeat(10000), state: 'done' }] } }),
+  ];
+  const snap = capSnap(sessions);
+  const { res, vm } = capPublish(t, snap);
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.ok(capRow(vm, 'idle-big').folded, 'stage A folded the idle card');
+  assert.equal(capRow(vm, 'recent').folded, undefined, 'stage B did not run on a fitting model');
+  assert.deepEqual(res.presentation.sessions.map((s) => s.sessionId), ['idle-big']);
+  assert.equal(res.presentation.overCap, false);
+});
+
+test('cap accounting: per-session cut counts, folded counts and overCap; no pass makes a card bigger', (t) => {
+  const compareRows = (full, vm) => {
+    const before = new Map(full.sessions.map((s) => [s.id, capRowBytes(s)]));
+    for (const s of vm.sessions) assert.ok(capRowBytes(s) <= before.get(s.id), `${s.id}: ${capRowBytes(s)} B grew from ${before.get(s.id)} B`);
+  };
+  // folded counts, sorted presentation, no cut
+  const foldedSnap = capSnap([capSession('folded', { at: NOW - 3 * DAY, status: 'done', reports: [{ id: 'old', title: 'o', summary: 'o'.repeat(500), at: NOW - 2 * DAY, images: [], blocks: [] }], brief: { flow: [{ label: 'f'.repeat(700000), state: 'done' }] } })]);
+  const foldedFull = buildViewModel(structuredClone(foldedSnap), NOW, { isAlive: () => false, full: true });
+  const foldedRun = capPublish(t, foldedSnap);
+  assert.equal(foldedRun.res.ok, true, JSON.stringify(foldedRun.res));
+  assert.deepEqual(foldedRun.res.presentation.sessions, [{ sessionId: 'folded', folded: { reports: 1, decisions: 0 }, cut: { reports: 0, blocks: 0, details: false } }]);
+  assert.equal(foldedRun.res.presentation.overCap, false);
+  compareRows(foldedFull, foldedRun.vm);
+  // per-session report counts, sorted by sessionId. Open decisions keep the cards on 나를 기다림 so pass 1b cannot eat
+  // the old reports' blocks before pass 2 removes the whole reports.
+  const reportSessions = ['z-reports', 'a-reports'].map((sid, i) => capSession(sid, { at: NOW - (30 - i * 10) * MIN, status: 'done', meta: CAP_KEEP, reports: [
+    { id: `${sid}-old1`, title: 'o1', summary: 'o1', at: NOW - 2 * DAY, images: [], blocks: Array.from({ length: 6 }, () => ({ kind: 'kv', title: 't', items: Array.from({ length: 30 }, (_, k) => ({ key: `k${k}`.padEnd(200, 'k'), value: 'v'.repeat(200) })) })) },
+    { id: `${sid}-old2`, title: 'o2', summary: 'o2', at: NOW - 3 * DAY, images: [], blocks: Array.from({ length: 6 }, () => ({ kind: 'kv', title: 't', items: Array.from({ length: 30 }, (_, k) => ({ key: `k${k}`.padEnd(200, 'k'), value: 'v'.repeat(200) })) })) },
+  ] }));
+  const reportSnap = capSnap(reportSessions, [capDecision(11, 'a-reports'), capDecision(12, 'z-reports')]);
+  capPad(reportSnap, MAX_VM_BYTES + 160000);
+  const reportRun = capPublish(t, reportSnap);
+  const reportFull = reportRun.full;
+  assert.equal(reportRun.res.ok, true, JSON.stringify(reportRun.res));
+  assert.deepEqual(reportRun.res.presentation.sessions.map((s) => s.sessionId), ['a-reports', 'z-reports'], 'presentation is sorted by sessionId');
+  for (const s of reportRun.res.presentation.sessions) assert.deepEqual([s.folded, s.cut.reports, s.cut.blocks, s.cut.details], [null, 2, 0, false]);
+  assert.equal(reportRun.res.presentation.overCap, false);
+  compareRows(reportFull, reportRun.vm);
+  // block counts
+  const blockReport = { id: 'blocks-r', title: 'b', summary: 's', at: NOW - 2 * DAY, images: [], blocks: [
+    { kind: 'kv', title: 't', items: [{ key: 'k'.repeat(100), value: 'v'.repeat(200) }] },
+    { kind: 'kv', title: 't', items: [{ key: 'k'.repeat(100), value: 'v'.repeat(200) }] },
+    { kind: 'kv', title: 't', items: [{ key: 'k'.repeat(100), value: 'v'.repeat(200) }] },
+  ] };
+  const blockSnap = capSnap([capSession('blocks', { at: NOW - MIN, status: 'done', meta: CAP_KEEP, reports: [blockReport] })]);
+  const blockFull = buildViewModel(structuredClone(blockSnap), NOW, { isAlive: () => false, full: true });
+  capPad(blockSnap, MAX_VM_BYTES + 100);
+  const blockRun = capPublish(t, blockSnap);
+  assert.equal(blockRun.res.ok, true, JSON.stringify(blockRun.res));
+  assert.deepEqual(blockRun.res.presentation.sessions[0].cut, { reports: 0, blocks: 3, details: false });
+  assert.equal(capRow(blockRun.vm, 'blocks').reports.length, 1, 'the report metadata survives a block-only trim');
+  assert.ok(capRow(blockRun.vm, 'blocks').chips.some((c) => /^표·그래프 생략 3개$/.test(c)));
+  compareRows(blockFull, blockRun.vm);
+  // details count
+  const detailSnap = capSnap([capSession('details', { at: NOW - MIN, status: 'done', meta: { auto: { work: { name: 'keep' }, live: { workers: [{ id: 'st_d', name: 'd'.repeat(20000), state: 'running' }] } } } })]);
+  const detailFull = buildViewModel(structuredClone(detailSnap), NOW, { isAlive: () => false, full: true });
+  capPad(detailSnap, MAX_VM_BYTES + 10000);
+  const detailRun = capPublish(t, detailSnap);
+  assert.equal(detailRun.res.ok, true, JSON.stringify(detailRun.res));
+  assert.deepEqual(detailRun.res.presentation.sessions[0].cut, { reports: 0, blocks: 0, details: true });
+  compareRows(detailFull, detailRun.vm);
+});
+
+test('cap exhausted: the irreducible model is published with overCap true and every open decision deep-equal to its source', (t) => {
+  const decisions = Array.from({ length: 1200 }, (_, i) => capDecision(i + 1, 'needy', {
+    question: `Q${String(i).padStart(4, '0')} `.padEnd(100, '?'),
+    reason: 'why '.repeat(20),
+    fields: Array.from({ length: 4 }, (_, k) => ({ id: `field_${k}`, label: 'l'.repeat(40), kind: 'choice', options: Array.from({ length: 6 }, () => 'o'.repeat(39)) })),
+  }));
+  const snap = capSnap([capSession('needy', { at: NOW - 3 * DAY, status: 'done' })], decisions);
+  const full = buildViewModel(structuredClone(snap), NOW, { isAlive: () => false, full: true });
+  assert.ok(capWire(full) > MAX_VM_BYTES, `open decisions alone exceed the cap (${capWire(full)} B)`);
+  const { res, text, vm } = capPublish(t, snap);
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.ok(Buffer.byteLength(text) > MAX_VM_BYTES, `data.js is ${Buffer.byteLength(text)} B, still published`);
+  assert.equal(res.presentation.overCap, true);
+  assert.equal(res.presentation.seq, vm.seq);
+  assert.deepEqual(capRow(vm, 'needy').decisions, capRow(full, 'needy').decisions, 'every open decision is deep-equal to its source');
+});
+
+test('cap accounting: blocks in a subsequently removed report are not counted as surviving block cuts', (t) => {
+  for (const at of [NOW - 2 * DAY, NOW - MIN]) {
+    const snap = capSnap([capSession('cut', { meta: CAP_KEEP, reports: [{
+      id: 'r', title: 'report', summary: '<'.repeat(1000), at, images: [],
+      blocks: [{ kind: 'kv', items: [{ key: 'k', value: 'v'.repeat(20000) }] }],
+    }] })]);
+    capPad(snap, MAX_VM_BYTES + 24000);
+    const { res, vm, text } = capPublish(t, snap);
+    assert.equal(res.ok, true);
+    assert.ok(Buffer.byteLength(text) <= MAX_VM_BYTES);
+    assert.deepEqual(capRow(vm, 'cut').reports, []);
+    assert.equal(res.presentation.sessions[0].cut.reports, 1);
+    assert.equal(res.presentation.sessions[0].cut.blocks, 0, 'removed reports own their removed blocks');
+  }
+});
+
+test('cap priority: recent source entries survive U and P1 removes only its report sources in tie order', () => {
+  const image = (id) => ({ sha: 'a'.repeat(64), ext: 'png', alt: id, path: `C:/shots/${id}/${'p'.repeat(5000)}.png` });
+  const report = (id, at) => ({ id, title: id, at, summary: 'r', images: [image(id)], blocks: [] });
+  const snap = capSnap([
+    capSession('a', { meta: CAP_KEEP, reports: [report('z', NOW - MIN), report('a', NOW - MIN), report('old', NOW - 2 * DAY)] }),
+    capSession('b', { meta: CAP_KEEP, reports: [report('b', NOW - MIN)] }),
+  ]);
+  const full = buildViewModel(snap, NOW, { isAlive: () => false, full: true });
+  const input = structuredClone(full);
+  input.readErrors = ['p'.repeat(MAX_VM_BYTES + 1 - capWire(input) - 2)];
+  const u = projectBoardModel(input, NOW, { fold: false });
+  for (const id of ['a', 'b']) {
+    const source = capRow(full, id);
+    const row = capRow(u, id);
+    for (const r of source.reports.filter((r) => r.at >= NOW - DAY)) {
+      assert.deepEqual(row.reports.find((x) => x.id === r.id), r);
+      for (const key of [`rep/${r.id}`, `rep/${r.id}/img/0`]) assert.deepEqual(row.blockSources[key], source.blockSources[key]);
+    }
+  }
+  // Exhaust U exactly, then demand one more byte: P1 must choose row a / report a despite source array order z,a.
+  const exhausted = structuredClone(full);
+  for (const row of exhausted.sessions) {
+    row.reports = row.reports.filter((r) => r.at >= NOW - DAY);
+    row.blockSources = Object.fromEntries(Object.entries(row.blockSources).filter(([key]) =>
+      row.reports.some((r) => key === `rep/${r.id}` || key.startsWith(`rep/${r.id}/`))));
+    for (const key of ['briefPath', 'sessionFile', 'todo', 'attachments', 'alive', 'briefSeq']) delete row[key];
+    if (row.id === 'a') row.chips.push(OMITTED_CHIP);
+  }
+  input.readErrors = ['p'.repeat(MAX_VM_BYTES + 1 - capWire(exhausted) - 2)];
+  const p1 = projectBoardModel(input, NOW, { fold: false });
+  assert.ok(capWire(p1) <= MAX_VM_BYTES);
+  assert.deepEqual(capRow(p1, 'a').reports.map((r) => r.id), ['z']);
+  assert.deepEqual(capRow(p1, 'b').reports, capRow(full, 'b').reports);
+  assert.deepEqual(Object.keys(capRow(p1, 'a').blockSources).sort(), ['rep/z', 'rep/z/img/0']);
+  assert.deepEqual(Object.keys(capRow(p1, 'b').blockSources).sort(), ['rep/b', 'rep/b/img/0']);
+});
+
+test('cap priority: internal cap state does not alter enumerable or serialized model contracts', () => {
+  const snap = capSnap([capSession('alive', { meta: { hostPid: 777 }, reports: [
+    { id: 'r', title: 'r', summary: 's', at: NOW, images: [], blocks: [] },
+  ] })]);
+  const full = buildViewModel(snap, NOW, { isAlive: () => true, full: true });
+  const projected = projectBoardModel(full, NOW);
+  assert.deepEqual(projected, full);
+  assert.deepEqual(projected, structuredClone(projected));
+  assert.deepEqual(JSON.parse(JSON.stringify(projected)), full);
+});
+
+test('fold stage B: a final sequence digit overflow folds before any trim', (t) => {
+  const store = fresh(t);
+  const snap = capSnap([capSession('recent', { brief: { flow: [{ label: 'f'.repeat(8000), state: 'done' }] } })], [], 999);
+  capPad(snap, MAX_VM_BYTES, { isAlive: () => false, stateDir: store.root });
+  store.readSnapshot = () => structuredClone(snap);
+  store.replace('published.json', { seq: 999 });
+  const result = renderPage(store, NOW, { isAlive: () => false });
+  const data = readData(store.root);
+  assert.equal(result.ok, true);
+  assert.equal(data.vm.seq, 1000);
+  assert.ok(data.dataBytes <= MAX_VM_BYTES);
+  assert.ok(data.vm.sessions[0].folded, 'final-sequence growth must still get stage B before cap trims');
+  assert.deepEqual(result.presentation.sessions, [{
+    sessionId: 'recent', folded: { reports: 0, decisions: 0 }, cut: { reports: 0, blocks: 0, details: false },
+  }]);
 });
