@@ -545,15 +545,15 @@
       (kids ? '<button type="button" class="sh-tg" data-sh="expand" data-sid="' + esc(id) + '" aria-expanded="' + open + '" aria-label="' +
         (open ? '접기' : '펼치기') + '">' + ic(open ? 'chevron-down' : 'chevron-right', 'ic-xs') + '</button>' : '<span class="sh-tg" aria-hidden="true"></span>') +
       '<button type="button" class="sh-go" data-sh="open" data-sid="' + esc(id) + '">' + icon(s, c) +
-      '<span class="sh-t" title="' + esc(fullOf(s)) + '">' + esc(nameOf(s)) + (sub || obj(s.folded) ? '<span class="sh-sub">' + foldMark(s) + (sub ? esc(sub) : '') + '</span>' : '') + '</span>' +
-      rowBadge(s, st) + '</button>' + favBtn(id, st) + '</div>';
+      '<span class="sh-t" title="' + esc(fullOf(s)) + '">' + esc(nameOf(s)) + (sub ? '<span class="sh-sub">' + esc(sub) + '</span>' : '') + '</span>' +
+      foldMark(s) + rowBadge(s, st) + '</button>' + favBtn(id, st) + '</div>';
     if (open) html += '<div class="sh-kids" role="group" aria-label="' + esc(nameOf(s)) + ' 펼침">' + kidRows(s, c) + '</div>';
     return html;
   }
   function kid(sid, sub, icon, text, extra, folded) {
     return '<div class="sh-row sh-kid' + (extra || '') + '"><span class="sh-tg" aria-hidden="true"></span>' +
       '<button type="button" class="sh-go" data-sh="open" data-sid="' + esc(sid) + '"' + (sub ? ' data-sub="' + sub + '"' : '') + '>' +
-      '<span class="sh-ki" aria-hidden="true">' + ic(icon, 'ic-sm') + '</span><span class="sh-t" title="' + esc(text) + '">' + (folded ? '<span class="sh-fold">접힘</span>' : '') + esc(text) + '</span></button></div>';
+      '<span class="sh-ki" aria-hidden="true">' + ic(icon, 'ic-sm') + '</span><span class="sh-t" title="' + esc(text) + '">' + esc(text) + '</span>' + (folded ? '<span class="sh-fold">접힘</span>' : '') + '</button></div>';
   }
   function kidRows(s, c) {
     var html = '';

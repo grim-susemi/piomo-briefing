@@ -75,7 +75,7 @@ const REVIEWED_ROWS = [
   ["page.js", "setAttribute", "ta.setAttribute('readonly', '')", "constant attribute value"],
   ["page.js", "setAttribute", "use.setAttribute('href', '#i-copy')", "constant sprite id"],
   ["page.js", "setAttribute", "use.setAttribute('href', ok ? '#i-check' : '#i-x')", "constant sprite id"],
-  ["page.js", "src", "sc.src ='folded.js?v=' + encodeURIComponent(key)", "own folded script url; the renderer's foldedKey is a 20-hex hash"],
+  ["page.js", "src", "sc.src ='folded.js?v=' + encodeURIComponent(key) + (reload ? '&r=' + reload : '')", "own folded script url; key is the renderer's 20-hex folded key and reload is our numeric retry counter"],
   ["page.js", "src", "sc.src =DATA_URL + '?v=' + (++state.n)", "own data script url (BRIEF_DATA_URL or data.js)"],
   ["plan-view.js", "html-attr-string", "<a class=\"plan-link\" href=\"#", "href/data-goto go through e() = escaped plan target"],
   ["shell.js", "html-attr-string", "\" style=\"--sw:", "width() is a clamped number"],

@@ -600,17 +600,34 @@
 
   // ---- page --------------------------------------------------------------------------------------------------------------
   // A folded row without its cached full card: the count line and the one state that matters (loading, retry, old server).
+  // A folded record keeps a short, known cause next to the panel. Raw errors, stacks and response bodies never reach it.
+  function foldCause(fold) {
+    var reason = str(fold.reason);
+    if (reason === 'http') { var code = whole(fold.httpStatus); return code !== null ? '서버 응답 오류 (' + code + ')' : '서버 응답 오류'; }
+    if (reason === 'payload') return '서버 응답 형식 오류';
+    if (reason === 'network') return '서버 연결 오류';
+    if (reason === 'file') return '접힌 기록 파일 오류';
+    if (reason === 'missing') return '접힌 기록에 이 대화가 없어요';
+    if (reason === 'unready') return '접힌 기록 파일이 아직 준비되지 않았어요';
+    return '전체 기록을 불러오지 못했어요';
+  }
   function foldPanel(s, fold) {
     var info = obj(s.folded) || {};
     var reports = whole(info.reports), decisions = whole(info.decisions);
     var rn = reports !== null && reports >= 0 ? reports : 0, dn = decisions !== null && decisions >= 0 ? decisions : 0;
     var status = str(fold.status) || 'loading';
+    var reason = str(fold.reason);
+    var cause = reason === 'file' ? 'file-load' : reason;
+    var code = whole(fold.httpStatus);
+    var attrs = ' data-fold="' + esc(status) + '"' +
+      (status === 'error' && cause ? ' data-cause="' + esc(cause) + '"' : '') +
+      (status === 'error' && reason === 'http' && code !== null ? ' data-code="' + esc(code) + '"' : '');
     var body;
     if (status === 'restart') body = '<p class="note cv-fold-note">' + esc(RESTART_HINT) + '</p>';
-    else if (status === 'error') body = '<p class="note cv-fold-note">전체 기록을 불러오지 못했어요.</p>' +
+    else if (status === 'error') body = '<p class="note cv-fold-note" data-reason="' + esc(reason) + '">' + esc(foldCause(fold)) + '</p>' +
       '<p><button type="button" class="more" data-act="fold-retry">전체 기록 다시 불러오기</button></p>';
     else body = '<p class="note cv-fold-note">전체 기록 불러오는 중…</p>';
-    return '<section class="cv-fold" data-fold="' + esc(status) + '"><p class="cv-fold-t">접어 둔 대화예요 · 보고서 ' +
+    return '<section class="cv-fold"' + attrs + '><p class="cv-fold-t">접어 둔 대화예요 · 보고서 ' +
       esc(rn) + '개 · 결정 ' + esc(dn) + '개</p>' + body + '</section>';
   }
 
@@ -634,7 +651,8 @@
     var name = SUBS.filter(function (t) { return t[0] === sub; })[0][1];
     return '<div class="cv-page" data-sid="' + esc(sid) + '" data-sub="' + sub + '">' + header(s, U, now) + subTabs(s, sub, counts, panelId) +
       '<div class="ann-tray" data-ann-tray="' + esc(sid) + '"></div>' +
-      '<section class="cv-panel" id="' + panelId + '" role="tabpanel" data-sub="' + sub + '" aria-label="' + name + '">' + body + '</section></div>';
+      '<section class="cv-panel" id="' + panelId + '" role="tabpanel" data-sub="' + sub + '" aria-label="' + name + '"' +
+      (obj(s.folded) ? ' tabindex="-1" data-fold-focus' : '') + '>' + body + '</section></div>';
   }
 
   g.BriefConvo = { render: render, SUBS: SUBS };

@@ -657,6 +657,79 @@ test('fold expand: a completed stale file payload clears its flight and exposes 
   assert.deepEqual(e.errors, []);
 });
 
+test('fold expand: known HTTP, payload and network causes stay finite and retry recovers', async () => {
+  const e = makeController();
+  e.page.receive(model(1, foldedRow(), { gen: 9 }));
+  e.page.open('f1', 'rep');
+  const main = e.byId.main;
+  const cause = () => {
+    const fold = main.querySelector('.cv-fold');
+    return fold ? fold.getAttribute('data-cause') : null;
+  };
+  const code = () => {
+    const fold = main.querySelector('.cv-fold');
+    return fold ? fold.getAttribute('data-code') : null;
+  };
+  assert.equal(cause(), null, 'loading has no error cause');
+  sendConvo(convoCalls(e)[0], 500, {});
+  await flushTwice();
+  assert.equal(cause(), 'http');
+  assert.equal(code(), '500');
+  assert.ok(main.querySelector('.cv-fold-note').textContent.length > 0, 'visible explanation');
+  click(e, '[data-act="fold-retry"]');
+  convoCalls(e)[1].resolve({ status: 200, json: async () => { throw new Error('bad json'); } });
+  await flushTwice();
+  assert.equal(cause(), 'payload');
+  click(e, '[data-act="fold-retry"]');
+  sendConvo(convoCalls(e)[2], 200, { schema: 1, gen: 9, key: 'wrong-key', session: fullCard() });
+  await flushTwice();
+  assert.equal(cause(), 'payload');
+  click(e, '[data-act="fold-retry"]');
+  convoCalls(e)[3].reject(new Error('network down'));
+  await flushTwice();
+  assert.equal(cause(), 'network');
+  assert.ok(e.errors.some((x) => /convo load/.test(String((x && x.message) || x))), 'network rejection is logged, not swallowed');
+  click(e, '[data-act="fold-retry"]');
+  sendConvo(convoCalls(e)[4], 200, { schema: 1, gen: 9, key: FOLD_KEY, session: fullCard() });
+  await flushTwice();
+  assert.equal(main.querySelector('.cv-fold'), null);
+  assert.equal(main.querySelectorAll('.rep').length, 3);
+});
+
+test('fold expand: file load, payload and missing causes stay finite and retry loads the restored script', async () => {
+  const { e, counter } = withFoldCounter({ protocol: 'file:', token: 'ignored' });
+  const row = foldedRow();
+  e.page.receive(model(1, row, { gen: 9, foldedKey: 'agg-1' }));
+  e.page.open('f1', 'rep');
+  const main = e.byId.main;
+  const cause = () => {
+    const fold = main.querySelector('.cv-fold');
+    return fold ? fold.getAttribute('data-cause') : null;
+  };
+  const first = foldedScriptNodes(e)[0];
+  e.fire(first, 'error');
+  assert.equal(cause(), 'file-load');
+  assert.ok(main.querySelector('[data-act="fold-retry"]'), 'file-load retry');
+  click(e, '[data-act="fold-retry"]');
+  assert.equal(counter.inserted, 2, 'retry requests a fresh script');
+  e.ctx.__briefFolded({ schema: 2, gen: 9, key: 'agg-1', sessions: { f1: fullCard() } });
+  e.fire(foldedScriptNodes(e)[0], 'load');
+  assert.equal(cause(), 'missing');
+  click(e, '[data-act="fold-retry"]');
+  assert.equal(counter.inserted, 3);
+  e.ctx.__briefFolded({ schema: 1, gen: 9, key: 'agg-1', sessions: { f1: fullCard() } });
+  e.fire(foldedScriptNodes(e)[0], 'load');
+  assert.equal(main.querySelector('.cv-fold'), null);
+  assert.equal(main.querySelectorAll('.rep').length, 3);
+
+  const missing = makeController({ protocol: 'file:' });
+  missing.page.receive(model(1, foldedRow(), { gen: 9 }));
+  missing.page.open('f1', 'rep');
+  const missingFold = missing.byId.main.querySelector('.cv-fold');
+  assert.equal(missingFold && missingFold.getAttribute('data-cause'), 'unready');
+  assert.ok(missing.byId.main.querySelector('[data-act="fold-retry"]'), 'file-missing retry');
+});
+
 test('fold expand: an unfolded frame followed by the same folded key reloads its pruned history', () => {
   const { e, counter } = withFoldCounter({ protocol: 'file:', token: 'ignored' });
   const folded = foldedRow();
@@ -709,6 +782,125 @@ test('fold expand: a 404 shows the restart hint', async () => {
   assert.deepEqual(e.errors, []);
 });
 
+test('fold expand: server causes are named next to the panel and retry recovers', async () => {
+  const cases = [
+    {
+      name: 'HTTP 500',
+      cause: /서버 응답 오류 \(500\)/,
+      stateCause: 'http',
+      stateCode: '500',
+      send: (e) => sendConvo(convoCalls(e)[0], 500, {}),
+    },
+    {
+      name: 'bad JSON',
+      cause: /서버 응답 형식 오류/,
+      stateCause: 'payload',
+      send: (e) => convoCalls(e)[0].resolve({ status: 200, json: async () => { throw new Error('bad json'); } }),
+    },
+    {
+      name: 'contract mismatch',
+      cause: /서버 응답 형식 오류/,
+      stateCause: 'payload',
+      send: (e) => sendConvo(convoCalls(e)[0], 200, { schema: 2, gen: 9, key: FOLD_KEY, session: fullCard() }),
+    },
+    {
+      name: 'network reject',
+      cause: /서버 연결 오류/,
+      stateCause: 'network',
+      send: (e) => convoCalls(e)[0].reject(new Error('ECONNREFUSED secret stack at 127.0.0.1')),
+      noLeak: true,
+    },
+  ];
+  for (const item of cases) {
+    const e = makeController();
+    e.page.receive(model(1, foldedRow(), { gen: 9 })); e.page.open('f1', 'rep');
+    item.send(e);
+    await flushTwice();
+    const panel = e.byId.main.querySelector('.cv-fold');
+    assert.ok(panel, item.name + ': error panel');
+    assert.equal(panel.getAttribute('data-fold'), 'error', item.name + ': panel state');
+    assert.equal(panel.getAttribute('data-cause'), item.stateCause, item.name + ': finite cause');
+    assert.equal(panel.getAttribute('data-code'), item.stateCode || null, item.name + ': HTTP code only for HTTP');
+    assert.match(e.byId.main.textContent, item.cause, item.name + ': known cause');
+    assert.match(e.byId.main.textContent, /전체 기록 다시 불러오기/, item.name + ': retry');
+    if (item.noLeak) assert.doesNotMatch(e.byId.main.textContent, /ECONNREFUSED|secret|127\.0\.0\.1|stack/i, item.name + ': no raw error leak');
+    const before = convoCalls(e).length;
+    click(e, '[data-act="fold-retry"]');
+    assert.equal(convoCalls(e).length, before + 1, item.name + ': retry request');
+    sendConvo(convoCalls(e)[convoCalls(e).length - 1], 200, { schema: 1, gen: 9, key: FOLD_KEY, session: fullCard() });
+    await flushTwice();
+    assert.equal(e.byId.main.querySelectorAll('.rep').length, 3, item.name + ': recovered reports');
+    assert.equal(e.byId.main.querySelector('.cv-fold'), null, item.name + ': panel gone');
+  }
+});
+
+test('fold expand: file causes are named and retry recovers', () => {
+  const { e, counter } = withFoldCounter({ protocol: 'file:', token: 'ignored' });
+  e.page.receive(model(1, foldedRow(), { gen: 9, foldedKey: 'agg-1' }));
+  e.page.open('f1', 'rep');
+  const first = foldedScriptNodes(e)[0];
+  e.fire(first, 'error');
+  assert.equal(e.byId.main.querySelector('.cv-fold').getAttribute('data-fold'), 'error');
+  assert.equal(e.byId.main.querySelector('.cv-fold').getAttribute('data-cause'), 'file-load');
+  assert.match(e.byId.main.textContent, /접힌 기록 파일 오류/);
+  assert.match(e.byId.main.textContent, /전체 기록 다시 불러오기/);
+  click(e, '[data-act="fold-retry"]');
+  assert.equal(counter.inserted, 2, 'retry re-inserts the file');
+  const second = foldedScriptNodes(e)[0];
+  e.ctx.__briefFolded({ schema: 1, gen: 9, key: 'agg-1', sessions: { f1: fullCard() } });
+  e.fire(second, 'load');
+  assert.equal(e.byId.main.querySelectorAll('.rep').length, 3, 'file retry recovers the full record');
+
+  const missing = withFoldCounter({ protocol: 'file:', token: 'ignored' });
+  missing.e.page.receive(model(1, foldedRow(), { gen: 9, foldedKey: 'agg-1' }));
+  missing.e.page.open('f1', 'rep');
+  missing.e.fire(foldedScriptNodes(missing.e)[0], 'load');
+  assert.equal(missing.e.byId.main.querySelector('.cv-fold').getAttribute('data-cause'), 'missing');
+  assert.match(missing.e.byId.main.textContent, /접힌 기록에 이 대화가 없어요/);
+
+  const unready = withFoldCounter({ protocol: 'file:', token: 'ignored' });
+  unready.e.page.receive(model(1, foldedRow(), { gen: 9 }));
+  unready.e.page.open('f1', 'rep');
+  assert.equal(unready.e.byId.main.querySelector('.cv-fold').getAttribute('data-cause'), 'unready');
+  assert.match(unready.e.byId.main.textContent, /아직 준비되지 않았어요/);
+  unready.e.page.receive(model(2, foldedRow(), { gen: 9, foldedKey: 'agg-1' }));
+  unready.e.advance(600);
+  click(unready.e, '[data-act="fold-retry"]');
+  assert.equal(unready.counter.inserted, 1, 'a retry starts once the file key exists');
+  unready.e.ctx.__briefFolded({ schema: 1, gen: 9, key: 'agg-1', sessions: { f1: fullCard() } });
+  unready.e.fire(foldedScriptNodes(unready.e)[0], 'load');
+  assert.equal(unready.e.byId.main.querySelectorAll('.rep').length, 3, 'unready retry recovers');
+});
+
+test('fold expand: file retry uses a fresh safe numeric cache-buster', () => {
+  const { e, counter } = withFoldCounter({ protocol: 'file:', token: 'ignored' });
+  e.page.receive(model(1, foldedRow(), { gen: 9, foldedKey: 'agg-1' }));
+  e.page.open('f1', 'rep');
+  assert.equal(foldedScripts(e)[0], 'folded.js?v=agg-1', 'the first load has no retry suffix');
+  e.fire(foldedScriptNodes(e)[0], 'error');
+  click(e, '[data-act="fold-retry"]');
+  assert.equal(counter.inserted, 2, 'one fresh script for the first retry');
+  const retry1 = foldedScripts(e)[0];
+  assert.equal(retry1, 'folded.js?v=agg-1&r=1', 'the retry cache-buster is numeric');
+  assert.match(retry1, /^folded\.js\?v=[A-Za-z0-9._~-]+&r=[1-9]\d*$/, 'the retry query is a safe key + positive integer');
+  e.fire(foldedScriptNodes(e)[0], 'error');
+  click(e, '[data-act="fold-retry"]');
+  assert.equal(counter.inserted, 3, 'a second retry is another fresh script');
+  assert.equal(foldedScripts(e)[0], 'folded.js?v=agg-1&r=2', 'the counter increments monotonically');
+  e.ctx.__briefFolded({ schema: 1, gen: 9, key: 'agg-1', sessions: { f1: fullCard() } });
+  e.fire(foldedScriptNodes(e)[0], 'load');
+  assert.equal(e.byId.main.querySelectorAll('.rep').length, 3, 'the retried script recovers the full record');
+  assert.deepEqual(e.errors, []);
+
+  const unsafe = withFoldCounter({ protocol: 'file:', token: 'ignored' });
+  unsafe.e.page.receive(model(1, foldedRow(), { gen: 9, foldedKey: 'agg 1&x' }));
+  unsafe.e.page.open('f1', 'rep');
+  assert.equal(foldedScripts(unsafe.e)[0], 'folded.js?v=agg%201%26x', 'the aggregate file key is URL-encoded, not concatenated raw');
+  unsafe.e.fire(foldedScriptNodes(unsafe.e)[0], 'error');
+  click(unsafe.e, '[data-act="fold-retry"]');
+  assert.equal(foldedScripts(unsafe.e)[0], 'folded.js?v=agg%201%26x&r=1', 'the numeric suffix cannot be injected by the key');
+});
+
 test('fold expand: decisions and notes come from the base row after hydration', async () => {
   const e = makeController();
   e.page.receive(model(1, foldedRow(), { gen: 9 })); e.page.open('f1', 'ov');
@@ -738,5 +930,66 @@ test('fold render: overview, convo view, sidebar, search and inbox render a mode
   const input = e.app.querySelector('[data-sh="search"]');
   input.value = 'Folded'; e.fire(input, 'input');
   click(e, '#rail [data-sh="view"][data-key="inbox"]');
+  assert.deepEqual(e.errors, []);
+});
+
+test('fold retry focus: loading and recovery keep a non-approval panel anchor', async () => {
+  const e = makeController();
+  e.page.receive(model(1, foldedRow(), { gen: 9 })); e.page.open('f1', 'rep');
+  sendConvo(convoCalls(e)[0], 500, {});
+  await flushTwice();
+  const retry = e.byId.main.querySelector('[data-act="fold-retry"]');
+  retry.focus();
+  click(e, '[data-act="fold-retry"]');
+  const loading = e.byId.main.querySelector('.cv-panel[data-fold-focus]');
+  assert.ok(loading, 'folded conversation has a persistent panel anchor');
+  assert.equal(e.document.activeElement, loading, 'retry hands focus to the loading panel');
+  assert.equal(loading.getAttribute('tabindex'), '-1', 'anchor does not enter the natural Tab order');
+  assert.equal(loading.querySelector('.cv-fold').getAttribute('data-fold'), 'loading');
+  sendConvo(convoCalls(e).at(-1), 200, { schema: 1, gen: 9, key: FOLD_KEY, session: fullCard() });
+  await flushTwice();
+  const recovered = e.byId.main.querySelector('.cv-panel[data-fold-focus]');
+  assert.equal(e.document.activeElement, recovered, 'recovery restores the same logical panel identity');
+  assert.equal(recovered.querySelectorAll('.rep').length, 3);
+  assert.equal(recovered.querySelector('.cv-fold'), null);
+  assert.deepEqual(e.errors, []);
+});
+
+test('fold retry focus: pending recovery does not take focus back after the user leaves', async () => {
+  const e = makeController();
+  e.page.receive({ ...model(1, foldedRow(), { gen: 9 }), sessions: [foldedRow(), session()] });
+  e.page.open('f1', 'rep');
+  sendConvo(convoCalls(e)[0], 500, {});
+  await flushTwice();
+  e.byId.main.querySelector('[data-act="fold-retry"]').focus();
+  click(e, '[data-act="fold-retry"]');
+  const outside = e.byId.rail.querySelector('button');
+  outside.focus();
+  sendConvo(convoCalls(e).at(-1), 200, { schema: 1, gen: 9, key: FOLD_KEY, session: fullCard() });
+  await flushTwice();
+  assert.equal(e.document.activeElement, outside, 'an explicit focus move remains authoritative');
+  e.page.open('s1', 'ov');
+  assert.equal(e.page.state.ui.active, 's1');
+  assert.equal(e.byId.main.querySelector('.cv-page').getAttribute('data-sid'), 's1');
+  assert.deepEqual(e.errors, []);
+});
+
+test('fold retry focus: a completed request cannot reopen the conversation the user left', async () => {
+  const e = makeController();
+  e.page.receive({ ...model(1, foldedRow(), { gen: 9 }), sessions: [foldedRow(), session()] });
+  e.page.open('f1', 'rep');
+  sendConvo(convoCalls(e)[0], 500, {});
+  await flushTwice();
+  e.byId.main.querySelector('[data-act="fold-retry"]').focus();
+  click(e, '[data-act="fold-retry"]');
+  e.page.open('s1', 'ov');
+  const outside = e.byId.rail.querySelector('button');
+  outside.focus();
+  const content = e.byId.main.innerHTML;
+  sendConvo(convoCalls(e).at(-1), 200, { schema: 1, gen: 9, key: FOLD_KEY, session: fullCard() });
+  await flushTwice();
+  assert.equal(e.page.state.ui.active, 's1');
+  assert.equal(e.byId.main.innerHTML, content);
+  assert.equal(e.document.activeElement, outside);
   assert.deepEqual(e.errors, []);
 });

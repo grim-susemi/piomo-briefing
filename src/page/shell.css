@@ -169,6 +169,7 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 /* the only ellipsis in the sidebar: one-line row titles, each with its full text in a title attribute */
 .sh-t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .sh-sub { margin-left: var(--sp-2); color: var(--tx3); font-size: var(--fs-sm); }
+.sh-fold { flex: none; color: var(--tx3); font-size: var(--fs-base); white-space: nowrap; }
 .sh-gone .sh-t { color: var(--tx3); font-style: italic; }
 .sh-fav { display: none; flex: none; padding: var(--sp-1); border: 0; border-radius: var(--r-xs); background: none; color: var(--tx3); line-height: 0; }
 .sh-fav:hover { color: var(--tx); }
@@ -178,7 +179,10 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 .sh-kids { padding-left: var(--sp-4); }
 .sh-kid .sh-go { min-height: var(--ctl-h); color: var(--tx2); font-size: var(--fs-sm); }
 .sh-ki { flex: none; display: grid; place-items: center; width: var(--sp-5); color: var(--tx3); }
-.sh-prev { opacity: .7; }
+/* the previous row is attenuated by hierarchy, not by ancestor opacity: the marker and title must stay full-strength
+ * so their actual pixels keep 4.5:1 on the previous-row surface in both themes */
+.sh-prev .sh-t { color: var(--tx); }
+.sh-prev .sh-fold { color: var(--tx); }
 /* the tab-number chip: the number in its desaturated hue on that hue's tint; a conversation outside a herdr tab gets the dot */
 .sh-ico {
   flex: none; display: grid; place-items: center; min-width: var(--sp-6); height: 18px; padding: 0 var(--sp-1); border-radius: var(--r-xs);
@@ -340,6 +344,14 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
     content: ""; position: sticky; right: calc(-1 * var(--cv-pad-x)); flex: 0 0 var(--sp-6); margin-left: calc(-1 * var(--sp-6));
     background: linear-gradient(to right, transparent, var(--bg)); pointer-events: none;
   }
+  /* phone: a visible fold label must not starve the conversation title; only folded-row metadata is compacted
+   * and every interactive target keeps its 44 px hit box */
+  .sh-row:has(> .sh-go > .sh-fold) { gap: var(--sp-2); }
+  .sh-row:has(> .sh-go > .sh-fold) > .sh-tg[aria-hidden="true"] { width: var(--sp-2); min-width: var(--sp-2); }
+  .sh-row:has(> .sh-go > .sh-fold) .sh-go { gap: var(--sp-1); padding: 0 var(--sp-1); }
+  .sh-row:has(> .sh-go > .sh-fold) .sh-ico { min-width: var(--sp-4); }
+  .sh-row:has(> .sh-go > .sh-fold) .sh-ki { width: var(--sp-4); }
+  .sh-row:has(> .sh-go > .sh-fold) .sh-fold { font-size: var(--fs-sm); }
 }
 /* reduced motion (visual-qa G4): no slide; shell.js sync() cross-fades the part that changed instead; colour fades stay */
 @media (prefers-reduced-motion: reduce) {

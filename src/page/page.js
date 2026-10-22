@@ -287,7 +287,8 @@
   function foldStatus(s) {
     if (!obj(s.folded) || cachedFull(s)) return null;
     var key = foldKeyOf(s), f = state.fold[s.id];
-    return { status: f && f.key === key ? f.status : 'loading' };
+    var current = f && f.key === key ? f : null;
+    return { status: current ? current.status : 'loading', reason: current ? current.reason : null, httpStatus: current ? current.httpStatus : null };
   }
   function applyFold(sid) {
     if (state.ui.active !== sid) return;
@@ -308,8 +309,8 @@
       return;
     }
     var foldedKey = state.model && typeof state.model.foldedKey === 'string' ? state.model.foldedKey : '';
-    if (!foldedKey) { state.fold[sid] = { status: 'error', key: key }; return; }
-    ensureFileFull(foldedKey, sid);
+    if (!foldedKey) { state.fold[sid] = { status: 'error', key: key, reason: 'unready' }; return; }
+    ensureFileFull(foldedKey, sid, retry);
   }
   function ensureServerFull(sid, key, cacheKey) {
     state.fold[sid] = { status: 'loading', key: key };
@@ -317,8 +318,8 @@
     var wantGen = generationOf(state.model && state.model.gen);
     g.fetch('/convo/' + encodeURIComponent(sid) + '.json', { cache: 'no-store' }).then(function (r) {
       if (r.status === 404) return { status: 404 };
-      if (r.status !== 200) return { status: 'bad' };
-      return r.json().then(function (body) { return { status: 200, body: body }; }, function () { return { status: 'bad' }; });
+      if (r.status !== 200) return { status: 'http', httpStatus: r.status };
+      return r.json().then(function (body) { return { status: 200, body: body }; }, function () { return { status: 'payload' }; });
     }).then(function (res) {
       delete state.fullFlight[cacheKey];
       var base = sessionById(sid);
@@ -327,7 +328,9 @@
       var body = res.body, gen = body ? generationOf(body.gen) : null;
       if (res.status !== 200 || !body || body.schema !== 1 || body.key !== key || !obj(body.session) || body.session.id !== sid ||
           (wantGen !== null && gen !== wantGen)) {
-        state.fold[sid] = { status: 'error', key: key };
+        state.fold[sid] = res.status === 'http'
+          ? { status: 'error', key: key, reason: 'http', httpStatus: res.httpStatus }
+          : { status: 'error', key: key, reason: 'payload' };
         applyFold(sid);
         return;
       }
@@ -339,11 +342,11 @@
       var base = sessionById(sid);
       if (!base || foldKeyOf(base) !== key) return;
       warn('convo load', e);
-      state.fold[sid] = { status: 'error', key: key };
+      state.fold[sid] = { status: 'error', key: key, reason: 'network' };
       applyFold(sid);
     });
   }
-  function ensureFileFull(key, sid) {
+  function ensureFileFull(key, sid, retry) {
     var model = state.model, flight = 'file|' + key;
     if (!model || model.foldedKey !== key) return;
     if (state.foldedFor === key) {
@@ -353,8 +356,9 @@
     }
     if (state.fullFlight[flight]) return;
     state.fullFlight[flight] = true;
+    var reload = retry ? (state.fileReload = (state.fileReload || 0) + 1) : 0;
     var sc = doc.createElement('script');
-    sc.src = 'folded.js?v=' + encodeURIComponent(key);
+    sc.src = 'folded.js?v=' + encodeURIComponent(key) + (reload ? '&r=' + reload : '');
     sc.addEventListener('load', function () {
       sc.remove();
       delete state.fullFlight[flight];
@@ -363,7 +367,7 @@
       for (var i = 0; i < list.length; i++) {
         var row = list[i], rowKey = foldKeyOf(row);
         if (!rowKey || cachedFull(row)) continue;
-        state.fold[row.id] = { status: 'error', key: rowKey }; // completed script supplied no usable card
+        state.fold[row.id] = { status: 'error', key: rowKey, reason: 'missing' }; // completed script supplied no usable card
         missing = true;
       }
       if (missing) { state.foldedFor = null; applyFold(state.ui.active); }
@@ -376,7 +380,7 @@
       var list = Array.isArray(state.model.sessions) ? state.model.sessions : [];
       for (var i = 0; i < list.length; i++) {
         var rowKey = foldKeyOf(list[i]);
-        if (rowKey) state.fold[list[i].id] = { status: 'error', key: rowKey };
+        if (rowKey) state.fold[list[i].id] = { status: 'error', key: rowKey, reason: 'file' };
       }
       applyFold(state.ui.active);
     });
@@ -415,10 +419,16 @@
   function foldRetry() {
     var base = sessionById(state.ui.active);
     if (!base) return;
+    var keepFocus = doc.activeElement && main.contains(doc.activeElement) &&
+      doc.activeElement.getAttribute('data-act') === 'fold-retry';
     delete state.fold[base.id];
     state.foldDeferred = false;
     ensureFull(base.id, true);
     render();
+    if (keepFocus) {
+      var panel = main.querySelector('.cv-panel[data-fold-focus]');
+      if (panel) panel.focus({ preventScroll: true });
+    }
   }
   function mainKey() { return state.ui.view === 'memento' ? 'memento' : state.ui.active ? state.ui.active + '/' + (state.ui.sub[state.ui.active] || 'ov') : 'overview'; }
   function saveScroll() {

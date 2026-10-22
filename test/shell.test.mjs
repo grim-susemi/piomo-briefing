@@ -969,3 +969,52 @@ test('fold parity: side, rail, tabs, search and inbox render identically with fo
   assert.equal((markedRecent.match(/<span class="sh-fold">접힘<\/span>/g) || []).length, 2, 'favourite and recent rows each carry the marker');
   assert.equal(normalize(markedRecent), plainRecent, 'empty grey subtext containers differ only by the marker');
 });
+
+test('fold marker placement: 접힘 is a shrink-0 sibling outside the ellipsized .sh-t for every row caller', () => {
+  const S = load().BriefShell;
+  const model = fixture();
+  const prev = model.sessions.find((s) => s.id === 'p185');
+  prev.folded = { reports: 2, decisions: 1, key: 'a'.repeat(20) };
+  const st = S.reduce(base(S), { type: 'expand', sid: 'a185' });
+  const archive = S.side(model, S.reduce(st, { type: 'view', key: 'archive' }));
+  const conv = S.side(model, st);
+  const recent = {
+    id: 'recent-fold', alive: false, status: 'done', statusKey: 'done', tab: '끝남', title: '최근 접힘', headline: '최근',
+    lastActivityAt: NOW - 2 * DAY, decisions: [], folded: { reports: 1, decisions: 0, key: 'b'.repeat(20) }, chips: ['접어 둠'],
+  };
+  const stRecent = S.reduce(undefined, { type: 'load', json: JSON.stringify({ view: 'conv', favs: ['recent-fold'] }), known: ['recent-fold'], now: NOW });
+  const openRecent = S.reduce(stRecent, { type: 'expand', sid: 'sec:recent' });
+  const recentHtml = S.side({ generatedAt: NOW, sessions: [recent] }, openRecent);
+  const marker = '<span class="sh-fold">접힘</span>';
+  const outside = (html, label) => {
+    assert.ok(html.includes(marker), label + ' carries the marker');
+    assert.match(html, /<\/span><span class="sh-fold">접힘<\/span>/, label + ' places the marker after the closed .sh-t');
+    const subs = [...html.matchAll(/<span class="sh-sub">([\s\S]*?)<\/span>/g)].map((m) => m[1]);
+    assert.ok(subs.every((s) => !s.includes('sh-fold')), label + ' keeps the marker out of .sh-sub');
+    return html;
+  };
+  outside(archive, '닫힌 창');
+  outside(conv, '이전 대화 kid');
+  outside(recentHtml, '즐겨찾기 and 최근 항목');
+  assert.equal((recentHtml.match(/<span class="sh-fold">접힘<\/span>/g) || []).length, 2, 'favourite and recent rows each carry the marker');
+  const row = /<div class="sh-row[^"]*" data-row="p185">([\s\S]*?)<\/div>/.exec(archive)?.[1] || '';
+  const at = row.indexOf(marker);
+  const before = row.slice(0, at);
+  assert.ok(at > 0 && before.lastIndexOf('<span class="sh-t"') >= 0 && before.lastIndexOf('</span>') > before.lastIndexOf('<span class="sh-t"'), 'the marker follows the closed .sh-t');
+  assert.match(archive, /<button type="button" class="sh-go" data-sh="open" data-sid="p185">/, 'row action hook is unchanged');
+  assert.match(archive, /class="sh-fav" data-sh="fav" data-sid="p185" aria-pressed="false"/, 'favourite action hook is unchanged');
+});
+
+test('fold row metadata: phone compaction preserves the title and previous-row contrast', () => {
+  const css = read('src/page/shell.css');
+  assert.match(css, /\.sh-fold \{[^}]*font-size: var\(--fs-base\)/, 'desktop marker text is 14px');
+  assert.match(css, /\.sh-prev \.sh-t \{[^}]*color: var\(--tx\)/, 'previous-row title meets contrast after ancestor opacity');
+  assert.match(css, /\.sh-prev \.sh-fold \{[^}]*color: var\(--tx\)/, 'previous-row marker meets contrast after ancestor opacity');
+  assert.ok(css.includes('.sh-row:has(> .sh-go > .sh-fold) { gap: var(--sp-2); }'), 'folded phone rows keep the minimum action gap');
+  assert.ok(css.includes('.sh-row:has(> .sh-go > .sh-fold) > .sh-tg[aria-hidden="true"] { width: var(--sp-2); min-width: var(--sp-2); }'), 'the non-interactive folded spacer gives width back to the title');
+  assert.ok(css.includes('.sh-row:has(> .sh-go > .sh-fold) .sh-go { gap: var(--sp-1); padding: 0 var(--sp-1); }'), 'the folded row keeps compact internal spacing');
+  assert.ok(css.includes('.sh-row:has(> .sh-go > .sh-fold) .sh-ico { min-width: var(--sp-4); }'), 'the folded icon column is compact');
+  assert.ok(css.includes('.sh-row:has(> .sh-go > .sh-fold) .sh-ki { width: var(--sp-4); }'), 'the previous-kid icon column is compact');
+  assert.ok(css.includes('.sh-row:has(> .sh-go > .sh-fold) .sh-fold { font-size: var(--fs-sm); }'), 'phone marker keeps the 15px secondary size');
+  assert.match(read('src/page/page.css'), /\.cv-fold-note \{[^}]*font-size: var\(--fs-base\)/, 'the fold instruction is 14px on desktop');
+});
