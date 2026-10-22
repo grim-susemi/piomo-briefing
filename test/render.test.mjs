@@ -1187,7 +1187,8 @@ test('fold publish: nothing folded leaves an existing folded.js untouched and un
   assert.equal(store.readText('folded.js'), first);
   assert.equal(calls.includes('folded.js'), false);
   assert.equal('foldedKey' in runDataJs(store.readText('data.js')), false);
-  assert.equal(store.readText('index.html').includes('folded.js'), false);
+  assert.doesNotMatch(store.readText('index.html'), /<script\b[^>]*\ssrc\s*=\s*(?:"[^"]*folded\.js(?:[?#][^"]*)?"|'[^']*folded\.js(?:[?#][^']*)?'|[^\s>]*folded\.js(?:[?#][^\s>]*)?(?=[\s>]))/i,
+    'no script element references folded.js');
 });
 
 test('fold publish: folded.js carries every folded card whole, including one larger than 614400 bytes', (t) => {

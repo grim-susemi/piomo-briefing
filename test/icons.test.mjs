@@ -142,12 +142,13 @@ test('no pictographic emoji left in the rail, the sidebar or the tab bar, in tex
   }
 });
 
-// TASK15's explicit scope exception: accepted S1 main 71979fa plus the byte-frozen approved TASK14 cards-view.js/css
-// and their single asset entries. The starting page uses main's page.js/shell.js, not the new wiring.
-// Measured with the same fixture, generation 7 and file mode by task-15/attempt-1/measure-budget.mjs (2026-10-22):
-// 444680 B; the 16384 B wiring-growth budget stays unchanged.
-const BASELINE_TREE = '71979fa627a5123d8561e85d43e1ad6ebf5b5ca2+approved-TASK14-assets';
-const BASELINE_PAGE_BYTES = 444680;
+// U5 baseline: accepted M1 base 06cde25, measured with the ordinary fixture, generation 7, file mode:
+// Buffer.byteLength(pageHtml(test/fixtures/view-model-board.json, 7, { mode: 'file' })).
+// Includes the M1 cards-view wiring/assets in page.js, shell.js, render.mjs and src/page/*; excludes only this
+// branch's folded-history additions. Re-measured from the extracted 06cde25 source (icons-baseline-measure.json):
+// 449015 B. The 16384 B whole-page growth budget is unchanged; the folded states add 11027 B at the page commit.
+const BASELINE_TREE = '06cde252a65e638fceb6fdbafb5ae6864a4f6316';
+const BASELINE_PAGE_BYTES = 449015;
 
 test('fixture page growth over the accepted tree stays within 16 KB (whole page; icon payload printed too)', (t) => {
   const notice = /<!--\nIcons: Lucide[\s\S]*?-->\n/.exec(PAGE)[0];

@@ -534,6 +534,7 @@
       ic('star', on ? 'ic-md ic-fill' : 'ic-md') + '</button>';
   }
 
+  function foldMark(s) { return obj(s.folded) ? '<span class="sh-fold">접힘</span>' : ''; }
   // o.flat: no kids toggle; o.sub: the grey text after the name ('' = none)
   function row(s, st, c, o) {
     var id = s.id;
@@ -544,15 +545,15 @@
       (kids ? '<button type="button" class="sh-tg" data-sh="expand" data-sid="' + esc(id) + '" aria-expanded="' + open + '" aria-label="' +
         (open ? '접기' : '펼치기') + '">' + ic(open ? 'chevron-down' : 'chevron-right', 'ic-xs') + '</button>' : '<span class="sh-tg" aria-hidden="true"></span>') +
       '<button type="button" class="sh-go" data-sh="open" data-sid="' + esc(id) + '">' + icon(s, c) +
-      '<span class="sh-t" title="' + esc(fullOf(s)) + '">' + esc(nameOf(s)) + (sub ? '<span class="sh-sub">' + esc(sub) + '</span>' : '') + '</span>' +
+      '<span class="sh-t" title="' + esc(fullOf(s)) + '">' + esc(nameOf(s)) + (sub || obj(s.folded) ? '<span class="sh-sub">' + foldMark(s) + (sub ? esc(sub) : '') + '</span>' : '') + '</span>' +
       rowBadge(s, st) + '</button>' + favBtn(id, st) + '</div>';
     if (open) html += '<div class="sh-kids" role="group" aria-label="' + esc(nameOf(s)) + ' 펼침">' + kidRows(s, c) + '</div>';
     return html;
   }
-  function kid(sid, sub, icon, text, extra) {
+  function kid(sid, sub, icon, text, extra, folded) {
     return '<div class="sh-row sh-kid' + (extra || '') + '"><span class="sh-tg" aria-hidden="true"></span>' +
       '<button type="button" class="sh-go" data-sh="open" data-sid="' + esc(sid) + '"' + (sub ? ' data-sub="' + sub + '"' : '') + '>' +
-      '<span class="sh-ki" aria-hidden="true">' + ic(icon, 'ic-sm') + '</span><span class="sh-t" title="' + esc(text) + '">' + esc(text) + '</span></button></div>';
+      '<span class="sh-ki" aria-hidden="true">' + ic(icon, 'ic-sm') + '</span><span class="sh-t" title="' + esc(text) + '">' + (folded ? '<span class="sh-fold">접힘</span>' : '') + esc(text) + '</span></button></div>';
   }
   function kidRows(s, c) {
     var html = '';
@@ -560,7 +561,7 @@
     var w = workers(s);
     if (w) html += kid(s.id, 'wk', 'users', '작업자 ' + w);
     html += kid(s.id, 'dec', 'bell', '결정 ' + openDecs(s).length + ' 대기 · ' + answeredDecs(s).length + ' 답함');
-    c.prevsOf(s).forEach(function (p) { html += kid(p.id, '', 'rotate-ccw-clock', '이전 대화 · ' + (str(p.title) || '(제목 없음)'), ' sh-prev'); });
+    c.prevsOf(s).forEach(function (p) { html += kid(p.id, '', 'rotate-ccw-clock', '이전 대화 · ' + (str(p.title) || '(제목 없음)'), ' sh-prev', !!obj(p.folded)); });
     return html;
   }
   // a remembered id the model does not have now: shown, not openable from here; its star still takes it off the favourites

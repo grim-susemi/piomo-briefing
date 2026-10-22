@@ -337,6 +337,35 @@ test('generation reload keeps annotation drafts and the existing request without
   reply(posts(next)[0], 200, { ok: true }); await flush();
 });
 
+test('regions: a newer generation requested while busy reloads on release even with no pending model', () => {
+  const e = makeController({ generation: 8 });
+  e.page.receive(model(1, session(), { gen: 8 }));
+  e.page.open('s1', 'ov');
+  e.selection.isCollapsed = false;
+  e.selection.toString = () => 'held selection';
+  e.selection.anchorNode = e.byId.main;
+  e.page.receive(model(1, session(), { gen: 9 }));
+  assert.equal(e.page.state.seq, 1, 'the model did not change');
+  assert.equal(e.reloads.length, 0, 'busy holds the generation reload');
+  e.selection.isCollapsed = true;
+  e.selection.toString = () => '';
+  e.document.listeners.selectionchange();
+  e.advance(100);
+  assert.equal(e.reloads.length, 1, 'release retries the generation reload');
+});
+
+test('fold expand: a model with nothing folded never loads or references folded history', () => {
+  const { e, counter } = withFoldCounter({ protocol: 'file:', token: 'ignored' });
+  const plain = session({ id: 'plain', alive: false, status: 'done', statusKey: 'done', tab: '끝남', headline: 'plain', lastActivityAt: 0 });
+  e.page.receive(model(1, plain, { gen: 9 }));
+  e.page.open('plain', 'rep');
+  e.advance(600); e.page.receive(model(2, plain, { gen: 9 }));
+  assert.equal(counter.inserted, 0, 'cumulative folded.js insertions are zero');
+  assert.equal(foldedScripts(e).length, 0, 'no folded.js script node remains');
+  assert.equal(e.page.state.full.size, 0, 'no full-card cache');
+  assert.equal(e.fetches.length, 0, 'no folded history request');
+});
+
 test('decision and annotation sends share the same one-at-a-time POST queue', async () => {
   const e = makeController();
   prepare(e, session({ decisions: [{ id: 1, question: 'Which?', options: { A: { text: 'yes' } } }] }));
@@ -487,5 +516,227 @@ test('C-ASK integration: askLive and builtin notes render for true, absent flags
   e.advance(600); e.page.receive(model(2, s));
   assert.doesNotMatch(e.byId.main.textContent, /터미널에도 같은 질문|하네스 기본 질문창/);
   assert.match(e.byId.main.textContent, /native/);
+  assert.deepEqual(e.errors, []);
+});
+
+const FOLD_KEY = 'a'.repeat(20);
+const foldedRow = (patch = {}) => ({
+  id: 'f1', title: 'Folded talk', alive: false, status: 'done', statusKey: 'done', tab: '끝남',
+  headline: 'old headline', lastActivityAt: 0, briefSeq: 2,
+  decisions: [{ id: 7, question: 'BASE QUESTION', options: { A: { text: 'yes' } }, answered: false, closed: false }],
+  notes: [{ key: 'base-note', at: 1, preview: 'BASE NOTE' }],
+  folded: { reports: 3, decisions: 1, key: FOLD_KEY },
+  ...patch,
+});
+const fullCard = (patch = {}) => ({
+  id: 'f1', title: 'Folded talk', alive: false, status: 'done', statusKey: 'done', tab: '끝남',
+  headline: 'full headline', lastActivityAt: 1, briefSeq: 2,
+  reports: [{ id: 'r1', title: 'Report one' }, { id: 'r2', title: 'Report two' }, { id: 'r3', title: 'Report three' }],
+  changes: [{ text: 'full change', truth: 'reported', applied: 'none' }], done: [],
+  notes: [{ key: 'server-note', at: 2, preview: 'SERVER NOTE' }],
+  decisions: [{ id: 8, question: 'SERVER QUESTION', options: { A: { text: 'yes' } }, answered: false, closed: false }],
+  answerKinds: ['annotation'],
+  ...patch,
+});
+const convoCalls = e => e.fetches.filter(f => /^\/convo\//.test(f.url));
+const sendConvo = (request, status, body) => request.resolve({ status, json: async () => body });
+const flushTwice = async () => { await flush(); await flush(); };
+const foldedScripts = e => e.document.head.querySelectorAll('script').map(s => s.src).filter(src => /(?:^|\/)folded\.js(?:\?|$)/.test(src));
+const foldedScriptNodes = e => e.document.head.querySelectorAll('script').filter(s => /(?:^|\/)folded\.js(?:\?|$)/.test(s.src || ''));
+function withFoldCounter(options = {}) {
+  const counter = { inserted: 0 };
+  const configure = options.configure;
+  const e = makeController(Object.assign({}, options, { configure(ctx, rendered) {
+    if (configure) configure(ctx, rendered);
+    const head = ctx.document.head, add = head.appendChild.bind(head);
+    head.appendChild = function (node) {
+      if (node && typeof node.src === 'string' && /(?:^|\/)folded\.js(?:\?|$)/.test(node.src)) counter.inserted++;
+      return add(node);
+    };
+  } }));
+  return { e, counter };
+}
+
+test('fold expand: opening a folded conversation fetches its card once and renders all its reports', async () => {
+  const e = makeController();
+  e.page.receive(model(1, foldedRow(), { gen: 9 }));
+  e.page.open('f1', 'rep');
+  e.page.open('f1', 'rep');
+  assert.match(e.byId.main.textContent, /전체 기록 불러오는 중…/);
+  assert.equal(convoCalls(e).length, 1, 'one in-flight request for the same (sid, key)');
+  assert.equal(convoCalls(e)[0].url, '/convo/f1.json');
+  assert.equal(convoCalls(e)[0].opts.cache, 'no-store');
+  sendConvo(convoCalls(e)[0], 200, { schema: 1, gen: 9, key: FOLD_KEY, session: fullCard() });
+  await flushTwice();
+  assert.equal(e.byId.main.querySelectorAll('.rep').length, 3);
+  assert.match(e.byId.main.textContent, /Report three/);
+  assert.deepEqual(e.errors, []);
+});
+
+test('fold expand: three live frames with an unchanged key make no request and leave #main untouched', async () => {
+  const e = makeController();
+  const row = foldedRow();
+  e.page.receive(model(1, row, { gen: 9 })); e.page.open('f1', 'rep');
+  sendConvo(convoCalls(e)[0], 200, { schema: 1, gen: 9, key: FOLD_KEY, session: fullCard() });
+  await flushTwice();
+  const main = e.byId.main, html = main.innerHTML, writes = main.writes;
+  for (let seq = 2; seq <= 4; seq++) {
+    e.advance(600);
+    e.page.receive(model(seq, row, { gen: 9 }));
+  }
+  assert.equal(convoCalls(e).length, 1, 'the unchanged key never refetches');
+  assert.equal(main.writes, writes, '#main is not rewritten');
+  assert.equal(main.innerHTML, html);
+  assert.deepEqual(e.errors, []);
+});
+
+test('fold expand: a changed key refetches the active conversation and a stale reply is discarded', async () => {
+  const e = makeController();
+  const firstKey = 'a'.repeat(20), secondKey = 'b'.repeat(20);
+  e.page.receive(model(1, foldedRow(), { gen: 9 })); e.page.open('f1', 'rep');
+  const stale = convoCalls(e)[0];
+  e.advance(600);
+  e.page.receive(model(2, foldedRow({ folded: { reports: 2, decisions: 1, key: secondKey } }), { gen: 9 }));
+  assert.equal(convoCalls(e).length, 2, 'the new key starts its own request');
+  const fresh = convoCalls(e)[1];
+  sendConvo(stale, 200, { schema: 1, gen: 9, key: firstKey, session: fullCard({ title: 'STALE REPLY' }) });
+  await flushTwice();
+  assert.doesNotMatch(e.byId.main.textContent, /STALE REPLY/);
+  assert.match(e.byId.main.textContent, /전체 기록 불러오는 중…/);
+  sendConvo(fresh, 200, { schema: 1, gen: 9, key: secondKey, session: fullCard({
+    title: 'FRESH', reports: [{ id: 'r1', title: 'Report one' }, { id: 'r2', title: 'Report two' }],
+  }) });
+  await flushTwice();
+  assert.equal(e.byId.main.querySelectorAll('.rep').length, 2);
+  assert.match(e.byId.main.textContent, /Report two/);
+  assert.deepEqual(e.errors, []);
+});
+
+test('fold expand: file mode inserts folded.js once per key and makes no fetch or POST', async () => {
+  const { e, counter } = withFoldCounter({ protocol: 'file:', token: 'ignored' });
+  const row = foldedRow();
+  e.page.receive(model(1, row, { gen: 9, foldedKey: 'agg-1' }));
+  e.page.open('f1', 'rep');
+  assert.equal(foldedScripts(e).length, 1);
+  assert.equal(foldedScripts(e)[0], 'folded.js?v=agg-1');
+  e.ctx.__briefFolded({ schema: 2, gen: 9, key: 'agg-1', sessions: { f1: fullCard() } });
+  e.ctx.__briefFolded({ schema: 1, gen: 8, key: 'agg-1', sessions: { f1: fullCard() } });
+  e.ctx.__briefFolded({ schema: 1, gen: 9, key: 'other', sessions: { f1: fullCard() } });
+  assert.equal(e.byId.main.querySelectorAll('.rep').length, 0, 'schema, generation and key are validated');
+  const firstScript = foldedScriptNodes(e)[0];
+  e.ctx.__briefFolded({ schema: 1, gen: 9, key: 'agg-1', sessions: { f1: fullCard() } });
+  e.fire(firstScript, 'load');
+  assert.equal(e.byId.main.querySelectorAll('.rep').length, 3);
+  e.advance(600); e.page.receive(model(2, row, { gen: 9, foldedKey: 'agg-1' })); e.page.open('f1', 'rep');
+  assert.equal(counter.inserted, 1, 'one script insertion per folded key');
+  assert.equal(counter.inserted, 1, 'cumulative insertions stay at one');
+  assert.equal(e.fetches.length, 0, 'no fetch in file mode');
+  assert.equal(posts(e).length, 0, 'no POST in file mode');
+  assert.deepEqual(e.errors, []);
+});
+
+test('fold expand: a completed stale file payload clears its flight and exposes retry', () => {
+  const { e, counter } = withFoldCounter({ protocol: 'file:', token: 'ignored' });
+  e.page.receive(model(1, foldedRow(), { gen: 9, foldedKey: 'agg-1' }));
+  e.page.open('f1', 'rep');
+  assert.equal(counter.inserted, 1);
+  const first = foldedScriptNodes(e)[0];
+  e.ctx.__briefFolded({ schema: 2, gen: 9, key: 'agg-1', sessions: { f1: fullCard() } });
+  e.fire(first, 'load');
+  assert.match(e.byId.main.textContent, /전체 기록 다시 불러오기/);
+  assert.doesNotMatch(e.byId.main.textContent, /전체 기록 불러오는 중…/);
+  assert.equal(e.page.state.fullFlight['file|agg-1'], undefined, 'the completed load cleared its flight');
+  assert.equal(e.page.state.foldedFor, null, 'no success marker for a rejected payload');
+  assert.equal(foldedScripts(e).length, 0, 'the completed script is removed');
+  click(e, '[data-act="fold-retry"]');
+  assert.equal(counter.inserted, 2, 'retry starts a fresh script insertion');
+  const second = foldedScriptNodes(e)[0];
+  e.ctx.__briefFolded({ schema: 1, gen: 9, key: 'agg-1', sessions: { f1: fullCard() } });
+  e.fire(second, 'load');
+  assert.equal(e.byId.main.querySelectorAll('.rep').length, 3);
+  assert.deepEqual(e.errors, []);
+});
+
+test('fold expand: an unfolded frame followed by the same folded key reloads its pruned history', () => {
+  const { e, counter } = withFoldCounter({ protocol: 'file:', token: 'ignored' });
+  const folded = foldedRow();
+  e.page.receive(model(1, folded, { gen: 9, foldedKey: 'agg-1' }));
+  e.page.open('f1', 'rep');
+  let script = foldedScriptNodes(e)[0];
+  e.ctx.__briefFolded({ schema: 1, gen: 9, key: 'agg-1', sessions: { f1: fullCard() } });
+  e.fire(script, 'load');
+  assert.equal(e.byId.main.querySelectorAll('.rep').length, 3);
+  assert.equal(counter.inserted, 1);
+  const unfolded = Object.assign({}, folded);
+  delete unfolded.folded; delete unfolded.chips;
+  e.advance(600); e.page.receive(model(2, unfolded, { gen: 9 }));
+  assert.equal(e.page.state.full.size, 0, 'the unfolded frame prunes the cached card');
+  e.advance(600); e.page.receive(model(3, folded, { gen: 9, foldedKey: 'agg-1' }));
+  e.page.open('f1', 'rep');
+  assert.equal(counter.inserted, 2, 'the same key reloads after its usable card was pruned');
+  script = foldedScriptNodes(e)[0];
+  e.ctx.__briefFolded({ schema: 1, gen: 9, key: 'agg-1', sessions: { f1: fullCard() } });
+  e.fire(script, 'load');
+  assert.equal(e.byId.main.querySelectorAll('.rep').length, 3);
+  e.advance(600); e.page.receive(model(4, folded, { gen: 9, foldedKey: 'agg-1' }));
+  assert.equal(counter.inserted, 2, 'an unchanged key with its card does not load again');
+  assert.deepEqual(e.errors, []);
+});
+
+test('fold expand: a failed load shows 전체 기록 다시 불러오기, never 보고서 0', async () => {
+  const e = makeController();
+  e.page.receive(model(1, foldedRow(), { gen: 9 })); e.page.open('f1', 'rep');
+  const main = e.byId.main;
+  sendConvo(convoCalls(e)[0], 500, {});
+  await flushTwice();
+  assert.match(main.textContent, /전체 기록 다시 불러오기/);
+  assert.doesNotMatch(main.textContent, /보고서 0/);
+  click(e, '[data-act="fold-retry"]');
+  assert.equal(convoCalls(e).length, 2);
+  sendConvo(convoCalls(e)[1], 200, { schema: 1, gen: 9, key: FOLD_KEY, session: fullCard() });
+  await flushTwice();
+  assert.equal(main.querySelectorAll('.rep').length, 3);
+  assert.deepEqual(e.errors, []);
+});
+
+test('fold expand: a 404 shows the restart hint', async () => {
+  const e = makeController();
+  e.page.receive(model(1, foldedRow(), { gen: 9 })); e.page.open('f1', 'rep');
+  sendConvo(convoCalls(e)[0], 404, {});
+  await flushTwice();
+  assert.ok(e.byId.main.textContent.includes('이 상황판 서버는 접은 대화 펼치기를 모르는 이전 세대입니다. 대화를 재시작하면 최신 상황판이 열립니다.'));
+  assert.equal(e.byId.main.querySelector('[data-act="fold-retry"]'), null);
+  assert.deepEqual(e.errors, []);
+});
+
+test('fold expand: decisions and notes come from the base row after hydration', async () => {
+  const e = makeController();
+  e.page.receive(model(1, foldedRow(), { gen: 9 })); e.page.open('f1', 'ov');
+  sendConvo(convoCalls(e)[0], 200, { schema: 1, gen: 9, key: FOLD_KEY, session: fullCard() });
+  await flushTwice();
+  const main = e.byId.main;
+  e.page.open('f1', 'rep');
+  assert.equal(main.querySelectorAll('.rep').length, 3, 'the full report history is rendered');
+  e.page.open('f1', 'ov');
+  assert.match(main.textContent, /BASE QUESTION/);
+  assert.match(main.textContent, /BASE NOTE/);
+  assert.doesNotMatch(main.textContent, /SERVER QUESTION/);
+  assert.doesNotMatch(main.textContent, /SERVER NOTE/);
+  assert.deepEqual(e.errors, []);
+});
+
+test('fold render: overview, convo view, sidebar, search and inbox render a model with folded rows without a thrown error', () => {
+  const e = makeController();
+  const folded = foldedRow();
+  e.page.receive({ seq: 1, generatedAt: 0, gen: 9, foldedKey: 'agg-1', sessions: [session(), folded] });
+  assert.match(e.byId.main.textContent, /Folded talk/);
+  e.page.open('f1', 'ov');
+  assert.match(e.byId.main.textContent, /전체 기록 불러오는 중…/);
+  for (const key of ['inbox', 'plans', 'home', 'archive', 'settings', 'conv']) {
+    click(e, `#rail [data-sh="view"][data-key="${key}"]`);
+  }
+  const input = e.app.querySelector('[data-sh="search"]');
+  input.value = 'Folded'; e.fire(input, 'input');
+  click(e, '#rail [data-sh="view"][data-key="inbox"]');
   assert.deepEqual(e.errors, []);
 });

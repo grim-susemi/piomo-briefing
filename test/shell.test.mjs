@@ -937,3 +937,35 @@ test('Escape shuts the narrow overlay with preventDefault; wide, shut, modified,
   assert.deepEqual([shut.seen, wide.seen, layered.seen], [[], [], []]);
   assert.deepEqual([...pass, shutEv, wideEv, layeredEv].map((ev) => ev.prevented), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 });
+
+test('fold parity: side, rail, tabs, search and inbox render identically with folding on and off apart from the 접힘 marker', () => {
+  const S = load().BriefShell;
+  const baseModel = fixture(), markedModel = fixture();
+  const basePrev = baseModel.sessions.find((s) => s.id === 'p185');
+  const prev = markedModel.sessions.find((s) => s.id === 'p185');
+  const decision = { id: 501, question: 'fold parity decision', options: { A: { text: 'yes' } }, answered: false, closed: false, createdAt: NOW - 3600e3 };
+  basePrev.decisions = [decision];
+  prev.decisions = [decision];
+  prev.folded = { reports: 2, decisions: 1, key: 'a'.repeat(20) };
+  const st = S.reduce(base(S), { type: 'expand', sid: 'a185' });
+  const strip = (html) => html.replace(/<span class="sh-fold">접힘<\/span>/g, '');
+  const normalize = (html) => strip(html).replace(/<span class="sh-sub"><\/span>/g, '');
+  const parity = (a, b, label, markedRow = false) => {
+    if (markedRow) assert.ok(b.includes('<span class="sh-fold">접힘</span>'), label + ' carries the marker');
+    assert.equal(normalize(b), a, label);
+  };
+  parity(S.side(baseModel, S.reduce(st, { type: 'view', key: 'archive' })), S.side(markedModel, S.reduce(st, { type: 'view', key: 'archive' })), '닫힌 창', true);
+  parity(S.side(baseModel, st), S.side(markedModel, st), '대화 side', true);
+  parity(S.rail(baseModel, st), S.rail(markedModel, st), 'rail');
+  parity(S.tabs(baseModel, st), S.tabs(markedModel, st), 'tabs');
+  parity(S.side(baseModel, S.reduce(st, { type: 'search', text: '설치' })), S.side(markedModel, S.reduce(st, { type: 'search', text: '설치' })), 'search');
+  parity(S.side(baseModel, S.reduce(st, { type: 'view', key: 'inbox' })), S.side(markedModel, S.reduce(st, { type: 'view', key: 'inbox' })), 'inbox');
+  const recent = { id: 'recent-fold', alive: false, status: 'done', statusKey: 'done', tab: '끝남', title: '최근 접힘', headline: '최근', lastActivityAt: NOW - 2 * DAY, decisions: [] };
+  const recentFolded = Object.assign({}, recent, { folded: { reports: 1, decisions: 0, key: 'b'.repeat(20) }, chips: ['접어 둠'] });
+  const stRecent = S.reduce(undefined, { type: 'load', json: JSON.stringify({ view: 'conv', favs: ['recent-fold'] }), known: ['recent-fold'], now: NOW });
+  const openRecent = S.reduce(stRecent, { type: 'expand', sid: 'sec:recent' });
+  const plainRecent = S.side({ generatedAt: NOW, sessions: [recent] }, openRecent);
+  const markedRecent = S.side({ generatedAt: NOW, sessions: [recentFolded] }, openRecent);
+  assert.equal((markedRecent.match(/<span class="sh-fold">접힘<\/span>/g) || []).length, 2, 'favourite and recent rows each carry the marker');
+  assert.equal(normalize(markedRecent), plainRecent, 'empty grey subtext containers differ only by the marker');
+});

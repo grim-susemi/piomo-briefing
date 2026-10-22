@@ -44,7 +44,12 @@
     transport: 'file',
     pointerDown: false,
     now: function () { return Date.now(); },
-    ui: { expanded: Object.create(null), live: false, focus: Object.create(null) }
+    ui: { expanded: Object.create(null), live: false, focus: Object.create(null) },
+    full: new Map(),
+    fullFlight: Object.create(null),
+    fold: Object.create(null),
+    foldDeferred: false,
+    foldedFor: null
   };
   var hooks = { beforeApply: [], afterApply: [] };
   var root, badge, statusEl, linkEl, errEl, applyTimer = null, releaseTimer = null, sessionJson = {}, glowTimers = {};
@@ -63,6 +68,8 @@
     });
   }
   function seqOf(d) { return d && typeof d.seq === 'number' && isFinite(d.seq) ? d.seq : 0; }
+  function has(o, k) { return o != null && typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k); }
+  function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : null; }
 
   // Page script errors are never swallowed: console.error + a small 'screen error' mark.
   function fail(where, e) {
@@ -190,10 +197,11 @@
   }
 
   function scheduleRelease() {
-    if ((!state.pending && pendingGeneration === null) || releaseTimer) return;
+    if ((!state.pending && pendingGeneration === null && !state.foldDeferred) || releaseTimer) return;
     releaseTimer = g.setTimeout(function () {
       releaseTimer = null;
       // A busy-held update has a 300 ms release deadline, even inside the normal 500 ms window.
+      if (state.foldDeferred && !busy()) { state.foldDeferred = false; render(); }
       if (heldForBusy && !busy()) apply();
       else consider();
     }, RELEASE_MS);
@@ -224,10 +232,193 @@
     }
   }
 
-  function currentSession() {
+  function sessionById(id) {
     var sessions = state.model && Array.isArray(state.model.sessions) ? state.model.sessions : [];
-    for (var i = 0; i < sessions.length; i++) if (sessions[i] && sessions[i].id === state.ui.active) return sessions[i];
+    for (var i = 0; i < sessions.length; i++) if (sessions[i] && sessions[i].id === id) return sessions[i];
     return null;
+  }
+  function foldKeyOf(s) {
+    var f = obj(s && s.folded);
+    return f && typeof f.key === 'string' && f.key ? f.key : '';
+  }
+  function fullCacheKey(sid, key) { return sid + '|' + key; }
+  function cachedFull(s) {
+    var key = foldKeyOf(s);
+    if (!key || typeof s.id !== 'string') return null;
+    var hit = state.full.get(fullCacheKey(s.id, key));
+    return hit && obj(hit.card) ? hit.card : null;
+  }
+  // The base row stays authoritative for decisions and notes; the cached full card supplies the heavy fields it left out.
+  function mergeFull(base, full) {
+    var out = {}, k;
+    for (k in full) if (has(full, k)) out[k] = full[k];
+    for (k in base) if (has(base, k)) out[k] = base[k];
+    if (has(base, 'decisions')) out.decisions = base.decisions; else delete out.decisions;
+    if (has(base, 'notes')) out.notes = base.notes; else delete out.notes;
+    return out;
+  }
+  function currentSession() {
+    var base = sessionById(state.ui.active);
+    if (!base) return null;
+    var full = cachedFull(base);
+    return full ? mergeFull(base, full) : base;
+  }
+  // Cache entries live under sid|key: an unfolded row, a vanished row or a re-keyed row drops its old card.
+  function pruneFull() {
+    var list = state.model && Array.isArray(state.model.sessions) ? state.model.sessions : [];
+    var keep = Object.create(null), byId = Object.create(null);
+    for (var i = 0; i < list.length; i++) {
+      var s = list[i];
+      if (!s || typeof s.id !== 'string') continue;
+      byId[s.id] = s;
+      var key = foldKeyOf(s);
+      if (key) keep[fullCacheKey(s.id, key)] = true;
+    }
+    var dropped = false;
+    state.full.forEach(function (v, k) { if (!keep[k]) { state.full.delete(k); dropped = true; } });
+    // A successful file load is deduplicated by aggregate key, but its usable cards live in this cache. Once a card is
+    // pruned (gone, unfolded or re-keyed), the success marker must no longer suppress the next load.
+    if (dropped || !state.model || typeof state.model.foldedKey !== 'string') state.foldedFor = null;
+    for (var sid in state.fold) {
+      if (!has(state.fold, sid)) continue;
+      if (!byId[sid] || state.fold[sid].key !== foldKeyOf(byId[sid])) delete state.fold[sid];
+    }
+  }
+  function foldStatus(s) {
+    if (!obj(s.folded) || cachedFull(s)) return null;
+    var key = foldKeyOf(s), f = state.fold[s.id];
+    return { status: f && f.key === key ? f.status : 'loading' };
+  }
+  function applyFold(sid) {
+    if (state.ui.active !== sid) return;
+    if (busy()) { state.foldDeferred = true; return; }
+    state.foldDeferred = false;
+    render();
+  }
+  function ensureFull(sid, retry) {
+    var base = sessionById(sid), key = foldKeyOf(base);
+    if (!base || !key) return;
+    var cacheKey = fullCacheKey(sid, key);
+    if (state.full.has(cacheKey)) { delete state.fold[sid]; return; }
+    var f = state.fold[sid];
+    if (!retry && f && f.key === key && (f.status === 'error' || f.status === 'restart')) return;
+    if (state.transport === 'http') {
+      if (state.fullFlight[cacheKey]) return;
+      ensureServerFull(sid, key, cacheKey);
+      return;
+    }
+    var foldedKey = state.model && typeof state.model.foldedKey === 'string' ? state.model.foldedKey : '';
+    if (!foldedKey) { state.fold[sid] = { status: 'error', key: key }; return; }
+    ensureFileFull(foldedKey, sid);
+  }
+  function ensureServerFull(sid, key, cacheKey) {
+    state.fold[sid] = { status: 'loading', key: key };
+    state.fullFlight[cacheKey] = true;
+    var wantGen = generationOf(state.model && state.model.gen);
+    g.fetch('/convo/' + encodeURIComponent(sid) + '.json', { cache: 'no-store' }).then(function (r) {
+      if (r.status === 404) return { status: 404 };
+      if (r.status !== 200) return { status: 'bad' };
+      return r.json().then(function (body) { return { status: 200, body: body }; }, function () { return { status: 'bad' }; });
+    }).then(function (res) {
+      delete state.fullFlight[cacheKey];
+      var base = sessionById(sid);
+      if (!base || foldKeyOf(base) !== key) return; // a stale reply never replaces the current conversation
+      if (res.status === 404) { state.fold[sid] = { status: 'restart', key: key }; applyFold(sid); return; }
+      var body = res.body, gen = body ? generationOf(body.gen) : null;
+      if (res.status !== 200 || !body || body.schema !== 1 || body.key !== key || !obj(body.session) || body.session.id !== sid ||
+          (wantGen !== null && gen !== wantGen)) {
+        state.fold[sid] = { status: 'error', key: key };
+        applyFold(sid);
+        return;
+      }
+      state.full.set(cacheKey, { sid: sid, key: key, card: body.session });
+      delete state.fold[sid];
+      applyFold(sid);
+    }, function (e) {
+      delete state.fullFlight[cacheKey];
+      var base = sessionById(sid);
+      if (!base || foldKeyOf(base) !== key) return;
+      warn('convo load', e);
+      state.fold[sid] = { status: 'error', key: key };
+      applyFold(sid);
+    });
+  }
+  function ensureFileFull(key, sid) {
+    var model = state.model, flight = 'file|' + key;
+    if (!model || model.foldedKey !== key) return;
+    if (state.foldedFor === key) {
+      var current = sessionById(sid);
+      if (current && cachedFull(current)) return; // unchanged key with its usable card: zero extra loads
+      state.foldedFor = null; // the success marker outlived its cached card (pruned by an unfold or re-key)
+    }
+    if (state.fullFlight[flight]) return;
+    state.fullFlight[flight] = true;
+    var sc = doc.createElement('script');
+    sc.src = 'folded.js?v=' + encodeURIComponent(key);
+    sc.addEventListener('load', function () {
+      sc.remove();
+      delete state.fullFlight[flight];
+      if (!state.model || state.model.foldedKey !== key) return;
+      var list = Array.isArray(state.model.sessions) ? state.model.sessions : [], missing = false;
+      for (var i = 0; i < list.length; i++) {
+        var row = list[i], rowKey = foldKeyOf(row);
+        if (!rowKey || cachedFull(row)) continue;
+        state.fold[row.id] = { status: 'error', key: rowKey }; // completed script supplied no usable card
+        missing = true;
+      }
+      if (missing) { state.foldedFor = null; applyFold(state.ui.active); }
+    });
+    sc.addEventListener('error', function () {
+      delete state.fullFlight[flight];
+      sc.remove();
+      state.foldedFor = null;
+      if (!state.model || state.model.foldedKey !== key) return;
+      var list = Array.isArray(state.model.sessions) ? state.model.sessions : [];
+      for (var i = 0; i < list.length; i++) {
+        var rowKey = foldKeyOf(list[i]);
+        if (rowKey) state.fold[list[i].id] = { status: 'error', key: rowKey };
+      }
+      applyFold(state.ui.active);
+    });
+    doc.head.appendChild(sc);
+  }
+  function installFolded() {
+    g.__briefFolded = function (payload) {
+      try {
+        var model = state.model, body = obj(payload);
+        if (!model || typeof model.foldedKey !== 'string') return;
+        if (!body || body.schema !== 1 || body.key !== model.foldedKey) return;
+        var want = generationOf(model.gen), got = generationOf(body.gen);
+        if (want !== null && got !== want) return;
+        var sessions = obj(body.sessions);
+        if (!sessions) return;
+        var list = Array.isArray(model.sessions) ? model.sessions : [], changed = false;
+        for (var i = 0; i < list.length; i++) {
+          var base = list[i];
+          if (!base) continue;
+          var key = foldKeyOf(base);
+          if (!key || !has(sessions, base.id)) continue;
+          var card = obj(sessions[base.id]);
+          if (!card || card.id !== base.id) continue;
+          state.full.set(fullCacheKey(base.id, key), { sid: base.id, key: key, card: card });
+          delete state.fold[base.id];
+          changed = true;
+        }
+        delete state.fullFlight['file|' + body.key];
+        if (changed) {
+          state.foldedFor = body.key;
+          applyFold(state.ui.active);
+        }
+      } catch (e) { warn('folded.js', e); }
+    };
+  }
+  function foldRetry() {
+    var base = sessionById(state.ui.active);
+    if (!base) return;
+    delete state.fold[base.id];
+    state.foldDeferred = false;
+    ensureFull(base.id, true);
+    render();
   }
   function mainKey() { return state.ui.view === 'memento' ? 'memento' : state.ui.active ? state.ui.active + '/' + (state.ui.sub[state.ui.active] || 'ov') : 'overview'; }
   function saveScroll() {
@@ -331,6 +522,8 @@
   }
   function render() {
     saveScroll();
+    var base = sessionById(state.ui.active);
+    if (base && foldKeyOf(base) && !cachedFull(base)) ensureFull(base.id);
     var key = mainKey(), sideY = sideList.scrollTop;
     try {
       var model = state.model || EMPTY;
@@ -353,7 +546,7 @@
       var s = currentSession();
       var cards = state.ui.view === 'memento';
       if (!cards && cardsView) { cardsView.destroy(); cardsView = null; cardsEpoch++; }
-      var html = cards ? CARDS_REGION : s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision, checked: isChecked })
+      var html = cards ? CARDS_REGION : s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision, checked: isChecked, fold: foldStatus(s) })
         : state.ui.active ? '<p class="empty">(지금 안 보임)</p>' : g.BriefView.renderOverview(model, state.ui);
       if (region('main', main, html)) {
         g.BriefAnnotate.decorate();
@@ -464,6 +657,7 @@
 
   function show(model) {
     state.model = model; state.seq = seqOf(model); state.appliedAt = state.now();
+    pruneFull();
     state.ui = g.BriefShell.reduce(state.ui, { type: 'known',
       ids: (Array.isArray(model.sessions) ? model.sessions : []).filter(function (s) { return s && typeof s.id === 'string'; }).map(function (s) { return s.id; }), now: state.now() });
     g.BriefShell.persist(undefined, state.ui);
@@ -687,6 +881,8 @@
       render();
     } else if (act === 'focus') {
       focusTab(t.getAttribute('data-session'));
+    } else if (act === 'fold-retry') {
+      foldRetry();
     }
   }
 
@@ -1102,6 +1298,7 @@
 
   function start() {
     ensureRoot();
+    installFolded();
     wireBlocks();
     var loc = g.location;
     var http = !!(loc && /^https?:$/.test(loc.protocol) && g.EventSource && g.fetch);
