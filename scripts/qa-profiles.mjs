@@ -29,7 +29,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { launch, isPidAlive, listProfilePids } from './cdp.mjs';
+import { launch, isPidAlive, listProfilePids, watchCsp } from './cdp.mjs';
 import { createBoardServer } from '../src/server.mjs';
 import { pageHtml } from '../src/render.mjs';
 import {
@@ -272,7 +272,7 @@ async function main() {
   let profilesStateOverride = null;
   const server = createBoardServer({
     portBase: PORT_BASE, portCount: 5, generation: 7, token: TOKEN,
-    getPage: () => pageHtml(vm, 7, { mode: 'server', token: TOKEN }),
+    getPage: ({ nonce } = {}) => pageHtml(vm, 7, { mode: 'server', token: TOKEN, nonce }),
     getViewModel: () => vm,
     profilesState: () => profilesStateOverride || store.state(),
     onProfiles: (body) => store.handle(body),
@@ -281,7 +281,7 @@ async function main() {
   const url = `http://127.0.0.1:${port}/`;
   run.server = { url, port, stateDir: homes.stateDir };
   const pageText = (await request({ port, path: '/' })).body;
-  const buildHash = sha256(Buffer.from(pageText.split(TOKEN).join('<board-token>')));
+  const buildHash = sha256(Buffer.from(pageText.replace(/ nonce="[^"]*"/g, '').split(TOKEN).join('<board-token>')));
   run.build = { hash: buildHash, pageBytes: Buffer.byteLength(pageText), url };
   run.source = sourceTree();
   run.fixture = {
@@ -293,10 +293,12 @@ async function main() {
   };
 
   let page;
+  let csp = null;
   let chromePids = [];
   let closeError = null;
   try {
     page = await launch({ width: 1440, height: 900 });
+    csp = await watchCsp(page);
     chromePids = [...new Set([page.pid, ...listProfilePids(page.profileDir)])].sort((a, b) => a - b);
     run.chrome = { pid: page.pid, profileDir: page.profileDir, pids: chromePids };
     const consoleErrors = [];
@@ -2386,33 +2388,34 @@ async function main() {
 
     let settleTimeout = '';
     try {
-      await page.eval(`new Promise((resolve, reject) => {
-        const style = document.createElement('style');
-        style.id = 'qa-slow-settle-style';
-        style.textContent = '@keyframes qa-slow-settle { from { opacity: .2 } to { opacity: 1 } }';
-        document.head.appendChild(style);
+      await page.eval(`(() => {
         const el = document.createElement('div');
         el.id = 'qa-slow-settle';
-        el.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;animation:qa-slow-settle 60s linear 1 forwards';
-        const onStart = () => { clearTimeout(timer); resolve(true); };
-        const timer = setTimeout(() => { el.removeEventListener('animationstart', onStart); reject(new Error('slow animation did not start')); }, 2000);
-        el.addEventListener('animationstart', onStart, { once: true });
+        el.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px';
         document.body.appendChild(el);
-      })`);
+        el.animate([{ opacity: 0.2 }, { opacity: 1 }], { duration: 60000, iterations: 1, fill: 'forwards' });
+        return true;
+      })()`);
       try { await settle(); } catch (error) { settleTimeout = String(error && error.message || error); }
     } finally {
       await page.eval(`(() => {
         const el = document.getElementById('qa-slow-settle'); if (el) el.remove();
-        const style = document.getElementById('qa-slow-settle-style'); if (style) style.remove();
         return true;
       })()`);
     }
     run.checks.settleTimeoutProbe = { rejected: settleTimeout.length > 0, message: settleTimeout };
     assert.match(settleTimeout, /animation settlement timed out/, 'the forced settlement timeout did not fail');
 
+    run.csp = {
+      installedBeforeFirstNavigation: true,
+      violations: csp ? csp.violations : [],
+      notes: csp ? csp.notes.length : 0,
+    };
+    run.checks.cspViolations = run.csp.violations;
+    csp.assertNone('qa-profiles');
     run.checks.consoleErrors = consoleErrors;
     assert.deepEqual(consoleErrors, [], 'page console errors: ' + consoleErrors.join(' | '));
-    run.ok = failures.length === 0;
+    run.ok = failures.length === 0 && run.csp.violations.length === 0;
   } catch (error) {
     run.errors.push(String(error && error.stack || error));
     console.error('FAIL', error && error.stack || error);
@@ -2468,8 +2471,16 @@ async function main() {
       run.cleanup.tempRootKept = run.tempRoot;
     }
     if (!run.cleanup.tempRootRemoved && !KEEP) run.errors.push('temp root still exists: ' + run.tempRoot);
+    if (!run.csp) {
+      run.csp = {
+        installedBeforeFirstNavigation: !!csp,
+        violations: csp ? csp.violations : [],
+        notes: csp ? csp.notes.length : 0,
+      };
+    }
     run.finishedAt = new Date().toISOString();
     run.ok = run.ok && failures.length === 0 && run.errors.length === 0
+      && run.csp.violations.length === 0
       && run.cleanup.chrome?.closed === true && run.cleanup.server?.closed === true
       && run.cleanup.live?.serverJsonUnchanged === true && run.cleanup.live?.liveStateInvariantHolds === true
       && run.cleanup.tempRootRemoved === true;
@@ -2535,8 +2546,8 @@ async function negativeControl() {
     assert.equal(buildHash, candidate.build.hash, 'negative control build does not match the candidate captures.json');
     server = createBoardServer({
       portBase: PORT_BASE, portCount: 5, generation: 7, token: TOKEN,
-      getPage: () => {
-        const html = pageHtml(vm, 7, { mode: 'server', token: TOKEN });
+      getPage: ({ nonce } = {}) => {
+        const html = pageHtml(vm, 7, { mode: 'server', token: TOKEN, nonce });
         return defective ? html.replace('</style>', NEGATIVE_CSS + '</style>') : html;
       },
       getViewModel: () => vm,
@@ -2878,6 +2889,11 @@ function writeEvidence() {
   ];
   fs.writeFileSync(path.join(EVIDENCE, `${PREFIX}-a11y.txt`), a11yLines.join('\n') + '\n');
 
+  const cspPayload = `${JSON.stringify(run.csp || { installedBeforeFirstNavigation: false, violations: [] }, null, 2)}\n`;
+  fs.writeFileSync(path.join(OUT, 'csp.json'), cspPayload);
+  if (path.resolve(EVIDENCE) !== path.resolve(OUT)) {
+    fs.writeFileSync(path.join(EVIDENCE, 'csp.json'), cspPayload);
+  }
   fs.writeFileSync(path.join(OUT, 'captures.json'), `${JSON.stringify(run, null, 2)}\n`);
 }
 
