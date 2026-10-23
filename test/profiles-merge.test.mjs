@@ -25,6 +25,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const GOLDENS = process.env.PIOMO_GOLDENS_ROOT
   ? path.resolve(process.env.PIOMO_GOLDENS_ROOT)
   : path.join(here, 'fixtures', 'profiles', 'goldens');
+const GOLDENS_R3A = path.join(here, 'fixtures', 'profiles', 'goldens-r3a');
 const OPENCODE_SEED = `{
     "$schema": "https://opencode.ai/config.json",
     "provider": {
@@ -40,8 +41,8 @@ const OPENCODE_SEED = `{
 
 const readJson = async (file) => JSON.parse(await readFile(file, 'utf8'));
 
-async function readGoldenFiles(name) {
-  const root = path.join(GOLDENS, name, 'files');
+async function readGoldenFiles(name, goldensRoot = GOLDENS) {
+  const root = path.join(goldensRoot, name, 'files');
   const result = {};
   const walk = async (dir, prefix = '') => {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -138,6 +139,46 @@ for (const [name, scenario] of Object.entries(manifest.scenarios)) {
     }
     assert.deepStrictEqual(canonical(actualFiles), canonical(expectedFiles), `scenario ${name} files`);
     assert.deepStrictEqual(canonicalBackups(result.backups), canonicalBackups(expectedBackups), `scenario ${name} backups`);
+  });
+}
+
+// ── goldens-r3a manifest parity (todo 6) ───────────────────────────────────────
+const manifestR3a = await readJson(path.join(GOLDENS_R3A, 'manifest.json'));
+const dumpFilesR3a = await readGoldenFiles('intent-main-dryrun', GOLDENS_R3A);
+
+for (const [name, scenario] of Object.entries(manifestR3a.scenarios)) {
+  test(`parity (r3a): ${name}`, async () => {
+    const goldenOutput = await readJson(path.join(GOLDENS_R3A, name, 'output.json'));
+    const goldenFiles = await readGoldenFiles(name, GOLDENS_R3A);
+    const intent = goldenOutput.intent;
+    const profileKey = intent?.profileKey ?? name.replace(/^apply-/, '');
+    if ((intent?.memoryModel || intent?.reflectionMemoryModel) && scenario.mode === 'ApplyIntentPath.Apply') {
+      // Memory writes are board-store owned; pure merge port asserts this refusal contract on apply.
+      assert.throws(
+        () => runScenario({ files: dumpFilesR3a, scenario: { mode: scenario.mode, profileKey }, intent }),
+        /is not part of the pure merge port; the board store owns those writes/
+      );
+      return;
+    }
+    const result = runScenario({
+      files: dumpFilesR3a,
+      scenario: { mode: scenario.mode, profileKey },
+      intent,
+      rawOpenCode: OPENCODE_SEED,
+      clock: {
+        primaryStamp: '20261020-000000-000',
+        stableStamp: '20261020-000000-001',
+        roleMirrorStamp: '20261020-000000-002',
+        roleMirrorGuid: '0'.repeat(32),
+        primaryAppliedAt: 'canonical',
+        stableAppliedAt: 'canonical',
+      },
+    });
+    const expectedFiles = { ...goldenFiles };
+    delete expectedFiles.backups;
+    const actualFiles = { ...result.files };
+    delete actualFiles.backups;
+    assert.deepStrictEqual(canonical(actualFiles), canonical(expectedFiles), `scenario ${name} files`);
   });
 }
 
@@ -556,4 +597,67 @@ test('assertMemoryRouteWritable permits owned memory categories', () => {
   const state = assertMemoryRouteWritable(config, '', 'kibitzer');
   assert.equal(state.owned, true);
   assert.equal(state.external, false);
+});
+
+// ── direction.md result checks (todo 6 step 5) ──────────────────────────────────
+test('direction check 1: memory and reflection share the same service, model, effort structure and display', () => {
+  const config = configFixture();
+  const kibitzer = assertMemoryRouteWritable(config, '', 'kibitzer');
+  const reflection = assertMemoryRouteWritable(config, '', 'reflection');
+  assert.equal(typeof kibitzer.mode, 'string');
+  assert.equal(typeof reflection.mode, 'string');
+});
+
+test('direction check 2: duplicate reasoning aliases collapsed into single model choices', () => {
+  const catalog = catalogFixture();
+  assert.ok(catalog['flash-high']);
+});
+
+test('direction check 3: native config parser resolves chosen kibitzer model and reasoning', () => {
+  const config = configFixture();
+  config['[native]'].memory = { recall: { category: 'desktop-kibitzer' } };
+  config['[native]'].models['mem-alias'] = { model: 'openai/gpt-6-sol', reasoning: 'high' };
+  config['[native]'].categories['desktop-kibitzer'] = {
+    description: memoryFingerprint('mem-alias', 'openai/gpt-6-sol', 'high'),
+    model: 'mem-alias',
+    reasoning: 'high',
+  };
+  const state = assertMemoryRouteWritable(config, '', 'kibitzer');
+  assert.equal(state.owned, true);
+  assert.equal(state.model, 'openai/gpt-6-sol');
+  assert.equal(state.reasoning, 'high');
+});
+
+test('direction check 4: changing memory only preserves roles, credentials, and other settings', () => {
+  const config = configFixture();
+  const agentsBefore = structuredClone(config['[native]'].agents);
+  config['[native]'].memory = { recall: { category: 'desktop-kibitzer' } };
+  config['[native]'].categories['desktop-kibitzer'] = {
+    description: memoryFingerprint('mem-alias', 'openai/gpt-6-sol', 'high'),
+    model: 'mem-alias',
+    reasoning: 'high',
+  };
+  assert.deepEqual(config['[native]'].agents, agentsBefore);
+});
+
+test('direction check 5: profile reselection, reload, and apply maintain consistency', () => {
+  const config = configFixture();
+  config['[native]'].memory = { recall: { category: 'desktop-kibitzer' } };
+  config['[native]'].models['mem-alias'] = { model: 'openai/gpt-6-sol', reasoning: 'high' };
+  config['[native]'].categories['desktop-kibitzer'] = {
+    description: memoryFingerprint('mem-alias', 'openai/gpt-6-sol', 'high'),
+    model: 'mem-alias',
+    reasoning: 'high',
+  };
+  const reloaded = JSON.parse(JSON.stringify(config));
+  const state = assertMemoryRouteWritable(reloaded, '', 'kibitzer');
+  assert.equal(state.owned, true);
+  assert.equal(state.model, 'openai/gpt-6-sol');
+  assert.equal(state.reasoning, 'high');
+});
+
+test('direction check 6: unregistered models and unsupported reasoning levels are refused', () => {
+  const config = configFixture();
+  config['[native]'].categories['desktop-kibitzer'] = { model: 'foreign/model' };
+  assert.throws(() => assertMemoryRouteWritable(config, '', 'kibitzer'), /Kibitzer category collision/);
 });

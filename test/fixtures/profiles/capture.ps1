@@ -23,7 +23,8 @@ param(
     [string]$FixtureRoot,
     [string]$GoldensRoot,
     [string]$SwitcherPath = 'C:\Users\USER\Desktop\OpenCode_Modes\OMO_Native_Profile_Switcher.ps1',
-    [int]$TimeoutSeconds = 600
+    [int]$TimeoutSeconds = 600,
+    [switch]$R3aOnly
 )
 
 Set-StrictMode -Version Latest
@@ -478,16 +479,18 @@ $goldensParent = Split-Path -Parent $GoldensRoot
 if (-not (Test-Path -LiteralPath $goldensParent)) { [void][IO.Directory]::CreateDirectory($goldensParent) }
 [void][IO.Directory]::CreateDirectory($GoldensRoot)
 
-$dumpOutFile = Join-Path $root 'out\dump-state\result.json'
-Invoke-Scenario -Name 'dump-state' -Mode 'DumpState' -ModeArgs @('-DumpState', '-OutFile', $dumpOutFile)
-Invoke-Scenario -Name 'print-status' -Mode 'PrintStatus' -ModeArgs @('-PrintStatus')
-Invoke-Scenario -Name 'recommendation-status' -Mode 'RecommendationStatus' -ModeArgs @('-RecommendationStatus')
+if (-not $R3aOnly) {
+    $dumpOutFile = Join-Path $root 'out\dump-state\result.json'
+    Invoke-Scenario -Name 'dump-state' -Mode 'DumpState' -ModeArgs @('-DumpState', '-OutFile', $dumpOutFile)
+    Invoke-Scenario -Name 'print-status' -Mode 'PrintStatus' -ModeArgs @('-PrintStatus')
+    Invoke-Scenario -Name 'recommendation-status' -Mode 'RecommendationStatus' -ModeArgs @('-RecommendationStatus')
 
-foreach ($profileKey in @(
-    'gpt-kimi-deepseek', 'gpt-deepseek', 'kimi-deepseek',
-    'kimi-ollama-deepseek', 'experimental-custom', 'cmd-glm-deepseek'
-)) {
-    Invoke-Scenario -Name ('apply-' + $profileKey) -Mode 'Apply' -ModeArgs @('-Apply', '-ProfileKey', $profileKey)
+    foreach ($profileKey in @(
+        'gpt-kimi-deepseek', 'gpt-deepseek', 'kimi-deepseek',
+        'kimi-ollama-deepseek', 'experimental-custom', 'cmd-glm-deepseek'
+    )) {
+        Invoke-Scenario -Name ('apply-' + $profileKey) -Mode 'Apply' -ModeArgs @('-Apply', '-ProfileKey', $profileKey)
+    }
 }
 
 $seedConfig = [IO.File]::ReadAllText((Join-Path $root 'seed\home\.omo\omo.jsonc'), [Text.Encoding]::UTF8) | ConvertFrom-Json
@@ -535,69 +538,139 @@ function New-ModelProfileIntent {
     return (New-IntentFile $Name $body)
 }
 
-$modelProfileCases = @(
-    @{ Name = 'daily-normal'; Selection = 'daily-normal'; Literal = '' }
-    @{ Name = 'daily-heavy'; Selection = 'daily-heavy'; Literal = '' }
-    @{ Name = 'geeky-normal'; Selection = 'geeky-normal'; Literal = '' }
-    @{ Name = 'geeky-heavy'; Selection = 'geeky-heavy'; Literal = '' }
-    @{ Name = 'custom-literal'; Selection = 'custom-literal'; Literal = $customLiteral }
-    @{ Name = 'off'; Selection = 'off'; Literal = '' }
-)
-foreach ($case in $modelProfileCases) {
-    $intent = New-ModelProfileIntent -Name ('model-profile-' + $case.Name) -Selection $case.Selection -Literal $case.Literal
-    Invoke-Scenario -Name ('intent-model-profile-' + $case.Name + '-dryrun') -Mode 'ApplyIntentPath.DryRun' `
-        -ModeArgs @('-ApplyIntentPath', $intent, '-OutFile', (Join-Path $root ('out\intent-model-profile-' + $case.Name + '-dryrun\result.json')), '-DryRun') `
-        -IntentPath $intent
-    Invoke-Scenario -Name ('intent-model-profile-' + $case.Name + '-apply') -Mode 'ApplyIntentPath.Apply' `
-        -ModeArgs @('-ApplyIntentPath', $intent, '-OutFile', (Join-Path $root ('out\intent-model-profile-' + $case.Name + '-apply\result.json'))) `
-        -IntentPath $intent
+if (-not $R3aOnly) {
+    $modelProfileCases = @(
+        @{ Name = 'daily-normal'; Selection = 'daily-normal'; Literal = '' }
+        @{ Name = 'daily-heavy'; Selection = 'daily-heavy'; Literal = '' }
+        @{ Name = 'geeky-normal'; Selection = 'geeky-normal'; Literal = '' }
+        @{ Name = 'geeky-heavy'; Selection = 'geeky-heavy'; Literal = '' }
+        @{ Name = 'custom-literal'; Selection = 'custom-literal'; Literal = $customLiteral }
+        @{ Name = 'off'; Selection = 'off'; Literal = '' }
+    )
+    foreach ($case in $modelProfileCases) {
+        $intent = New-ModelProfileIntent -Name ('model-profile-' + $case.Name) -Selection $case.Selection -Literal $case.Literal
+        Invoke-Scenario -Name ('intent-model-profile-' + $case.Name + '-dryrun') -Mode 'ApplyIntentPath.DryRun' `
+            -ModeArgs @('-ApplyIntentPath', $intent, '-OutFile', (Join-Path $root ('out\intent-model-profile-' + $case.Name + '-dryrun\result.json')), '-DryRun') `
+            -IntentPath $intent
+        Invoke-Scenario -Name ('intent-model-profile-' + $case.Name + '-apply') -Mode 'ApplyIntentPath.Apply' `
+            -ModeArgs @('-ApplyIntentPath', $intent, '-OutFile', (Join-Path $root ('out\intent-model-profile-' + $case.Name + '-apply\result.json'))) `
+            -IntentPath $intent
+    }
+
+    $summarizerIntent = New-IntentFile 'summarizer' ([ordered]@{
+        schema     = 1
+        profileKey = 'gpt-kimi-deepseek'
+        activate   = $false
+        routing    = @()
+        summarizer = (Resolve-CatalogAlias 'flash-high').model
+    })
+    Invoke-Scenario -Name 'intent-summarizer-dryrun' -Mode 'ApplyIntentPath.DryRun' `
+        -ModeArgs @('-ApplyIntentPath', $summarizerIntent, '-OutFile', (Join-Path $root 'out\intent-summarizer-dryrun\result.json'), '-DryRun') `
+        -IntentPath $summarizerIntent
+    Invoke-Scenario -Name 'intent-summarizer-apply' -Mode 'ApplyIntentPath.Apply' `
+        -ModeArgs @('-ApplyIntentPath', $summarizerIntent, '-OutFile', (Join-Path $root 'out\intent-summarizer-apply\result.json')) `
+        -IntentPath $summarizerIntent
+
+    # One routing change per display purpose group (groups copied from $script:RoutingGroups in the switcher).
+    $routingCases = @(
+        @{ Group = 'discovery'; Section = 'agents'; Role = 'explore'; TargetAlias = 'sol' }
+        @{ Group = 'planning'; Section = 'agents'; Role = 'plan-consultant'; TargetAlias = 'terra' }
+        @{ Group = 'review'; Section = 'agents'; Role = 'plan-reviewer'; TargetAlias = 'sol' }
+        @{ Group = 'general'; Section = 'categories'; Role = 'quick'; TargetAlias = 'kimi-max' }
+        @{ Group = 'reasoning'; Section = 'categories'; Role = 'deep-low'; TargetAlias = 'kimi-max' }
+        @{ Group = 'specialism'; Section = 'categories'; Role = 'architect'; TargetAlias = 'terra' }
+    )
+    foreach ($case in $routingCases) {
+        $target = Resolve-CatalogAlias $case.TargetAlias
+        $body = [ordered]@{
+            schema     = 1
+            profileKey = 'gpt-kimi-deepseek'
+            activate   = $false
+            routing    = @([ordered]@{
+                section   = $case.Section
+                role      = $case.Role
+                provider  = $target.provider
+                model     = $target.model
+                reasoning = $target.reasoning
+            })
+        }
+        $intent = New-IntentFile ('routing-' + $case.Group) $body
+        Invoke-Scenario -Name ('intent-routing-' + $case.Group + '-dryrun') -Mode 'ApplyIntentPath.DryRun' `
+            -ModeArgs @('-ApplyIntentPath', $intent, '-OutFile', (Join-Path $root ('out\intent-routing-' + $case.Group + '-dryrun\result.json')), '-DryRun') `
+            -IntentPath $intent
+        Invoke-Scenario -Name ('intent-routing-' + $case.Group + '-apply') -Mode 'ApplyIntentPath.Apply' `
+            -ModeArgs @('-ApplyIntentPath', $intent, '-OutFile', (Join-Path $root ('out\intent-routing-' + $case.Group + '-apply\result.json'))) `
+            -IntentPath $intent
+    }
 }
 
-$summarizerIntent = New-IntentFile 'summarizer' ([ordered]@{
+# ---- New r3a intent scenarios (todo 6) --------------------------------------------------------------------------
+# Scenarios:
+#   intent-memory-custom-dryrun, intent-memory-custom-apply, intent-memory-quick-apply,
+#   intent-reflection-custom-dryrun, intent-reflection-custom-apply,
+#   intent-main-dryrun, intent-main-apply
+# The chosen custom memory model is openai/gpt-6-sol (reasoning: high), which is served in all fixture homes.
+$chosenCustomModel = 'openai/gpt-6-sol'
+$chosenCustomReasoning = 'high'
+$chosenMainModel = (Resolve-CatalogAlias 'flash-high').model
+$chosenMainReasoning = (Resolve-CatalogAlias 'flash-high').reasoning
+
+$intentMemoryCustom = New-IntentFile 'memory-custom' ([ordered]@{
+    schema      = 1
+    profileKey  = 'gpt-kimi-deepseek'
+    activate    = $false
+    routing     = @()
+    memoryModel = [ordered]@{ mode = 'custom'; model = $chosenCustomModel; reasoning = $chosenCustomReasoning }
+})
+Invoke-Scenario -Name 'intent-memory-custom-dryrun' -Mode 'ApplyIntentPath.DryRun' `
+    -ModeArgs @('-ApplyIntentPath', $intentMemoryCustom, '-OutFile', (Join-Path $root 'out\intent-memory-custom-dryrun\result.json'), '-DryRun') `
+    -IntentPath $intentMemoryCustom
+Invoke-Scenario -Name 'intent-memory-custom-apply' -Mode 'ApplyIntentPath.Apply' `
+    -ModeArgs @('-ApplyIntentPath', $intentMemoryCustom, '-OutFile', (Join-Path $root 'out\intent-memory-custom-apply\result.json')) `
+    -IntentPath $intentMemoryCustom
+
+$intentMemoryQuick = New-IntentFile 'memory-quick' ([ordered]@{
+    schema      = 1
+    profileKey  = 'gpt-kimi-deepseek'
+    activate    = $false
+    routing     = @()
+    memoryModel = [ordered]@{ mode = 'quick' }
+})
+Invoke-Scenario -Name 'intent-memory-quick-apply' -Mode 'ApplyIntentPath.Apply' `
+    -ModeArgs @('-ApplyIntentPath', $intentMemoryQuick, '-OutFile', (Join-Path $root 'out\intent-memory-quick-apply\result.json')) `
+    -IntentPath $intentMemoryQuick
+
+$intentReflectionCustom = New-IntentFile 'reflection-custom' ([ordered]@{
+    schema                 = 1
+    profileKey             = 'gpt-kimi-deepseek'
+    activate               = $false
+    routing                = @()
+    reflectionMemoryModel  = [ordered]@{ mode = 'custom'; model = $chosenCustomModel; reasoning = $chosenCustomReasoning }
+})
+Invoke-Scenario -Name 'intent-reflection-custom-dryrun' -Mode 'ApplyIntentPath.DryRun' `
+    -ModeArgs @('-ApplyIntentPath', $intentReflectionCustom, '-OutFile', (Join-Path $root 'out\intent-reflection-custom-dryrun\result.json'), '-DryRun') `
+    -IntentPath $intentReflectionCustom
+Invoke-Scenario -Name 'intent-reflection-custom-apply' -Mode 'ApplyIntentPath.Apply' `
+    -ModeArgs @('-ApplyIntentPath', $intentReflectionCustom, '-OutFile', (Join-Path $root 'out\intent-reflection-custom-apply\result.json')) `
+    -IntentPath $intentReflectionCustom
+
+$intentMain = New-IntentFile 'main' ([ordered]@{
     schema     = 1
     profileKey = 'gpt-kimi-deepseek'
     activate   = $false
     routing    = @()
-    summarizer = (Resolve-CatalogAlias 'flash-high').model
-})
-Invoke-Scenario -Name 'intent-summarizer-dryrun' -Mode 'ApplyIntentPath.DryRun' `
-    -ModeArgs @('-ApplyIntentPath', $summarizerIntent, '-OutFile', (Join-Path $root 'out\intent-summarizer-dryrun\result.json'), '-DryRun') `
-    -IntentPath $summarizerIntent
-Invoke-Scenario -Name 'intent-summarizer-apply' -Mode 'ApplyIntentPath.Apply' `
-    -ModeArgs @('-ApplyIntentPath', $summarizerIntent, '-OutFile', (Join-Path $root 'out\intent-summarizer-apply\result.json')) `
-    -IntentPath $summarizerIntent
-
-# One routing change per display purpose group (groups copied from $script:RoutingGroups in the switcher).
-$routingCases = @(
-    @{ Group = 'discovery'; Section = 'agents'; Role = 'explore'; TargetAlias = 'sol' }
-    @{ Group = 'planning'; Section = 'agents'; Role = 'plan-consultant'; TargetAlias = 'terra' }
-    @{ Group = 'review'; Section = 'agents'; Role = 'plan-reviewer'; TargetAlias = 'sol' }
-    @{ Group = 'general'; Section = 'categories'; Role = 'quick'; TargetAlias = 'kimi-max' }
-    @{ Group = 'reasoning'; Section = 'categories'; Role = 'deep-low'; TargetAlias = 'kimi-max' }
-    @{ Group = 'specialism'; Section = 'categories'; Role = 'architect'; TargetAlias = 'terra' }
-)
-foreach ($case in $routingCases) {
-    $target = Resolve-CatalogAlias $case.TargetAlias
-    $body = [ordered]@{
-        schema     = 1
-        profileKey = 'gpt-kimi-deepseek'
-        activate   = $false
-        routing    = @([ordered]@{
-            section   = $case.Section
-            role      = $case.Role
-            provider  = $target.provider
-            model     = $target.model
-            reasoning = $target.reasoning
-        })
+    main       = [ordered]@{
+        provider  = ($chosenMainModel -split '/', 2)[0]
+        model     = $chosenMainModel
+        reasoning = $chosenMainReasoning
     }
-    $intent = New-IntentFile ('routing-' + $case.Group) $body
-    Invoke-Scenario -Name ('intent-routing-' + $case.Group + '-dryrun') -Mode 'ApplyIntentPath.DryRun' `
-        -ModeArgs @('-ApplyIntentPath', $intent, '-OutFile', (Join-Path $root ('out\intent-routing-' + $case.Group + '-dryrun\result.json')), '-DryRun') `
-        -IntentPath $intent
-    Invoke-Scenario -Name ('intent-routing-' + $case.Group + '-apply') -Mode 'ApplyIntentPath.Apply' `
-        -ModeArgs @('-ApplyIntentPath', $intent, '-OutFile', (Join-Path $root ('out\intent-routing-' + $case.Group + '-apply\result.json'))) `
-        -IntentPath $intent
-}
+})
+Invoke-Scenario -Name 'intent-main-dryrun' -Mode 'ApplyIntentPath.DryRun' `
+    -ModeArgs @('-ApplyIntentPath', $intentMain, '-OutFile', (Join-Path $root 'out\intent-main-dryrun\result.json'), '-DryRun') `
+    -IntentPath $intentMain
+Invoke-Scenario -Name 'intent-main-apply' -Mode 'ApplyIntentPath.Apply' `
+    -ModeArgs @('-ApplyIntentPath', $intentMain, '-OutFile', (Join-Path $root 'out\intent-main-apply\result.json')) `
+    -IntentPath $intentMain
 
 # ---- manifest --------------------------------------------------------------------------------------------------
 $engineVersion = (& 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -NoProfile -Command '$PSVersionTable.PSVersion.ToString()') -join ''

@@ -1,0 +1,123 @@
+{
+    "scenario":  "intent-main-dryrun",
+    "mode":  "ApplyIntentPath.DryRun",
+    "modeArgs":  [
+                     "-ApplyIntentPath",
+                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\intents\\main.json",
+                     "-OutFile",
+                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\out\\intent-main-dryrun\\result.json",
+                     "-DryRun"
+                 ],
+    "exitCode":  0,
+    "durationMs":  2673,
+    "engine":  "powershell.exe",
+    "intent":  {
+                   "schema":  1,
+                   "profileKey":  "gpt-kimi-deepseek",
+                   "activate":  false,
+                   "routing":  [
+
+                               ],
+                   "main":  {
+                                "provider":  "opencode-go",
+                                "model":  "opencode-go/deepseek-v4-flash",
+                                "reasoning":  "high"
+                            }
+               },
+    "stream":  null,
+    "result":  {
+                   "files":  [
+                                 {
+                                     "path":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo\\runtime\\native-profile-switcher-main.json",
+                                     "preSha256":  "c7f7bb374d6dc42f6bf0c81b1a6bb9d0d83463a20c3ec77a5575325f667d2892",
+                                     "before":  {
+                                                    "native-gpt-deepseek":  {
+                                                                                "provider":  "commandcode",
+                                                                                "model":  "deepseek/deepseek-v4-pro",
+                                                                                "thinking":  "high"
+                                                                            },
+                                                    "native-cmd-glm-deepseek":  {
+                                                                                    "provider":  "anthropic-subscription",
+                                                                                    "model":  "claude-opus-5-5",
+                                                                                    "thinking":  "medium"
+                                                                                },
+                                                    "native-experimental-custom":  {
+                                                                                       "provider":  "anthropic-subscription",
+                                                                                       "model":  "claude-sonnet-5-5",
+                                                                                       "thinking":  "high"
+                                                                                   }
+                                                },
+                                     "after":  {
+                                                   "native-gpt-deepseek":  {
+                                                                               "provider":  "commandcode",
+                                                                               "model":  "deepseek/deepseek-v4-pro",
+                                                                               "thinking":  "high"
+                                                                           },
+                                                   "native-cmd-glm-deepseek":  {
+                                                                                   "provider":  "anthropic-subscription",
+                                                                                   "model":  "claude-opus-5-5",
+                                                                                   "thinking":  "medium"
+                                                                               },
+                                                   "native-experimental-custom":  {
+                                                                                      "provider":  "anthropic-subscription",
+                                                                                      "model":  "claude-sonnet-5-5",
+                                                                                      "thinking":  "high"
+                                                                                  },
+                                                   "native-gpt-kimi-deepseek":  {
+                                                                                    "provider":  "opencode-go",
+                                                                                    "model":  "deepseek-v4-flash",
+                                                                                    "thinking":  "high"
+                                                                                }
+                                               },
+                                     "bomBefore":  false,
+                                     "bomAfter":  false
+                                 }
+                             ],
+                   "activation":  {
+                                      "from":  "experimental-custom",
+                                      "to":  "experimental-custom"
+                                  },
+                   "nonFileEffects":  [
+
+                                      ],
+                   "skippedUnderIsolation":  [
+
+                                             ],
+                   "steps":  [
+                                 {
+                                     "name":  "Invoke-PendingApply",
+                                     "ok":  true,
+                                     "message":  "보류 변경 1건을 반영했습니다."
+                                 },
+                                 {
+                                     "name":  "main",
+                                     "ok":  true,
+                                     "message":  "보류 변경 1건을 반영했습니다."
+                                 }
+                             ],
+                   "preSha256":  {
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.config\\opencode\\opencode.json":  "1a8946a566d6cfd2f283c91d9f0cca923badb1be8350bbc0bc93082423494abf",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo\\agent\\models.json":  "3103af76afba2af0580e5441639c9fa450f979a40826a16fe68c691e0dab45ef",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo\\agent\\models-store.json":  "40a1ed0a447021d4aaad4751c59b0b40e8b4d0d0966186dc32aa9453c17e19b7",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo\\agent\\native-profile-selection.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo\\agent\\settings.json":  "a64d758bfb51d2393f272c427c10cdfd79a644db98361f334857875782eaf031",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo\\commandcode-subscriptions.json":  null,
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo\\native-profile-selection.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo\\omo.jsonc":  "3fa290db641f561a88fb2fc9fcccf55bf6919eb16fa1387250c70735d978018b",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo\\runtime\\native-profile-selection.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo\\runtime\\native-profile-switcher-main.json":  "c7f7bb374d6dc42f6bf0c81b1a6bb9d0d83463a20c3ec77a5575325f667d2892",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo\\runtime\\native-profile-switcher-recommendation.json":  "607ff504160843ef5d52ad7e0095d20dc83e036ba87cf2e3427c1b06788bcedb",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo-stable-500\\home\\.omo\\agent\\models.json":  "a616536b3812629b7174106e4ea3cc674bb3e2225fa16b50f67c02ba8dbf78f4",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo-stable-500\\home\\.omo\\agent\\models-store.json":  "48cbaaf9049291e0b6e9125995d0b21febc9f640ef5207dc5cc2f16354f88114",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo-stable-500\\home\\.omo\\agent\\native-profile-selection.json":  "d9114b2a68a341c67bc7a25538d4bde3749fa12571b05e412e72df455255276c",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo-stable-500\\home\\.omo\\agent\\settings.json":  "51b573afbd4dff395310a88ed8a19a490d4281b97b0c8b977f0f869f150118b9",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo-stable-500\\home\\.omo\\commandcode-subscriptions.json":  null,
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo-stable-500\\home\\.omo\\native-profile-selection.json":  "d9114b2a68a341c67bc7a25538d4bde3749fa12571b05e412e72df455255276c",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo-stable-500\\home\\.omo\\omo.jsonc":  "67688cd08464c8405173918065233505e379c54461dda38faeb5536368b9250a",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo-stable-500\\home\\.omo\\runtime\\native-profile-selection.json":  "d9114b2a68a341c67bc7a25538d4bde3749fa12571b05e412e72df455255276c",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo-stable-500\\home\\.omo\\runtime\\native-profile-switcher-main.json":  "edc9f01c693a7c140b46e870e32a64818b8d280b754c6149549d65e7517ac17f",
+                                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\inputs\\OMO_Native_Recommendation.json":  "946865e7dc92c625aac23dea349b3da2154d56a98c7e226766d9b3ed24337d3b"
+                                 },
+                   "partial":  false
+               }
+}

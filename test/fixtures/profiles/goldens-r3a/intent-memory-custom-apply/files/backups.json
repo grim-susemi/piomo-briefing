@@ -1,0 +1,15 @@
+{
+    "primary":  [
+                    {
+                        "name":  "kibitzer-a9193003a9af4eccad371bca9936f04b.jsonc",
+                        "sha256":  "3fa290db641f561a88fb2fc9fcccf55bf6919eb16fa1387250c70735d978018b"
+                    },
+                    {
+                        "name":  "kibitzer-d81b57e5d12b49e8a5d11b13356b8054.jsonc",
+                        "sha256":  "67688cd08464c8405173918065233505e379c54461dda38faeb5536368b9250a"
+                    }
+                ],
+    "stable":  [
+
+               ]
+}

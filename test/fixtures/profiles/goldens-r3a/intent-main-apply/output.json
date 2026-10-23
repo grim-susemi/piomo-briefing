@@ -1,0 +1,56 @@
+{
+    "scenario":  "intent-main-apply",
+    "mode":  "ApplyIntentPath.Apply",
+    "modeArgs":  [
+                     "-ApplyIntentPath",
+                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\intents\\main.json",
+                     "-OutFile",
+                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\out\\intent-main-apply\\result.json"
+                 ],
+    "exitCode":  0,
+    "durationMs":  1370,
+    "engine":  "powershell.exe",
+    "intent":  {
+                   "schema":  1,
+                   "profileKey":  "gpt-kimi-deepseek",
+                   "activate":  false,
+                   "routing":  [
+
+                               ],
+                   "main":  {
+                                "provider":  "opencode-go",
+                                "model":  "opencode-go/deepseek-v4-flash",
+                                "reasoning":  "high"
+                            }
+               },
+    "stream":  null,
+    "result":  {
+                   "steps":  [
+                                 {
+                                     "name":  "Invoke-PendingApply",
+                                     "ok":  true,
+                                     "message":  "보류 변경 1건을 반영했습니다."
+                                 },
+                                 {
+                                     "name":  "main",
+                                     "ok":  true,
+                                     "message":  "보류 변경 1건을 반영했습니다."
+                                 }
+                             ],
+                   "written":  [
+                                   {
+                                       "path":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo\\runtime\\native-profile-switcher-main.json",
+                                       "backupPath":  null,
+                                       "backupSha256":  null,
+                                       "postSha256":  "6e5e16b23b4a8a8b0535dbdfe5b48267f399b9637a65de0166b186106f888440"
+                                   }
+                               ],
+                   "nonFileEffects":  [
+
+                                      ],
+                   "skippedUnderIsolation":  [
+
+                                             ],
+                   "partial":  false
+               }
+}

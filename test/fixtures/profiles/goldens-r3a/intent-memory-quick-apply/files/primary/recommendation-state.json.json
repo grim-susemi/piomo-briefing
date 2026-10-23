@@ -1,0 +1,30 @@
+{
+    "schemaVersion":  1,
+    "status":  "changed",
+    "checkedAt":  "2026-10-23T15:37:53.6081672Z",
+    "snapshotDate":  "2026-10-14",
+    "revisions":  [
+                      {
+                          "path":  "plugin/extensions/omo-task.js",
+                          "baseline":  "3083fecf39e3f2fac7a67ac8962d9d385a066129827c3f3c4457899480a332b6",
+                          "latest":  "0dd146b930bd525cca12b6b39387a4d07db5cff0f5b6e29f3bf3ef04d2bdf45d"
+                      },
+                      {
+                          "path":  "plugin/extensions/omo.js",
+                          "baseline":  "29b8f399fdfe11a45ce691f51f660aaa24b82a2b7ab851260bf322cdf84518c9",
+                          "latest":  "99262013ba80365491acdb1224291f6f41c5b0e1013e07ca605e452ed8c83b19"
+                      }
+                  ],
+    "changedSources":  [
+                           {
+                               "Path":  "plugin/extensions/omo-task.js",
+                               "Baseline":  "3083fecf39e3f2fac7a67ac8962d9d385a066129827c3f3c4457899480a332b6",
+                               "Latest":  "0dd146b930bd525cca12b6b39387a4d07db5cff0f5b6e29f3bf3ef04d2bdf45d"
+                           },
+                           {
+                               "Path":  "plugin/extensions/omo.js",
+                               "Baseline":  "29b8f399fdfe11a45ce691f51f660aaa24b82a2b7ab851260bf322cdf84518c9",
+                               "Latest":  "99262013ba80365491acdb1224291f6f41c5b0e1013e07ca605e452ed8c83b19"
+                           }
+                       ]
+}

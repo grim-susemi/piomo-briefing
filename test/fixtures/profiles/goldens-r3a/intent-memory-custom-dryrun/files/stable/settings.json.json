@@ -1,0 +1,36 @@
+{
+    "defaultProvider":  "anthropic-subscription",
+    "defaultModel":  "claude-sonnet-5-5",
+    "defaultThinkingLevel":  "high",
+    "tuiMode":  "fullscreen",
+    "packages":  [
+                     "<redacted>",
+                     "C:/Users/USER/.omo-stable-500/home/.omo/agent/packages/piomo-agent-coordination-mod"
+                 ],
+    "extensions":  [
+                       "C:/Users/USER/orca/projects/herdr-agent-sidebar-diagnosis/repair/herdr-senpi.mjs"
+                   ],
+    "hideThinkingBlock":  true,
+    "theme":  "dark",
+    "markdown":  {
+                     "mermaid":  "streaming"
+                 },
+    "compaction":  {
+                       "enabled":  true,
+                       "summarizationMaxDurationMs":  900000,
+                       "model":  "opencode-go/muse-spark-1.3-contributor"
+                   },
+    "smoothStreamingFps":  60,
+    "defaultProjectTrust":  "always",
+    "fullscreenScrollbar":  "auto",
+    "fullscreenCopyOnSelect":  true,
+    "fullscreenWheelScrollLines":  "auto",
+    "retry":  {
+                  "modelFallback":  false,
+                  "fallbackChains":  {
+                                         "*":  [
+
+                                               ]
+                                     }
+              }
+}

@@ -1,0 +1,234 @@
+{
+    "schema":  1,
+    "generatedAt":  "2026-10-23T20:42:58.5833687Z",
+    "fixtureRoot":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674",
+    "engine":  {
+                   "file":  "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                   "name":  "Windows PowerShell",
+                   "version":  "5.1.26100.8875",
+                   "edition":  "Desktop",
+                   "launcher":  "C:\\Users\\USER\\Desktop\\OMO Native Profile Switcher.vbs",
+                   "launcherSha256":  "b6947a69c3f5869b861664bdabc925a7b82cab2de6a5d58c3219fcc2ed478249",
+                   "launcherCommand":  "powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File OMO_Native_Profile_Switcher.ps1"
+               },
+    "switcher":  {
+                     "path":  "C:\\Users\\USER\\Desktop\\OpenCode_Modes\\OMO_Native_Profile_Switcher.ps1",
+                     "sha256":  "694bfe28660ec64eceffa1956e58fa6eb2820e10b04f4d9a442d62ed5fd96bec"
+                 },
+    "recommendationManifest":  {
+                                   "source":  "C:\\Users\\USER\\Desktop\\OpenCode_Modes\\OMO_Native_Recommendation.json",
+                                   "fixture":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\inputs\\OMO_Native_Recommendation.json",
+                                   "sha256":  "946865e7dc92c625aac23dea349b3da2154d56a98c7e226766d9b3ed24337d3b"
+                               },
+    "seed":  {
+                 "sources":  {
+                                 "primary":  "C:\\Users\\USER\\.omo",
+                                 "stable500":  "C:\\Users\\USER\\.omo-stable-500\\home\\.omo"
+                             },
+                 "files":  {
+                               "home\\.config\\opencode\\opencode.json":  "1a8946a566d6cfd2f283c91d9f0cca923badb1be8350bbc0bc93082423494abf",
+                               "home\\.omo\\agent\\models.json":  "3103af76afba2af0580e5441639c9fa450f979a40826a16fe68c691e0dab45ef",
+                               "home\\.omo\\agent\\models-store.json":  "40a1ed0a447021d4aaad4751c59b0b40e8b4d0d0966186dc32aa9453c17e19b7",
+                               "home\\.omo\\agent\\native-profile-selection.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                               "home\\.omo\\agent\\settings.json":  "a64d758bfb51d2393f272c427c10cdfd79a644db98361f334857875782eaf031",
+                               "home\\.omo\\memory-model-selection.json":  "f0d58f79ce26d6d378c7c7589190781c644bcf2528437c0c277261fb908c2fe3",
+                               "home\\.omo\\native-profile-selection.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                               "home\\.omo\\omo.jsonc":  "3fa290db641f561a88fb2fc9fcccf55bf6919eb16fa1387250c70735d978018b",
+                               "home\\.omo\\runtime\\native-profile-selection.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                               "home\\.omo\\runtime\\native-profile-switcher-main.json":  "c7f7bb374d6dc42f6bf0c81b1a6bb9d0d83463a20c3ec77a5575325f667d2892",
+                               "home\\.omo\\runtime\\native-profile-switcher-recommendation.json":  "607ff504160843ef5d52ad7e0095d20dc83e036ba87cf2e3427c1b06788bcedb",
+                               "home\\.omo-stable-500\\home\\.omo\\agent\\models.json":  "a616536b3812629b7174106e4ea3cc674bb3e2225fa16b50f67c02ba8dbf78f4",
+                               "home\\.omo-stable-500\\home\\.omo\\agent\\models-store.json":  "48cbaaf9049291e0b6e9125995d0b21febc9f640ef5207dc5cc2f16354f88114",
+                               "home\\.omo-stable-500\\home\\.omo\\agent\\native-profile-selection.json":  "d9114b2a68a341c67bc7a25538d4bde3749fa12571b05e412e72df455255276c",
+                               "home\\.omo-stable-500\\home\\.omo\\agent\\settings.json":  "51b573afbd4dff395310a88ed8a19a490d4281b97b0c8b977f0f869f150118b9",
+                               "home\\.omo-stable-500\\home\\.omo\\memory-model-selection.json":  "f0d58f79ce26d6d378c7c7589190781c644bcf2528437c0c277261fb908c2fe3",
+                               "home\\.omo-stable-500\\home\\.omo\\native-profile-selection.json":  "d9114b2a68a341c67bc7a25538d4bde3749fa12571b05e412e72df455255276c",
+                               "home\\.omo-stable-500\\home\\.omo\\omo.jsonc":  "67688cd08464c8405173918065233505e379c54461dda38faeb5536368b9250a",
+                               "home\\.omo-stable-500\\home\\.omo\\runtime\\native-profile-selection.json":  "d9114b2a68a341c67bc7a25538d4bde3749fa12571b05e412e72df455255276c",
+                               "home\\.omo-stable-500\\home\\.omo\\runtime\\native-profile-switcher-main.json":  "edc9f01c693a7c140b46e870e32a64818b8d280b754c6149549d65e7517ac17f"
+                           },
+                 "laneMirrors":  [
+                                     {
+                                         "name":  "omo-original",
+                                         "source":  "C:\\Users\\USER\\.omo-original\\home\\.omo",
+                                         "present":  false,
+                                         "copied":  [
+
+                                                    ]
+                                     },
+                                     {
+                                         "name":  "somo",
+                                         "source":  "C:\\Users\\USER\\.somo\\home\\.omo",
+                                         "present":  false,
+                                         "copied":  [
+
+                                                    ]
+                                     }
+                                 ],
+                 "excluded":  [
+                                  "auth.json",
+                                  "credential-pool-state.json",
+                                  "models-store backups",
+                                  "sessions",
+                                  "logs"
+                              ]
+             },
+    "liveHashes":  {
+                       "before":  {
+                                      "C:\\Users\\USER\\.omo-stable-500\\home\\.omo\\omo.jsonc":  "67688cd08464c8405173918065233505e379c54461dda38faeb5536368b9250a",
+                                      "C:\\Users\\USER\\.omo-stable-500\\home\\.omo\\agent\\settings.json":  "51b573afbd4dff395310a88ed8a19a490d4281b97b0c8b977f0f869f150118b9",
+                                      "C:\\Users\\USER\\.omo-stable-500\\home\\.omo\\agent\\models.json":  "a616536b3812629b7174106e4ea3cc674bb3e2225fa16b50f67c02ba8dbf78f4",
+                                      "C:\\Users\\USER\\.omo\\omo.jsonc":  "3fa290db641f561a88fb2fc9fcccf55bf6919eb16fa1387250c70735d978018b",
+                                      "C:\\Users\\USER\\.omo\\agent\\settings.json":  "a64d758bfb51d2393f272c427c10cdfd79a644db98361f334857875782eaf031"
+                                  },
+                       "after":  {
+                                     "C:\\Users\\USER\\.omo-stable-500\\home\\.omo\\omo.jsonc":  "67688cd08464c8405173918065233505e379c54461dda38faeb5536368b9250a",
+                                     "C:\\Users\\USER\\.omo-stable-500\\home\\.omo\\agent\\settings.json":  "51b573afbd4dff395310a88ed8a19a490d4281b97b0c8b977f0f869f150118b9",
+                                     "C:\\Users\\USER\\.omo-stable-500\\home\\.omo\\agent\\models.json":  "a616536b3812629b7174106e4ea3cc674bb3e2225fa16b50f67c02ba8dbf78f4",
+                                     "C:\\Users\\USER\\.omo\\omo.jsonc":  "3fa290db641f561a88fb2fc9fcccf55bf6919eb16fa1387250c70735d978018b",
+                                     "C:\\Users\\USER\\.omo\\agent\\settings.json":  "a64d758bfb51d2393f272c427c10cdfd79a644db98361f334857875782eaf031"
+                                 }
+                   },
+    "scenarios":  {
+                      "intent-memory-custom-dryrun":  {
+                                                          "mode":  "ApplyIntentPath.DryRun",
+                                                          "exitCode":  0,
+                                                          "files":  {
+                                                                        "output.json":  "50e8ac795936d9aa9a58af656ae220a85ca5edd46a3a307fd1a32ea3106c6afc",
+                                                                        "files/primary/omo.jsonc.json":  "3fa290db641f561a88fb2fc9fcccf55bf6919eb16fa1387250c70735d978018b",
+                                                                        "files/primary/settings.json.json":  "a64d758bfb51d2393f272c427c10cdfd79a644db98361f334857875782eaf031",
+                                                                        "files/primary/models.json.json":  "3aa85e8c3e5306db0f5d9d10f4cf8cb65e3357c8753de9263255d5c7275b7663",
+                                                                        "files/primary/selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                                        "files/primary/agent-selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                                        "files/primary/runtime-selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                                        "files/primary/main-override.json.json":  "c7f7bb374d6dc42f6bf0c81b1a6bb9d0d83463a20c3ec77a5575325f667d2892",
+                                                                        "files/primary/recommendation-state.json.json":  "607ff504160843ef5d52ad7e0095d20dc83e036ba87cf2e3427c1b06788bcedb",
+                                                                        "files/stable/omo.jsonc.json":  "69956fb0e1e2185c03eb2eb8e787f957c7191374795cd995312d1b1a36e20677",
+                                                                        "files/stable/settings.json.json":  "e565957a703af125a2aa3ac8b1d279566e6d3c1265bfaffd77f0824a6849039f",
+                                                                        "files/stable/selection.json.json":  "d9114b2a68a341c67bc7a25538d4bde3749fa12571b05e412e72df455255276c",
+                                                                        "files/opencode/opencode.json.json":  "a96213b614d626380ba55225b97411d886f89515d5101f1352f739892004c63f",
+                                                                        "files/backups.json":  "675c163cc6a796401a3695b3b775c15117ff6cd40be214e27ba718ca2cabc6c5"
+                                                                    }
+                                                      },
+                      "intent-memory-custom-apply":  {
+                                                         "mode":  "ApplyIntentPath.Apply",
+                                                         "exitCode":  0,
+                                                         "files":  {
+                                                                       "output.json":  "dff0483cfa79b5ed2fe796942af0fbe901d05f2014444ce68daf23885b8bf54a",
+                                                                       "files/primary/omo.jsonc.json":  "730b059a3068504f5665e86f05bf11281ef9d542725ab9dbedb24d0a2c994bcd",
+                                                                       "files/primary/settings.json.json":  "a64d758bfb51d2393f272c427c10cdfd79a644db98361f334857875782eaf031",
+                                                                       "files/primary/models.json.json":  "3aa85e8c3e5306db0f5d9d10f4cf8cb65e3357c8753de9263255d5c7275b7663",
+                                                                       "files/primary/selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                                       "files/primary/agent-selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                                       "files/primary/runtime-selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                                       "files/primary/main-override.json.json":  "c7f7bb374d6dc42f6bf0c81b1a6bb9d0d83463a20c3ec77a5575325f667d2892",
+                                                                       "files/primary/recommendation-state.json.json":  "607ff504160843ef5d52ad7e0095d20dc83e036ba87cf2e3427c1b06788bcedb",
+                                                                       "files/stable/omo.jsonc.json":  "196b9adef32283dd9f72d6a7534ad94dedc9a2ad8fc95931d0533c3a647f2a3a",
+                                                                       "files/stable/settings.json.json":  "e565957a703af125a2aa3ac8b1d279566e6d3c1265bfaffd77f0824a6849039f",
+                                                                       "files/stable/selection.json.json":  "d9114b2a68a341c67bc7a25538d4bde3749fa12571b05e412e72df455255276c",
+                                                                       "files/opencode/opencode.json.json":  "a96213b614d626380ba55225b97411d886f89515d5101f1352f739892004c63f",
+                                                                       "files/backups.json":  "974fddb1a5472074e6c38e80021dc019f50297dca5e53ce4e7c392b7cae598d5"
+                                                                   }
+                                                     },
+                      "intent-memory-quick-apply":  {
+                                                        "mode":  "ApplyIntentPath.Apply",
+                                                        "exitCode":  0,
+                                                        "files":  {
+                                                                      "output.json":  "43ac9a1b8a671cc67ed9a28d007cd209e6d9ec8276235391d0821322889ce4a4",
+                                                                      "files/primary/omo.jsonc.json":  "3fa290db641f561a88fb2fc9fcccf55bf6919eb16fa1387250c70735d978018b",
+                                                                      "files/primary/settings.json.json":  "a64d758bfb51d2393f272c427c10cdfd79a644db98361f334857875782eaf031",
+                                                                      "files/primary/models.json.json":  "3aa85e8c3e5306db0f5d9d10f4cf8cb65e3357c8753de9263255d5c7275b7663",
+                                                                      "files/primary/selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                                      "files/primary/agent-selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                                      "files/primary/runtime-selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                                      "files/primary/main-override.json.json":  "c7f7bb374d6dc42f6bf0c81b1a6bb9d0d83463a20c3ec77a5575325f667d2892",
+                                                                      "files/primary/recommendation-state.json.json":  "607ff504160843ef5d52ad7e0095d20dc83e036ba87cf2e3427c1b06788bcedb",
+                                                                      "files/stable/omo.jsonc.json":  "69956fb0e1e2185c03eb2eb8e787f957c7191374795cd995312d1b1a36e20677",
+                                                                      "files/stable/settings.json.json":  "e565957a703af125a2aa3ac8b1d279566e6d3c1265bfaffd77f0824a6849039f",
+                                                                      "files/stable/selection.json.json":  "d9114b2a68a341c67bc7a25538d4bde3749fa12571b05e412e72df455255276c",
+                                                                      "files/opencode/opencode.json.json":  "a96213b614d626380ba55225b97411d886f89515d5101f1352f739892004c63f",
+                                                                      "files/backups.json":  "675c163cc6a796401a3695b3b775c15117ff6cd40be214e27ba718ca2cabc6c5"
+                                                                  }
+                                                    },
+                      "intent-reflection-custom-dryrun":  {
+                                                              "mode":  "ApplyIntentPath.DryRun",
+                                                              "exitCode":  0,
+                                                              "files":  {
+                                                                            "output.json":  "ca6a0b79d82eb12b3574712b319c54ac5e5503d9998db34119b60582072120ea",
+                                                                            "files/primary/omo.jsonc.json":  "3fa290db641f561a88fb2fc9fcccf55bf6919eb16fa1387250c70735d978018b",
+                                                                            "files/primary/settings.json.json":  "a64d758bfb51d2393f272c427c10cdfd79a644db98361f334857875782eaf031",
+                                                                            "files/primary/models.json.json":  "3aa85e8c3e5306db0f5d9d10f4cf8cb65e3357c8753de9263255d5c7275b7663",
+                                                                            "files/primary/selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                                            "files/primary/agent-selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                                            "files/primary/runtime-selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                                            "files/primary/main-override.json.json":  "c7f7bb374d6dc42f6bf0c81b1a6bb9d0d83463a20c3ec77a5575325f667d2892",
+                                                                            "files/primary/recommendation-state.json.json":  "607ff504160843ef5d52ad7e0095d20dc83e036ba87cf2e3427c1b06788bcedb",
+                                                                            "files/stable/omo.jsonc.json":  "69956fb0e1e2185c03eb2eb8e787f957c7191374795cd995312d1b1a36e20677",
+                                                                            "files/stable/settings.json.json":  "e565957a703af125a2aa3ac8b1d279566e6d3c1265bfaffd77f0824a6849039f",
+                                                                            "files/stable/selection.json.json":  "d9114b2a68a341c67bc7a25538d4bde3749fa12571b05e412e72df455255276c",
+                                                                            "files/opencode/opencode.json.json":  "a96213b614d626380ba55225b97411d886f89515d5101f1352f739892004c63f",
+                                                                            "files/backups.json":  "675c163cc6a796401a3695b3b775c15117ff6cd40be214e27ba718ca2cabc6c5"
+                                                                        }
+                                                          },
+                      "intent-reflection-custom-apply":  {
+                                                             "mode":  "ApplyIntentPath.Apply",
+                                                             "exitCode":  0,
+                                                             "files":  {
+                                                                           "output.json":  "8c569acfbce776fccd9efe7513843e6874e9494d138bdc6a705958a8520578fd",
+                                                                           "files/primary/omo.jsonc.json":  "074d8f31fe32a6a6c11163bb619f30ea94430c4081149b898270ed17d4aff44a",
+                                                                           "files/primary/settings.json.json":  "a64d758bfb51d2393f272c427c10cdfd79a644db98361f334857875782eaf031",
+                                                                           "files/primary/models.json.json":  "3aa85e8c3e5306db0f5d9d10f4cf8cb65e3357c8753de9263255d5c7275b7663",
+                                                                           "files/primary/selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                                           "files/primary/agent-selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                                           "files/primary/runtime-selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                                           "files/primary/main-override.json.json":  "c7f7bb374d6dc42f6bf0c81b1a6bb9d0d83463a20c3ec77a5575325f667d2892",
+                                                                           "files/primary/recommendation-state.json.json":  "607ff504160843ef5d52ad7e0095d20dc83e036ba87cf2e3427c1b06788bcedb",
+                                                                           "files/stable/omo.jsonc.json":  "ad4482d1582e119342c543eb2732af24981b7f4ee86133b77d2fddb980566f7e",
+                                                                           "files/stable/settings.json.json":  "e565957a703af125a2aa3ac8b1d279566e6d3c1265bfaffd77f0824a6849039f",
+                                                                           "files/stable/selection.json.json":  "d9114b2a68a341c67bc7a25538d4bde3749fa12571b05e412e72df455255276c",
+                                                                           "files/opencode/opencode.json.json":  "a96213b614d626380ba55225b97411d886f89515d5101f1352f739892004c63f",
+                                                                           "files/backups.json":  "c4bbc8a3aa9bb9547479269d1a10745e7bf934b8b481e6fc36e01cd5613996f3"
+                                                                       }
+                                                         },
+                      "intent-main-dryrun":  {
+                                                 "mode":  "ApplyIntentPath.DryRun",
+                                                 "exitCode":  0,
+                                                 "files":  {
+                                                               "output.json":  "1faa4a3d5570f1c9ee35e4eae911b37749d910026413c8864167ec95b7580626",
+                                                               "files/primary/omo.jsonc.json":  "3fa290db641f561a88fb2fc9fcccf55bf6919eb16fa1387250c70735d978018b",
+                                                               "files/primary/settings.json.json":  "a64d758bfb51d2393f272c427c10cdfd79a644db98361f334857875782eaf031",
+                                                               "files/primary/models.json.json":  "3aa85e8c3e5306db0f5d9d10f4cf8cb65e3357c8753de9263255d5c7275b7663",
+                                                               "files/primary/selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                               "files/primary/agent-selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                               "files/primary/runtime-selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                               "files/primary/main-override.json.json":  "c7f7bb374d6dc42f6bf0c81b1a6bb9d0d83463a20c3ec77a5575325f667d2892",
+                                                               "files/primary/recommendation-state.json.json":  "607ff504160843ef5d52ad7e0095d20dc83e036ba87cf2e3427c1b06788bcedb",
+                                                               "files/stable/omo.jsonc.json":  "69956fb0e1e2185c03eb2eb8e787f957c7191374795cd995312d1b1a36e20677",
+                                                               "files/stable/settings.json.json":  "e565957a703af125a2aa3ac8b1d279566e6d3c1265bfaffd77f0824a6849039f",
+                                                               "files/stable/selection.json.json":  "d9114b2a68a341c67bc7a25538d4bde3749fa12571b05e412e72df455255276c",
+                                                               "files/opencode/opencode.json.json":  "a96213b614d626380ba55225b97411d886f89515d5101f1352f739892004c63f",
+                                                               "files/backups.json":  "675c163cc6a796401a3695b3b775c15117ff6cd40be214e27ba718ca2cabc6c5"
+                                                           }
+                                             },
+                      "intent-main-apply":  {
+                                                "mode":  "ApplyIntentPath.Apply",
+                                                "exitCode":  0,
+                                                "files":  {
+                                                              "output.json":  "434cbc5149b14dc5e978ca60f63f791a99ba5faadf9a281df85fb81378c43008",
+                                                              "files/primary/omo.jsonc.json":  "3fa290db641f561a88fb2fc9fcccf55bf6919eb16fa1387250c70735d978018b",
+                                                              "files/primary/settings.json.json":  "a64d758bfb51d2393f272c427c10cdfd79a644db98361f334857875782eaf031",
+                                                              "files/primary/models.json.json":  "3aa85e8c3e5306db0f5d9d10f4cf8cb65e3357c8753de9263255d5c7275b7663",
+                                                              "files/primary/selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                              "files/primary/agent-selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                              "files/primary/runtime-selection.json.json":  "c704b0f30e5389707dc45f4d28620564ba71fc77864d4dcdf4b919f360e8051e",
+                                                              "files/primary/main-override.json.json":  "6e5e16b23b4a8a8b0535dbdfe5b48267f399b9637a65de0166b186106f888440",
+                                                              "files/primary/recommendation-state.json.json":  "607ff504160843ef5d52ad7e0095d20dc83e036ba87cf2e3427c1b06788bcedb",
+                                                              "files/stable/omo.jsonc.json":  "69956fb0e1e2185c03eb2eb8e787f957c7191374795cd995312d1b1a36e20677",
+                                                              "files/stable/settings.json.json":  "e565957a703af125a2aa3ac8b1d279566e6d3c1265bfaffd77f0824a6849039f",
+                                                              "files/stable/selection.json.json":  "d9114b2a68a341c67bc7a25538d4bde3749fa12571b05e412e72df455255276c",
+                                                              "files/opencode/opencode.json.json":  "a96213b614d626380ba55225b97411d886f89515d5101f1352f739892004c63f",
+                                                              "files/backups.json":  "675c163cc6a796401a3695b3b775c15117ff6cd40be214e27ba718ca2cabc6c5"
+                                                          }
+                                            }
+                  }
+}

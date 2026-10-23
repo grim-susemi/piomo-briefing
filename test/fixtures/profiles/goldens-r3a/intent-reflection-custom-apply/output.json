@@ -1,0 +1,62 @@
+{
+    "scenario":  "intent-reflection-custom-apply",
+    "mode":  "ApplyIntentPath.Apply",
+    "modeArgs":  [
+                     "-ApplyIntentPath",
+                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\intents\\reflection-custom.json",
+                     "-OutFile",
+                     "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\out\\intent-reflection-custom-apply\\result.json"
+                 ],
+    "exitCode":  0,
+    "durationMs":  9135,
+    "engine":  "powershell.exe",
+    "intent":  {
+                   "schema":  1,
+                   "profileKey":  "gpt-kimi-deepseek",
+                   "activate":  false,
+                   "routing":  [
+
+                               ],
+                   "reflectionMemoryModel":  {
+                                                 "mode":  "custom",
+                                                 "model":  "openai/gpt-6-sol",
+                                                 "reasoning":  "high"
+                                             }
+               },
+    "stream":  null,
+    "result":  {
+                   "steps":  [
+                                 {
+                                     "name":  "Invoke-PendingApply",
+                                     "ok":  true,
+                                     "message":  "보류 변경 1건을 반영했습니다."
+                                 },
+                                 {
+                                     "name":  "reflectionMemoryModel",
+                                     "ok":  true,
+                                     "message":  "보류 변경 1건을 반영했습니다."
+                                 }
+                             ],
+                   "written":  [
+                                   {
+                                       "path":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo\\omo.jsonc",
+                                       "backupPath":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo\\runtime\\native-profile-switcher-backups\\reflection-dcd98f057519410c869dfaeff3988ea7.jsonc",
+                                       "backupSha256":  "3fa290db641f561a88fb2fc9fcccf55bf6919eb16fa1387250c70735d978018b",
+                                       "postSha256":  "074d8f31fe32a6a6c11163bb619f30ea94430c4081149b898270ed17d4aff44a"
+                                   },
+                                   {
+                                       "path":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo-stable-500\\home\\.omo\\omo.jsonc",
+                                       "backupPath":  "C:\\Users\\USER\\AppData\\Local\\Temp\\omo-switcher-tests\\piomo-pa-20261024-054208-674\\home\\.omo\\runtime\\native-profile-switcher-backups\\reflection-5710d16caa63422aa24d885b385e151b.jsonc",
+                                       "backupSha256":  "67688cd08464c8405173918065233505e379c54461dda38faeb5536368b9250a",
+                                       "postSha256":  "dd0baba116ec9350df09c7dd85b89f8bb265799e43b3e49ea139807a3b6aec83"
+                                   }
+                               ],
+                   "nonFileEffects":  [
+
+                                      ],
+                   "skippedUnderIsolation":  [
+
+                                             ],
+                   "partial":  false
+               }
+}
