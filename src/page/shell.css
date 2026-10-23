@@ -38,7 +38,7 @@
 .sh-h11 { --sh-hue: var(--tabhue-11); --sh-hue-bg: var(--tabhue-11-bg); }
 
 /* frame: rail | sidebar | (tab bar over the page) */
-.sh-shell { position: relative; display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
+.sh-shell { position: relative; display: flex; box-sizing: border-box; height: 100vh; height: 100dvh; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); overflow: hidden; }
 .sh-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .sh-main { flex: 1; min-height: 0; overflow: auto; }
 .sh-wrap > .live-status, .sh-wrap > .live-link { flex: none; }
@@ -264,6 +264,10 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 .tb:hover { background: var(--hov); color: var(--tx2); }
 .tb.on, .tb.on:hover { background: var(--sel); color: var(--tx); box-shadow: inset 0 0 0 1px var(--ctl-edge); }
 .tb.on .tt { font-weight: var(--fw-medium); }
+/* Keep the active window's identity and bell inside its capsule, including enlarged UI.
+ * The existing document strip scrolls instead of shrinking the selected title to zero. */
+.tb.on { flex-shrink: 0; min-width: max-content; }
+.tb.on .tt { min-width: calc(3 * var(--sp-5)); max-width: calc(3 * var(--sp-8)); }
 .tb-go {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); height: 100%; padding: 0 var(--sp-1) 0 var(--sp-2);
   border: 0; border-radius: inherit; background: none; color: inherit; font-size: var(--fs-base); white-space: nowrap;
@@ -277,6 +281,7 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 }
 .tb:hover .tb-x, .tb.on .tb-x, .tb-x:focus-visible { opacity: .7; }
 .tb-x:hover { background: var(--hov); opacity: 1; }
+.tb .tb-x:focus-visible { opacity: 1; }
 
 .sh-rb:focus-visible, .sh-ib:focus-visible, .sh-back:focus-visible, .sh-chip:focus-visible, .sh-sh:focus-visible,
 .sh-tg:focus-visible, .sh-go:focus-visible, .sh-fav:focus-visible, .sh-pt:focus-visible, .sh-it:focus-visible,
@@ -286,7 +291,7 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 }
 .copy { display: inline-flex; align-items: center; gap: var(--sp-1); }
 /* Shell actions and the shared page actions acknowledge a press using the same token-driven variant. */
-:is(.copy, .more, .detail-btn, .ans-opt, .ans-write, .ans-go, .ans-cancel, .cv-pick):active:not(:disabled) {
+:is(.copy, .more, .detail-btn, .ans-opt, .ans-write, .ans-go, .ans-cancel, .cv-pick, .cv-prevgo):active:not(:disabled) {
   background: var(--press); box-shadow: inset 0 0 0 1px var(--press-edge); transition-duration: 0s;
 }
 :is(.ans-opt.is-rec, .ans-go, .cv-pick.is-rec):active:not(:disabled) {
@@ -313,7 +318,7 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
  * stays filled there too */
 @media (max-width: 899px) {
   .sh-shell[data-side][data-peek] > .sh-side {
-    position: absolute; z-index: 7; left: var(--sh-rail-w); top: 0; bottom: 0;
+    position: absolute; z-index: 7; left: calc(var(--sh-rail-w) + env(safe-area-inset-left, 0px)); top: env(safe-area-inset-top, 0px); bottom: env(safe-area-inset-bottom, 0px);
     width: min(var(--sw), calc(100vw - var(--sh-rail-w) - 24px)); margin-left: 0; visibility: hidden;
     border: 0; border-right: var(--hair) solid var(--c-line-strong); border-radius: 0; box-shadow: var(--sh-shade); transition: none;
   }
@@ -336,8 +341,8 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
   .sh-scroll > *, .sh-nav > *, .sh-kids > * { flex-shrink: 0; }
   .sh-iw { display: grid; gap: var(--sp-2); margin-bottom: var(--sp-2); }
   .sh-rz { display: none; } /* the phone overlay keeps one width: nothing to drag */
-  .tb { flex: 0 0 auto; min-width: 0; max-width: 168px; } /* the bar scrolls sideways; titles keep their ellipsis */
-  .tb .tt { max-width: 96px; }
+  .tb { flex: 0 0 auto; min-width: 0; max-width: calc(8 * var(--sp-8)); } /* retain pin, number, title, bell and the close target */
+  .tb .tt { min-width: calc(3 * var(--sp-5)); max-width: calc(3 * var(--sp-8)); }
   /* The type scale makes the sub-tabs scroll. A sticky fade and a partly visible tab cue the continuation. */
   .sh-main .stabs { padding-right: calc(var(--cv-pad-x) + var(--sp-6)); }
   .sh-main .stabs::after {
@@ -356,4 +361,7 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 /* reduced motion (visual-qa G4): no slide; shell.js sync() cross-fades the part that changed instead; colour fades stay */
 @media (prefers-reduced-motion: reduce) {
   .sh-side, .sh-shell[data-side="closed"] > .sh-side { transition: opacity var(--dur) linear; }
+  /* A selected history row must never composite its text, icon or edge over the
+   * conversation. Override only this inherited WAAPI opacity fade, not navigation. */
+  .sh-side:has(.sh-prev.sel) { opacity: 1 !important; }
 }

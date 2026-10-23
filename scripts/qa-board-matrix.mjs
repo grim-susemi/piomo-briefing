@@ -905,7 +905,8 @@ async function click(sel, o) {
   await settle();
 }
 async function dblclick(sel) {
-  const p = await point(sel, { scroll: false });
+  const p = await point(sel);
+  if (!p.inside) throw new Error(`a double-click on ${sel} would land on ${p.hit}`);
   await dblclickAt(p.x, p.y);
   await settle();
 }
