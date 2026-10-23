@@ -40,7 +40,7 @@ class Element {
     this.nodeType = 1; this.tagName = tag.toUpperCase(); this.attrs = {}; this.childNodes = [];
     Object.defineProperty(this, 'parentNode', { value: null, writable: true });
     Object.defineProperty(this, 'win', { value: win });
-    this.listeners = {}; this.scrollTop = 0; this.value = ''; this.hidden = false; this.writes = 0;
+    this.listeners = {}; this.scrollTop = 0; this._value = ''; this.hidden = false; this.writes = 0;
     this.style = { setProperty(k, v) { this[k] = v; }, removeProperty(k) { delete this[k]; } };
     this.classList = {
       add: c => { const s = this.classes; s.add(c); this.attrs.class = [...s].join(' '); },
@@ -49,6 +49,17 @@ class Element {
       toggle: (c, force) => { const on = force ?? !this.classes.has(c); this.classList[on ? 'add' : 'remove'](c); return on; },
     };
   }
+  get value() {
+    if (this._value !== undefined && this._value !== null) return this._value;
+    if (this.tagName === 'SELECT') {
+      for (const opt of this.querySelectorAll('option')) {
+        if (opt.hasAttribute('selected')) return opt.getAttribute('value') || '';
+      }
+      return '';
+    }
+    return '';
+  }
+  set value(v) { this._value = String(v ?? ''); }
   get classes() { return new Set((this.attrs.class || '').split(/\s+/).filter(Boolean)); }
   get ownerDocument() { return this.win.document; }
   get id() { return this.attrs.id || ''; }

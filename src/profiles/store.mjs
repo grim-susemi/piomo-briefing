@@ -1076,13 +1076,25 @@ export function openProfilesStore(options = {}) {
       }
       case 'setMain': {
         if (!settings) return refusal('MISSING_CONFIG', 'agent/settings.json is missing');
-        if (typeof change.provider !== 'string' || !change.provider.trim()
-          || typeof change.model !== 'string' || !change.model.trim()) {
-          return refusal('BAD_REQUEST', 'provider and model are required');
-        }
         const profile = change.profileKey ? getProfile(change.profileKey)
           : context.selectedProfile ?? activeProfile(context.files);
         if (!profile) return refusal('BAD_REQUEST', 'an active profile is required');
+
+        if (!change.provider || !change.model || !change.thinking) {
+          // Removal of main override -> fall back to profile default
+          sidecar.value = setMainLayerOverride({
+            state: sidecar.value,
+            profileKey: profile.omoProfile,
+            main: null,
+          });
+          const defMain = resolveMainDefaults(profile, sidecar.value);
+          settings.value.defaultProvider = defMain.provider;
+          settings.value.defaultModel = defMain.model;
+          context.main = defMain;
+          context.mainOverrides.push({ profileKey: profile.omoProfile, main: null });
+          break;
+        }
+
         const thinking = typeof change.thinking === 'string' && change.thinking.trim()
           ? change.thinking : profile.mainThinking;
         if (!THINKING.includes(thinking)) return refusal('BAD_REQUEST', `unknown thinking level ${thinking}`);

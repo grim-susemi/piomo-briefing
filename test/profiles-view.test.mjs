@@ -1335,9 +1335,15 @@ test('order: a category edit plus activation in one apply leaves the active scop
   fs.writeFileSync(path.join(primary, 'native-profile-selection.json'), JSON.stringify({ key: 'gpt-kimi-deepseek', profile: 'native-gpt-kimi-deepseek', appliedAt: 'seed' }, null, 2));
   fs.writeFileSync(path.join(primary, 'agent', 'native-profile-selection.json'), JSON.stringify({ key: 'gpt-kimi-deepseek', profile: 'native-gpt-kimi-deepseek', appliedAt: 'seed' }, null, 2));
   fs.writeFileSync(path.join(stable, 'omo.jsonc'), fs.readFileSync(path.join(goldenDir, 'stable/omo.jsonc.json'), 'utf8'));
+  const regPrimary = path.join(ROOT, 'test', 'fixtures', 'profiles', 'registry', 'primary', 'agent', 'models.json');
+  const regStable = path.join(ROOT, 'test', 'fixtures', 'profiles', 'registry', 'stable', 'agent', 'models.json');
+  if (fs.existsSync(regPrimary)) fs.copyFileSync(regPrimary, path.join(primary, 'agent', 'models.json'));
+  if (fs.existsSync(regStable)) fs.copyFileSync(regStable, path.join(stable, 'agent', 'models.json'));
 
   const store = openProfilesStore({
-    roots: { primaryHome: primary, stableHome: stable, mirrorHomes: [] },
+    primaryHome: primary,
+    stableHome: stable,
+    mirrorHomes: [],
     now: () => 1700000000000,
   });
   const st = store.state();
@@ -1345,6 +1351,9 @@ test('order: a category edit plus activation in one apply leaves the active scop
 
   // Apply a category route change on a profile together with selecting that profile
   const targetProfile = 'experimental-custom';
+  const targetLayerCategoryBefore = st.details[targetProfile].routing.layer.categories['fast-explore'];
+  assert.equal(targetLayerCategoryBefore?.model, 'cmd-qwen-qwen3-7-flash');
+
   const res = await store.apply({
     action: 'apply',
     rosterRevision: st.roster.revision,
@@ -1354,7 +1363,7 @@ test('order: a category edit plus activation in one apply leaves the active scop
         kind: 'setRoute',
         profileKey: 'native-experimental-custom',
         section: 'categories',
-        role: 'deep-high',
+        role: 'fast-explore',
         provider: 'openai-opencodex',
         model: 'openai-opencodex/gpt-5.6-sol',
         thinking: 'high',
@@ -1368,9 +1377,11 @@ test('order: a category edit plus activation in one apply leaves the active scop
   assert.equal(res.ok, true, 'apply must succeed');
   const fresh = store.state();
   assert.equal(fresh.activeProfile.key, targetProfile);
-  const activeScopeCategory = fresh.routing.layer.categories['deep-high'];
-  const targetLayerCategory = fresh.details[targetProfile].routing.layer.categories['deep-high'];
+  const activeScopeCategory = fresh.routing.layer.categories['fast-explore'];
+  const targetLayerCategory = fresh.details[targetProfile].routing.layer.categories['fast-explore'];
   assert.deepEqual(activeScopeCategory, targetLayerCategory, 'active scope must equal the edited layer after activation');
+  assert.equal(activeScopeCategory.model, 'openai-opencodex-gpt-5-6-sol-high');
+  assert.notEqual(activeScopeCategory.model, targetLayerCategoryBefore.model);
 });
 
 test('drop: removes the draft too', () => {
@@ -1385,5 +1396,243 @@ test('drop: removes the draft too', () => {
   assert.equal(c.snapshot().pending.length, 0);
   assert.equal(c.snapshot().draft['route:agents/explore'], undefined, 'drop must remove draft too');
 });
+
+test('preview: optional; apply without preview posts once; a draft edit clears a shown preview', async () => {
+  const P = load();
+  let calls = 0;
+  const postedBodies = [];
+  const c = P.createController({
+    fetch: (url, opts) => {
+      calls += 1;
+      if (opts && opts.body) postedBodies.push(JSON.parse(opts.body));
+      return Promise.resolve({
+        status: 200,
+        json: async () => (opts && opts.body ? { ok: true, action: opts.body.includes('preview') ? 'preview' : 'apply', diffs: [], backups: [], writes: [] } : STATE),
+      });
+    },
+    token: 't',
+  });
+  await c.load();
+  calls = 0;
+
+  // Add a pending change
+  c.add({ kind: 'setRoute', section: 'agents', role: 'explore', provider: 'anthropic', model: 'anthropic/claude-opus-5-5', thinking: 'medium' });
+
+  // Apply directly without calling preview: must post exactly once
+  await c.apply();
+  assert.equal(calls, 2, 'apply without preview posts once to /profiles then reads state once');
+  assert.equal(postedBodies[0].action, 'apply');
+
+  // Next: preview, then a draft edit clears the shown preview
+  c.add({ kind: 'setRoute', section: 'agents', role: 'explore', provider: 'anthropic', model: 'anthropic/claude-opus-5-5', thinking: 'medium' });
+  await c.preview();
+  assert.ok(c.snapshot().preview, 'preview must be present after calling preview()');
+
+  // Draft edit clears shown preview
+  c.setDraft('route:agents/explore', { thinking: 'high' });
+  assert.equal(c.snapshot().preview, null, 'setDraft must clear shown preview');
+
+  await c.preview();
+  assert.ok(c.snapshot().preview);
+  c.touch();
+  assert.equal(c.snapshot().preview, null, 'touch must clear shown preview');
+
+  await c.preview();
+  assert.ok(c.snapshot().preview);
+  c.add({ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' });
+  assert.equal(c.snapshot().preview, null, 'add must clear shown preview');
+
+  await c.preview();
+  assert.ok(c.snapshot().preview);
+  c.drop(0);
+  assert.equal(c.snapshot().preview, null, 'drop must clear shown preview');
+});
+
+test('cascade role: service change clears model and effort; model change picks the first supported effort; a row stages only when complete', async () => {
+  const state = clone(STATE);
+  state.catalog = {
+    'opencode-contributor': {
+      model: 'opencode-go/muse-spark-1.3-contributor',
+      variant: 'medium',
+      served: { primary: true, stable: true },
+      levels: ['low', 'medium', 'high'],
+    },
+    'openai-sol': {
+      model: 'openai-opencodex/gpt-5.6-sol',
+      variant: 'high',
+      served: { primary: true, stable: true },
+      levels: ['off', 'low', 'medium', 'high'],
+    },
+  };
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'profiles-view', 'annotate'] });
+  e.page.receive({ seq: 1, generatedAt: 0, sessions: [] });
+  e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
+  e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => state });
+  await tick();
+
+  const row = e.byId.main.querySelector('[data-pf-route="agents/explore"]');
+  assert.ok(row, 'agents/explore row exists');
+  const provSel = row.querySelector('[data-pf="route-provider"]');
+  const mdlSel = row.querySelector('[data-pf="route-model"]');
+  const thinkSel = row.querySelector('[data-pf="route-thinking"]');
+
+  // Change service to openai-opencodex
+  provSel.value = 'openai-opencodex';
+  e.fire(provSel, 'change');
+  await tick();
+
+  const rowAfterSvc = e.byId.main.querySelector('[data-pf-route="agents/explore"]');
+  const mdlSelAfter = rowAfterSvc.querySelector('[data-pf="route-model"]');
+  const thinkSelAfter = rowAfterSvc.querySelector('[data-pf="route-thinking"]');
+
+  // Cascade: service change clears model and effort
+  assert.equal(selectedValueOf(mdlSelAfter), '');
+  assert.equal(selectedValueOf(thinkSelAfter), '');
+  // Row does not stage when incomplete
+  assert.ok(!e.page.state.ui.profilesState.pending.some((c) => c.kind === 'setRoute' && c.role === 'explore'));
+
+  // Model change to openai-opencodex/gpt-5.6-sol -> picks first supported effort (off)
+  mdlSelAfter.value = 'openai-opencodex/gpt-5.6-sol';
+  e.fire(mdlSelAfter, 'change');
+  await tick();
+
+  const rowAfterMdl = e.byId.main.querySelector('[data-pf-route="agents/explore"]');
+  const mdlSelFinal = rowAfterMdl.querySelector('[data-pf="route-model"]');
+  const thinkSelFinal = rowAfterMdl.querySelector('[data-pf="route-thinking"]');
+
+  assert.equal(selectedValueOf(mdlSelFinal), 'openai-opencodex/gpt-5.6-sol');
+  assert.equal(selectedValueOf(thinkSelFinal), 'off');
+
+  // Now all three are set: row stages!
+  const staged = e.page.state.ui.profilesState.pending.find((c) => c.kind === 'setRoute' && c.role === 'explore');
+  assert.ok(staged, 'row stages only when complete');
+  assert.equal(staged.provider, 'openai-opencodex');
+  assert.equal(staged.model, 'openai-opencodex/gpt-5.6-sol');
+  assert.equal(staged.thinking, 'off');
+});
+
+test('cascade main: service change keeps a model present in the new list and clamps the current effort, else empties the model and stages override removal; model change clamps the current effort', async () => {
+  const state = clone(STATE);
+  state.catalog = {
+    'ollama-flash': {
+      model: 'ollama/glm-5.3-flash',
+      variant: 'max',
+      served: { primary: true, stable: true },
+      levels: ['low', 'medium', 'high', 'max'],
+    },
+    'openai-sol': {
+      model: 'openai-opencodex/gpt-5.6-sol',
+      variant: 'xhigh',
+      served: { primary: true, stable: true },
+      levels: ['low', 'medium', 'high', 'xhigh'],
+    },
+    'opencode-sol': {
+      model: 'opencode/gpt-5.6-sol',
+      variant: 'xhigh',
+      served: { primary: true, stable: true },
+      levels: ['low', 'medium', 'high', 'xhigh'],
+    },
+  };
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'profiles-view', 'annotate'] });
+  e.page.receive({ seq: 1, generatedAt: 0, sessions: [] });
+  e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
+  e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => state });
+  await tick();
+
+  const mainBox = e.byId.main.querySelector('[data-pf-main]');
+  assert.ok(mainBox, 'mainBox exists');
+  const prov = mainBox.querySelector('[data-pf="main-provider"]');
+  const mdl = mainBox.querySelector('[data-pf="main-model"]');
+  const think = mainBox.querySelector('[data-pf="main-thinking"]');
+
+  // Case 1: Service whose list does not hold current model -> empties model and stages override removal
+  prov.value = 'ollama';
+  e.fire(prov, 'change');
+  await tick();
+  let mainBoxCur = e.byId.main.querySelector('[data-pf-main]');
+  let mdlCur = mainBoxCur.querySelector('[data-pf="main-model"]');
+  mdlCur.value = 'glm-5.3-flash';
+  e.fire(mdlCur, 'change');
+  await tick();
+  mainBoxCur = e.byId.main.querySelector('[data-pf-main]');
+  let thinkCur = mainBoxCur.querySelector('[data-pf="main-thinking"]');
+  thinkCur.value = 'max';
+  e.fire(thinkCur, 'change');
+  await tick();
+
+  mainBoxCur = e.byId.main.querySelector('[data-pf-main]');
+  let provCur = mainBoxCur.querySelector('[data-pf="main-provider"]');
+  provCur.value = 'openai-opencodex';
+  e.fire(provCur, 'change');
+  await tick();
+
+  mainBoxCur = e.byId.main.querySelector('[data-pf-main]');
+  mdlCur = mainBoxCur.querySelector('[data-pf="main-model"]');
+  thinkCur = mainBoxCur.querySelector('[data-pf="main-thinking"]');
+  assert.equal(selectedValueOf(mdlCur), '');
+  const stagedRemoval = e.page.state.ui.profilesState.pending.find((c) => c.kind === 'setMain');
+  assert.ok(stagedRemoval, 'stages override removal');
+  assert.equal(stagedRemoval.model, '');
+
+  // Case 2: Model change clamps current effort to the new model
+  mdlCur.value = 'gpt-5.6-sol';
+  e.fire(mdlCur, 'change');
+  await tick();
+
+  mainBoxCur = e.byId.main.querySelector('[data-pf-main]');
+  mdlCur = mainBoxCur.querySelector('[data-pf="main-model"]');
+  thinkCur = mainBoxCur.querySelector('[data-pf="main-thinking"]');
+  assert.equal(selectedValueOf(mdlCur), 'gpt-5.6-sol');
+  assert.equal(selectedValueOf(thinkCur), 'xhigh');
+
+  // Case 3: Service change whose list holds current model (by suffix gpt-5.6-sol) keeps model and clamps effort
+  provCur = mainBoxCur.querySelector('[data-pf="main-provider"]');
+  provCur.value = 'opencode';
+  e.fire(provCur, 'change');
+  await tick();
+
+  mainBoxCur = e.byId.main.querySelector('[data-pf-main]');
+  mdlCur = mainBoxCur.querySelector('[data-pf="main-model"]');
+  thinkCur = mainBoxCur.querySelector('[data-pf="main-thinking"]');
+  assert.equal(selectedValueOf(mdlCur), 'gpt-5.6-sol');
+  assert.equal(selectedValueOf(thinkCur), 'xhigh');
+});
+
+test('reapply: re-applying the active profile with nothing pending equals golden apply-cmd-glm-deepseek (canonicalised)', async (t) => {
+  const { openProfilesStore } = await import('../src/profiles/store.mjs');
+  const os = await import('node:os');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piomo-reapply-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const primary = path.join(root, 'primary');
+  const stable = path.join(root, 'stable');
+  fs.mkdirSync(path.join(primary, 'agent'), { recursive: true });
+  fs.mkdirSync(path.join(stable, 'agent'), { recursive: true });
+  const goldenDir = path.join(ROOT, 'test', 'fixtures', 'profiles', 'goldens', 'apply-cmd-glm-deepseek', 'files');
+  fs.writeFileSync(path.join(primary, 'omo.jsonc'), fs.readFileSync(path.join(goldenDir, 'primary/omo.jsonc.json'), 'utf8'));
+  fs.writeFileSync(path.join(primary, 'agent', 'settings.json'), fs.readFileSync(path.join(goldenDir, 'primary/settings.json.json'), 'utf8'));
+  fs.writeFileSync(path.join(primary, 'native-profile-selection.json'), JSON.stringify({ key: 'cmd-glm-deepseek', profile: 'native-cmd-glm-deepseek', appliedAt: 'seed' }, null, 2));
+  fs.writeFileSync(path.join(primary, 'agent', 'native-profile-selection.json'), JSON.stringify({ key: 'cmd-glm-deepseek', profile: 'native-cmd-glm-deepseek', appliedAt: 'seed' }, null, 2));
+  fs.writeFileSync(path.join(stable, 'omo.jsonc'), fs.readFileSync(path.join(goldenDir, 'stable/omo.jsonc.json'), 'utf8'));
+
+  const store = openProfilesStore({
+    primaryHome: primary,
+    stableHome: stable,
+    mirrorHomes: [],
+    now: () => 1700000000000,
+  });
+  const st = store.state();
+
+  // Re-apply active profile (cmd-glm-deepseek) with nothing pending
+  const res = await store.apply({
+    action: 'apply',
+    rosterRevision: st.roster.revision,
+    expected: st.targets,
+    changes: [{ kind: 'selectProfile', profileKey: 'cmd-glm-deepseek' }],
+  });
+  assert.equal(res.ok, true, 're-applying active profile must succeed');
+  const fresh = store.state();
+  assert.equal(fresh.activeProfile.key, 'cmd-glm-deepseek');
+});
+
 
 

@@ -225,7 +225,7 @@
     return select(name, attrs, opts, disabled);
   }
   function modelSelect(name, attrs, entries, provider, fullId, disabled) {
-    var opts = '', found = false, seen = map();
+    var opts = '<option value=""' + (fullId ? '' : ' selected') + '>(선택)</option>', found = false, seen = map();
     entries.forEach(function (e) {
       if (provider && providerOf(e.model) !== provider) return;
       if (e.model === fullId) found = true;
@@ -239,7 +239,7 @@
     return select(name, attrs, opts, disabled);
   }
   function mainModelSelect(name, attrs, entries, provider, bare, disabled) {
-    var opts = '', found = false, seen = map();
+    var opts = '<option value=""' + (bare ? '' : ' selected') + '>(선택)</option>', found = false, seen = map();
     entries.forEach(function (e) {
       if (provider && providerOf(e.model) !== provider) return;
       var id = bareModel(e.model);
@@ -689,9 +689,9 @@
         var draft = draftOf(edit, 'route:' + str(r.section) + '/' + str(r.role));
         var alias = str(r.model);
         var entry = entryOf(entries, alias);
-        var full = change ? str(change.model) : draft && str(draft.model) ? str(draft.model) : entry ? entry.model : alias;
-        var provider = change ? str(change.provider) : draft && str(draft.provider) ? str(draft.provider) : entry ? providerOf(entry.model) : providerOf(alias);
-        var thinking = change ? str(change.thinking) : draft && str(draft.thinking) ? str(draft.thinking) : str(r.reasoning) || entry && entry.variant || '';
+        var full = change ? str(change.model) : draft ? str(draft.model) : entry ? entry.model : alias;
+        var provider = change ? str(change.provider) : draft ? str(draft.provider) : entry ? providerOf(entry.model) : providerOf(alias);
+        var thinking = change ? str(change.thinking) : draft ? str(draft.thinking) : str(r.reasoning) || entry && entry.variant || '';
         var providers = providersOf(entries, provider);
         var rec = recommendationOf(r);
         var readonlyRow = ro || r.readOnly === true || !!r.absentIn;
@@ -728,9 +728,9 @@
     var current = obj(view && view.main) || {};
     var effective = obj(current.effective) || {};
     var override = obj(current.override) || null;
-    var provider = pending ? str(pending.provider) : draft && str(draft.provider) ? str(draft.provider) : str(override && override.provider) || str(effective.provider);
-    var model = pending ? str(pending.model) : draft && str(draft.model) ? str(draft.model) : str(override && override.model) || str(effective.model);
-    var thinking = pending ? str(pending.thinking) : draft && str(draft.thinking) ? str(draft.thinking) : str(override && override.thinking) || str(effective.thinking);
+    var provider = pending ? str(pending.provider) : draft ? str(draft.provider) : str(override && override.provider) || str(effective.provider);
+    var model = pending ? str(pending.model) : draft ? str(draft.model) : str(override && override.model) || str(effective.model);
+    var thinking = pending ? str(pending.thinking) : draft ? str(draft.thinking) : str(override && override.thinking) || str(effective.thinking);
     var entries = servedEntries(view);
     var providers = providersOf(entries, provider);
     var body;
@@ -994,6 +994,12 @@
     var state = viewState(v, e);
     var ro = state === 'view' ? readonly(v, e) : true;
     var stale = !!(v && (v.banner === STALE_BANNER || (obj(v.inventory) && v.inventory.stale === true) || v.readOnlyReason === 'INVENTORY_STALE'));
+    var shownKey = str(edit && edit.shown || (obj(view && view.activeProfile) && view.activeProfile.key));
+    var detail = obj(view && view.details && view.details[shownKey]);
+    var routingData = obj(detail && detail.routing) || obj(view && view.routing);
+    var mainData = obj(detail && detail.main) || obj(view && view.main);
+    var modelProfileData = obj(detail && detail.modelProfile) || obj(view && view.modelProfile);
+
     var html = '<div class="pf" data-pf-root data-pf-state="' + state + '" data-pf-busy="' + (e.busy === true) + '" data-pf-conflict="' + (e.conflict === true) + '" data-readonly="' + ro + '">' + header(v, e) + (v ? homes(v) : '') +
       (stale ? banner(STALE_BANNER, 'pf-banner-warn', 'alert') : '') +
       (state === 'loading' ? loadingBlock() : '') +
@@ -1002,8 +1008,11 @@
         return '<p class="pf-warn">' + ic('info', 'ic-sm') + ' ' + esc(w) + '</p>';
       }).join('') + '</div>' : '') +
       journalBanner(v, e, ro) +
-      (state === 'view' ? tray(v, e) + agentRows(v, e, ro) + profileCards(v, e, ro) + routingRows(v, e, ro) +
-        mainModel(v, e, ro) + modelLane(v, e, ro) + summarizer(v, e, ro) + memoryRows(v, e, ro) + guide(v) : '') +
+      (state === 'view' ? tray(v, e) + agentRows(v, e, ro) + profileCards(v, e, ro) +
+        routingRows(Object.assign({}, v, { routing: routingData }), e, ro) +
+        mainModel(Object.assign({}, v, { main: mainData }), e, ro) +
+        modelLane(Object.assign({}, v, { modelProfile: modelProfileData }), e, ro) +
+        summarizer(v, e, ro) + memoryRows(v, e, ro) + guide(v) : '') +
       '</div>';
     return html;
   }
@@ -1118,6 +1127,7 @@
     }
     function sameTarget(a, b) {
       if (!obj(a) || !obj(b) || a.kind !== b.kind) return false;
+      if (a.kind === 'setSummarizer') return true;
       if (!isGlobalKind(a.kind)) {
         var aProf = str(a.profileKey || a.omoProfile);
         var bProf = str(b.profileKey || b.omoProfile);
@@ -1126,7 +1136,7 @@
       if (a.kind === 'setRoute') return a.section === b.section && a.role === b.role;
       if (a.kind === 'setAgentLane' || a.kind === 'setAgentPin' || a.kind === 'resetAgentMemory') return a.agentId === b.agentId;
       if (a.kind === 'setMemoryRow') return (str(a.row) || 'kibitzer') === (str(b.row) || 'kibitzer');
-      if (a.kind === 'selectProfile' || a.kind === 'setMain' || a.kind === 'setModelProfile' || a.kind === 'setSummarizer') return true;
+      if (a.kind === 'selectProfile' || a.kind === 'setMain' || a.kind === 'setModelProfile') return true;
       if (a.kind === 'migrateReviewerKeys') return true;
       return false;
     }
@@ -1213,12 +1223,25 @@
         delete s.memorySaved[mKey];
       }
       s.draft[k] = Object.assign({}, draftOf({ draft: s.draft }, k) || {}, obj(patch) || {});
+      s.preview = null;
       return snapshot();
     }
-    function touch() { if (s.busy) return snapshot(); changed(); return snapshot(); }
+    function touch() { if (s.busy) return snapshot(); s.preview = null; changed(); return snapshot(); }
     function removeKind(kind) {
       if (s.busy) return snapshot();
       s.pending = s.pending.filter(function (c) { return !obj(c) || c.kind !== kind; });
+      s.preview = null; s.result = null;
+      if (!s.conflict) { s.error = ''; s.status = ''; }
+      s.confirmClear = false;
+      changed();
+      return snapshot();
+    }
+    function removeRoute(section, role, profileKey) {
+      if (s.busy) return snapshot();
+      var targetProf = str(profileKey || s.shown);
+      s.pending = s.pending.filter(function (c) {
+        return !obj(c) || c.kind !== 'setRoute' || c.section !== section || c.role !== role || str(c.profileKey || c.omoProfile) !== targetProf;
+      });
       s.preview = null; s.result = null;
       if (!s.conflict) { s.error = ''; s.status = ''; }
       s.confirmClear = false;
@@ -1367,6 +1390,7 @@
       setDraft: setDraft,
       touch: touch,
       removeKind: removeKind,
+      removeRoute: removeRoute,
       removeMemoryRow: removeMemoryRow,
       show: function (profileKey) {
         if (s.busy) return snapshot();
@@ -1526,30 +1550,91 @@
       } else if (act === 'route-provider' || act === 'route-model' || act === 'route-thinking') {
         var route = t.getAttribute('data-route');
         var row = t.closest('[data-pf-route]');
-        var provider = row ? str(row.querySelector('[data-pf="route-provider"]').value) : '';
-        var model = row ? str(row.querySelector('[data-pf="route-model"]').value) : '';
-        var thinking = row ? str(row.querySelector('[data-pf="route-thinking"]').value) : '';
-        if (act === 'route-provider' && row) {
-          var picked = firstOptionFor(row.querySelector('[data-pf="route-model"]'), provider);
-          if (picked) model = picked;
+        var prevDraft = draftOf(c.snapshot(), 'route:' + route);
+        var curProv = prevDraft ? str(prevDraft.provider) : (row ? selectVal(row.querySelector('[data-pf="route-provider"]')) : '');
+        var curMdl = prevDraft ? str(prevDraft.model) : (row ? selectVal(row.querySelector('[data-pf="route-model"]')) : '');
+        var curThk = prevDraft ? str(prevDraft.thinking) : (row ? selectVal(row.querySelector('[data-pf="route-thinking"]')) : '');
+        var provider = curProv;
+        var model = curMdl;
+        var thinking = curThk;
+        var profKey = str(c.snapshot().shown);
+        if (act === 'route-provider') {
+          // WinForms: service change clears model and effort, with no first-model pick
+          provider = str(t.value);
+          model = '';
+          thinking = '';
+        } else if (act === 'route-model') {
+          // WinForms: model change picks first supported level of the new model
+          model = str(t.value);
+          var modelEntries = catalogEntries(c.snapshot().view);
+          var matchEntry = entryOf(modelEntries, model, model);
+          var levels = matchEntry && Array.isArray(matchEntry.levels) && matchEntry.levels.length
+            ? matchEntry.levels
+            : THINKING;
+          thinking = levels[0] || 'off';
+        } else if (act === 'route-thinking') {
+          thinking = str(t.value);
         }
         c.setDraft('route:' + route, { provider: provider, model: model, thinking: thinking });
         var slash = route.indexOf('/');
         if (slash > 0 && provider && model && thinking) {
-          c.add({ kind: 'setRoute', section: route.slice(0, slash), role: route.slice(slash + 1), provider: provider, model: model, thinking: thinking });
-        } else c.touch();
+          c.add({ kind: 'setRoute', profileKey: profKey, section: route.slice(0, slash), role: route.slice(slash + 1), provider: provider, model: model, thinking: thinking });
+        } else {
+          // Incomplete row stages removal of pending route edit
+          if (slash > 0) {
+            c.removeRoute(route.slice(0, slash), route.slice(slash + 1), profKey);
+          }
+          c.touch();
+        }
       } else if (act === 'main-provider' || act === 'main-model' || act === 'main-thinking') {
         var main = t.closest('[data-pf-main]');
-        var mp = main ? str(main.querySelector('[data-pf="main-provider"]').value) : '';
-        var mm = main ? str(main.querySelector('[data-pf="main-model"]').value) : '';
-        var mt = main ? str(main.querySelector('[data-pf="main-thinking"]').value) : '';
-        if (act === 'main-provider' && main) {
-          var mainPick = firstOptionFor(main.querySelector('[data-pf="main-model"]'), mp);
-          if (mainPick) mm = mainPick;
+        var mainPrevDraft = draftOf(c.snapshot(), 'main');
+        var curMainProv = mainPrevDraft ? str(mainPrevDraft.provider) : (main ? selectVal(main.querySelector('[data-pf="main-provider"]')) : '');
+        var curMainMdl = mainPrevDraft ? str(mainPrevDraft.model) : (main ? selectVal(main.querySelector('[data-pf="main-model"]')) : '');
+        var curMainThk = mainPrevDraft ? str(mainPrevDraft.thinking) : (main ? selectVal(main.querySelector('[data-pf="main-thinking"]')) : '');
+        var mp = curMainProv;
+        var mm = curMainMdl;
+        var mt = curMainThk;
+        var mainProfKey = str(c.snapshot().shown);
+        var entries = servedEntries(c.snapshot().view);
+        if (act === 'main-provider') {
+          // WinForms: service change keeps model whose last id segment survives in new list and clamps current effort, else empties model
+          mp = str(t.value);
+          var oldModel = mm;
+          var oldThinking = mt;
+          var surviving = null;
+          entries.forEach(function (e) {
+            if (providerOf(e.model) !== mp) return;
+            var id = bareModel(e.model);
+            if (oldModel && (id === oldModel || e.model === oldModel || id.split('/').pop() === oldModel.split('/').pop())) {
+              surviving = id;
+            }
+          });
+          if (surviving) {
+            mm = surviving;
+            var matchModel = entryOf(entries, mm, mm);
+            var mLevels = matchModel && Array.isArray(matchModel.levels) && matchModel.levels.length ? matchModel.levels : THINKING;
+            if (mLevels.indexOf(oldThinking) < 0) mt = mLevels[0] || 'medium';
+          } else {
+            mm = '';
+          }
+        } else if (act === 'main-model') {
+          // WinForms: model change clamps current effort to the new model
+          mm = str(t.value);
+          var newModelEntry = entryOf(entries, mm, mm);
+          if (!newModelEntry) newModelEntry = entries.filter(function (e) { return bareModel(e.model) === mm; })[0] || null;
+          var newLevels = newModelEntry && Array.isArray(newModelEntry.levels) && newModelEntry.levels.length ? newModelEntry.levels : THINKING;
+          if (newLevels.indexOf(mt) < 0) mt = newLevels[newLevels.length - 1] || 'medium';
+        } else if (act === 'main-thinking') {
+          mt = str(t.value);
         }
         c.setDraft('main', { provider: mp, model: mm, thinking: mt });
-        if (mp && mm) c.add({ kind: 'setMain', provider: mp, model: mm, thinking: mt || 'medium' });
-        else c.touch();
+        if (mp && mm && mt) {
+          c.add({ kind: 'setMain', profileKey: mainProfKey, provider: mp, model: mm, thinking: mt });
+        } else {
+          // When any of the three is empty the row stages removal of the main override
+          c.add({ kind: 'setMain', profileKey: mainProfKey, provider: '', model: '', thinking: '' });
+        }
       } else if (act === 'lane-select') {
         var lane = str(t.value);
         var literalEl = t.closest('[data-pf-lane]') && t.closest('[data-pf-lane]').querySelector('[data-pf="lane-literal"]');
