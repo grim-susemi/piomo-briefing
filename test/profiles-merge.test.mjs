@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 import { runScenario } from '../src/profiles/parity.mjs';
 import {
-  assertCatalogAlias, assertMemoryProfilePreservation, commandCodeWarning, ensureOllamaCloudProviderText,
+  assertCatalogAlias, assertMemoryProfilePreservation, assertMemoryRouteWritable, commandCodeWarning, ensureOllamaCloudProviderText,
   getModelProfileSettings, getOrCreateCatalogAlias, laneMirrorPlan, memoryFingerprint, migrateReviewerKeys,
   mergeModelProfileSettings, mergeProfileLayerIntoActiveScopes, readCompactionSummarizer,
   readMainOverride, removeNullModelProfile, resolveCatalogRouteAlias, resolveMainDefaults,
@@ -529,4 +529,31 @@ test('expandLayerRoles keeps inherited categories and unresolved aliases visible
   assert.equal(oracle.Unresolved, true);
   assert.equal(oracle.ModelEn, '[unknown:ghost]');
   assert.equal(PROFILE_META.length, 6);
+});
+
+test('memory: a foreign desktop-kibitzer category is refused before any write', () => {
+  const config = configFixture();
+  config['[native]'].categories['desktop-kibitzer'] = { model: 'foreign/model' };
+  assert.throws(
+    () => assertMemoryRouteWritable(config, '', 'kibitzer'),
+    /Kibitzer category collision \/ foreign recall route/
+  );
+  config['[native]'].categories['desktop-reflection'] = { model: 'foreign/model' };
+  assert.throws(
+    () => assertMemoryRouteWritable(config, '', 'reflection'),
+    /Reflection category collision \/ foreign reflection route/
+  );
+});
+
+test('assertMemoryRouteWritable permits owned memory categories', () => {
+  const config = configFixture();
+  config['[native]'].models['mem-alias'] = { model: 'openai/gpt-6-sol', reasoning: 'high' };
+  config['[native]'].categories['desktop-kibitzer'] = {
+    description: memoryFingerprint('mem-alias', 'openai/gpt-6-sol', 'high'),
+    model: 'mem-alias',
+    reasoning: 'high',
+  };
+  const state = assertMemoryRouteWritable(config, '', 'kibitzer');
+  assert.equal(state.owned, true);
+  assert.equal(state.external, false);
 });

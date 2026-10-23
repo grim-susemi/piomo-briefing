@@ -60,6 +60,7 @@ function makeFixture(t, options = {}) {
     fs.mkdirSync(path.join(home, 'agent'), { recursive: true });
     fs.writeFileSync(path.join(home, 'omo.jsonc'), formatJsonText(omo, style));
     fs.writeFileSync(path.join(home, 'agent', 'settings.json'), formatJsonText(settings, style));
+    if (fs.existsSync(regPrimary)) fs.copyFileSync(regPrimary, path.join(home, 'agent', 'models.json'));
     if (options.mirrorMain !== undefined) {
       fs.mkdirSync(path.join(home, 'runtime'), { recursive: true });
       fs.writeFileSync(path.join(home, 'runtime', 'native-profile-switcher-main.json'),
@@ -607,4 +608,81 @@ test('migrateReviewerKeys rewrites the legacy reviewer names in the allowed path
 test('redaction hides the todo-3 credential key set', () => {
   const value = { apiKey: 'x', nested: { token: 'y', keep: 'z' }, list: [{ password: 'p' }] };
   assert.deepEqual(redact(value), { apiKey: '<redacted>', nested: { token: '<redacted>', keep: 'z' }, list: [{ password: '<redacted>' }] });
+});
+
+test('memory: a memory-only apply writes stable omo.jsonc, quick and the other row byte-preserved', (t) => {
+  const fx = makeFixture(t, { mirrors: ['mirror1', 'mirror2'] });
+  const stableOmo = path.join(fx.stable, 'omo.jsonc');
+  const beforeStable = readJsonFile(stableOmo);
+  const beforeQuick = structuredClone(beforeStable['[native]'].categories.quick);
+
+  const customChange = { kind: 'setMemoryRow', mode: 'custom', model: 'openai/gpt-6-sol', reasoning: 'high' };
+  const customResult = fx.store.apply(body('apply', [customChange], fx.store));
+  assert.equal(customResult.ok, true, JSON.stringify(customResult));
+  assert.ok(customResult.writes.includes('stable/omo.jsonc'), 'stable/omo.jsonc must be in writes');
+  assert.ok(customResult.writes.includes('omo.jsonc'), 'omo.jsonc must be in writes');
+  assert.ok(customResult.writes.includes('mirror/mirror1/omo.jsonc'), 'mirror1 must be in writes');
+  assert.ok(customResult.writes.includes('mirror/mirror2/omo.jsonc'), 'mirror2 must be in writes');
+
+  const afterStable = readJsonFile(stableOmo);
+  assert.ok(afterStable['[native]'].categories['desktop-kibitzer']);
+  assert.equal(afterStable['[native]'].memory.recall.category, 'desktop-kibitzer');
+  assert.deepEqual(afterStable['[native]'].categories.quick, beforeQuick, 'quick category is byte-preserved');
+  assert.equal(afterStable['[native]'].categories['desktop-reflection'], undefined, 'reflection row is preserved');
+
+  // Changing reflection preserves kibitzer and quick
+  const refChange = { kind: 'setMemoryRow', row: 'reflection', mode: 'custom', model: 'openai/gpt-6-sol', reasoning: 'high' };
+  const refResult = fx.store.apply(body('apply', [refChange], fx.store));
+  assert.equal(refResult.ok, true, JSON.stringify(refResult));
+
+  const afterRefStable = readJsonFile(stableOmo);
+  assert.ok(afterRefStable['[native]'].categories['desktop-reflection']);
+  assert.equal(afterRefStable['[native]'].memory.reflection.category, 'desktop-reflection');
+  assert.ok(afterRefStable['[native]'].categories['desktop-kibitzer'], 'kibitzer is preserved');
+  assert.equal(afterRefStable['[native]'].memory.recall.category, 'desktop-kibitzer');
+  assert.deepEqual(afterRefStable['[native]'].categories.quick, beforeQuick, 'quick category is byte-preserved');
+
+  // Changing kibitzer back to quick preserves reflection and quick
+  const quickChange = { kind: 'setMemoryRow', mode: 'quick' };
+  const quickResult = fx.store.apply(body('apply', [quickChange], fx.store));
+  assert.equal(quickResult.ok, true, JSON.stringify(quickResult));
+
+  const afterQuickStable = readJsonFile(stableOmo);
+  assert.equal(afterQuickStable['[native]'].categories['desktop-kibitzer'], undefined);
+  assert.equal(afterQuickStable['[native]'].memory?.recall?.category, undefined);
+  assert.ok(afterQuickStable['[native]'].categories['desktop-reflection'], 'reflection row is preserved');
+  assert.equal(afterQuickStable['[native]'].memory.reflection.category, 'desktop-reflection');
+  assert.deepEqual(afterQuickStable['[native]'].categories.quick, beforeQuick, 'quick category is byte-preserved');
+});
+
+test('memory: a foreign desktop-kibitzer category is refused before any write', (t) => {
+  const fx = makeFixture(t, { mirrors: ['mirror1', 'mirror2'] });
+  const primaryOmo = path.join(fx.primary, 'omo.jsonc');
+  const stableOmo = path.join(fx.stable, 'omo.jsonc');
+  const mirror1Omo = path.join(fx.mirrors.mirror1, 'omo.jsonc');
+  const mirror2Omo = path.join(fx.mirrors.mirror2, 'omo.jsonc');
+
+  // Inject a foreign desktop-kibitzer category into stable home
+  const stableConfig = readJsonFile(stableOmo);
+  stableConfig['[native]'].categories['desktop-kibitzer'] = {
+    model: 'foreign-kibitzer-model',
+  };
+  fs.writeFileSync(stableOmo, formatJsonText(stableConfig, fx.style));
+
+  const primaryHashBefore = hashFile(primaryOmo);
+  const stableHashBefore = hashFile(stableOmo);
+  const mirror1HashBefore = hashFile(mirror1Omo);
+  const mirror2HashBefore = hashFile(mirror2Omo);
+
+  const change = { kind: 'setMemoryRow', mode: 'custom', model: 'openai/gpt-6-sol', reasoning: 'high' };
+  const result = fx.store.apply(body('apply', [change], fx.store));
+
+  assert.equal(result.ok, false, 'apply must be refused');
+  assert.match(result.message, /foreign recall route|collision/i);
+
+  // All four fixture homes unchanged
+  assert.equal(hashFile(primaryOmo), primaryHashBefore, 'primary home unchanged');
+  assert.equal(hashFile(stableOmo), stableHashBefore, 'stable home unchanged');
+  assert.equal(hashFile(mirror1Omo), mirror1HashBefore, 'mirror1 home unchanged');
+  assert.equal(hashFile(mirror2Omo), mirror2HashBefore, 'mirror2 home unchanged');
 });

@@ -27,7 +27,7 @@ import { atomicWriteJson, writeRoster as contractWriteRoster } from './contract/
 import { readMemory, readRoster, validateRoster } from './contract/schema.mjs';
 import { AGENT_IDS, LANES, THINKING } from './contract/constants.mjs';
 import {
-  clone, commandCodeWarning, deepEqual, getEffectiveMemoryCatalog, getMemorySelectionFromConfig,
+  assertMemoryRouteWritable, clone, commandCodeWarning, deepEqual, getEffectiveMemoryCatalog, getMemorySelectionFromConfig,
   getModelProfileSettings, getOrCreateCatalogAlias, getReflectionMemorySelectionFromConfig,
   isPlainObject, memoryFingerprint, mergeProfileLayerIntoActiveScopes, migrateReviewerKeys,
   readConfig, readCompactionSummarizer, readMainOverride, reflectionMemoryFingerprint, removeNullModelProfile,
@@ -949,6 +949,26 @@ export function openProfilesStore(options = {}) {
     setMemorySelection(config, change.mode, change.model ?? '', change.reasoning ?? '', fallbackProfile);
   }
 
+  function checkMemoryOwnershipInAllHomes(targetFiles, change) {
+    const kind = change.row === 'reflection' ? 'reflection' : 'kibitzer';
+    for (const [id, file] of targetFiles) {
+      if (!file?.exists) continue;
+      if (id === 'omo.jsonc' || id === 'stable/omo.jsonc' || (id.startsWith('mirror/') && id.endsWith('/omo.jsonc'))) {
+        if (file.error) return refusal('INVALID_CONFIG', `${id}: ${file.error.message}`);
+        const homeConfig = readConfig(file.value);
+        try {
+          assertMemoryRouteWritable(homeConfig, '', kind);
+          for (const profileKey of Object.keys(homeConfig.profiles ?? {})) {
+            assertMemoryRouteWritable(homeConfig, profileKey, kind);
+          }
+        } catch (error) {
+          return refusal('BAD_REQUEST', error.message);
+        }
+      }
+    }
+    return { ok: true };
+  }
+
   function applyChange(context, change) {
     const { config, settings, sidecar, selections, roster, warnings } = context;
     switch (change.kind) {
@@ -1100,15 +1120,18 @@ export function openProfilesStore(options = {}) {
       }
       case 'setMemoryRow': {
         if (!config) return refusal('MISSING_CONFIG', 'omo.jsonc is missing');
+        const ownership = checkMemoryOwnershipInAllHomes(context.files, change);
+        if (!ownership.ok) return ownership;
         if (change.mode === 'custom') {
           const memoryHomes = getRequiredHomes();
           const homeRegistries = {};
           for (const h of memoryHomes) homeRegistries[h] = getHomeRegistry(h);
           const catalog = (config['[senpi]'] ?? config['[native]'])?.models;
+          const provider = change.provider ?? (change.model?.includes('/') ? change.model.split('/')[0] : '');
           const valid = validateSelection({
             kind: change.row ?? 'memory',
             homes: memoryHomes,
-            provider: change.provider,
+            provider,
             model: change.model,
             effort: change.reasoning ?? change.thinking,
             registries: homeRegistries,
@@ -1187,6 +1210,10 @@ export function openProfilesStore(options = {}) {
   function setMemorySelection(config, mode, model, reasoning, profile) {
     const engine = config['[senpi]'] ?? config['[native]'];
     if (!isPlainObject(engine)) throw new Error('model catalog is missing');
+    assertMemoryRouteWritable(config, '', 'kibitzer');
+    for (const key of Object.keys(config.profiles ?? {})) {
+      assertMemoryRouteWritable(config, key, 'kibitzer');
+    }
     if (mode === 'custom') {
       if (!model.trim() || !reasoning.trim()) throw new Error('Choose service, model and thinking explicitly.');
       if (!THINKING.includes(reasoning)) throw new Error(`unsupported thinking level ${reasoning}`);
@@ -1241,6 +1268,10 @@ export function openProfilesStore(options = {}) {
   function setReflectionMemorySelection(config, mode, model, reasoning, profile) {
     const engine = config['[senpi]'] ?? config['[native]'];
     if (!isPlainObject(engine)) throw new Error('model catalog is missing');
+    assertMemoryRouteWritable(config, '', 'reflection');
+    for (const key of Object.keys(config.profiles ?? {})) {
+      assertMemoryRouteWritable(config, key, 'reflection');
+    }
     if (mode === 'custom') {
       if (!model.trim() || !reasoning.trim()) throw new Error('Choose service, model and thinking explicitly.');
       if (!THINKING.includes(reasoning)) throw new Error(`unsupported thinking level ${reasoning}`);
@@ -1331,6 +1362,14 @@ export function openProfilesStore(options = {}) {
       configTouched: false, configReplaced: false, nextConfig: null,
       selectedProfile: null, main: null, mainOverrides: [],
     };
+
+    for (const change of body.changes) {
+      if (change.kind === 'setMemoryRow') {
+        const ownership = checkMemoryOwnershipInAllHomes(files, change);
+        if (!ownership.ok) return ownership;
+      }
+    }
+
     for (const change of body.changes) {
       const result = applyChange(context, change);
       if (!result.ok) return result;
@@ -1379,26 +1418,53 @@ export function openProfilesStore(options = {}) {
         next.set(id, { value, kind: 'json' });
       }
     }
-    // Stable-500 role models and aliases only.
+    // Stable-500 role models and memory rows.
     const stableFile = files.get('stable/omo.jsonc');
-    const selected = context.selectedProfile;
-    if (selected && stableFile?.exists) {
-      let source = savedConfig;
-      let selectionProfile = '';
-      try {
-        const selectionValue = files.get('native-profile-selection.json')?.value;
-        selectionProfile = typeof selectionValue?.profile === 'string' ? selectionValue.profile : '';
-      } catch { selectionProfile = ''; }
-      try {
-        const synced = syncStable500RoleModels({
-          source, target: clone(stableFile.value), profileKey: selected.omoProfile,
-          selectionProfile, switchProfile: true,
-        });
-        if (synced.changed) {
-          next.set('stable/omo.jsonc', { value: synced.config, kind: 'jsonc' });
+    if (stableFile?.exists) {
+      let stableConfig = null;
+      let stableTouched = false;
+      const selected = context.selectedProfile;
+      if (selected) {
+        let source = savedConfig;
+        let selectionProfile = '';
+        try {
+          const selectionValue = files.get('native-profile-selection.json')?.value;
+          selectionProfile = typeof selectionValue?.profile === 'string' ? selectionValue.profile : '';
+        } catch { selectionProfile = ''; }
+        try {
+          const synced = syncStable500RoleModels({
+            source, target: clone(stableFile.value), profileKey: selected.omoProfile,
+            selectionProfile, switchProfile: true,
+          });
+          stableConfig = synced.config;
+          if (synced.changed) stableTouched = true;
+        } catch (error) {
+          return refusal('STABLE_REFUSED', error.message);
         }
-      } catch (error) {
-        return refusal('STABLE_REFUSED', error.message);
+      }
+
+      const memoryChanges = body.changes.filter((c) => c.kind === 'setMemoryRow');
+      if (memoryChanges.length > 0) {
+        if (!stableConfig) stableConfig = readConfig(stableFile.value);
+        for (const change of memoryChanges) {
+          try {
+            memoryRowChange(stableConfig, change, selected ?? activeProfile(files));
+            stableTouched = true;
+          } catch (error) {
+            return refusal('BAD_REQUEST', `stable/omo.jsonc: ${error.message}`);
+          }
+        }
+      }
+
+      if (stableConfig && stableTouched) {
+        const savedStable = saveConfig(stableConfig);
+        const stableAllow = assertAllowedConfig(savedStable, loadInventory());
+        if (!stableAllow.ok) {
+          return refusal('ALLOWLIST', `stable/omo.jsonc: ${stableAllow.errors[0]}`);
+        }
+        if (!deepEqual(savedStable, stableFile.value)) {
+          next.set('stable/omo.jsonc', { value: savedStable, kind: 'jsonc' });
+        }
       }
     }
     // Lane mirrors (only roots that already have omo.jsonc). The switcher treats a

@@ -423,7 +423,7 @@ export function getReflectionMemorySelectionFromConfig(config, profileKey = '') 
   });
 }
 
-function assertMemoryRouteWritable(config, profileKey, kind) {
+export function assertMemoryRouteWritable(config, profileKey, kind) {
   const state = kind === 'reflection'
     ? getReflectionMemorySelectionFromConfig(config, profileKey)
     : getMemorySelectionFromConfig(config, profileKey);
