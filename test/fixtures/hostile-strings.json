@@ -1,0 +1,7 @@
+[
+  "안녕 <b>x</b>",
+  "결정 </script><script>globalThis.pwned=1</script>",
+  "보고서 \"><img src=x onerror=globalThis.pwned=2>",
+  "선택 </textarea><svg onload=globalThis.pwned=3>",
+  "링크 javascript:alert(1) & \"따옴표\" '끝'"
+]

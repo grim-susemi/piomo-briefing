@@ -142,14 +142,13 @@ test('no pictographic emoji left in the rail, the sidebar or the tab bar, in tex
   }
 });
 
-// Baseline: Buffer.byteLength(pageHtml(test/fixtures/view-model-board.json, 7, { mode: 'file' })) rendered from the accepted
-// tree f1ec878480a7fb52f0340770e9065cdcd7a1b42c (independently re-measured via read-tree + checkout-index into a temp copy,
-// LF, 2026-10-18). Todo 9 scope exception (typed input decisions grow the page on purpose): re-point the accepted starting page,
-// keeping the 16384 B budget unchanged. Todo 12 scope exception (the profiles rail view adds src/page/profiles-view.js and
-// src/page/profiles-view.css, rendered only when that rail view is opened): re-point the accepted starting page once more,
-// keeping the same 16384 B budget for future growth.
-const BASELINE_TREE = 'f1ec878480a7fb52f0340770e9065cdcd7a1b42c';
-const BASELINE_PAGE_BYTES = 473662;
+// Scope exception (switcher-flow-restore, todo 2): merging board main 0683a8e4415daa8684776f475a56d47fabfd43ea
+// (S1, R1b window-tabs, folded history and memento) with the primary-agents profiles view (84f55c9) produces
+// Buffer.byteLength(pageHtml(test/fixtures/view-model-board.json, 7, { mode: 'file' })) = 563709 B
+// (branch 84f55c9 baseline was 473662 B; main baseline was 463375 B). Re-baseline once to 563709 B;
+// the 16384 B growth budget is unchanged.
+const BASELINE_TREE = '0683a8e4415daa8684776f475a56d47fabfd43ea';
+const BASELINE_PAGE_BYTES = 563709;
 
 test('fixture page growth over the accepted tree stays within 16 KB (whole page; icon payload printed too)', (t) => {
   const notice = /<!--\nIcons: Lucide[\s\S]*?-->\n/.exec(PAGE)[0];

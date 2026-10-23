@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "comment": "Baseline of unnamed interactive accessibility nodes at the start sha. The QA scripts never append to this file; a new unnamed control must fail and be reviewed here.",
+  "provenance": {
+    "startSha": "054543c31557bfbd801265fa741fbbbcdcdb8486",
+    "capturedAt": "2026-10-21T21:05:28.797Z",
+    "method": "axSnapshot + unnamedInteractive from scripts/cdp.mjs",
+    "markup": "src/page/*.js equals the start sha except the fail-closed esc() fallback in page.js"
+  },
+  "entries": {}
+}

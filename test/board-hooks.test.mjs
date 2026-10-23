@@ -102,9 +102,37 @@ test('the extension hands the server host its answer and focus hooks, and the pa
   const page = s.hooks().getPage(vm, 'tok-123_ABC');
   assert.equal(page.match(/<meta name="omo-board-token"/g).length, 1);
   assert.ok(page.includes('<meta name="omo-board-token" content="tok-123_ABC">'));
+  const nonce = 'AbCdEfGhIjKlMnOpQrStUv==';
+  const nonced = s.hooks().getPage(vm, 'tok-123_ABC', nonce);
+  assert.equal(nonced.match(new RegExp(`<style nonce="${nonce}">`, 'g')).length, 1, 'the combined style carries the nonce');
+  assert.equal(nonced.match(new RegExp(`<script nonce="${nonce}">`, 'g')).length, 13, 'every script carries the nonce');
+  assert.equal((nonced.match(/<script>/g) ?? []).length, 0, 'no script is left un-nonced');
   for (const file of ['index.html', 'data.js']) {
     assert.ok(!readFileSync(join(s.stateDir, file), 'utf8').includes('omo-board-token'), `${file} (what the file page and data.js carry) has no token`);
   }
+});
+
+test('memento hooks resolve discovery at each call, preserve WRITE_FAILED and never publish private card contents', async t => {
+  const key = Symbol.for('omo.memento.api.v1'), prev = globalThis[key];
+  t.after(() => { if (prev === undefined) delete globalThis[key]; else globalThis[key] = prev; });
+  delete globalThis[key];
+  const s = lead(t);
+  await s.start();
+  assert.deepEqual(await s.hooks().mementoState(), fail(501, 'MEMENTO_UNAVAILABLE'));
+  assert.deepEqual(await s.hooks().memento({}), fail(501, 'MEMENTO_UNAVAILABLE'));
+  globalThis[key] = { version: 2 };
+  assert.deepEqual(await s.hooks().memento({}), fail(501, 'API_VERSION_UNSUPPORTED'));
+  const sent = { action: 'setStatus', id: '20261022-abcd', rev: 1, requestId: 'same', status: 'done' };
+  const bodies = [];
+  const privateState = { schema: 'memento.board-state.v1', cards: [{ original: 'PRIVATE_SENTINEL', notes: 'PRIVATE_NOTES' }] };
+  globalThis[key] = { version: 1, features: ['cards.read', 'cards.setStatus'], state: () => privateState,
+    handle: async body => { bodies.push(body); return { status: 500, body: { ok: false, code: 'WRITE_FAILED' } }; } };
+  assert.deepEqual(await s.hooks().mementoState(), { status: 200, json: privateState });
+  for (let i = 0; i < 2; i++) assert.deepEqual(await s.hooks().memento(sent), fail(500, 'WRITE_FAILED'));
+  assert.deepEqual(bodies, [sent, sent]);
+  await s.brief(goodBrief());
+  assert.ok(!s.publishedText().includes('PRIVATE_SENTINEL'));
+  assert.ok(!s.publishedText().includes('PRIVATE_NOTES'));
 });
 
 test('answer: every applyBoardAnswer code maps to its HTTP status; only the first answer writes a file', async (t) => {

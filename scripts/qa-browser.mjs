@@ -12,6 +12,7 @@
 //                            its profile) with its state after close; what each lead's session admitted and proved
 //   <dir>/render-p95.json    20 renderPage runs on a store built through the real store API
 //   <dir>/{desktop,mobile}-{board,plan,workers,alarm}.png   1440x900 and 390x844
+//   <dir>/ax-{desktop,mobile}-{board,plan,workers}.json|.txt  raw Accessibility.getFullAXTree answer and readable tree
 //   <dir>/desktop-{state,annotation-sent,report-pick,file-page}.png, <dir>/mobile-<scenario>-*.png
 // Desktop scenarios (1440x900, autoplay allowed):
 //   a  20 publications reach the page without a click, p95 <= 1500 ms
@@ -43,6 +44,9 @@
 //                       record, and the conversation's fake pi receives exactly ONE message carrying every value in full;
 //                       no other lead receives anything, before or after a re-render, a reload and forced delivery scans
 //   k  no console error or page exception in any run, no failure inside a lead's fake host
+//   n  no CSP violation in any run: watchCsp is installed before the first navigation of both browsers
+//   ax no unnamed interactive accessibility node outside scripts/qa-ax-allowlist.json (allowlisted baseline nodes are an
+//      S3 follow-up); AX snapshots are evidence only and never golden-diffed (they carry relative times)
 // 390x844 run (default autoplay policy; connected before each trigger; script clicks only until e-blocked's one tap):
 //   m-fit, f-mobile, plan-fold-mobile, c-mobile, d-mobile, e-blocked, e-mobile, g-mobile (captures mobile-<scenario>-*.png)
 // Waits are events with a bound: in-page promises (MutationObserver, apply hook, toggle), IPC replies, fs.watch.
@@ -56,7 +60,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { launch, isPidAlive, listProfilePids } from './cdp.mjs';
+import { launch, isPidAlive, listProfilePids, watchCsp, axSnapshot, unnamedInteractive } from './cdp.mjs';
 import { openStore } from '../src/store.mjs';
 import { MAX_VM_BYTES, renderPage } from '../src/render.mjs';
 import { decisionFields, decisionValues } from '../test/fixtures/decision-fields.mjs';
@@ -143,6 +147,7 @@ if (process.argv[2] === LEAD_FLAG) await leadMain(process.argv.slice(3));
 // ------------------------------------------------------------------ the QA run
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const AX_ALLOWLIST = path.join(ROOT, 'scripts/qa-ax-allowlist.json');
 const PLAN_FIXTURE = JSON.parse(readFileSync(path.join(ROOT, 'test/fixtures/view-model-plan.json'), 'utf8'));
 const IMAGE_FIXTURES = path.join(ROOT, 'test/fixtures/board-assets');
 const NO_AUTOPLAY_FLAG = '--autoplay-policy=no-user-gesture-required';
@@ -171,6 +176,8 @@ const owned = { pids: [], profiles: [], tempDirs: [] };
 const consoleErrors = [];
 const chromeRuns = []; // one per browser: {label, browserPid, profileDir, pids (every process of the profile seen), aliveAfterClose}
 const leadReports = {}; // sessionId -> what its fake host admitted and proved (read before the process is killed or shut down)
+const cspStates = new Map(); // browser label -> watchCsp state (installed before that browser's first navigation)
+const ax = { captures: {}, allowlist: null, baseline: [], unexpected: [] };
 // The page the running scenarios use. Every scenario result carries the viewport name and the page's measured innerWidth/innerHeight;
 // a run with `expect` (the 390x844 one) fails the scenario when the page is not that size.
 let activeView = null; // { name, page, expect: { width, height } | null }
@@ -623,6 +630,91 @@ async function openBoard(page, url, label) {
   })`);
 }
 
+// ---- accessibility baseline: the same named-control rule as scripts/qa-board-matrix.mjs
+function axKeyOf(view, viewport, role, ancestors) {
+  return JSON.stringify([view, viewport, role, ...ancestors]);
+}
+
+function axFindings(raw, { view, viewport }) {
+  const nodes = Array.isArray(raw?.nodes) ? raw.nodes : [];
+  const byId = new Map(nodes.map((node) => [String(node.nodeId), node]));
+  const instances = [];
+  for (const node of unnamedInteractive(nodes)) {
+    const ancestors = [];
+    for (let p = byId.get(String(node.parentId)); p && ancestors.length < 3; p = byId.get(String(p.parentId))) {
+      const name = String(p.name?.value ?? '').replace(/\s+/g, ' ').trim();
+      if (name) ancestors.push(name);
+    }
+    const role = String(node.role?.value ?? '');
+    instances.push({ key: axKeyOf(view, viewport, role, ancestors), view, viewport, role, ancestors });
+  }
+  const byKey = new Map();
+  for (const e of instances) byKey.set(e.key, (byKey.get(e.key) || 0) + 1);
+  return { nodes: nodes.length, instances, byKey };
+}
+
+function readAxAllowlist() {
+  if (!existsSync(AX_ALLOWLIST)) return { exists: false, doc: null, entries: {}, sha256: null };
+  const text = readFileSync(AX_ALLOWLIST, 'utf8');
+  const doc = JSON.parse(text);
+  if (!doc || typeof doc !== 'object' || !doc.entries || typeof doc.entries !== 'object' || Array.isArray(doc.entries)) {
+    throw new Error(`${AX_ALLOWLIST}: expected an object with an "entries" object`);
+  }
+  return { exists: true, doc, entries: doc.entries, sha256: createHash('sha256').update(text).digest('hex') };
+}
+
+// First full run only: write every unnamed interactive node once. Never called when the file exists.
+function writeAxAllowlist(captures) {
+  const entries = {};
+  for (const cap of captures) {
+    for (const [key, count] of cap.findings.byKey) {
+      const first = cap.findings.instances.find((x) => x.key === key);
+      entries[key] = { view: first.view, viewport: first.viewport, role: first.role, ancestors: first.ancestors, count };
+    }
+  }
+  const sorted = Object.fromEntries(Object.keys(entries).sort().map((key) => [key, entries[key]]));
+  const doc = {
+    version: 1,
+    comment: 'Baseline of unnamed interactive accessibility nodes at the start sha. The QA scripts never append to this file; a new unnamed control must fail and be reviewed here.',
+    provenance: {
+      startSha: process.env.OMO_QA_START_SHA || null,
+      capturedAt: new Date().toISOString(),
+      method: 'axSnapshot + unnamedInteractive from scripts/cdp.mjs',
+      markup: 'src/page/*.js equals the start sha except the fail-closed esc() fallback in page.js',
+    },
+    entries: sorted,
+  };
+  const text = JSON.stringify(doc, null, 2) + '\n';
+  writeFileSync(AX_ALLOWLIST, text);
+  return { doc, entries: sorted, sha256: createHash('sha256').update(text).digest('hex') };
+}
+
+function compareAx(captures, entries) {
+  const baseline = [];
+  const unexpected = [];
+  for (const cap of captures) {
+    const seen = new Map();
+    for (const e of cap.findings.instances) {
+      const instance = (seen.get(e.key) || 0) + 1;
+      seen.set(e.key, instance);
+      const allowed = Number(entries[e.key]?.count || 0);
+      (instance <= allowed ? baseline : unexpected).push({ ...e, instance, allowed });
+    }
+  }
+  return { baseline, unexpected };
+}
+
+async function captureAx(page, viewport, view) {
+  const snap = await axSnapshot(page);
+  const rawFile = `ax-${viewport}-${view}.json`;
+  const textFile = `ax-${viewport}-${view}.txt`;
+  writeFileSync(path.join(OUT, rawFile), JSON.stringify(snap.raw, null, 2) + '\n');
+  writeFileSync(path.join(OUT, textFile), snap.text + '\n');
+  const findings = axFindings(snap.raw, { view, viewport });
+  ax.captures[`${viewport}/${view}`] = { viewport, view, rawFile, textFile, findings };
+  return { raw: rawFile, text: textFile, nodes: findings.nodes, unnamed: findings.instances.length };
+}
+
 // ---- Chrome by identity: every process of the profile is recorded, and checked gone after close
 const pages = [];
 async function launchTracked(opts, label) {
@@ -634,6 +726,11 @@ async function launchTracked(opts, label) {
   chromeRuns.push(page.qaRun);
   await page.client.send('Log.enable');
   watchConsole(page, label);
+  // Before the first navigation of this browser: the binding and the document init script must exist before the page
+  // that may violate the policy is parsed. Every violation accumulates in this state until scenario n judges it.
+  const cspState = await watchCsp(page);
+  cspStates.set(label, cspState);
+  page.qaRun.csp = { installedBeforeFirstNavigation: true, violations: cspState.violations };
   return page;
 }
 function notePids(page) {
@@ -855,6 +952,7 @@ async function desktopRun() {
     return { p95Ms: p95, maxMs: Math.max(...values), valuesMs: values };
   });
   await page.screenshot(path.join(OUT, 'desktop-board.png'));
+  await captureAx(page, 'desktop', 'board');
 
   // (b) everything the owner set up on the screen survives 20 publications
   let bDecision = null;
@@ -966,6 +1064,7 @@ async function desktopRun() {
     assert.equal(initial.pulse, 'w-pulse');
     assert.equal(initial.reduced, false);
     await page.screenshot(path.join(OUT, 'desktop-workers.png'));
+    await captureAx(page, 'desktop', 'workers');
 
     // normal motion: the first row finishes and sinks
     const mover1 = initial.order[0];
@@ -1095,6 +1194,7 @@ async function desktopRun() {
     await page.eval(`(document.querySelector('#main .plan-expanded').scrollIntoView({ block: 'start' }), true)`);
     await frames(page);
     await page.screenshot(path.join(OUT, 'desktop-plan.png'));
+    await captureAx(page, 'desktop', 'plan');
     return { planId: id, seededOpenOnFirstVisit: firstOpen, collapsedLines: collapsed.lines, anchorsChecked: anchors.length, lanes };
   });
 
@@ -1844,6 +1944,7 @@ async function mobileRun() {
     return fit;
   });
   await shot(page, 'mobile-board.png');
+  await captureAx(page, 'mobile', 'board');
 
   const planToggle = (id, key) => `#main [data-act="exp"][data-key="${key}${id}"]`;
   const planOpen = (id, key) => page.eval(`(() => { const t = document.querySelector(${J(planToggle(id, key))}); return t ? t.getAttribute('aria-expanded') === 'true' : null; })()`);
@@ -1888,12 +1989,14 @@ async function mobileRun() {
     await page.eval(`(document.querySelector('#main .plan-expanded').scrollIntoView({ block: 'start' }), true)`);
     await frames(page);
     await shot(page, 'mobile-plan.png');
+    await captureAx(page, 'mobile', 'plan');
     return shape;
   });
 
   await showPage(page, 'lead-A', 'wk');
   await frames(page);
   await shot(page, 'mobile-workers.png');
+  await captureAx(page, 'mobile', 'workers');
 
   // Folded / open / closed / reopened, each framed. The folded summary is measured as real lines (not a node count), the open plan
   // must carry exactly the expected anchors, and a reopen must lay out like the first open.
@@ -2430,6 +2533,30 @@ try {
     try { return [sid, readJson(path.join(STATE, 'sessions', sid, 'meta.json')).errors ?? null]; } catch (err) { return [sid, `unreadable: ${err.message}`]; }
   }));
 
+  await scenario('n', 'no CSP violation in any run: watchCsp was installed before the first navigation of both browsers', async () => {
+    const runs = [];
+    for (const [label, state] of cspStates) {
+      state.assertNone(label);
+      runs.push({ label, installedBeforeFirstNavigation: true, violations: state.violations.length, notes: state.notes.length });
+    }
+    assert.equal(runs.length, 2, `both browsers were watched: ${runs.map((r) => r.label).join(', ')}`);
+    return { runs };
+  });
+
+  await scenario('ax', 'no unnamed interactive element outside scripts/qa-ax-allowlist.json; the allowlisted baseline nodes are the S3 follow-up', async () => {
+    const captures = Object.values(ax.captures);
+    assert.equal(captures.length, 6, `six AX captures: ${captures.map((c) => `${c.viewport}/${c.view}`).join(', ')}`);
+    const allow = readAxAllowlist();
+    const written = allow.exists ? null : writeAxAllowlist(captures);
+    const entries = allow.exists ? allow.entries : written.entries;
+    const cmp = compareAx(captures, entries);
+    ax.allowlist = { file: 'scripts/qa-ax-allowlist.json', exists: allow.exists, wrote: !!written, sha256: allow.exists ? allow.sha256 : written.sha256, entries: Object.keys(entries).length };
+    ax.baseline = cmp.baseline;
+    ax.unexpected = cmp.unexpected;
+    assert.deepEqual(cmp.unexpected, []);
+    return { allowlist: ax.allowlist, axBaselineFailures: cmp.baseline, captures: captures.map((c) => ({ viewport: c.viewport, view: c.view, raw: c.rawFile, text: c.textFile, unnamed: c.findings.instances.length })) };
+  });
+
   await scenario('k', 'no console errors or page exceptions in any run, no failure inside a lead\'s fake host', async () => {
     assert.deepEqual(consoleErrors, []);
     const failures = Object.entries(leadReports).flatMap(([sid, r]) => (r.failures || []).map((f) => `${sid}: ${f}`));
@@ -2447,6 +2574,12 @@ try {
     const file = path.join(OUT, name);
     if (!existsSync(file) || statSync(file).size < 5000) throw new Error(`missing or tiny screenshot ${file}`);
   }
+  for (const cap of Object.values(ax.captures)) {
+    for (const name of [cap.rawFile, cap.textFile]) {
+      const file = path.join(OUT, name);
+      if (!existsSync(file) || statSync(file).size < 100) throw new Error(`missing or tiny AX capture ${file}`);
+    }
+  }
 } catch (err) {
   fatal = err;
   console.error('FATAL', err);
@@ -2454,7 +2587,7 @@ try {
 
 const cleanupResult = await cleanup();
 const scenarioIds = ['a', 'b', 'c', 'd', 'e', 'f', 'annotation-delivered', 'pick-writes-answer', 'legacy-501-bad-text', 'forged-origin-403', 'unknown-asset-404', 'blocks', 'input-decision',
-  'blocks-max', 'input-invalid-page', 'input-max-once', 'i', 'g', 'h', 'file-no-send', 'j', 'k'];
+  'blocks-max', 'input-invalid-page', 'input-max-once', 'i', 'g', 'h', 'file-no-send', 'j', 'n', 'ax', 'k'];
 const extra = ['m-fit', 'f-mobile', 'plan-fold-mobile', 'c-mobile', 'd-mobile', 'e-blocked', 'e-mobile', 'g-mobile', 'blocks-mobile'];
 const allPass = !fatal
   && scenarioIds.every((id) => results[id] && results[id].pass)
@@ -2473,8 +2606,13 @@ const doc = {
     fail: [...scenarioIds, ...extra].filter((id) => !(results[id] && results[id].pass)),
   },
   chrome: chromeRuns,
+  csp: { runs: [...cspStates].map(([label, state]) => ({ label, installedBeforeFirstNavigation: true, violations: state.violations.length, notes: state.notes.length })),
+    totalViolations: [...cspStates.values()].reduce((n, state) => n + state.violations.length, 0) },
+  ax: { allowlist: ax.allowlist, axBaselineFailures: ax.baseline, axUnexpected: ax.unexpected,
+    captures: Object.values(ax.captures).map((c) => ({ viewport: c.viewport, view: c.view, raw: c.rawFile, text: c.textFile, nodes: c.findings.nodes, unnamed: c.findings.instances.length })) },
   mobileScenarios: extra.map((id) => ({ id, pass: Boolean(results[id] && results[id].pass), viewport: results[id] ? results[id].viewport : null })),
   captures: Object.fromEntries([...DESKTOP_CAPTURES, ...MOBILE_CAPTURES].map((n) => [n, existsSync(path.join(OUT, n)) ? statSync(path.join(OUT, n)).size : null])),
+  axCaptures: Object.fromEntries(Object.values(ax.captures).flatMap((c) => [c.rawFile, c.textFile].map((n) => [n, existsSync(path.join(OUT, n)) ? statSync(path.join(OUT, n)).size : null]))),
   scenarios: results,
   consoleErrors,
   pageErrorReadFailures,

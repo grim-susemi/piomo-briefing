@@ -35,10 +35,11 @@ import { validateBrief, REPORT_BLOCK_SCHEMA, DECISION_FIELDS_SCHEMA } from './sr
 import { openStore } from './src/store.mjs';
 import { collectAuto } from './src/collect.mjs';
 import { applyDecide, applyBoardAnswer, applyBoardAnnotation, formatDecideResult } from './src/decide.mjs';
-import { renderPageMaybe, buildViewModel, pageHtml, serverInfoOf, withReports, OWN_GENERATION } from './src/render.mjs';
+import { renderPageMaybe, buildViewModel, projectBoardModel, pageHtml, serverInfoOf, withReports, OWN_GENERATION } from './src/render.mjs';
 import { importImage, gcAssets } from './src/assets.mjs';
 import { createServerHost, readInstalledGeneration } from './src/server-host.mjs';
 import { openProfilesStore } from './src/profiles/store.mjs';
+import { getMementoApi } from './src/memento-bridge.mjs';
 import { createWorkersLive } from './src/workers-live.mjs';
 import { createPlanTool } from './src/plan-tool.mjs';
 import { createAskBridge } from './src/ask-bridge.mjs';
@@ -829,7 +830,21 @@ export function createBriefingExtension(opts = {}) {
         : `보고는 저장됐지만 상황판은 갱신되지 못함${newText}: ${res.error}`];
       for (const w of v.warnings) lines.push(`경고: ${w}`);
       if (reportWarning) lines.push(`경고: ${reportWarning}`);
-      return { content: [{ type: 'text', text: lines.join('\n') }], details: { seq, newDecisionIds: created.map((d) => d.id), pagePath } };
+      // The caller's own card only: the last written publication names this session when its row was folded or trimmed.
+      // Other conversations' entries stay in details.boardTrim and never produce a line here.
+      const presentation = res.presentation ?? null;
+      const own = presentation ? presentation.sessions.find((e) => e.sessionId === sid) ?? null : null;
+      if (own) {
+        if (own.folded) lines.push(`경고: 이 대화는 상황판에서 접혀 있습니다(보고서 ${own.folded.reports}개). 펼치면 전체 기록이 보입니다.`);
+        if (own.cut.reports > 0) lines.push(`경고: 상황판 용량(600KB) 때문에 이 대화의 보고서 ${own.cut.reports}개가 상황판에서 빠졌습니다. 원본은 그대로 있습니다.`);
+        if (own.cut.blocks > 0) lines.push(`경고: 상황판 용량(600KB) 때문에 이 대화 보고서의 표·그래프 ${own.cut.blocks}개가 빠졌습니다. 원본은 그대로 있습니다.`);
+        if (own.cut.details) lines.push('경고: 상황판 용량(600KB) 때문에 이 대화의 부가 정보 일부가 줄었습니다.');
+        if (presentation.overCap) lines.push('경고: 줄일 수 있는 것을 다 줄여도 상황판 데이터가 600KB를 넘었습니다(지금처럼 게시함).');
+      }
+      return { content: [{ type: 'text', text: lines.join('\n') }], details: {
+        seq, newDecisionIds: created.map((d) => d.id), pagePath,
+        boardTrim: presentation ? { seq: presentation.seq, overCap: presentation.overCap, session: own } : null,
+      } };
     }
 
     // ---- commands ----
@@ -1131,24 +1146,37 @@ export function createBriefingExtension(opts = {}) {
       });
       if (serverOn && (!host || hostSid !== sid)) {
         hostSid = sid;
+        const buildServerModel = (snap, t, full = false) => {
+          const info = serverInfoOf(store);
+          // A record read may change errors; build from a fresh snapshot in that case.
+          const changed = noteServerRecord(info);
+          return buildViewModel(changed ? withReports(store, store.readSnapshot()) : snap, t, { generation, server: info.server, serverError: info.error, stateDir: store.root, full });
+        };
         host = (opts.createServerHost ?? createServerHost)({
           stateDir,
           sessionId: sid,
           generation,
           installedGeneration,
           isEnabled: enabled, // never throws: an unreadable settings file is recorded as the 'settings' error and reads as paused
-          buildViewModel: (snap, t) => {
-            const info = serverInfoOf(store);
-            // a failed record read is recorded in this very operation; when that changed the errors the model is built from a fresh snapshot
-            const changed = noteServerRecord(info);
-            return buildViewModel(changed ? withReports(store, store.readSnapshot()) : snap, t, { generation, server: info.server, serverError: info.error, stateDir: store.root });
-          },
+          buildViewModel: (snap, t) => buildServerModel(snap, t),
+          buildFull: (snap, t) => buildServerModel(snap, t, true),
+          project: (full, t) => projectBoardModel(full, t),
           readSnapshot: () => withReports(store, store.readSnapshot()),
-          getPage: (vm, token) => pageHtml(vm, generation, { mode: 'server', token }),
+          getPage: (vm, token, nonce) => pageHtml(vm, generation, { mode: 'server', token, nonce }),
           answer: boardAnswer,
           focus: boardFocus,
           profiles: boardProfiles,
           profilesState: boardProfilesState,
+          mementoState: async () => {
+            const api = getMementoApi();
+            return api.ok ? { status: 200, json: await api.value.state() } : { status: 501, json: { ok: false, code: api.code } };
+          },
+          memento: async (body) => {
+            const api = getMementoApi();
+            if (!api.ok) return { status: 501, json: { ok: false, code: api.code } };
+            const result = await api.value.handle(body);
+            return { status: result.status, json: result.body };
+          },
           reclaimStale: (rel, rec) => store.reclaimStale(rel, rec),
           onError: hostError,
           onRecover: hostRecover,

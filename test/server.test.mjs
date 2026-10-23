@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
-import { createBoardServer } from '../src/server.mjs';
+import { createBoardServer, cspHeader } from '../src/server.mjs';
 
 // Server tests use 48120-48839, disjoint from server-host.test.mjs even when child pids have the same modulo.
 // Tests read the bound port from start().
@@ -13,6 +13,66 @@ function nextBase() {
 }
 
 const VM = { gen: 4, seq: 7, sessions: [{ id: 's1', title: 'a\nb "quoted" \u2028 end' }] };
+
+test('convo route: a board sid returns its full card with the /data.json gates and SECURE headers', async () => {
+  const card = { id: 's1', reports: [{ id: 'r1', summary: 'whole' }] };
+  const payload = { schema: 1, gen: 4, key: 'fold-key', session: card };
+  await withServer({ getConvo: (sid) => sid === 's1' ? payload : null }, async ({ port }) => {
+    for (const site of [undefined, 'same-origin', 'none']) {
+      const r = await request({ port, path: '/convo/s1.json', headers: site ? { 'Sec-Fetch-Site': site } : {} });
+      assert.equal(r.status, 200);
+      assert.deepEqual(JSON.parse(r.body), payload);
+      for (const [name, value] of Object.entries({ 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'content-type': 'application/json; charset=utf-8' })) assert.equal(r.headers[name], value);
+      assert.equal(r.headers['content-security-policy'], undefined);
+    }
+    assert.equal((await request({ port, path: '/convo/s1.json', method: 'POST' })).status, 405);
+  });
+});
+
+test('convo route: foreign Host 403, cross-site 403, malformed, percent-encoded, extra-segment or other-suffix paths 404, unknown sid 404', async () => {
+  const reads = [];
+  const spyStore = { readSnapshot() { reads.push('snapshot'); return {}; } };
+  await withServer({ getConvo: (sid) => { spyStore.readSnapshot(); assert.equal(sid, 'unknown'); return null; } }, async ({ port }) => {
+    assert.equal((await request({ port, path: '/convo/..%2Fmeta.json', headers: { Host: 'evil.example', 'Sec-Fetch-Site': 'cross-site' } })).body, 'forbidden host');
+    for (const site of ['cross-site', 'same-site']) assert.equal((await request({ port, path: '/convo/s1.json', headers: { 'Sec-Fetch-Site': site } })).status, 403);
+    for (const path of ['/convo/.json', '/convo/_bad.json', '/convo/../meta.json', '/convo/..%2Fmeta.json', '/convo/%73.json', '/convo/s1/x.json', '/convo/s1.js', '/convo/s1.json/extra', '/convo/' + 'a'.repeat(129) + '.json']) {
+      assert.equal((await request({ port, path })).status, 404, path);
+    }
+    assert.deepEqual(reads, [], 'invalid paths and gates never reach the spy store');
+    assert.equal((await request({ port, path: '/convo/unknown.json' })).status, 404);
+    assert.deepEqual(reads, ['snapshot']);
+  });
+});
+
+test('convo route: data.js and folded.js stay unserved', async () => {
+  await withServer({ getConvo: () => assert.fail('not a conversation') }, async ({ port }) => {
+    for (const path of ['/data.js', '/folded.js']) assert.equal((await request({ port, path })).status, 404);
+  });
+});
+
+test('convo route: a builder throw is a 500 through the existing error path', async () => {
+  const failure = new Error('full builder failed');
+  await withServer({ getConvo: () => { throw failure; } }, async ({ port, errors }) => {
+    assert.equal((await request({ port, path: '/convo/s1.json' })).status, 500);
+    assert.deepEqual(errors, [{ key: 'server:sse', err: failure }]);
+  });
+});
+
+test('convo route: without getConvo the route is 404', async () => {
+  await withServer({}, async ({ port }) => {
+    assert.equal((await request({ port, path: '/convo/s1.json' })).status, 404);
+  });
+});
+
+test('convo route: a folded card larger than 614400 bytes is served whole and deep-equal to its full card', async () => {
+  const card = { id: 'big', reports: [{ summary: 'x'.repeat(614401) }], decisions: [], notes: [] };
+  await withServer({ getConvo: () => ({ schema: 1, gen: 4, key: 'big-key', session: card }) }, async ({ port }) => {
+    const r = await request({ port, path: '/convo/big.json' });
+    assert.equal(r.status, 200);
+    assert.ok(Buffer.byteLength(r.body) > 614400);
+    assert.deepEqual(JSON.parse(r.body).session, card);
+  });
+});
 if (process.env.OMO_TEST_MUTANT_HOOKS) console.log(`TEST-PID ${process.pid}`);
 
 function makeServer(over = {}) {
@@ -138,6 +198,55 @@ test('GET / serves the page with the hardening headers and no CORS', async () =>
   });
 });
 
+test('GET / carries one CSP header with a fresh nonce that the same page also carries', async () => {
+  const pageFor = ({ nonce } = {}) =>
+    `<!doctype html><style${nonce ? ` nonce="${nonce}"` : ''}></style>` +
+    Array.from({ length: 11 }, () => `<script${nonce ? ` nonce="${nonce}"` : ''}></script>`).join('');
+  await withServer({ getPage: pageFor }, async ({ port }) => {
+    const a = await request({ port, path: '/' });
+    const policy = a.headers['content-security-policy'];
+    assert.equal(typeof policy, 'string', 'one CSP header');
+    const nonce = /script-src 'nonce-([^']+)'/.exec(policy)?.[1];
+    assert.match(nonce, /^[A-Za-z0-9+/]{22}==$/, '16 random bytes as base64');
+    assert.equal(
+      policy,
+      "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'; " +
+        `script-src 'nonce-${nonce}'; script-src-attr 'none'; style-src 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; ` +
+        "connect-src 'self'; img-src 'self' data:; frame-src 'none'; worker-src 'none'",
+      'the exact policy is the contract, with the nonce in script-src and style-src',
+    );
+    assert.equal(policy, cspHeader(nonce), 'the route uses the exported policy builder');
+    const bodyNonces = [...a.body.matchAll(/nonce="([^"]+)"/g)].map((m) => m[1]);
+    assert.equal(bodyNonces.length, 12, 'one style + eleven scripts carry the nonce');
+    assert.ok(bodyNonces.every((n) => n === nonce), 'the page carries the header nonce');
+    const b = await request({ port, path: '/' });
+    const nonceB = /script-src 'nonce-([^']+)'/.exec(b.headers['content-security-policy'])?.[1];
+    assert.notEqual(nonceB, nonce, 'two consecutive responses carry different nonces');
+    assert.equal(b.headers['content-security-policy'], cspHeader(nonceB));
+  });
+});
+
+test('only GET / carries CSP: /data.json, /health, /events, a 404 and a Host refusal have none', async () => {
+  await withServer({}, async ({ port }) => {
+    for (const p of ['/data.json', '/health']) {
+      const r = await request({ port, path: p });
+      assert.equal(r.status, 200, p);
+      assert.equal(r.headers['content-security-policy'], undefined, `${p} has no CSP`);
+    }
+    const feed = await sse(port);
+    assert.equal(feed.status, 200);
+    assert.equal(feed.headers['content-security-policy'], undefined, '/events has no CSP');
+    feed.req.destroy();
+    const nope = await request({ port, path: '/nope' });
+    assert.equal(nope.status, 404);
+    assert.equal(nope.headers['content-security-policy'], undefined, 'a 404 has no CSP');
+    const forbidden = await request({ port, path: '/', headers: { Host: 'evil.example' } });
+    assert.equal(forbidden.status, 403);
+    assert.equal(forbidden.headers['content-security-policy'], undefined, 'a Host refusal has no CSP');
+    assert.doesNotMatch(forbidden.body, /<html/i, 'a Host refusal serves no page');
+  });
+});
+
 test('/data.json is JSON + nosniff, /health has its fields, /data.js and unknown paths are 404', async () => {
   await withServer({}, async ({ port }) => {
     const h0 = await request({ port, path: '/health' });
@@ -178,6 +287,11 @@ test('Host header: foreign / missing / wrong-port hosts are 403, localhost:<port
       assert.equal(r.status, 403, host);
       const p = await request({ port, path: '/', headers: { Host: host } });
       assert.equal(p.status, 403, `GET / with ${host}`);
+      const d = await request({ port, path: '/data.json', headers: { Host: host } });
+      assert.equal(d.status, 403, `GET /data.json with ${host}`);
+      const e = await sse(port, { Host: host });
+      assert.equal(e.status, 403, `GET /events with ${host}`);
+      e.req.destroy();
     }
     assert.equal((await request({ port, path: '/health', headers: { Host: `localhost:${port}` } })).status, 200);
     assert.equal((await request({ port, path: '/health', headers: { Host: `127.0.0.1:${port}` } })).status, 200);

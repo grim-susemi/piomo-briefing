@@ -1,0 +1,114 @@
+{
+  "nodes": [
+    {
+      "nodeId": "1",
+      "ignored": false,
+      "role": { "type": "role", "value": "RootWebArea" },
+      "name": { "type": "computedString", "value": "Board" },
+      "childIds": ["2", "5", "6", "7", "9", "11"]
+    },
+    {
+      "nodeId": "2",
+      "parentId": "1",
+      "ignored": false,
+      "role": { "type": "role", "value": "main" },
+      "name": { "type": "computedString", "value": "" },
+      "childIds": ["3", "4"]
+    },
+    {
+      "nodeId": "3",
+      "parentId": "2",
+      "ignored": false,
+      "role": { "type": "role", "value": "button" },
+      "name": { "type": "computedString", "value": "확인" },
+      "properties": [
+        { "name": "disabled", "value": { "type": "boolean", "value": true } }
+      ],
+      "childIds": []
+    },
+    {
+      "nodeId": "4",
+      "parentId": "2",
+      "ignored": false,
+      "role": { "type": "role", "value": "button" },
+      "name": { "type": "computedString", "value": "   " },
+      "childIds": []
+    },
+    {
+      "nodeId": "5",
+      "parentId": "1",
+      "ignored": false,
+      "role": { "type": "role", "value": "textbox" },
+      "name": { "type": "computedString", "value": "메모" },
+      "value": { "type": "string", "value": "hello" },
+      "properties": [
+        { "name": "focusable", "value": { "type": "booleanOrUndefined", "value": true } },
+        { "name": "editable", "value": { "type": "token", "value": "plaintext" } },
+        { "name": "multiline", "value": { "type": "boolean", "value": false } }
+      ],
+      "childIds": []
+    },
+    {
+      "nodeId": "6",
+      "parentId": "1",
+      "ignored": false,
+      "role": { "type": "role", "value": "link" },
+      "name": { "type": "computedString", "value": "열기" },
+      "properties": [
+        { "name": "expanded", "value": { "type": "boolean", "value": true } },
+        { "name": "selected", "value": { "type": "boolean", "value": true } }
+      ],
+      "childIds": []
+    },
+    {
+      "nodeId": "7",
+      "parentId": "1",
+      "ignored": true,
+      "role": { "type": "role", "value": "generic" },
+      "name": { "type": "computedString", "value": "" },
+      "childIds": ["8"]
+    },
+    {
+      "nodeId": "8",
+      "parentId": "7",
+      "ignored": false,
+      "role": { "type": "role", "value": "checkbox" },
+      "name": { "type": "computedString", "value": "알림" },
+      "properties": [
+        { "name": "checked", "value": { "type": "tristate", "value": "mixed" } }
+      ],
+      "childIds": []
+    },
+    {
+      "nodeId": "9",
+      "parentId": "1",
+      "ignored": false,
+      "role": { "type": "role", "value": "heading" },
+      "name": { "type": "computedString", "value": "상황판" },
+      "childIds": ["10"]
+    },
+    {
+      "nodeId": "10",
+      "parentId": "9",
+      "ignored": false,
+      "role": { "type": "role", "value": "StaticText" },
+      "name": { "type": "computedString", "value": "본문" },
+      "childIds": []
+    },
+    {
+      "nodeId": "11",
+      "parentId": "1",
+      "ignored": false,
+      "role": { "type": "role", "value": "slider" },
+      "name": { "type": "computedString", "value": "볼륨" },
+      "value": { "type": "number", "value": 37 },
+      "properties": [
+        { "name": "orientation", "value": { "type": "token", "value": "horizontal" } },
+        { "name": "valuemin", "value": { "type": "number", "value": 0 } },
+        { "name": "valuemax", "value": { "type": "number", "value": 100 } },
+        { "name": "valuetext", "value": { "type": "string", "value": "37" } }
+      ],
+      "childIds": []
+    }
+  ]
+}

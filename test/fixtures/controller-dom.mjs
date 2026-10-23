@@ -192,9 +192,18 @@ export function makeController({ protocol = 'http:', token = 'tok-1', generation
   const byId = new Proxy({}, { get: (_, id) => document.getElementById(id) });
   const fire = (target, type, props = {}) => {
     const ev = { target, type, button: 0, preventDefault() { this.defaultPrevented = true; }, stopPropagation() { this.stopped = true; }, ...props };
-    for (const l of document.listeners[type]?.list || []) if (l.capture) l.fn(ev);
-    if (!ev.stopped) for (let p = target; p && !ev.stopped; p = p.parentNode) p.listeners?.[type]?.(ev);
-    if (!ev.stopped) for (const l of document.listeners[type]?.list || []) if (!l.capture) l.fn(ev);
+    try {
+      ev.eventPhase = 1;
+      for (const l of document.listeners[type]?.list || []) if (l.capture) l.fn(ev);
+      if (!ev.stopped) for (let p = target; p && !ev.stopped; p = p.parentNode) {
+        ev.eventPhase = p === target ? 2 : 3;
+        p.listeners?.[type]?.(ev);
+      }
+      ev.eventPhase = 3;
+      if (!ev.stopped) for (const l of document.listeners[type]?.list || []) if (!l.capture) l.fn(ev);
+    } finally {
+      ev.eventPhase = 0;
+    }
     return ev;
   };
   return {

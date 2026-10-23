@@ -48,10 +48,19 @@ export const MAX_VM_BYTES = 600 * 1024;
 const PAUSED = Symbol('paused'); // thrown inside the publish when opts.canPublish() turned false: nothing was written
 const PAUSED_ERROR = '브리핑이 꺼져 있어 게시하지 않았습니다';
 export const OMITTED_CHIP = '용량 때문에 일부 생략';
+// C-FOLD stage A: an idle closed conversation is shown as a compact row; nothing is deleted and the full card stays one
+// click away. The predicate below is the owner's rule (see isFoldable); stage B (over the cap) belongs to the cap work.
+export const FOLD_AFTER_MS = 2 * DAY_MS;
+export const FOLDED_CHIP = '접어 둠';
 // C-CAP2 bookkeeping on the model objects (symbols are never serialized)
 const CAP_TOUCHED = Symbol('capTouched');
 const CAP_NO_COUNTER = Symbol('capNoCounter');
 const CAP_BLOCKS = Symbol('capBlocks');
+const CAP_ALIVE = Symbol('capAlive');
+const CAP_RECENT = Symbol('capRecent');
+const CAP_CUT = Symbol('capCut');
+const PRESENTATION = Symbol('presentation');
+const capState = (object, key, value) => Object.defineProperty(object, key, { value, writable: true, configurable: true });
 const CAP_KEYS = ['briefPath', 'sessionFile', 'todo', 'attachments', 'blockSources'];
 // render.lock files this process created but could not verify/remove at release (nonce by lock path): a live pid is never
 // reclaimed by the stale rule, so the owner itself removes a nonce-verified leftover of its own.
@@ -463,116 +472,323 @@ function skeletonPlan(planId, files, status, ownerMeta) {
 function capSize(vm) {
   const exact = () => Buffer.byteLength(dataJsText(vm));
   let size = exact();
-  if (size <= MAX_VM_BYTES) return;
-  const byAge = (a, b) => ((a.tab === '끝남' ? 0 : 1) - (b.tab === '끝남' ? 0 : 1)) || (a.lastActivityAt - b.lastActivityAt);
-  const srcKeys = (s, prefix) => Object.keys(isObj(s.blockSources) ? s.blockSources : {}).filter((k) => k.startsWith(prefix));
-  const repKeys = (s) => srcKeys(s, 'rep/');
-  const nonEmptySources = (s) => isObj(s.blockSources) && Object.keys(s.blockSources).length > 0;
-  const fit = () => {
-    if (size <= MAX_VM_BYTES) size = exact(); // estimates are confirmed on the real text before stopping
-    return size <= MAX_VM_BYTES;
-  };
-  const bytes = (v) => Buffer.byteLength(scriptJson(v));
-  const keyBytes = (s, k) => (has(s, k) && s[k] !== undefined ? bytes(k) + 1 + bytes(s[k]) + 1 : 0); // "key":value plus its comma
-  const replace = (s, key, value) => { size += bytes(value) - bytes(s[key]); s[key] = value; };
-  const del = (s, key) => {
-    if (!has(s, key)) return;
-    size -= keyBytes(s, key); // deleted keys have a preceding field: session/decision id or question text remains
-    delete s[key];
-  };
-  const withoutRep = (s) => Object.fromEntries(Object.entries(s.blockSources).filter(([k]) => !k.startsWith('rep/')));
-
-  // pass 1: finished conversations' blockSources (only annotation paths are lost, so no chip)
-  for (const s of vm.sessions.filter((x) => x.tab === '끝남' && nonEmptySources(x)).sort(byAge)) {
-    if (fit()) return;
-    replace(s, 'blockSources', {});
-  }
-  const chipCost = (s, chip = OMITTED_CHIP) => (s.chips.includes(chip) ? 0 : bytes(chip) + (s.chips.length ? 1 : 0));
-  // pass 1b: preserve finished reports before pass 2 can remove them wholesale.
-  for (const s of vm.sessions.filter((x) => x.tab === '끝남' && x.alive === false).sort(byAge)) {
-    for (const r of s.reports) {
-      if (fit()) return;
-      if (!Array.isArray(r.blocks) || r.blocks.length === 0) continue;
-      const omitted = s[CAP_BLOCKS] ?? { count: 0, index: s.chips.length };
-      const count = omitted.count + r.blocks.length;
-      const chip = `표·그래프 생략 ${count}개`;
-      const cost = omitted.count ? bytes(chip) - bytes(s.chips[omitted.index]) : bytes(chip) + (s.chips.length ? 1 : 0);
-      if (keyBytes(r, 'blocks') <= cost) continue;
-      del(r, 'blocks');
-      s.chips[omitted.index] = chip;
-      s[CAP_BLOCKS] = { count, index: omitted.index }; // not serialized; survives the final-seq cap call
-      size += cost;
-    }
-  }
-  // pass 2: the existing drops with their chip. A drop is applied to a card only when it saves more bytes than the chip
-  // it adds (a tiny live row is smaller than the chip): no drop ever makes a card bigger.
-  const legacy = [
-    [(s) => s.live !== undefined || s.plan !== undefined, (s) => keyBytes(s, 'live') + keyBytes(s, 'plan'), (s) => { delete s.live; delete s.plan; }],
-    [(s) => Array.isArray(s.reports) && s.reports.length > 0,
-      (s) => bytes(s.reports) - bytes([]) + (repKeys(s).length ? bytes(s.blockSources) - bytes(withoutRep(s)) : 0),
-      (s) => { s.reports = []; if (repKeys(s).length) s.blockSources = withoutRep(s); }],
-  ];
-  // Two rounds: a drop skipped in round 1 because of its chip is free in round 2 once a later drop gave the card the chip.
-  for (let round = 0; round < 2; round++) {
-    for (const [need, saving, drop] of legacy) {
-      for (const s of vm.sessions.filter(need).sort(byAge)) {
+  if (size > MAX_VM_BYTES) {
+    const byAge = (a, b) => ((a.tab === '끝남' ? 0 : 1) - (b.tab === '끝남' ? 0 : 1))
+      || (a.lastActivityAt - b.lastActivityAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    const byReport = (a, b) => (a.r.at - b.r.at) || (a.s.id < b.s.id ? -1 : a.s.id > b.s.id ? 1 : 0)
+      || (str(a.r.id) < str(b.r.id) ? -1 : str(a.r.id) > str(b.r.id) ? 1 : 0);
+    const srcKeys = (s, prefix) => Object.keys(isObj(s.blockSources) ? s.blockSources : {}).filter((k) => k.startsWith(prefix));
+    const nonEmptySources = (s) => isObj(s.blockSources) && Object.keys(s.blockSources).length > 0;
+    const isProtectedReport = (r) => isObj(r) && r[CAP_RECENT] === true;
+    const protectedPrefixes = (s) => arr(s.reports).filter(isProtectedReport).map((r) => `rep/${r.id}`);
+    const protectedSource = (s, k) => protectedPrefixes(s).some((p) => k === p || k.startsWith(`${p}/`));
+    // A source entry belongs to a protected report only when its key is that report's rep/<id> or rep/<id>/img/<n>.
+    const removableSources = (s) => isObj(s.blockSources) && Object.keys(s.blockSources).some((k) => !protectedSource(s, k));
+    const keepProtectedSources = (s) => Object.fromEntries(Object.entries(isObj(s.blockSources) ? s.blockSources : {}).filter(([k]) => protectedSource(s, k)));
+    const withoutReps = (s, ids) => {
+      const drop = (k) => ids.some((id) => k === `rep/${id}` || k.startsWith(`rep/${id}/`));
+      return Object.fromEntries(Object.entries(isObj(s.blockSources) ? s.blockSources : {}).filter(([k]) => !drop(k)));
+    };
+    const fit = () => {
+      if (size <= MAX_VM_BYTES) size = exact(); // estimates are confirmed on the real text before stopping
+      return size <= MAX_VM_BYTES;
+    };
+    const bytes = (v) => Buffer.byteLength(scriptJson(v));
+    const keyBytes = (s, k) => (has(s, k) && s[k] !== undefined ? bytes(k) + 1 + bytes(s[k]) + 1 : 0); // "key":value plus its comma
+    const replace = (s, key, value) => { size += bytes(value) - bytes(s[key]); s[key] = value; };
+    const del = (s, key) => {
+      if (!has(s, key)) return;
+      size -= keyBytes(s, key); // deleted keys have a preceding field: session/decision id or question text remains
+      delete s[key];
+    };
+    const cutOf = (s) => {
+      if (!s[CAP_CUT]) capState(s, CAP_CUT, { reports: 0, blocks: 0, details: false });
+      return s[CAP_CUT];
+    };
+    const chipCost = (s, chip = OMITTED_CHIP) => (s.chips.includes(chip) ? 0 : bytes(chip) + (s.chips.length ? 1 : 0));
+    let n = vm.sessions.filter((s) => s[CAP_TOUCHED]).length; // a second call (final seq) continues the same count
+    const counterBytes = (k) => (k > 0 && !vm[CAP_NO_COUNTER] ? bytes('trimmed') + 1 + bytes({ cards: k }) + 1 : 0);
+    const touch = (s) => {
+      cutOf(s).details = true;
+      if (s[CAP_TOUCHED]) return;
+      capState(s, CAP_TOUCHED, true);
+      size += counterBytes(n + 1) - counterBytes(n);
+      n += 1;
+      if (!vm[CAP_NO_COUNTER]) vm.trimmed = { cards: n };
+    };
+    // One stage = today's pass schedule. Stage U protects recent reports (and their sources); stage P2 does not.
+    const schedule = (rows, protectReports) => {
+      // pass 1: finished conversations' blockSources (only annotation paths are lost, so no chip). In stage U the rep/
+      // entries of protected reports stay.
+      for (const s of rows.filter((x) => x.tab === '끝남' && nonEmptySources(x) && (!protectReports || removableSources(x))).sort(byAge)) {
         if (fit()) return;
+        replace(s, 'blockSources', protectReports ? keepProtectedSources(s) : {});
+        cutOf(s).details = true;
+      }
+      // pass 1b: preserve finished reports before pass 2 can remove them wholesale. A folded row carries no reports array
+      // (C-FOLD) and is skipped here exactly as pass 2's own predicate skips it. Protected reports are skipped in stage U.
+      for (const s of rows.filter((x) => x.tab === '끝남' && x.alive === false).sort(byAge)) {
+        if (!Array.isArray(s.reports)) continue;
+        for (const r of s.reports) {
+          if (fit()) return;
+          if (protectReports && isProtectedReport(r)) continue;
+          if (!Array.isArray(r.blocks) || r.blocks.length === 0) continue;
+          const omitted = s[CAP_BLOCKS] ?? { count: 0, index: s.chips.length };
+          const count = omitted.count + r.blocks.length;
+          const chip = `표·그래프 생략 ${count}개`;
+          const cost = omitted.count ? bytes(chip) - bytes(s.chips[omitted.index]) : bytes(chip) + (s.chips.length ? 1 : 0);
+          if (keyBytes(r, 'blocks') <= cost) continue;
+          const blockCount = r.blocks.length;
+          del(r, 'blocks');
+          s.chips[omitted.index] = chip;
+          capState(s, CAP_BLOCKS, { count, index: omitted.index });
+          capState(r, CAP_BLOCKS, blockCount);
+          cutOf(s).blocks += blockCount;
+          size += cost;
+        }
+      }
+      // pass 2: the existing drops with their chip. A drop is applied to a card only when it saves more bytes than the chip
+      // it adds (a tiny live row is smaller than the chip): no drop ever makes a card bigger.
+      const keep = protectReports ? isProtectedReport : () => false;
+      const removableReports = (s) => Array.isArray(s.reports) && s.reports.some((r) => !keep(r));
+      const savingReports = (s) => {
+        const kept = s.reports.filter((r) => keep(r));
+        const ids = s.reports.filter((r) => !keep(r)).map((r) => r.id);
+        return bytes(s.reports) - bytes(kept) + (ids.length && isObj(s.blockSources) ? bytes(s.blockSources) - bytes(withoutReps(s, ids)) : 0);
+      };
+      const dropReports = (s) => {
+        const before = s.reports.length;
+        const ids = s.reports.filter((r) => !keep(r)).map((r) => r.id);
+        for (const r of s.reports) if (!keep(r)) cutOf(s).blocks -= r[CAP_BLOCKS] ?? 0;
+        s.reports = s.reports.filter((r) => keep(r));
+        if (ids.length && isObj(s.blockSources)) s.blockSources = withoutReps(s, ids);
+        cutOf(s).reports += before - s.reports.length;
+      };
+      const legacy = [
+        [(s) => s.live !== undefined || s.plan !== undefined, (s) => keyBytes(s, 'live') + keyBytes(s, 'plan'), (s) => { delete s.live; delete s.plan; cutOf(s).details = true; }],
+        [removableReports, savingReports, dropReports],
+      ];
+      // Two rounds: a drop skipped in round 1 because of its chip is free in round 2 once a later drop gave the card the chip.
+      for (let round = 0; round < 2; round++) {
+        for (const [need, saving, drop] of legacy) {
+          for (const s of rows.filter(need).sort(byAge)) {
+            if (fit()) return;
+            const cost = chipCost(s);
+            const saved = saving(s);
+            if (saved <= cost) continue;
+            drop(s);
+            if (cost) s.chips.push(OMITTED_CHIP);
+            size -= saved - cost;
+          }
+        }
+      }
+
+      const passes = [
+        [(s) => isObj(s.todo) && s.todo.items.length > 0, (s) => {
+          replace(s, 'todo', { items: [], more: s.todo.more + s.todo.items.length });
+          const keepSrc = srcKeys(s, 'plan/todo/');
+          if (keepSrc.length) replace(s, 'blockSources', Object.fromEntries(Object.entries(s.blockSources).filter(([k]) => !keepSrc.includes(k))));
+        }],
+        [(s) => nonEmptySources(s) && (!protectReports || removableSources(s)), (s) => replace(s, 'blockSources', protectReports ? keepProtectedSources(s) : {})],
+        [(s) => Array.isArray(s.attachments) && s.attachments.length > 1, (s) => replace(s, 'attachments', s.attachments.slice(0, 1))],
+        [(s) => CAP_KEYS.some((k) => has(s, k) && (k !== 'blockSources' || !protectReports || removableSources(s))), (s) => {
+          for (const k of CAP_KEYS) {
+            // A protected report keeps its own rep/<id> sources until the report itself is cut (pass 2 / stage P1).
+            if (k === 'blockSources' && protectReports && nonEmptySources(s)) {
+              if (removableSources(s)) replace(s, 'blockSources', keepProtectedSources(s));
+            } else del(s, k);
+          }
+        }],
+        [(s) => has(s, 'alive') || has(s, 'briefSeq'), (s) => { del(s, 'alive'); del(s, 'briefSeq'); }],
+      ];
+      for (const [need, apply] of passes) {
+        for (const s of rows.filter(need).sort(byAge)) {
+          if (fit()) return;
+          touch(s);
+          apply(s);
+        }
+      }
+      if (fit()) return;
+      if (!vm[CAP_NO_COUNTER] && has(vm, 'trimmed')) {
+        delete vm.trimmed; // pass 7 last resort: the counter's own bytes prevent fitting
+        capState(vm, CAP_NO_COUNTER, true);
+        size = exact();
+      }
+      // Pass 8 also runs on the final-seq call when pass 7 already omitted the counter.
+      for (const s of rows.filter((s) => s.decisions.some((d) => has(d, 'askLive')) || has(s.openQuestion, 'builtin')).sort(byAge)) {
+        if (fit()) return;
+        touch(s);
+        for (const d of s.decisions) del(d, 'askLive');
+        del(s.openQuestion, 'builtin');
+      }
+      for (const s of rows.filter((x) => has(x, 'heldCount')).sort(byAge)) {
+        if (fit()) return;
+        touch(s);
+        del(s, 'heldCount');
+        for (const d of s.decisions) if (isObj(d.held) && has(d.held, 'at')) replace(d, 'held', {});
+      }
+    };
+
+    const unprotected = vm.sessions.filter((s) => s[CAP_ALIVE] !== true);
+    // stage U: today's whole schedule over the unprotected rows only
+    schedule(unprotected, true);
+    // stage P1: the unprotected rows' protected reports, per report oldest first, then row id, then report id
+    const stageP1 = () => {
+      const pairs = [];
+      for (const s of unprotected) {
+        if (!Array.isArray(s.reports)) continue;
+        for (const r of s.reports) if (isProtectedReport(r)) pairs.push({ s, r });
+      }
+      pairs.sort(byReport);
+      for (const { s, r } of pairs) {
+        if (fit()) return;
+        if (!s.reports.includes(r)) continue;
+        if (!Array.isArray(r.blocks) || r.blocks.length === 0) continue;
+        const omitted = s[CAP_BLOCKS] ?? { count: 0, index: s.chips.length };
+        const count = omitted.count + r.blocks.length;
+        const chip = `표·그래프 생략 ${count}개`;
+        const cost = omitted.count ? bytes(chip) - bytes(s.chips[omitted.index]) : bytes(chip) + (s.chips.length ? 1 : 0);
+        if (keyBytes(r, 'blocks') <= cost) continue;
+        const blockCount = r.blocks.length;
+        del(r, 'blocks');
+        s.chips[omitted.index] = chip;
+        capState(s, CAP_BLOCKS, { count, index: omitted.index });
+        capState(r, CAP_BLOCKS, blockCount);
+        cutOf(s).blocks += blockCount;
+        size += cost;
+      }
+      for (const { s, r } of pairs) {
+        if (fit()) return;
+        if (!s.reports.includes(r)) continue;
         const cost = chipCost(s);
-        const saved = saving(s);
+        const kept = s.reports.filter((x) => x !== r);
+        const saved = bytes(s.reports) - bytes(kept) + (isObj(s.blockSources) ? bytes(s.blockSources) - bytes(withoutReps(s, [r.id])) : 0);
         if (saved <= cost) continue;
-        drop(s);
+        s.reports = kept;
+        if (isObj(s.blockSources)) s.blockSources = withoutReps(s, [r.id]);
         if (cost) s.chips.push(OMITTED_CHIP);
+        cutOf(s).reports += 1;
+        cutOf(s).blocks -= r[CAP_BLOCKS] ?? 0;
         size -= saved - cost;
       }
-    }
+    };
+    if (!fit()) stageP1();
+    // stage P2: today's whole schedule over the protected rows (an alive row's alive is removed only by pass 7)
+    if (!fit()) schedule(vm.sessions.filter((s) => s[CAP_ALIVE] === true), false);
   }
+  capState(vm, PRESENTATION, presentationOf(vm, exact()));
+}
 
-  let n = vm.sessions.filter((s) => s[CAP_TOUCHED]).length; // a second call (final seq) continues the same count
-  const counterBytes = (k) => (k > 0 && !vm[CAP_NO_COUNTER] ? bytes('trimmed') + 1 + bytes({ cards: k }) + 1 : 0);
-  const touch = (s) => {
-    if (s[CAP_TOUCHED]) return;
-    s[CAP_TOUCHED] = true; // a symbol: never serialized
-    size += counterBytes(n + 1) - counterBytes(n);
-    n += 1;
-    if (!vm[CAP_NO_COUNTER]) vm.trimmed = { cards: n };
+// Presentation accounting for the publish result: only folded or cut sessions, sorted by sessionId, never serialized.
+function presentationOf(vm, exactBytes) {
+  const sessions = [];
+  for (const s of arr(vm.sessions)) {
+    if (!isObj(s)) continue;
+    const folded = isObj(s.folded) ? { reports: s.folded.reports ?? 0, decisions: s.folded.decisions ?? 0 } : null;
+    const cut = isObj(s[CAP_CUT]) ? { reports: s[CAP_CUT].reports, blocks: s[CAP_CUT].blocks, details: s[CAP_CUT].details === true } : null;
+    if (!folded && !cut) continue;
+    sessions.push({ sessionId: s.id, folded, cut: cut ?? { reports: 0, blocks: 0, details: false } });
+  }
+  sessions.sort((a, b) => (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0));
+  return { seq: Number.isInteger(vm.seq) ? vm.seq : 0, overCap: exactBytes > MAX_VM_BYTES, sessions };
+}
+
+// ---- C-FOLD: the compact row for an idle closed conversation --------------------------------------------------------
+// A row may fold only when ALL hold (the page's own plan test plus the owner's rules): not alive, not blocked or on the
+// waiting tab, no open decision or question, nothing waiting for an answer, every decision and note delivered or without a
+// delivery line, no plan signal, no read error or unavailable mirror, idle for FOLD_AFTER_MS, and every visible report
+// older than a day. Folding keeps the whole row except the heavy fields; the full card stays one click away.
+const HEAVY_KEYS = ['reports', 'changes', 'done', 'flow', 'todo', 'attachments', 'blockSources', 'briefPath', 'sessionFile', 'autoSummaryText'];
+const READ_ERROR_CHIP = '기록 읽기 실패';
+const MIRROR_UNAVAILABLE_CHIP = '질문 미러 사용 불가';
+const jsonBytes = (v) => Buffer.byteLength(scriptJson(v));
+const sha20 = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 20);
+
+function foldableExceptTime(view, waitingSids) {
+  if (!isObj(view) || view.alive === true) return false;
+  if (view.status === 'blocked' || view.tab === '나를 기다림') return false;
+  const decisions = arr(view.decisions);
+  if (decisions.some((d) => isObj(d) && !d.answered && !d.closed)) return false;
+  if (view.openQuestion !== undefined && view.openQuestion !== null) return false;
+  // the caller passes vm.waiting's session ids: an item waiting for the owner keeps its card whole
+  if (waitingSids instanceof Set ? waitingSids.has(view.id) : arr(waitingSids).includes(view.id)) return false;
+  // a delivery still pending ('대기: …', '전달 중', '질문창에서 답 받음') loses information when the card folds
+  const delivered = (x) => isObj(x) && (x.delivery === undefined || (typeof x.delivery === 'string' && x.delivery.startsWith('전달됨')));
+  if (!decisions.every(delivered) || !arr(view.notes).every(delivered)) return false;
+  // the page's hasPlan test (src/page/shell.js): plan, planLink, workName, auto.work, auto.stage
+  const auto = isObj(view.auto) ? view.auto : null;
+  if (view.plan || view.planLink || str(view.workName) || (auto && (auto.work || str(auto.stage)))) return false;
+  const chips = arr(view.chips); // truth.mjs renders readError / mirrorUnavailable as these chips
+  if (chips.includes(READ_ERROR_CHIP) || chips.includes(MIRROR_UNAVAILABLE_CHIP)) return false;
+  return true;
+}
+
+/** True when this full card may be shown as a folded row at `now`. */
+export function isFoldable(view, waitingSids, now) {
+  if (!foldableExceptTime(view, waitingSids)) return false;
+  if (!isNum(view.lastActivityAt) || !(view.lastActivityAt < now - FOLD_AFTER_MS)) return false;
+  return arr(view.reports).every((r) => isObj(r) && isNum(r.at) && r.at < now - DAY_MS);
+}
+
+// The folded row: the full row minus HEAVY_KEYS, plus the counts/key of the full card and the fold chip.
+function foldRow(full) {
+  const row = structuredClone(full);
+  for (const k of HEAVY_KEYS) delete row[k];
+  row.folded = { reports: arr(full.reports).length, decisions: arr(full.decisions).length, key: sha20(full) };
+  row.chips = [...arr(full.chips), FOLDED_CHIP];
+  return row;
+}
+
+/**
+ * The publishable model from the full one: a clone with the stage-A rows folded (unless opts.fold === false), vm.foldedKey
+ * when anything folded (absent otherwise), then the cap. The input model is never touched; the full model itself is what
+ * the expand paths serve (todo 4/5), so folding is a presentation change only.
+ */
+export function projectBoardModel(fullVm, now = Date.now(), opts = {}) {
+  const vm = structuredClone(fullVm);
+  // Protection is captured from the unmodified rows before any fold or cut. Symbols never serialize and survive the
+  // final-seq cap re-entry.
+  for (const s of arr(vm.sessions)) {
+    if (!isObj(s)) continue;
+    if (s.alive === true) capState(s, CAP_ALIVE, true);
+    for (const r of arr(s.reports)) if (isObj(r) && isNum(r.at) && r.at >= now - DAY_MS) capState(r, CAP_RECENT, true);
+  }
+  const waitingSids = new Set(arr(vm.waiting).map((w) => (isObj(w) ? w.sessionId : null)).filter((sid) => typeof sid === 'string'));
+  const setFoldedKey = () => {
+    const folded = arr(vm.sessions).filter((s) => isObj(s) && isObj(s.folded));
+    if (!folded.length) { delete vm.foldedKey; return; }
+    const pairs = folded.slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((s) => `${s.id}:${s.folded.key}`);
+    vm.foldedKey = sha20(pairs);
   };
-  const passes = [
-    [(s) => isObj(s.todo) && s.todo.items.length > 0, (s) => {
-      replace(s, 'todo', { items: [], more: s.todo.more + s.todo.items.length });
-      const keep = srcKeys(s, 'plan/todo/');
-      if (keep.length) replace(s, 'blockSources', Object.fromEntries(Object.entries(s.blockSources).filter(([k]) => !keep.includes(k))));
-    }],
-    [nonEmptySources, (s) => replace(s, 'blockSources', {})],
-    [(s) => Array.isArray(s.attachments) && s.attachments.length > 1, (s) => replace(s, 'attachments', s.attachments.slice(0, 1))],
-    [(s) => CAP_KEYS.some((k) => has(s, k)), (s) => { for (const k of CAP_KEYS) del(s, k); }],
-    [(s) => has(s, 'alive') || has(s, 'briefSeq'), (s) => { del(s, 'alive'); del(s, 'briefSeq'); }],
-  ];
-  for (const [need, apply] of passes) {
-    for (const s of vm.sessions.filter(need).sort(byAge)) {
-      if (fit()) return;
-      touch(s);
-      apply(s);
+  if (opts.fold !== false) {
+    // stage A: every row whose full card satisfies the predicate
+    vm.sessions = arr(vm.sessions).map((full) => {
+      if (!isObj(full) || !isFoldable(full, waitingSids, now)) return full;
+      const row = foldRow(full);
+      return jsonBytes(row) < jsonBytes(full) ? row : full; // fold only when the row strictly shrinks
+    });
+    setFoldedKey();
+    // stage B: only while the model is still over the cap after stage A, and before any trim. Candidates satisfy the
+    // predicate except its two time rules; report-less rows fold first, then rows with a report under 24 h, oldest first.
+    if (Buffer.byteLength(dataJsText(vm)) > MAX_VM_BYTES) {
+      const recentReport = (s) => arr(s.reports).some((r) => isObj(r) && isNum(r.at) && r.at >= now - DAY_MS);
+      const candidates = arr(vm.sessions).filter((s) => isObj(s) && !s.folded && foldableExceptTime(s, waitingSids));
+      candidates.sort((a, b) => (Number(recentReport(a)) - Number(recentReport(b)))
+        || ((isNum(a.lastActivityAt) ? a.lastActivityAt : 0) - (isNum(b.lastActivityAt) ? b.lastActivityAt : 0))
+        || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      for (const full of candidates) {
+        const row = foldRow(full);
+        if (jsonBytes(row) >= jsonBytes(full)) continue;
+        vm.sessions = arr(vm.sessions).map((s) => (s === full ? row : s));
+        setFoldedKey();
+        if (Buffer.byteLength(dataJsText(vm)) <= MAX_VM_BYTES) break; // stop on the exact byte check
+      }
     }
+  } else {
+    delete vm.foldedKey; // a false fold option turns off both stages and leaves no key
   }
-  if (fit()) return;
-  if (!vm[CAP_NO_COUNTER] && has(vm, 'trimmed')) {
-    delete vm.trimmed; // pass 7 last resort: the counter's own bytes prevent fitting
-    vm[CAP_NO_COUNTER] = true;
-    size = exact();
-  }
-  // Pass 8 also runs on the final-seq call when pass 7 already omitted the counter.
-  for (const s of vm.sessions.filter((s) => s.decisions.some((d) => has(d, 'askLive')) || has(s.openQuestion, 'builtin')).sort(byAge)) {
-    if (fit()) return;
-    touch(s);
-    for (const d of s.decisions) del(d, 'askLive');
-    del(s.openQuestion, 'builtin');
-  }
-  for (const s of vm.sessions.filter((x) => has(x, 'heldCount')).sort(byAge)) {
-    if (fit()) return;
-    touch(s);
-    del(s, 'heldCount');
-    for (const d of s.decisions) if (isObj(d.held) && has(d.held, 'at')) replace(d, 'held', {});
-  }
+  capSize(vm);
+  return vm;
 }
 
 /**
@@ -601,7 +817,8 @@ export function serverInfoOf(store, isAlive = isPidAlive) {
  * @param {object} snapshot store.readSnapshot()
  * @param {number} now ms
  * @param {{isAlive?: (pid:number)=>boolean, fs?: object, pendingDeliveries?: Iterable<number>, generation?: number|null,
- *   server?: {url:string, generation:number|null}|null, serverError?: boolean}} [opts]
+ *   server?: {url:string, generation:number|null}|null, serverError?: boolean, stateDir?: string, full?: boolean,
+ *   fold?: boolean}} [opts] `full: true` returns the uncapped, unfolded model; a false `fold` turns stage-A folding off.
  */
 export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
   const isAlive = opts.isAlive ?? isPidAlive;
@@ -912,8 +1129,8 @@ export function buildViewModel(snapshot, now = Date.now(), opts = {}) {
     waiting: waitingItems(snap).filter((w) => shown.has(w.sessionId)),
     sessions: ordered,
   };
-  capSize(vm);
-  return vm;
+  if (opts.full === true) return vm; // uncapped and unfolded: what the expand paths and the fold projection build on
+  return projectBoardModel(vm, now, opts);
 }
 
 // JSON that is safe inside <script> and as a JS expression: no '<' (so no </script>, <!--),
@@ -938,10 +1155,10 @@ function dataJsText(vm) {
 const attrEscape = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 // tokens.css first: the design tokens every later sheet names.
-const PAGE_CSS = ['tokens.css', 'page.css', 'plan-view.css', 'workers-view.css', 'alarm.css', 'shell.css', 'profiles-view.css', 'convo.css', 'blocks.css', 'annotate.css'];
+const PAGE_CSS = ['tokens.css', 'page.css', 'plan-view.css', 'workers-view.css', 'alarm.css', 'shell.css', 'profiles-view.css', 'convo.css', 'blocks.css', 'annotate.css', 'cards-view.css'];
 // icons.js (the icon helper the templates call), view.js, then the block renderers it calls into, then alarm.js, then
 // page.js which wires them together.
-const PAGE_JS = ['icons.js', 'view.js', 'plan-view.js', 'workers-view.js', 'blocks.js', 'convo-view.js', 'shell.js', 'profiles-view.js', 'alarm.js', 'annotate.js', 'page.js'];
+const PAGE_JS = ['icons.js', 'view.js', 'plan-view.js', 'workers-view.js', 'blocks.js', 'convo-view.js', 'shell.js', 'profiles-view.js', 'alarm.js', 'annotate.js', 'cards-view.js', 'page.js'];
 // The icons the page scripts draw (icons.js): Lucide, one file per icon in assets/icons/lucide, vendored from LUCIDE_COMMIT
 // with the upstream LICENSE (ISC; MIT for the icons derived from Feather). pageHtml inlines them once as a hidden sprite of
 // <symbol id="i-<name>"> that keeps only the shapes' geometry: stroke, size and colour are page.css's (.ic).
@@ -995,22 +1212,25 @@ function iconSprite(fs) {
  * The whole board page (all scripts, styles and icons inline, first paint from `vm`). mode 'file' = STATE/index.html,
  * 'server' = GET / of the board server; both are built from the same template of this generation.
  * `token` (the board server's per-process write token) is emitted as <meta name="omo-board-token"> in server mode ONLY:
- * the file page, data.js, /data.json and the SSE model never carry it.
+ * the file page, data.js, /data.json and the SSE model never carry it. `nonce`, also server mode only, is the fresh
+ * per-response CSP nonce: it is put on the combined <style>, every page script and the bootstrap script. Any nonce that
+ * is not 16 bytes as base64 is ignored, so a legacy caller's bytes stay exactly today's.
  */
-export function pageHtml(vm, generation, { mode = 'file', token, fs = nodeFs } = {}) {
+export function pageHtml(vm, generation, { mode = 'file', token, nonce, fs = nodeFs } = {}) {
   const read = (name) => name === 'profiles-view.js' ? readProfilesScript(PAGE_DIR, fs) : fs.readFileSync(join(PAGE_DIR, name), 'utf8');
   const css = PAGE_CSS.map((n) => read(n).replace(/<\/style/gi, '<\\/style')).join('\n');
+  const nonceAttr = mode === 'server' && typeof nonce === 'string' && /^[A-Za-z0-9+/]{22}==$/.test(nonce) ? ` nonce="${nonce}"` : '';
   return '<!doctype html>\n<html lang="ko"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
     '<link rel="icon" href="data:,">' + // inline icon: the board server has no /favicon.ico and its 404 would be a console error on every load
     (Number.isInteger(generation) ? `<meta name="omo-briefing-generation" content="${generation}">` : '') +
     `<meta name="omo-briefing-mode" content="${mode === 'server' ? 'server' : 'file'}">` +
     (mode === 'server' && typeof token === 'string' && token !== '' ? `<meta name="omo-board-token" content="${attrEscape(token)}">` : '') +
-    '<title>OMO 상황판</title>\n<style>\n' + css + '\n</style></head>\n<body>\n' + iconSprite(fs) + '<div id="app"></div>\n' +
-    PAGE_JS.map((n) => '<script>\n' + inlineJs(read(n)) + '\n</script>\n').join('') +
+    '<title>OMO 상황판</title>\n<style' + nonceAttr + '>\n' + css + '\n</style></head>\n<body>\n' + iconSprite(fs) + '<div id="app"></div>\n' +
+    PAGE_JS.map((n) => '<script' + nonceAttr + '>\n' + inlineJs(read(n)) + '\n</script>\n').join('') +
     // Runs after page.js's own DOMContentLoaded start(): first paint uses the inline data,
     // data.js re-injection then only raises the badge for a larger seq.
-    '<script>\ndocument.addEventListener("DOMContentLoaded", function () { window.__briefData && window.__briefData(' +
+    '<script' + nonceAttr + '>\ndocument.addEventListener("DOMContentLoaded", function () { window.__briefData && window.__briefData(' +
     scriptJson(vm) + '); });\n</script>\n</body></html>\n';
 }
 
@@ -1038,6 +1258,10 @@ function makeRenderer(store, now, opts) {
   // asked right before anything is written and after every wait: false = the board is paused, so nothing may be published
   const canPublish = typeof opts.canPublish === 'function' ? opts.canPublish : () => true;
   const pausedOut = () => ({ ok: false, paused: true, seqs, error: PAUSED_ERROR });
+  // The presentation of the last data.js actually written in this invocation; null until one is written. It survives a
+  // follow-up attempt that is busy, paused or fails before writing again.
+  let writtenPresentation = null;
+  const finish = (result) => ({ ...result, presentation: writtenPresentation });
 
   // True when index.html on disk was written by a newer generation than ours - or by any generation when we have none
   // (a checkout publisher): only data.js is updated then. An unstamped or missing page is still written.
@@ -1147,14 +1371,28 @@ function makeRenderer(store, now, opts) {
       readMtime = snap.maxMtime;
       const info = serverInfoOf(store, isAlive);
       if (typeof opts.onServerInfo === 'function') opts.onServerInfo(info); // the caller notes a failed record read after the publish
-      const vm = buildViewModel(snap, now, {
+      // Project the actual publication sequence so a digit-boundary overflow can still fold before any trim.
+      const seq = lastPublishedSeq(store, snap) + 1;
+      const full = buildViewModel({ ...snap, published: { seq } }, now, {
         isAlive, fs, pendingDeliveries: opts.pendingDeliveries, generation, server: info.server, serverError: info.error, stateDir: store.root,
+        full: true,
       });
-      vm.seq = lastPublishedSeq(store, snap) + 1;
+      const vm = projectBoardModel(full, now, { fold: opts.fold });
+      vm.seq = seq;
       capSize(vm); // the seq text is part of data.js: confirm the cap on the final text
       if (!canPublish()) throw PAUSED;
+      if (vm.foldedKey) {
+        const foldedSids = new Set(vm.sessions.filter((s) => s.folded).map((s) => s.id));
+        const payload = {
+          schema: 1, gen: vm.gen, key: vm.foldedKey,
+          sessions: Object.fromEntries(full.sessions.filter((s) => foldedSids.has(s.id)).map((s) => [s.id, s])),
+        };
+        const text = `window.__briefFolded&&window.__briefFolded(${scriptJson(payload)});`;
+        if (store.readText('folded.js') !== text) store.replace('folded.js', text);
+      }
       const data = dataJsText(vm);
       store.replace('data.js', data);
+      writtenPresentation = vm[PRESENTATION] ?? null;
       let keepPage;
       try { keepPage = pageIsNewer(); } catch (err) {
         // generation of the existing page unknown: fail closed - keep it, still publish the data, and report it
@@ -1247,14 +1485,14 @@ function makeRenderer(store, now, opts) {
     return { ok: true, seqs };
   }
 
-  return { flow, publishOnceSync, publishOnceMaybe };
+  return { finish, flow, publishOnceSync, publishOnceMaybe };
 }
 
 /**
  * @param {ReturnType<import('./store.mjs').openStore>} store
  * @param {number} [now]
  * @param {{sessionId?: string, sleep?: (ms:number)=>void, isAlive?: (pid:number)=>boolean, fs?: object,
- *   pendingDeliveries?: Iterable<number>, generation?: number|null}} [opts]
+ *   pendingDeliveries?: Iterable<number>, generation?: number|null, fold?: boolean}} [opts]
  * @returns {{ok: boolean, seqs: number[], error?: string}}
  */
 export function renderPage(store, now = Date.now(), opts = {}) {
@@ -1262,7 +1500,7 @@ export function renderPage(store, now = Date.now(), opts = {}) {
   const gen = r.flow();
   let step = gen.next();
   while (!step.done) step = gen.next(r.publishOnceSync());
-  return step.value;
+  return r.finish(step.value);
 }
 
 /**
@@ -1292,7 +1530,7 @@ export function renderPageMaybe(store, now = Date.now(), opts = {}) {
       if (out && typeof out.then === 'function') return out.then((v) => drive(gen.next(v)));
       step = gen.next(out);
     }
-    return step.value;
+    return r.finish(step.value);
   };
   return drive(gen.next());
 }

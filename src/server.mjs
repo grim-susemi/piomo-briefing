@@ -1,7 +1,9 @@
-// Loopback-only board server: GET / (page), /data.json (view model), /events (SSE), /health,
-// /profiles/state (profile switcher view model + target hashes) and exactly three guarded write
-// routes, POST /answer, /focus and /profiles. `node:http` only. No CORS (no Access-Control-* header,
+// Loopback-only board server: GET / (page), /data.json (view model), /events (SSE), /health, /memento/state,
+// /profiles/state (profile switcher view model + target hashes) and guarded write routes
+// POST /answer, /focus, /memento and /profiles. `node:http` only. No CORS (no Access-Control-* header,
 // OPTIONS stays 405), never serves data.js (a cross-site <script> could read it). Every other method/path is 405/404.
+// GET / is the only HTML route: every response carries exactly one Content-Security-Policy whose fresh nonce is also
+// on the page's combined <style>, every page script and the bootstrap script; other routes and refusals carry no CSP.
 //
 // A write route runs only when ALL of these hold, checked in this order; the first failure is answered and
 // no callback runs (Host is checked first, for every route):
@@ -24,8 +26,10 @@
 // assetAllowed(name) says the current model references it; the bytes come only from `assetsDir/<name>` (a regular file of
 // <= 8 MiB whose sha256 is the name and whose magic bytes match the extension) with nosniff, a Content-Type from the
 // extension and an immutable cache. Without assetsDir it is always 404.
+// GET /convo/<sid>.json uses the same Host-first and Sec-Fetch-Site gates as assets and returns getConvo(sid)
+// with SECURE headers, or 404 without a callback/card. The sid is validated, never decoded or used as a file path.
 //
-// createBoardServer({getPage, getViewModel, generation, portBase, portCount=10, preferPort?, assetsDir?, assetAllowed?,
+// createBoardServer({getPage, getViewModel, getConvo?, generation, portBase, portCount=10, preferPort?, assetsDir?, assetAllowed?,
 //                    onError, onRecover, pingMs?, onClientCount?, createServer?,
 //                    token?, onAnswer?, onFocus?, onProfiles?, profilesState?, bodyTimeoutMs=2000, writeTimeoutMs=10000})
 //   -> {start(): Promise<{port}>, broadcast(vm), sendPaused(), close(): Promise<void>, clientCount(), address()}
@@ -38,7 +42,7 @@
 import http from 'node:http';
 import { open as openFile, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { timingSafeEqual, createHash } from 'node:crypto';
+import { timingSafeEqual, createHash, randomBytes } from 'node:crypto';
 import { ASSET_NAME_RE, MIME, MAX_IMAGE_BYTES, sniffImage } from './assets.mjs';
 
 const HOST = '127.0.0.1';
@@ -47,8 +51,10 @@ const MAX_SOCKETS = 64;
 const PING_MS = 15000;
 const CLOSE_BOUND_MS = 500;
 const MAX_CLIENT_BACKLOG = 2 * 1024 * 1024; // a stalled SSE reader is dropped instead of buffering forever
-const GATED_PATHS = new Set(['/data.json', '/events', '/health', '/profiles/state']);
+const GATED_PATHS = new Set(['/data.json', '/events', '/health', '/memento/state', '/profiles/state']);
 const ASSET_PREFIX = '/assets/';
+const CONVO_PREFIX = '/convo/';
+const CONVO_SID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const SITE_OK = new Set(['same-origin', 'none']);
 const MAX_BODY_BYTES = 4096;
 const MAX_ANSWER_BYTES = 65536;
@@ -71,6 +77,14 @@ const SECURE = {
   'X-Content-Type-Options': 'nosniff',
 };
 const SOCKET_DISCONNECT_CODES = new Set(['ECONNRESET', 'EPIPE']);
+
+// Exact Content-Security-Policy for the served HTML page: the fresh per-response nonce is the only script/style authority.
+// Inline style attributes stay allowed (the page's style= sites and the data: favicon), and the page connects only to itself.
+export function cspHeader(nonce) {
+  return "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'; " +
+    `script-src 'nonce-${nonce}'; script-src-attr 'none'; style-src 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; ` +
+    "connect-src 'self'; img-src 'self' data:; frame-src 'none'; worker-src 'none'";
+}
 
 // JSON.parse checks the grammar first. Walk its raw tokens without recursion so a repeated member cannot be
 // hidden by last-wins parsing, string contents, escaped quotes, or alternate Unicode spellings of a key.
@@ -105,6 +119,7 @@ export function createBoardServer(options) {
   const {
     getPage,
     getViewModel,
+    getConvo,
     generation,
     portBase,
     portCount = 10,
@@ -117,6 +132,8 @@ export function createBoardServer(options) {
     onFocus,
     onProfiles,
     profilesState,
+    onMementoState,
+    onMemento,
     bodyTimeoutMs = BODY_TIMEOUT_MS,
     writeTimeoutMs = WRITE_TIMEOUT_MS,
     pingMs = PING_MS,
@@ -141,6 +158,7 @@ export function createBoardServer(options) {
   if (tokenBytes && typeof onAnswer === 'function') writeHandlers.set('/answer', onAnswer);
   if (tokenBytes && typeof onFocus === 'function') writeHandlers.set('/focus', onFocus);
   if (tokenBytes && typeof onProfiles === 'function') writeHandlers.set('/profiles', onProfiles);
+  if (tokenBytes && typeof onMemento === 'function') writeHandlers.set('/memento', onMemento);
   let writeInFlight = false;
   const idleWaiters = new Set();
 
@@ -385,6 +403,28 @@ export function createBoardServer(options) {
       && typeof b.expected === 'object' && b.expected !== null && !Array.isArray(b.expected)
       && Number.isInteger(b.rosterRevision) && b.rosterRevision >= 0;
   }
+  function validMemento(b) {
+    const keys = Object.keys(b);
+    return keys.length === 5 && ['action', 'id', 'status', 'rev', 'requestId'].every(k => keys.includes(k))
+      && b.action === 'setStatus' && typeof b.id === 'string' && typeof b.status === 'string'
+      && Number.isInteger(b.rev) && b.rev >= 1 && typeof b.requestId === 'string' && b.requestId !== '';
+  }
+  // The transport owns strict reply propagation, not card storage or API error classification.
+  function validMementoReply(result) {
+    const { status, json: b } = result;
+    if (Array.isArray(b)) return false;
+    const keys = Object.keys(b);
+    if (status === 200) return keys.length === 3 && keys.includes('ok') && keys.includes('rev') && keys.includes('discord')
+      && b.ok === true && Number.isInteger(b.rev) && b.rev >= 1 && ['pushed', 'pending', 'off', 'conflict'].includes(b.discord);
+    const codes = { 400: ['BAD_REQUEST', 'UNKNOWN_CARD', 'BAD_STATUS'], 409: ['STALE', 'BUSY'],
+      500: ['WRITE_FAILED'], 501: ['MEMENTO_UNAVAILABLE', 'API_VERSION_UNSUPPORTED'] };
+    // Host lifecycle refusals are generated by server-host, before the API is called.
+    if ((status === 503 && b.code === 'PAUSED') || (status === 429 && b.code === 'BUSY')) {
+      return keys.length === 2 && keys.includes('ok') && b.ok === false;
+    }
+    if (!codes[status]?.includes(b.code) || b.ok !== false || !keys.includes('ok') || !keys.includes('code')) return false;
+    return b.code === 'STALE' ? keys.length === 3 && Number.isInteger(b.rev) && b.rev >= 1 : keys.length === 2;
+  }
   // The parsed body when it is a JSON object with exactly the keys the route allows, else null.
   function parseWriteBody(buf, pathname) {
     let value, text;
@@ -401,6 +441,7 @@ export function createBoardServer(options) {
       const duplicate = duplicateAnswerKey(text);
       if (duplicate) return { [DUPLICATE_KEY]: duplicate };
     }
+    if (pathname === '/memento') return !duplicateAnswerKey(text) && validMemento(value) ? value : null;
     return (pathname === '/answer' ? validAnswer(value)
       : pathname === '/profiles' ? validProfiles(value) : validFocus(value)) ? value : null;
   }
@@ -480,7 +521,8 @@ export function createBoardServer(options) {
         json(res, 504, { ok: false, code: 'TIMEOUT' });
         return;
       }
-      if (!result || !Number.isInteger(result.status) || result.status < 200 || result.status > 599 || typeof result.json !== 'object' || result.json === null) {
+      if (!result || !Number.isInteger(result.status) || result.status < 200 || result.status > 599 || typeof result.json !== 'object' || result.json === null
+        || (pathname === '/memento' && !validMementoReply(result))) {
         report('server:sse', new Error(`${pathname} callback returned no {status, json}`));
         json(res, 500, { ok: false, code: 'INTERNAL' });
         return;
@@ -508,7 +550,7 @@ export function createBoardServer(options) {
       plain(res, 405, 'method not allowed', { Allow: writeHandler ? 'POST' : 'GET' });
       return;
     }
-    if (GATED_PATHS.has(pathname) || pathname.startsWith(ASSET_PREFIX)) {
+    if (GATED_PATHS.has(pathname) || pathname.startsWith(ASSET_PREFIX) || pathname.startsWith(CONVO_PREFIX)) {
       const site = req.headers['sec-fetch-site'];
       if (site !== undefined && !SITE_OK.has(site)) {
         plain(res, 403, 'forbidden origin');
@@ -517,8 +559,9 @@ export function createBoardServer(options) {
     }
     switch (pathname) {
       case '/': {
-        const page = await getPage();
-        send(res, 200, 'text/html; charset=utf-8', String(page));
+        const nonce = randomBytes(16).toString('base64');
+        const page = await getPage({ nonce });
+        send(res, 200, 'text/html; charset=utf-8', String(page), { 'Content-Security-Policy': cspHeader(nonce) });
         recoverSse();
         return;
       }
@@ -526,6 +569,16 @@ export function createBoardServer(options) {
         const vm = await getViewModel();
         track(vm);
         send(res, 200, 'application/json; charset=utf-8', JSON.stringify(vm));
+        recoverSse();
+        return;
+      }
+      case '/memento/state': {
+        if (typeof onMementoState !== 'function') {
+          json(res, 501, { ok: false, code: 'MEMENTO_UNAVAILABLE' });
+          return;
+        }
+        const result = await onMementoState();
+        json(res, result.status, result.json);
         recoverSse();
         return;
       }
@@ -546,6 +599,18 @@ export function createBoardServer(options) {
         await serveEvents(req, res);
         return;
       default:
+        if (pathname.startsWith(CONVO_PREFIX)) {
+          const sid = pathname.endsWith('.json') ? pathname.slice(CONVO_PREFIX.length, -5) : '';
+          if (!CONVO_SID.test(sid) || typeof getConvo !== 'function') {
+            plain(res, 404, 'not found');
+            return;
+          }
+          const card = await getConvo(sid);
+          if (card === null) plain(res, 404, 'not found');
+          else json(res, 200, card);
+          recoverSse();
+          return;
+        }
         if (pathname.startsWith(ASSET_PREFIX)) {
           await serveAsset(res, pathname);
           return;

@@ -654,3 +654,58 @@ test('phone targets: card detail and expansion buttons and the annotation tray a
     assert.equal(big(css, sel), false, sel + ' keeps its compact box on wider screens');
   }
 });
+
+// todo 2: each of the five reviewed hostile strings is placed in every named overview surface at once, and
+// each surface's own element must carry it as text - page-wide membership could let one surface hide another
+test('hostile fixture strings stay text per surface: title, headline, decision question/option and input-field label', () => {
+  const view = loadView();
+  const H = JSON.parse(fs.readFileSync(path.join(ROOT, 'test/fixtures/hostile-strings.json'), 'utf8'));
+  const esc = view.escapeHtml;
+  const one = (html, re, what) => {
+    const all = [...html.matchAll(new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g'))];
+    assert.equal(all.length, 1, 'exactly one ' + what);
+    return all[0][1];
+  };
+  const build = (s) => {
+    const m = clone(FIXTURE);
+    const sess = m.sessions.find((x) => x.decisions.some((d) => !d.answered && !d.closed));
+    sess.tab = '나를 기다림';
+    sess.title = s;
+    sess.headline = s;
+    const d = sess.decisions.find((x) => !x.answered && !x.closed);
+    d.question = s;
+    d.options = { A: { text: s, consequence: '결과' }, B: { text: '다른 안', consequence: '결과' } };
+    d.fields = [{ id: 'name', label: s, kind: 'text', maxLen: 200 }];
+    return m;
+  };
+  const ui = (m) => ({ tab: 'wait', live: true, expanded: expandAll(m) });
+  const realTags = (html) => count(html, /<(b|script|img|svg|textarea)[\s>\/]/gi);
+  // an event attribute counts only outside quoted values: escaped text inside title="..." is text, not an attribute
+  const eventAttrs = (html) => count(html.replace(/="[^"]*"/g, '=""'), /<[a-z][^>]*\son[a-z]+\s*=/gi);
+  for (const s of H) {
+    const model = build(s);
+    const sess = model.sessions.find((x) => x.title === s);
+    const d = sess.decisions.find((x) => x.question === s);
+    const html = view.renderOverview(model, ui(model));
+    const want = esc(s);
+    const card = one(html, new RegExp('<article class="card[^"]*"[^>]*data-card="' + sess.id + '">([\\s\\S]*?)<\\/article>'),
+      'card for ' + sess.id);
+    assert.ok(one(card, /<span class="title">([\s\S]*?)<\/span>/, 'title element').includes(want), 'title: ' + s);
+    assert.ok(one(card, /<p class="hl">([\s\S]*?)<\/p>/, 'headline element').includes(want), 'headline: ' + s);
+    const dcard = one(card, new RegExp('<div class="dcard[^"]*" data-decision="' + d.id + '">([\\s\\S]*?)<\\/div><!--dcard-->'),
+      'decision card #' + d.id);
+    assert.ok(one(dcard, /<div class="dline dq">([\s\S]*?)<\/div>/, 'decision question line').includes(want),
+      'decision question: ' + s);
+    // a decision with input fields draws its option text as the card's option line (the answer box is the field grid)
+    const optLines = [...dcard.matchAll(/<div class="dline opt[^"]*">([\s\S]*?)<\/div>/g)];
+    assert.equal(optLines.length, 2, 'two option lines are drawn');
+    assert.ok(optLines[0][1].includes(want), 'option A: ' + s);
+    assert.equal(one(dcard, new RegExp('<label for="field-' + d.id + '-dc-name">([^<]*)<\\/label>'), 'input-field label'),
+      want, 'input-field label: ' + s);
+    const neutralModel = build('NEUTRAL');
+    const neutral = view.renderOverview(neutralModel, ui(neutralModel));
+    // injected markup would add a real tag or an event attribute; escaped text adds neither
+    assert.deepEqual([realTags(html), eventAttrs(html)], [realTags(neutral), eventAttrs(neutral)],
+      'structure matches NEUTRAL: ' + s);
+  }
+});

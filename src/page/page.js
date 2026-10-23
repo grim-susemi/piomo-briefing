@@ -1,5 +1,5 @@
 /* omo-briefing page controller, classic script (file:// safe, no modules).
- * Load order: view, plan-view, workers-view, convo-view, shell, profiles-view, alarm, annotate, page.
+ * Load order: view, plan-view, workers-view, convo-view, shell, profiles-view, alarm, annotate, cards-view, page.
  * Transport:
  *  - http(s) origin (live board server): one fetch of /data.json + EventSource('/events').
  *    No polling. A dropped stream shows a banner; the browser reconnects by itself.
@@ -44,7 +44,12 @@
     transport: 'file',
     pointerDown: false,
     now: function () { return Date.now(); },
-    ui: { expanded: Object.create(null), live: false, focus: Object.create(null) }
+    ui: { expanded: Object.create(null), live: false, focus: Object.create(null) },
+    full: new Map(),
+    fullFlight: Object.create(null),
+    fold: Object.create(null),
+    foldDeferred: false,
+    foldedFor: null
   };
   var hooks = { beforeApply: [], afterApply: [] };
   var root, badge, statusEl, linkEl, errEl, applyTimer = null, releaseTimer = null, sessionJson = {}, glowTimers = {};
@@ -52,9 +57,20 @@
   var shell, main, sideList, rail, tabs, trimEl;
   var profilesCtl = null;
   var regionHtml = Object.create(null), scrollMemory = Object.create(null), renderedKey = null;
+  var cardsView = null, cardsEpoch = 0, cardsRead = 0, cardsOwnerAction = null;
+  // A constant region keeps TASK14's own DOM, filters and expanded rows outside string-rendered agent updates.
+  var CARDS_REGION = '<section aria-label="메멘토"><p id="memento-load" role="status"></p><div id="memento-cards"></div></section>';
 
-  function esc(v) { return g.BriefView && g.BriefView.escapeHtml ? g.BriefView.escapeHtml(v) : String(v); }
+  // Fail closed: without view.js, model text still cannot become markup (same mapping as view.js escapeHtml).
+  function esc(v) {
+    if (g.BriefView && g.BriefView.escapeHtml) return g.BriefView.escapeHtml(v);
+    return String(v).replace(/[&<>"'`]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c];
+    });
+  }
   function seqOf(d) { return d && typeof d.seq === 'number' && isFinite(d.seq) ? d.seq : 0; }
+  function has(o, k) { return o != null && typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k); }
+  function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : null; }
 
   // Page script errors are never swallowed: console.error + a small 'screen error' mark.
   function fail(where, e) {
@@ -128,6 +144,13 @@
     root.addEventListener('click', guard('click', onClick));
     root.addEventListener('input', guard('input', onInput));
     root.addEventListener('change', guard('checklist', onCheck));
+    // TASK14 calls setStatus synchronously from click/change handlers, then again for a BUSY retry.
+    // eventPhase becomes NONE after dispatch, including when capture consumes the event.
+    ['click', 'change'].forEach(function (type) {
+      doc.addEventListener(type, function (ev) {
+        cardsOwnerAction = cardsView && main.contains(ev.target) ? ev : null;
+      }, true);
+    });
     root.addEventListener('toggle', guard('details toggle', function (ev) {
       var t = ev.target, k = t && t.getAttribute && t.getAttribute('data-open-key');
       if (k) state.ui.expanded[k] = t.open === true;
@@ -178,10 +201,11 @@
   }
 
   function scheduleRelease() {
-    if ((!state.pending && pendingGeneration === null) || releaseTimer) return;
+    if ((!state.pending && pendingGeneration === null && !state.foldDeferred) || releaseTimer) return;
     releaseTimer = g.setTimeout(function () {
       releaseTimer = null;
       // A busy-held update has a 300 ms release deadline, even inside the normal 500 ms window.
+      if (state.foldDeferred && !busy()) { state.foldDeferred = false; render(); }
       if (heldForBusy && !busy()) apply();
       else consider();
     }, RELEASE_MS);
@@ -212,12 +236,210 @@
     }
   }
 
-  function currentSession() {
+  function sessionById(id) {
     var sessions = state.model && Array.isArray(state.model.sessions) ? state.model.sessions : [];
-    for (var i = 0; i < sessions.length; i++) if (sessions[i] && sessions[i].id === state.ui.active) return sessions[i];
+    for (var i = 0; i < sessions.length; i++) if (sessions[i] && sessions[i].id === id) return sessions[i];
     return null;
   }
-  function mainKey() { return state.ui.view === 'profiles' ? 'profiles' : state.ui.active ? state.ui.active + '/' + (state.ui.sub[state.ui.active] || 'ov') : 'overview'; }
+  function foldKeyOf(s) {
+    var f = obj(s && s.folded);
+    return f && typeof f.key === 'string' && f.key ? f.key : '';
+  }
+  function fullCacheKey(sid, key) { return sid + '|' + key; }
+  function cachedFull(s) {
+    var key = foldKeyOf(s);
+    if (!key || typeof s.id !== 'string') return null;
+    var hit = state.full.get(fullCacheKey(s.id, key));
+    return hit && obj(hit.card) ? hit.card : null;
+  }
+  // The base row stays authoritative for decisions and notes; the cached full card supplies the heavy fields it left out.
+  function mergeFull(base, full) {
+    var out = {}, k;
+    for (k in full) if (has(full, k)) out[k] = full[k];
+    for (k in base) if (has(base, k)) out[k] = base[k];
+    if (has(base, 'decisions')) out.decisions = base.decisions; else delete out.decisions;
+    if (has(base, 'notes')) out.notes = base.notes; else delete out.notes;
+    return out;
+  }
+  function shownSid() { return g.BriefShell.shownOf(state.ui, state.ui.active); }
+  function currentSession() {
+    var base = sessionById(shownSid());
+    if (!base) return null;
+    var full = cachedFull(base);
+    return full ? mergeFull(base, full) : base;
+  }
+  // Cache entries live under sid|key: an unfolded row, a vanished row or a re-keyed row drops its old card.
+  function pruneFull() {
+    var list = state.model && Array.isArray(state.model.sessions) ? state.model.sessions : [];
+    var keep = Object.create(null), byId = Object.create(null);
+    for (var i = 0; i < list.length; i++) {
+      var s = list[i];
+      if (!s || typeof s.id !== 'string') continue;
+      byId[s.id] = s;
+      var key = foldKeyOf(s);
+      if (key) keep[fullCacheKey(s.id, key)] = true;
+    }
+    var dropped = false;
+    state.full.forEach(function (v, k) { if (!keep[k]) { state.full.delete(k); dropped = true; } });
+    // A successful file load is deduplicated by aggregate key, but its usable cards live in this cache. Once a card is
+    // pruned (gone, unfolded or re-keyed), the success marker must no longer suppress the next load.
+    if (dropped || !state.model || typeof state.model.foldedKey !== 'string') state.foldedFor = null;
+    for (var sid in state.fold) {
+      if (!has(state.fold, sid)) continue;
+      if (!byId[sid] || state.fold[sid].key !== foldKeyOf(byId[sid])) delete state.fold[sid];
+    }
+  }
+  function foldStatus(s) {
+    if (!obj(s.folded) || cachedFull(s)) return null;
+    var key = foldKeyOf(s), f = state.fold[s.id];
+    var current = f && f.key === key ? f : null;
+    return { status: current ? current.status : 'loading', reason: current ? current.reason : null, httpStatus: current ? current.httpStatus : null };
+  }
+  function applyFold(sid) {
+    if (shownSid() !== sid) return;
+    if (busy()) { state.foldDeferred = true; return; }
+    state.foldDeferred = false;
+    render();
+  }
+  function ensureFull(sid, retry) {
+    var base = sessionById(sid), key = foldKeyOf(base);
+    if (!base || !key) return;
+    var cacheKey = fullCacheKey(sid, key);
+    if (state.full.has(cacheKey)) { delete state.fold[sid]; return; }
+    var f = state.fold[sid];
+    if (!retry && f && f.key === key && (f.status === 'error' || f.status === 'restart')) return;
+    if (state.transport === 'http') {
+      if (state.fullFlight[cacheKey]) return;
+      ensureServerFull(sid, key, cacheKey);
+      return;
+    }
+    var foldedKey = state.model && typeof state.model.foldedKey === 'string' ? state.model.foldedKey : '';
+    if (!foldedKey) { state.fold[sid] = { status: 'error', key: key, reason: 'unready' }; return; }
+    ensureFileFull(foldedKey, sid, retry);
+  }
+  function ensureServerFull(sid, key, cacheKey) {
+    state.fold[sid] = { status: 'loading', key: key };
+    state.fullFlight[cacheKey] = true;
+    var wantGen = generationOf(state.model && state.model.gen);
+    g.fetch('/convo/' + encodeURIComponent(sid) + '.json', { cache: 'no-store' }).then(function (r) {
+      if (r.status === 404) return { status: 404 };
+      if (r.status !== 200) return { status: 'http', httpStatus: r.status };
+      return r.json().then(function (body) { return { status: 200, body: body }; }, function () { return { status: 'payload' }; });
+    }).then(function (res) {
+      delete state.fullFlight[cacheKey];
+      var base = sessionById(sid);
+      if (!base || foldKeyOf(base) !== key) return; // a stale reply never replaces the current conversation
+      if (res.status === 404) { state.fold[sid] = { status: 'restart', key: key }; applyFold(sid); return; }
+      var body = res.body, gen = body ? generationOf(body.gen) : null;
+      if (res.status !== 200 || !body || body.schema !== 1 || body.key !== key || !obj(body.session) || body.session.id !== sid ||
+          (wantGen !== null && gen !== wantGen)) {
+        state.fold[sid] = res.status === 'http'
+          ? { status: 'error', key: key, reason: 'http', httpStatus: res.httpStatus }
+          : { status: 'error', key: key, reason: 'payload' };
+        applyFold(sid);
+        return;
+      }
+      state.full.set(cacheKey, { sid: sid, key: key, card: body.session });
+      delete state.fold[sid];
+      applyFold(sid);
+    }, function (e) {
+      delete state.fullFlight[cacheKey];
+      var base = sessionById(sid);
+      if (!base || foldKeyOf(base) !== key) return;
+      warn('convo load', e);
+      state.fold[sid] = { status: 'error', key: key, reason: 'network' };
+      applyFold(sid);
+    });
+  }
+  function ensureFileFull(key, sid, retry) {
+    var model = state.model, flight = 'file|' + key;
+    if (!model || model.foldedKey !== key) return;
+    if (state.foldedFor === key) {
+      var current = sessionById(sid);
+      if (current && cachedFull(current)) return; // unchanged key with its usable card: zero extra loads
+      state.foldedFor = null; // the success marker outlived its cached card (pruned by an unfold or re-key)
+    }
+    if (state.fullFlight[flight]) return;
+    state.fullFlight[flight] = true;
+    var reload = retry ? (state.fileReload = (state.fileReload || 0) + 1) : 0;
+    var sc = doc.createElement('script');
+    sc.src = 'folded.js?v=' + encodeURIComponent(key) + (reload ? '&r=' + reload : '');
+    sc.addEventListener('load', function () {
+      sc.remove();
+      delete state.fullFlight[flight];
+      if (!state.model || state.model.foldedKey !== key) return;
+      var list = Array.isArray(state.model.sessions) ? state.model.sessions : [], missing = false;
+      for (var i = 0; i < list.length; i++) {
+        var row = list[i], rowKey = foldKeyOf(row);
+        if (!rowKey || cachedFull(row)) continue;
+        state.fold[row.id] = { status: 'error', key: rowKey, reason: 'missing' }; // completed script supplied no usable card
+        missing = true;
+      }
+      if (missing) { state.foldedFor = null; applyFold(shownSid()); }
+    });
+    sc.addEventListener('error', function () {
+      delete state.fullFlight[flight];
+      sc.remove();
+      state.foldedFor = null;
+      if (!state.model || state.model.foldedKey !== key) return;
+      var list = Array.isArray(state.model.sessions) ? state.model.sessions : [];
+      for (var i = 0; i < list.length; i++) {
+        var rowKey = foldKeyOf(list[i]);
+        if (rowKey) state.fold[list[i].id] = { status: 'error', key: rowKey, reason: 'file' };
+      }
+      applyFold(shownSid());
+    });
+    doc.head.appendChild(sc);
+  }
+  function installFolded() {
+    g.__briefFolded = function (payload) {
+      try {
+        var model = state.model, body = obj(payload);
+        if (!model || typeof model.foldedKey !== 'string') return;
+        if (!body || body.schema !== 1 || body.key !== model.foldedKey) return;
+        var want = generationOf(model.gen), got = generationOf(body.gen);
+        if (want !== null && got !== want) return;
+        var sessions = obj(body.sessions);
+        if (!sessions) return;
+        var list = Array.isArray(model.sessions) ? model.sessions : [], changed = false;
+        for (var i = 0; i < list.length; i++) {
+          var base = list[i];
+          if (!base) continue;
+          var key = foldKeyOf(base);
+          if (!key || !has(sessions, base.id)) continue;
+          var card = obj(sessions[base.id]);
+          if (!card || card.id !== base.id) continue;
+          state.full.set(fullCacheKey(base.id, key), { sid: base.id, key: key, card: card });
+          delete state.fold[base.id];
+          changed = true;
+        }
+        delete state.fullFlight['file|' + body.key];
+        if (changed) {
+          state.foldedFor = body.key;
+          applyFold(shownSid());
+        }
+      } catch (e) { warn('folded.js', e); }
+    };
+  }
+  function foldRetry() {
+    var base = sessionById(shownSid());
+    if (!base) return;
+    var keepFocus = doc.activeElement && main.contains(doc.activeElement) &&
+      doc.activeElement.getAttribute('data-act') === 'fold-retry';
+    delete state.fold[base.id];
+    state.foldDeferred = false;
+    ensureFull(base.id, true);
+    render();
+    if (keepFocus) {
+      var panel = main.querySelector('.cv-panel[data-fold-focus]');
+      if (panel) panel.focus({ preventScroll: true });
+    }
+  }
+  function mainKey() {
+    if (state.ui.view === 'profiles') return 'profiles';
+    var sid = shownSid() || state.ui.active;
+    return state.ui.view === 'memento' ? 'memento' : sid ? sid + '/' + (state.ui.sub[sid] || 'ov') : 'overview';
+  }
   function saveScroll() {
     if (renderedKey !== null) scrollMemory[renderedKey] = { y: main.scrollTop, anchor: captureAnchor() };
   }
@@ -259,6 +481,9 @@
     var active = doc.activeElement;
     var sideToggle = active && active.getAttribute && active.getAttribute('data-sh') === 'toggleSide';
     var overlay = overlayOpen();
+    if (state.ui.view === 'memento' && (action.type === 'open' || action.type === 'active')) {
+      state.ui = g.BriefShell.reduce(state.ui, { type: 'view', key: 'conv' });
+    }
     state.ui = g.BriefShell.reduce(state.ui, action);
     g.BriefShell.persist(undefined, state.ui);
     render();
@@ -309,6 +534,7 @@
           target = groups[k].querySelector('[data-act="ans-cancel"]'); break;
         }
       }
+      if (!target && active.matches('.cv-prevgo')) target = el.querySelector('.stabs [aria-selected="true"]');
       if (target && !target.hasAttribute('disabled')) {
         target.focus({ preventScroll: true });
         if (typeof start === 'number' && typeof target.setSelectionRange === 'function') target.setSelectionRange(start, end, direction);
@@ -318,6 +544,8 @@
   }
   function render() {
     saveScroll();
+    var base = sessionById(shownSid());
+    if (base && foldKeyOf(base) && !cachedFull(base)) ensureFull(base.id);
     var key = mainKey(), sideY = sideList.scrollTop;
     try {
       var model = state.model || EMPTY;
@@ -338,6 +566,8 @@
       region('side', sideList, g.BriefShell.side(model, state.ui));
       region('tabs', tabs, g.BriefShell.tabs(model, state.ui));
       var s = currentSession();
+      var cards = state.ui.view === 'memento';
+      if (!cards && cardsView) { cardsView.destroy(); cardsView = null; cardsEpoch++; }
       var html;
       if (state.ui.view === 'profiles') {
         var ps = state.ui.profilesState || null;
@@ -345,12 +575,31 @@
         html = g.BriefProfiles && typeof g.BriefProfiles.render === 'function'
           ? g.BriefProfiles.render(ps && ps.view, pe)
           : '<p class="empty">프로필 화면 모듈이 없어요</p>';
-      } else html = s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision, checked: isChecked })
+      } else html = cards ? CARDS_REGION : s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision, checked: isChecked, fold: foldStatus(s), windowLive: g.BriefShell.windowLiveOf(model, state.ui) })
         : state.ui.active ? '<p class="empty">(지금 안 보임)</p>' : g.BriefView.renderOverview(model, state.ui);
       if (region('main', main, html)) {
         g.BriefAnnotate.decorate();
         // a #main drawn later than the apply shows the current elapsed times at once, not the apply's (the 1 s ticker goes on)
         if (g.BriefWorkersView) g.BriefWorkersView.tick(main, state.now());
+      }
+      if (cards && !cardsView) {
+        var cardBodies = Object.create(null);
+        cardsView = g.BriefCards.mount(doc.getElementById('memento-cards'), {
+          live: state.ui.live,
+          setStatus: function (id, status, rev) {
+            var body = cardBodies[id];
+            if ((cardsOwnerAction && cardsOwnerAction.eventPhase > 0) || !body) {
+              body = { action: 'setStatus', id: id, status: status, rev: rev, requestId: g.crypto.randomUUID() };
+              cardBodies[id] = body;
+            }
+            return postJson('/memento', body).then(function (res) {
+              refreshMemento();
+              return { status: res.status, body: res.json };
+            });
+          },
+          refresh: refreshMemento
+        });
+        refreshMemento();
       }
       var trimmed = model.trimmed;
       var n = trimmed && trimmed.cards;
@@ -364,6 +613,23 @@
     var memory = scrollMemory[key];
     if (memory) restoreAnchor(memory.anchor, memory.y); else main.scrollTop = 0;
     renderedKey = key;
+  }
+
+  function refreshMemento() {
+    if (!cardsView || state.ui.view !== 'memento' || state.transport !== 'http') return Promise.resolve();
+    var epoch = cardsEpoch, read = ++cardsRead, view = cardsView;
+    var notice = doc.getElementById('memento-load');
+    return g.fetch('/memento/state', { cache: 'no-store' }).then(function (res) {
+      if (!res.ok) throw new Error('memento unavailable');
+      return res.json();
+    }).then(function (value) {
+      if (epoch !== cardsEpoch || read !== cardsRead || view !== cardsView) return;
+      notice.textContent = '';
+      view.update(value);
+    }, function () {
+      if (epoch !== cardsEpoch || read !== cardsRead || view !== cardsView) return;
+      notice.textContent = '지금은 메멘토를 쓸 수 없어요';
+    });
   }
 
   function runHooks(list, arg) {
@@ -389,7 +655,7 @@
   }
 
   function setFlash(id, on) {
-    if (state.ui.active === id) {
+    if (shownSid() === id) {
       var blocks = main.querySelectorAll('[data-block]');
       for (var b = 0; b < blocks.length; b++) blocks[b].classList[on ? 'add' : 'remove']('flash');
     }
@@ -420,8 +686,13 @@
 
   function show(model) {
     state.model = model; state.seq = seqOf(model); state.appliedAt = state.now();
+    pruneFull();
     state.ui = g.BriefShell.reduce(state.ui, { type: 'known',
-      ids: (Array.isArray(model.sessions) ? model.sessions : []).filter(function (s) { return s && typeof s.id === 'string'; }).map(function (s) { return s.id; }), now: state.now() });
+      ids: (Array.isArray(model.sessions) ? model.sessions : []).filter(function (s) { return s && typeof s.id === 'string'; }).map(function (s) { return s.id; }),
+      members: (Array.isArray(model.sessions) ? model.sessions : []).filter(function (s) { return s && typeof s.id === 'string'; }).map(function (s) {
+        var at = typeof s.lastActivityAt === 'number' ? s.lastActivityAt : typeof s.lastActivityAt === 'string' ? Date.parse(s.lastActivityAt) : 0;
+        return { id: s.id, tabId: typeof s.tabId === 'string' ? s.tabId : '', alive: s.alive === true, at: isFinite(at) ? at : 0 };
+      }), now: state.now() });
     g.BriefShell.persist(undefined, state.ui);
     runHooks(hooks.beforeApply, model);
     render();
@@ -652,7 +923,7 @@
     var act = t.getAttribute('data-act');
     if (act && act.indexOf('ans-') === 0) { answerClick(act, t); return; }
     if (act === 'sub') {
-      open(t.getAttribute('data-sid') || state.ui.active, t.getAttribute('data-sub'));
+      open(t.getAttribute('data-sid') || shownSid(), t.getAttribute('data-sub'));
     } else if (act === 'ann-new') {
       var sid = t.getAttribute('data-sid');
       clearAnnotationRequest(sid);
@@ -664,6 +935,8 @@
       render();
     } else if (act === 'focus') {
       focusTab(t.getAttribute('data-session'));
+    } else if (act === 'fold-retry') {
+      foldRetry();
     }
   }
 
@@ -691,7 +964,7 @@
   // re-render: state.ui.answers[id] = {open, draft, confirm: {option}|{text}|null, phase: ''|'sending'|'sent'|'closed', error,
   // sentOption: the option of the send, '' for a reply}. A report's 이걸로 고르기 (data-dec) uses the same state and confirm row,
   // in place on the report (convo-view.js).
-  // Conversation and sub-tab identity live in state.ui.active/sub, independently of decision classification.
+  // The shown conversation and its sub-tab are independent of the active board key and decision classification.
   // A 200 only means the answer is stored: 전달됨 comes from the next view model (render.mjs delivery text), never from here.
   var REPLY_MAX = 500; // = view.js maxlength; <= 500 UTF-16 units is always within the server's 500 code points
   var POST_TIMEOUT_MS = 15000; // over the server's own bounds (2 s body read, 10 s write: it answers 408/504 first)
@@ -1013,7 +1286,7 @@
         annotationSent[sid] = res.json.key;
         A.status(sid, { text: '보냄 · 전달 상태 기다리는 중…', ok: true });
         state.ui.expanded['cv:' + sid + ':notes'] = true;
-        if (state.ui.active === sid) open(sid, 'ov');
+        if (shownSid() === sid) open(sid, 'ov');
       } else if (res.status === 403 && !reloadedFor403 && rememberForReload()) {
         A.status(sid, null);
         reloadedFor403 = true;
@@ -1079,11 +1352,16 @@
 
   function start() {
     ensureRoot();
+    installFolded();
     wireBlocks();
     var loc = g.location;
     var http = !!(loc && /^https?:$/.test(loc.protocol) && g.EventSource && g.fetch);
     state.transport = http ? 'http' : 'file';
     state.ui.live = http && !!boardToken();
+    g.addEventListener('focus', guard('memento focus', refreshMemento));
+    doc.addEventListener('visibilitychange', guard('memento visible', function () {
+      if (doc.visibilityState === 'visible') refreshMemento();
+    }));
     if (!state.model) render();
     if (http) { connectLive(); return; }
     inject();

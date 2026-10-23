@@ -9,7 +9,7 @@ import * as fsp from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServerHost, readInstalledGeneration, SERVER_LOCK, SERVER_JSON, CHECK_EVERY_MS, POLL_MS } from '../src/server-host.mjs';
-import { createBoardServer } from '../src/server.mjs';
+import { createBoardServer, cspHeader } from '../src/server.mjs';
 import { openStore, isPidAlive } from '../src/store.mjs';
 
 const HELPER = fileURLToPath(new URL('./helpers/server-child.mjs', import.meta.url));
@@ -22,6 +22,77 @@ if (process.env.OMO_TEST_MUTANT_HOOKS) console.log(`TEST-PID ${process.pid}`);
 // Tests alternate between two 12-port windows per process and read the bound port back.
 let windowNo = 0;
 const nextBase = () => 47400 + (process.pid % 30) * 24 + (windowNo++ % 2) * 12;
+
+test('folded report images are authorized from the full model across rebuilds; an unknown asset stays 404', async (t) => {
+  const dir = tempState();
+  const store = seed(dir);
+  const name = '84fecfda2b6702dc6015b4307ae048524399b4d6493664f11ecc3fc124a7ce37.png';
+  await fsp.mkdir(join(dir, 'assets'), { recursive: true });
+  await fsp.copyFile(new URL('./fixtures/board-assets/' + name, import.meta.url), join(dir, 'assets', name));
+  let builds = 0;
+  let getConvo;
+  let include = true;
+  let onBoard = true;
+  const full = { id: 's1', reports: [{ images: [{ src: 'assets/' + name }], summary: 'x'.repeat(614401) }], notes: [], decisions: [] };
+  const h = makeHost(dir, { opts: {
+    createBoardServer: (options) => { getConvo = options.getConvo; return createBoardServer(options); },
+    buildFull: () => { builds++; return { sessions: [{ ...full, reports: include ? full.reports : [] }] }; },
+    project: () => ({ sessions: onBoard ? [{ id: 's1', folded: { key: 'fold-key', reports: 1, decisions: 0 } }] : [] }),
+  } });
+  t.after(async () => { await h.host.release(); removeState(dir); });
+  const port = portOf((await h.host.ensure()).url);
+  const before = builds;
+  assert.equal((await get(port, '/assets/' + name)).status, 200);
+  const detail = JSON.parse((await get(port, '/convo/s1.json')).body);
+  assert.deepEqual(detail, { schema: 1, gen: 4, key: 'fold-key', session: full });
+  assert.equal(builds, before + 1, 'asset and convo reuse the same stat key');
+  const loaded = await getConvo('s1');
+  assert.notStrictEqual(loaded.session.reports, full.reports, 'the returned reports must not alias the full-model cache');
+  loaded.session.reports.length = 0;
+  assert.deepEqual(JSON.parse((await get(port, '/convo/s1.json')).body).session, full);
+  assert.equal((await get(port, '/assets/' + '0'.repeat(64) + '.png')).status, 404);
+  include = false;
+  onBoard = false;
+  store.replace('published.json', { seq: 6000, dataHash: 'changed', at: 2 });
+  assert.equal((await get(port, '/assets/' + name)).status, 404);
+  assert.equal((await get(port, '/convo/s1.json')).status, 404, 'full map alone does not establish board membership');
+  assert.equal(builds, before + 2);
+});
+
+test('convo route uses the current driver after handover', async (t) => {
+  const dir = tempState();
+  seed(dir);
+  const opts = (id) => ({
+    buildFull: () => ({ sessions: [{ id: 's1', reports: [{ id }], decisions: [], notes: [] }] }),
+    project: () => ({ sessions: [{ id: 's1' }] }),
+  });
+  const a = makeHost(dir, { opts: opts('old') });
+  const b = makeHost(dir, { opts: opts('new') });
+  t.after(async () => { await a.host.release(); await b.host.release(); removeState(dir); });
+  const port = portOf((await a.host.ensure()).url);
+  assert.equal(JSON.parse((await get(port, '/convo/s1.json')).body).session.reports[0].id, 'old');
+  await a.host.release('reload');
+  assert.equal(portOf((await b.host.ensure()).url), port);
+  const r = JSON.parse((await get(port, '/convo/s1.json')).body);
+  assert.equal(r.session.reports[0].id, 'new');
+  assert.equal(r.key, null);
+  assert.equal(r.gen, 4);
+});
+
+test("an old driver without buildFull keeps today's model and asset refs", async (t) => {
+  const dir = tempState();
+  seed(dir);
+  const name = '84fecfda2b6702dc6015b4307ae048524399b4d6493664f11ecc3fc124a7ce37.png';
+  await fsp.mkdir(join(dir, 'assets'), { recursive: true });
+  await fsp.copyFile(new URL('./fixtures/board-assets/' + name, import.meta.url), join(dir, 'assets', name));
+  const card = { id: 's1', reports: [{ images: [{ src: 'assets/' + name }] }] };
+  const h = makeHost(dir, { opts: { buildViewModel: () => ({ sessions: [card] }) } });
+  t.after(async () => { await h.host.release(); removeState(dir); });
+  const port = portOf((await h.host.ensure()).url);
+  assert.deepEqual(JSON.parse((await get(port, '/data.json')).body), { sessions: [card], seq: 5, gen: 4 });
+  assert.equal((await get(port, '/assets/' + name)).status, 200);
+  assert.deepEqual(JSON.parse((await get(port, '/convo/s1.json')).body), { schema: 1, gen: 4, key: null, session: card });
+});
 
 const tempState = () => mkdtempSync(join(os.tmpdir(), 'omo-server-host-'));
 const removeState = (dir) => rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
@@ -120,6 +191,17 @@ function get(port, path = '/') {
       res.setEncoding('utf8');
       res.on('data', (c) => { body += c; });
       res.on('end', () => resolve({ status: res.statusCode, body }));
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+  });
+}
+
+function getHeaders(port, path = '/') {
+  return new Promise((resolve, reject) => {
+    const req = http.get({ host: '127.0.0.1', port, path, agent: false, headers: { Connection: 'close' } }, (res) => {
+      res.resume();
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers }));
       res.on('error', reject);
     });
     req.on('error', reject);
@@ -772,6 +854,40 @@ const withToken = (seen) => (vm, token) => {
   return `${pageOf(vm)}<meta name="omo-board-token" content="${token}">`;
 };
 
+test('memento host forwards separate state/write callbacks and gates paused calls without leaking cards', async () => {
+  const dir = tempState();
+  let host;
+  try {
+    seed(dir);
+    const calls = [];
+    const state = { schema: 'memento.board-state.v1', cards: [{ original: 'PRIVATE_CARD_BYTES' }] };
+    const h = makeHost(dir, { portBase: 47700, opts: {
+      getPage: withToken([]),
+      mementoState: () => { calls.push('state'); return { status: 200, json: state }; },
+      memento: body => { calls.push(body); return { status: 500, json: { ok: false, code: 'WRITE_FAILED' } }; },
+    } });
+    host = h.host;
+    const port = portOf((await host.ensure()).url);
+    const token = tokenOfPage((await get(port, '/')).body);
+    assert.deepEqual(JSON.parse((await get(port, '/memento/state')).body), state);
+    const body = { action: 'setStatus', id: '20261022-abcd', status: 'done', rev: 1, requestId: 'same' };
+    assert.deepEqual(await postJson(port, '/memento', body, token), { status: 500, json: { ok: false, code: 'WRITE_FAILED' } });
+    const feed = await sse(port);
+    try {
+      await feed.waitFor(x => x.text.includes('event: data'), 3000, 'first SSE frame');
+      assert.ok(!feed.text.includes('PRIVATE_CARD_BYTES'));
+      assert.ok(!(await get(port, '/data.json')).body.includes('PRIVATE_CARD_BYTES'));
+    } finally { feed.close(); }
+    h.store.writeSettings({ enabled: false });
+    assert.equal((await get(port, '/memento/state')).status, 503);
+    assert.deepEqual(await postJson(port, '/memento', body, token), { status: 503, json: { ok: false, code: 'PAUSED' } });
+    assert.deepEqual(calls, ['state', body]);
+  } finally {
+    await host?.release();
+    removeState(dir);
+  }
+});
+
 test('board write token: new for every serving start, handed only to the served page; a stale token writes nothing', async () => {
   const dir = tempState();
   try {
@@ -809,6 +925,34 @@ test('board write token: new for every serving start, handed only to the served 
     assert.equal(calls.length, 2, 'the old token reached no hook');
     assert.equal((await postJson(second, '/answer', { id: 1, sessionId: 's1', option: 'A' }, b)).status, 200);
     assert.ok(allFiles(dir).every((f) => !readFileSync(f, 'utf8').includes(b)), 'the second token is not on disk either');
+    await t.host.release();
+  } finally {
+    removeState(dir);
+  }
+});
+
+test('the response CSP nonce is the one the driver getPage received', async () => {
+  const dir = tempState();
+  try {
+    seed(dir);
+    const seen = [];
+    const t = makeHost(dir, { opts: {
+      getPage: (vm, token, nonce) => { seen.push({ vm, token, nonce }); return pageOf(vm); },
+    } });
+    const port = portOf((await t.host.ensure()).url);
+    const first = await getHeaders(port, '/');
+    assert.equal(first.status, 200);
+    const policy = first.headers['content-security-policy'];
+    const nonce = /script-src 'nonce-([^']+)'/.exec(policy)?.[1];
+    assert.match(nonce, /^[A-Za-z0-9+/]{22}==$/, '16 random bytes as base64');
+    assert.equal(policy, cspHeader(nonce), 'the response carries the exported policy for its nonce');
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].nonce, nonce, 'the driver saw the header nonce');
+    assert.match(seen[0].token, /^[A-Za-z0-9_-]{43}$/, 'the driver still receives the write token');
+    const second = await getHeaders(port, '/');
+    const nonce2 = /script-src 'nonce-([^']+)'/.exec(second.headers['content-security-policy'])?.[1];
+    assert.notEqual(nonce2, nonce, 'a new response gets a new nonce');
+    assert.equal(seen[1].nonce, nonce2, 'the second page callback saw its own nonce');
     await t.host.release();
   } finally {
     removeState(dir);

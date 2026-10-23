@@ -239,3 +239,133 @@ export async function launch({ width = 1440, height = 900, extraArgs = [], chrom
     throw e;
   }
 }
+
+// --- QA helpers: CSP violations and accessibility snapshots -------------------------------
+
+const CSP_BINDING = '__omoCspViolation';
+const INTERACTIVE_ROLES = new Set([
+  'button', 'link', 'textbox', 'combobox', 'checkbox', 'radio',
+  'slider', 'spinbutton', 'tab', 'menuitem', 'switch',
+]);
+
+// Call this BEFORE the first navigation: the binding and the document init script must exist
+// before the document that may violate the policy is parsed, or the violation is lost.
+// Collects securitypolicyviolation payloads from the binding plus Log entries that Chrome emits
+// for the same refusal, so a QA run can fail on either signal independently.
+export async function watchCsp(page) {
+  const violations = [];
+  const notes = [];
+  const on = (method, fn) => {
+    const list = page.client.listeners.get(method) || [];
+    list.push(fn);
+    page.client.listeners.set(method, list);
+  };
+  await page.client.send('Runtime.addBinding', { name: CSP_BINDING });
+  await page.client.send('Log.enable');
+  await page.addInitScript(`(() => {
+    document.addEventListener('securitypolicyviolation', (event) => {
+      try {
+        globalThis.${CSP_BINDING}(JSON.stringify({
+          disposition: event.disposition,
+          directive: event.effectiveDirective,
+          blocked: event.blockedURI,
+          source: event.sourceFile,
+          line: event.lineNumber,
+        }));
+      } catch {}
+    }, true);
+  })()`);
+  on('Runtime.bindingCalled', (params) => {
+    if (params.name !== CSP_BINDING) return;
+    let record;
+    try {
+      record = JSON.parse(params.payload);
+    } catch (err) {
+      record = null;
+    }
+    if (record && typeof record === 'object') violations.push({ origin: 'binding', ...record });
+    // An unparsable payload is still a refused page: fail closed instead of dropping it.
+    else violations.push({ origin: 'binding', payload: params.payload, parseError: true });
+  });
+  const logRecord = (entry = {}) => ({
+    level: entry.level, source: entry.source, text: entry.text, url: entry.url, lineNumber: entry.lineNumber,
+  });
+  on('Log.entryAdded', (params) => {
+    const entry = params.entry || {};
+    if (entry.level === 'error' && (entry.source === 'security' || /Content Security Policy/.test(entry.text || ''))) {
+      violations.push({ origin: 'log', ...logRecord(entry) });
+    } else {
+      // Evidence only (autoplay refusal, network noise, console errors): never a CSP failure here.
+      notes.push(logRecord(entry));
+    }
+  });
+  return {
+    violations,
+    notes,
+    assertNone(label = 'page') {
+      if (!violations.length) return;
+      const detail = violations.map((violation, i) => `  ${i + 1}. ${JSON.stringify(violation)}`).join('\n');
+      throw new Error(`${label}: ${violations.length} CSP violation(s)\n${detail}`);
+    },
+  };
+}
+
+function axName(name) {
+  const text = String(name ?? '').trim();
+  return text === '' ? '' : ' ' + JSON.stringify(text);
+}
+
+// [checked|expanded|selected|disabled|value=...] in that fixed order; false states stay silent.
+function axState(node) {
+  const values = new Map((node.properties || []).map((property) => [property.name, property.value?.value]));
+  const on = (value) => value === true || value === 'true';
+  const flags = [];
+  if (values.get('checked') === 'mixed') flags.push('checked=mixed');
+  else if (on(values.get('checked'))) flags.push('checked');
+  if (on(values.get('expanded'))) flags.push('expanded');
+  if (on(values.get('selected'))) flags.push('selected');
+  if (on(values.get('disabled'))) flags.push('disabled');
+  // Chrome exposes the control value on the AXNode itself (AXValue), not in properties.
+  const value = node.value?.value;
+  if (value !== undefined && value !== null && String(value) !== '') flags.push(`value=${value}`);
+  return flags.length ? ` [${flags.join(', ')}]` : '';
+}
+
+// Child order from childIds; ignored nodes are not printed and their children are flattened to the
+// same depth. A node that is unreachable from every declared root still renders once.
+function formatAxTree(nodes) {
+  const byId = new Map(nodes.map((node) => [String(node.nodeId), node]));
+  const rendered = new Set();
+  const lines = [];
+  const emit = (node, depth) => {
+    if (!node) return;
+    const id = String(node.nodeId);
+    if (rendered.has(id)) return;
+    rendered.add(id);
+    const role = node.role?.value;
+    if (node.ignored || !role) {
+      for (const childId of node.childIds || []) emit(byId.get(String(childId)), depth);
+      return;
+    }
+    lines.push('  '.repeat(depth) + role + axName(node.name?.value) + axState(node));
+    for (const childId of node.childIds || []) emit(byId.get(String(childId)), depth + 1);
+  };
+  for (const node of nodes) {
+    if (!node.parentId || !byId.has(String(node.parentId))) emit(node, 0);
+  }
+  for (const node of nodes) emit(node, 0);
+  return lines.join('\n');
+}
+
+// Accessibility.enable then Accessibility.getFullAXTree; raw is the untouched response.
+export async function axSnapshot(page) {
+  await page.client.send('Accessibility.enable');
+  const raw = await page.client.send('Accessibility.getFullAXTree');
+  return { raw, text: formatAxTree(raw?.nodes || []) };
+}
+
+export function unnamedInteractive(nodes) {
+  return (nodes || []).filter((node) => !node.ignored
+    && INTERACTIVE_ROLES.has(node.role?.value)
+    && String(node.name?.value ?? '').trim() === '');
+}

@@ -425,3 +425,31 @@ test('page: blocks.js runs after view.js and before convo-view.js, blocks.css be
   assert.match(ann, /@media \(min-width: 600px\) \{ \.ann-root \.ab :is\(\.rbk-t, [^)]*\) \{ padding-right: calc\(58px \+ var\(--sp-2\)\); \} \}/);
   assert.match(ann, /@media \(max-width: 599px\) \{[^@]*\n  \.ann-root \.ab > \.bh \{ position: static;[^}]*min-height: var\(--hit\)/);
 });
+
+// todo 2: each of the five reviewed hostile strings is placed in a table cell and a kv value, and each
+// surface's own element must carry it as text
+test('hostile fixture strings stay text per surface: a table cell and a kv value', () => {
+  const ctx = load();
+  const H = JSON.parse(read('test/fixtures/hostile-strings.json'));
+  const esc = ctx.BriefView.kit.esc;
+  const build = (s) => session([
+    { kind: 'table', title: '표', columns: ['항목', '값'], rows: [[s, 1]] },
+    { kind: 'kv', title: '항목', items: [{ key: '항목', value: s }] },
+  ]);
+  const realTags = (html) => (html.match(/<(b|script|img|svg|textarea)[\s>\/]/gi) || []).length;
+  // an event attribute counts only outside quoted values: escaped text inside title="..." is text, not an attribute
+  const eventAttrs = (html) => (html.replace(/="[^"]*"/g, '=""').match(/<[a-z][^>]*\son[a-z]+\s*=/gi) || []).length;
+  for (const s of H) {
+    const html = render(ctx, build(s));
+    const cell = /<td data-label="항목">([\s\S]*?)<\/td>/.exec(html);
+    assert.ok(cell, 'table cell is drawn');
+    assert.equal(cell[1], esc(s), 'table cell: ' + s);
+    const dd = /<dl class="rbk-kvl"><dt>항목<\/dt><dd>([\s\S]*?)<\/dd>/.exec(html);
+    assert.ok(dd, 'kv value is drawn');
+    assert.equal(dd[1], esc(s), 'kv value: ' + s);
+    const neutral = render(ctx, build('NEUTRAL'));
+    // injected markup would add a real tag or an event attribute; escaped text adds neither
+    assert.deepEqual([realTags(html), eventAttrs(html)], [realTags(neutral), eventAttrs(neutral)],
+      'structure matches NEUTRAL: ' + s);
+  }
+});

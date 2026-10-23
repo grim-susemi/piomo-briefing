@@ -26,9 +26,9 @@
 //   process's notifyPublished(), rebuilds the view model with readSnapshot + buildViewModel (this generation's code) and
 //   broadcasts it. A data.js written by any generation is never forwarded.
 // - Board writes: every time this process starts serving it makes a new random write token (memory only: not in the lock,
-//   server.json, a log or a model) and hands it to the board server and, as getPage(vm, token), to the served page.
-//   answer(body) / focus(body) / profiles(body) -> Promise|{status, json} are the extension's hooks for
-//   POST /answer, /focus and /profiles; profilesState() is the read-only GET /profiles/state model.
+//   server.json, a log or a model) and hands it to the board server and, as getPage(vm, token, nonce), to the served page.
+//   answer(body) / focus(body) / profiles(body) / memento(body) -> Promise|{status, json} are the extension's hooks for
+//   POST /answer, /focus, /profiles and /memento; profilesState() and mementoState() serve the read-only state routes.
 //   While the board is paused the host answers 503 PAUSED itself and calls none of them.
 // - File I/O here is async; every timer and socket is unref'd; nothing here throws into the caller's session.
 //
@@ -175,12 +175,16 @@ export function createServerHost(options) {
     installedGeneration = async () => null,
     isEnabled,
     buildViewModel,
+    buildFull,
+    project,
     readSnapshot,
     getPage,
     answer,
     focus,
     profiles,
     profilesState,
+    mementoState,
+    memento,
     reclaimStale,
     onError = () => {},
     onRecover = () => {},
@@ -340,7 +344,9 @@ export function createServerHost(options) {
     now: () => now(),
     readSnapshot: () => readSnapshot(),
     buildViewModel: (snap, t) => buildViewModel(snap, t),
-    getPage: (vm, token) => getPage(vm, token),
+    buildFull,
+    project,
+    getPage: (vm, token, nonce) => getPage(vm, token, nonce),
     report,
     recover,
     isEnabled: enabledNow,
@@ -352,6 +358,8 @@ export function createServerHost(options) {
     focus: typeof focus === 'function' ? (body) => (enabledNow() ? focus(body) : PAUSED_REPLY) : undefined,
     profiles: typeof profiles === 'function' ? (body) => (enabledNow() ? profiles(body) : PAUSED_REPLY) : undefined,
     profilesState: typeof profilesState === 'function' ? () => profilesState() : undefined,
+    mementoState: typeof mementoState === 'function' ? () => (enabledNow() ? mementoState() : PAUSED_REPLY) : undefined,
+    memento: typeof memento === 'function' ? (body) => (enabledNow() ? memento(body) : PAUSED_REPLY) : undefined,
   };
 
   async function replaceFile(path, text) {
@@ -421,10 +429,16 @@ export function createServerHost(options) {
   async function buildVm(e) {
     const d = e.driver;
     const snap = await d.readSnapshot();
-    const vm = await d.buildViewModel(snap, d.now());
-    // '<sha>.<ext>' of every report image of this model: the board serves /assets/<name> only for these
+    const now = d.now();
+    const full = typeof d.buildFull === 'function' && typeof d.project === 'function'
+      ? await d.buildFull(snap, now) : await d.buildViewModel(snap, now);
+    const vm = typeof d.buildFull === 'function' && typeof d.project === 'function'
+      ? await d.project(full, now) : full;
+    const cards = Array.isArray(full?.sessions) ? full.sessions : [];
+    e.fullById = new Map(cards.map((s) => [s.id, s]));
+    // Asset authorization includes reports hidden by folding or capping in the board projection.
     const refs = new Set();
-    for (const s of Array.isArray(vm?.sessions) ? vm.sessions : []) {
+    for (const s of cards) {
       for (const r of Array.isArray(s?.reports) ? s.reports : []) {
         for (const img of Array.isArray(r?.images) ? r.images : []) {
           if (typeof img?.src === 'string' && img.src.startsWith('assets/')) refs.add(img.src.slice('assets/'.length));
@@ -436,6 +450,7 @@ export function createServerHost(options) {
       if (!Number.isInteger(vm.seq)) vm.seq = snap && snap.published && Number.isInteger(snap.published.seq) ? snap.published.seq : 0;
       if (vm.gen === undefined) vm.gen = d.generation;
     }
+    e.vm = vm;
     return vm;
   }
 
@@ -448,6 +463,17 @@ export function createServerHost(options) {
       e.assetKey = k;
     }
     return e.assetRefs.has(name);
+  }
+
+  async function getConvo(e, sid) {
+    const k = await statKey();
+    if (!e.assetRefs || e.assetKey !== k) {
+      await buildVm(e);
+      e.assetKey = k;
+    }
+    const row = e.vm?.sessions?.find((s) => s.id === sid);
+    if (!row) return null;
+    return { schema: 1, gen: e.vm.gen, key: row.folded ? row.folded.key : null, session: structuredClone(e.fullById.get(sid)) };
   }
 
   function entryError(e, k, err) {
@@ -715,7 +741,8 @@ export function createServerHost(options) {
   function writeVia(e, name, body) {
     if (e.handingOver || e.graceTimer) return BUSY_REPLY;
     const hook = e.driver[name];
-    return typeof hook === 'function' ? hook(body) : NOT_SUPPORTED_REPLY;
+    return typeof hook === 'function' ? hook(body)
+      : name === 'memento' ? { status: 501, json: { ok: false, code: 'MEMENTO_UNAVAILABLE' } } : NOT_SUPPORTED_REPLY;
   }
 
   // Runs inside serial(key). Returns {url}, null (could not serve) or LOST (another process created the lock first).
@@ -792,7 +819,12 @@ export function createServerHost(options) {
     let driver = self;
     Object.defineProperty(e, 'driver', {
       get: () => driver,
-      set: (next) => { if (rank(next.generation) >= rank(driver.generation)) driver = next; },
+      set: (next) => {
+        if (rank(next.generation) >= rank(driver.generation)) {
+          driver = next;
+          e.assetRefs = null;
+        }
+      },
     });
     return e;
   }
@@ -800,8 +832,9 @@ export function createServerHost(options) {
   async function listen(e, preferPort) {
     e.token = randomBytes(32).toString('base64url');
     const board = createBoardServer({
-      getPage: async () => e.driver.getPage(await buildVm(e), e.token),
+      getPage: async ({ nonce } = {}) => e.driver.getPage(await buildVm(e), e.token, nonce),
       getViewModel: () => buildVm(e),
+      getConvo: (sid) => getConvo(e, sid),
       token: e.token,
       assetsDir: join(stateDir, 'assets'),
       assetAllowed: (name) => assetAllowed(e, name),
@@ -809,6 +842,11 @@ export function createServerHost(options) {
       onFocus: (body) => writeVia(e, 'focus', body),
       onProfiles: (body) => writeVia(e, 'profiles', body),
       profilesState: typeof e.driver.profilesState === 'function' ? () => e.driver.profilesState() : undefined,
+      onMementoState: () => {
+        const hook = e.driver.mementoState;
+        return typeof hook === 'function' ? hook() : { status: 501, json: { ok: false, code: 'MEMENTO_UNAVAILABLE' } };
+      },
+      onMemento: (body) => writeVia(e, 'memento', body),
       generation: e.driver.generation,
       portBase,
       portCount: PORT_COUNT,

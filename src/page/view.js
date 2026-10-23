@@ -482,6 +482,12 @@
       '<span class="title">' + whereLabelHtml(view, 'ic-sm') + '</span>' + focusBtn(fview, { live: live, focus: focus }) +
       '<span class="time">' + ic('clock', 'ic-xs') + ' ' + esc(when(s.lastActivityAt != null ? s.lastActivityAt : s.lastBriefAt, now)) + '</span></div>' +
       '<p class="hl"><span class="sym">' + ic('chevron-right', 'ic-sm') + '</span>' + esc(s.headline || '아직 보고 없음') + '</p>';
+    var folded = obj(s.folded);
+    if (folded) {
+      var fr = num(folded.reports), fd = num(folded.decisions);
+      html += '<p class="note cv-fold-counts">보고서 ' + esc(fr === null || fr < 0 ? 0 : Math.floor(fr)) + '개 · 결정 ' +
+        esc(fd === null || fd < 0 ? 0 : Math.floor(fd)) + '개</p>';
+    }
     html += liveBlocks(s, n, ui, now);
 
     var q = obj(s.openQuestion);

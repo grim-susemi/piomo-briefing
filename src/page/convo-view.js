@@ -72,6 +72,7 @@
   };
   var REPORT_STATUS = { '결정 기다림': 's-needs_decision', '답함': 's-done', '참고': 'x-info' };
   var CLOSED = '이미 답했거나 닫힌 결정'; // = page.js ANSWER_TEXT.closed
+  var RESTART_HINT = '이 상황판 서버는 접은 대화 펼치기를 모르는 이전 세대입니다. 대화를 재시작하면 최신 상황판이 열립니다.';
   var PIN_HINT = '그림을 누르면 그 자리에 주석이 붙어'; // behind the map-pin icon
   var ASSET_SRC = /^assets\/[0-9a-f]{64}\.(?:png|jpg|webp)$/; // C-REPORT: the only image source the page draws
   var REPORT_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -266,9 +267,15 @@
     var open = openDecs(s).length, answered = answeredDecs(s).length;
     var p = progress(s, true);
     var wk = workerList(s).length, reps = reportsOf(s).length;
+    var folded = obj(s.folded);
+    if (!Array.isArray(s.reports) && folded) {
+      var fr = whole(folded.reports);
+      if (fr !== null && fr >= 0) reps = fr;
+    }
+    var fd = folded ? whole(folded.decisions) : null;
     return {
       ov: '', plan: p ? p.done + '/' + p.total : '', wk: wk ? String(wk) : '',
-      dec: open ? String(open) : answered ? String(answered) : '', decHot: open > 0, rep: reps ? String(reps) : ''
+      dec: open ? String(open) : answered ? String(answered) : fd !== null && fd > 0 ? String(fd) : '', decHot: open > 0, rep: reps ? String(reps) : ''
     };
   }
   function subTabs(s, sub, counts, panelId) {
@@ -592,6 +599,38 @@
   }
 
   // ---- page --------------------------------------------------------------------------------------------------------------
+  // A folded row without its cached full card: the count line and the one state that matters (loading, retry, old server).
+  // A folded record keeps a short, known cause next to the panel. Raw errors, stacks and response bodies never reach it.
+  function foldCause(fold) {
+    var reason = str(fold.reason);
+    if (reason === 'http') { var code = whole(fold.httpStatus); return code !== null ? '서버 응답 오류 (' + code + ')' : '서버 응답 오류'; }
+    if (reason === 'payload') return '서버 응답 형식 오류';
+    if (reason === 'network') return '서버 연결 오류';
+    if (reason === 'file') return '접힌 기록 파일 오류';
+    if (reason === 'missing') return '접힌 기록에 이 대화가 없어요';
+    if (reason === 'unready') return '접힌 기록 파일이 아직 준비되지 않았어요';
+    return '전체 기록을 불러오지 못했어요';
+  }
+  function foldPanel(s, fold) {
+    var info = obj(s.folded) || {};
+    var reports = whole(info.reports), decisions = whole(info.decisions);
+    var rn = reports !== null && reports >= 0 ? reports : 0, dn = decisions !== null && decisions >= 0 ? decisions : 0;
+    var status = str(fold.status) || 'loading';
+    var reason = str(fold.reason);
+    var cause = reason === 'file' ? 'file-load' : reason;
+    var code = whole(fold.httpStatus);
+    var attrs = ' data-fold="' + esc(status) + '"' +
+      (status === 'error' && cause ? ' data-cause="' + esc(cause) + '"' : '') +
+      (status === 'error' && reason === 'http' && code !== null ? ' data-code="' + esc(code) + '"' : '');
+    var body;
+    if (status === 'restart') body = '<p class="note cv-fold-note">' + esc(RESTART_HINT) + '</p>';
+    else if (status === 'error') body = '<p class="note cv-fold-note" data-reason="' + esc(reason) + '">' + esc(foldCause(fold)) + '</p>' +
+      '<p><button type="button" class="more" data-act="fold-retry">전체 기록 다시 불러오기</button></p>';
+    else body = '<p class="note cv-fold-note">전체 기록 불러오는 중…</p>';
+    return '<section class="cv-fold"' + attrs + '><p class="cv-fold-t">접어 둔 대화예요 · 보고서 ' +
+      esc(rn) + '개 · 결정 ' + esc(dn) + '개</p>' + body + '</section>';
+  }
+
   function subOf(u, sid) {
     var v = typeof u.sub === 'string' ? u.sub : own(obj(u.sub), sid);
     for (var i = 0; i < SUBS.length; i++) if (SUBS[i][0] === v) return v;
@@ -606,12 +645,17 @@
       decision: ctx && typeof ctx.decision === 'function' ? ctx.decision : null, checked: ctx && typeof ctx.checked === 'function' ? ctx.checked : null };
     var sid = str(s.id), sub = subOf(u, sid), panelId = 'cvp-' + safeId(sid);
     var counts = countsOf(s);
-    var body = sub === 'plan' ? planPanel(s, U, now) : sub === 'wk' ? workersPanel(s, U) : sub === 'dec' ? decisionsPanel(s, U, now)
+    var fold = ctx && obj(ctx.fold) && obj(s.folded) ? ctx.fold : null;
+    var body = fold ? foldPanel(s, fold) : sub === 'plan' ? planPanel(s, U, now) : sub === 'wk' ? workersPanel(s, U) : sub === 'dec' ? decisionsPanel(s, U, now)
       : sub === 'rep' ? reportsPanel(s, U, now) : overview(s, U, now, counts);
     var name = SUBS.filter(function (t) { return t[0] === sub; })[0][1];
-    return '<div class="cv-page" data-sid="' + esc(sid) + '" data-sub="' + sub + '">' + header(s, U, now) + subTabs(s, sub, counts, panelId) +
+    var windowLive = ctx && typeof ctx.windowLive === 'string' ? ctx.windowLive : '';
+    var prev = windowLive ? '<p class="cv-prevline">이전 대화 보는 중 · <button type="button" class="cv-prevgo" data-sh="open" data-sid="' +
+      esc(windowLive) + '">지금 대화로</button></p>' : '';
+    return '<div class="cv-page" data-sid="' + esc(sid) + '" data-sub="' + sub + '">' + prev + header(s, U, now) + subTabs(s, sub, counts, panelId) +
       '<div class="ann-tray" data-ann-tray="' + esc(sid) + '"></div>' +
-      '<section class="cv-panel" id="' + panelId + '" role="tabpanel" data-sub="' + sub + '" aria-label="' + name + '">' + body + '</section></div>';
+      '<section class="cv-panel" id="' + panelId + '" role="tabpanel" data-sub="' + sub + '" aria-label="' + name + '"' +
+      (obj(s.folded) ? ' tabindex="-1" data-fold-focus' : '') + '>' + body + '</section></div>';
   }
 
   g.BriefConvo = { render: render, SUBS: SUBS };

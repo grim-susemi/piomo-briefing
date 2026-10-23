@@ -3,7 +3,7 @@
 // with its committed report images, every state driven through the real page (BriefPage/BriefShell/BriefAnnotate, CDP mouse
 // and keyboard input), and the mockups v5/v6/v7 opened read-only at the same sizes.
 //
-// usage: node scripts/qa-board-matrix.mjs --out <dir> [--inject-overflow] [--mockups <dir>]
+// usage: node scripts/qa-board-matrix.mjs --out <dir> [--inject-overflow] [--inject-csp-violation] [--mockups <dir>]
 //   <dir>/shots/build-<w>x<h>-<nn>-<state>.png   every state at 1440x900, 1024x768 and 390x844
 //   <dir>/shots/mock-<w>x<h>-<mockup>.png         v5 (default, #inbox, #closed), v6 (#sub=ov|plan|wk|dec, #sub=rep&pins) and
 //                                                 v7 (#demo, #demo&pop, #demo&sent, #demo&path, #plan195) at the same sizes
@@ -53,6 +53,13 @@
 // --inject-overflow: the negative run (never part of the normal one). Before every 개요 shot the first visible text span of a
 //   개요 row gets width:120px; white-space:nowrap; overflow:hidden (plus flex:0 0 120px: that span is a flex item whose
 //   flex-basis would otherwise override the width). Check (b) must name it; the run exits 1.
+// --inject-csp-violation: the CSP negative run (never part of the normal one). The served blocks page's getPage appends one
+//   un-nonced <script>; watchCsp, installed before the first navigation, must record it. Every violation is routed to
+//   noteError('csp ' + JSON), so the run exits 1 with a csp entry; a negative run that sees no violation also fails, naming csp.
+// AX: for every VIEWPORTS entry the served blocks page and the file page each get ax-<viewport>-board|file.json (the raw
+//   Accessibility.getFullAXTree answer) and .txt (the readable tree). Unnamed interactive nodes are compared with
+//   scripts/qa-ax-allowlist.json: a missing file is written once (first full run); an existing file is never appended to.
+//   Allowlisted nodes are listed in result.json under axBaselineFailures (S3 follow-up); any other unnamed node fails.
 // Fixture: used as committed plus two additions the checks need (result.json fixture.additions): vm.waiting = the 2 items of
 //   its open decisions #97/#98 as src/waiting.mjs computes them (the committed fixture has none, check (i) needs 2), and one
 //   finished conversation whose title is 300 characters without a space (it must wrap or carry a title-attribute ellipsis).
@@ -64,7 +71,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import net from 'node:net';
-import { launch, isPidAlive, listProfilePids } from './cdp.mjs';
+import { launch, isPidAlive, listProfilePids, watchCsp, axSnapshot, unnamedInteractive } from './cdp.mjs';
 import { MAX_VM_BYTES, pageHtml } from '../src/render.mjs';
 import { createBoardServer } from '../src/server.mjs';
 import { waitingItems } from '../src/waiting.mjs';
@@ -83,9 +90,10 @@ const arg = (name) => {
 };
 const OUT = arg('--out') ? path.resolve(arg('--out')) : '';
 const INJECT = argv.includes('--inject-overflow');
+const INJECT_CSP = argv.includes('--inject-csp-violation');
 const MOCKUP_DIR = path.resolve(arg('--mockups') || process.env.OMO_MOCKUP_DIR || DEFAULT_MOCKUPS);
 if (!OUT) {
-  console.error('usage: node scripts/qa-board-matrix.mjs --out <dir> [--inject-overflow] [--mockups <dir>]');
+  console.error('usage: node scripts/qa-board-matrix.mjs --out <dir> [--inject-overflow] [--inject-csp-violation] [--mockups <dir>]');
   process.exit(2);
 }
 fs.mkdirSync(path.join(OUT, 'shots'), { recursive: true });
@@ -141,6 +149,84 @@ const SHORT_CMP = { id: 'short-korean', title: '검증 비교', summary: '시스
       { label: '결과정리', A: '자료처리완료결과와 추가 안내', B: '보고서자료검증결과와 추가 안내', C: '사용자입력처리기준과 추가 안내' }] }] };
 const blkSel = (n) => `#main [data-block="rep/${MAX_REPORT_ID}/blk/${n}"]`;
 
+// ------------------------------------------------------------------ accessibility baseline
+
+const AX_ALLOWLIST = path.join(ROOT, 'scripts/qa-ax-allowlist.json');
+
+function axKeyOf(view, viewport, role, ancestors) {
+  return JSON.stringify([view, viewport, role, ...ancestors]);
+}
+
+// The named-control rule: view + viewport + role + the nearest three non-empty ancestor names (nearest first).
+function axFindings(raw, { view, viewport }) {
+  const nodes = Array.isArray(raw?.nodes) ? raw.nodes : [];
+  const byId = new Map(nodes.map((node) => [String(node.nodeId), node]));
+  const instances = [];
+  for (const node of unnamedInteractive(nodes)) {
+    const ancestors = [];
+    for (let p = byId.get(String(node.parentId)); p && ancestors.length < 3; p = byId.get(String(p.parentId))) {
+      const name = String(p.name?.value ?? '').replace(/\s+/g, ' ').trim();
+      if (name) ancestors.push(name);
+    }
+    const role = String(node.role?.value ?? '');
+    instances.push({ key: axKeyOf(view, viewport, role, ancestors), view, viewport, role, ancestors });
+  }
+  const byKey = new Map();
+  for (const e of instances) byKey.set(e.key, (byKey.get(e.key) || 0) + 1);
+  return { nodes: nodes.length, instances, byKey };
+}
+
+function readAxAllowlist() {
+  if (!fs.existsSync(AX_ALLOWLIST)) return { exists: false, doc: null, entries: {}, sha256: null };
+  const text = fs.readFileSync(AX_ALLOWLIST, 'utf8');
+  const doc = JSON.parse(text);
+  if (!doc || typeof doc !== 'object' || !doc.entries || typeof doc.entries !== 'object' || Array.isArray(doc.entries)) {
+    throw new Error(`${AX_ALLOWLIST}: expected an object with an "entries" object`);
+  }
+  return { exists: true, doc, entries: doc.entries, sha256: crypto.createHash('sha256').update(text).digest('hex') };
+}
+
+// First full run only: write every unnamed interactive node once. Never called when the file exists.
+function writeAxAllowlist(captures) {
+  const entries = {};
+  for (const cap of captures) {
+    for (const [key, count] of cap.findings.byKey) {
+      const first = cap.findings.instances.find((x) => x.key === key);
+      entries[key] = { view: first.view, viewport: first.viewport, role: first.role, ancestors: first.ancestors, count };
+    }
+  }
+  const sorted = Object.fromEntries(Object.keys(entries).sort().map((key) => [key, entries[key]]));
+  const doc = {
+    version: 1,
+    comment: 'Baseline of unnamed interactive accessibility nodes at the start sha. The QA scripts never append to this file; a new unnamed control must fail and be reviewed here.',
+    provenance: {
+      startSha: process.env.OMO_QA_START_SHA || null,
+      capturedAt: new Date().toISOString(),
+      method: 'axSnapshot + unnamedInteractive from scripts/cdp.mjs',
+      markup: 'src/page/*.js equals the start sha except the fail-closed esc() fallback in page.js',
+    },
+    entries: sorted,
+  };
+  const text = JSON.stringify(doc, null, 2) + '\n';
+  fs.writeFileSync(AX_ALLOWLIST, text);
+  return { doc, entries: sorted, sha256: crypto.createHash('sha256').update(text).digest('hex') };
+}
+
+function compareAx(captures, entries) {
+  const baseline = [];
+  const unexpected = [];
+  for (const cap of captures) {
+    const seen = new Map();
+    for (const e of cap.findings.instances) {
+      const instance = (seen.get(e.key) || 0) + 1;
+      seen.set(e.key, instance);
+      const allowed = Number(entries[e.key]?.count || 0);
+      (instance <= allowed ? baseline : unexpected).push({ ...e, instance, allowed });
+    }
+  }
+  return { baseline, unexpected };
+}
+
 // ------------------------------------------------------------------ the fixture the page shows
 
 const fixtureText = fs.readFileSync(FIXTURE_FILE, 'utf8');
@@ -148,6 +234,13 @@ const FIXTURE = JSON.parse(fixtureText);
 const LONG_ID = '01a14f00-0300-7c00-8d00-000000000300';
 const ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 const LONG_TITLE = Array.from({ length: 300 }, (_, i) => ALNUM[i % ALNUM.length]).join(''); // no space, no break opportunity
+// The five hostile fixtures the board must draw as text (todo 2's fixture, served here over http with the CSP header).
+const HOSTILE_STRINGS = JSON.parse(fs.readFileSync(path.join(ROOT, 'test/fixtures/hostile-strings.json'), 'utf8'));
+if (!Array.isArray(HOSTILE_STRINGS) || HOSTILE_STRINGS.length !== 5) throw new Error('test/fixtures/hostile-strings.json: expected five strings');
+const HOSTILE_SID = 'qa-hostile';
+const HOSTILE_REPORT = 'hostile-report';
+const HOSTILE_DECISION = 102; // after the committed fixture's #100 and the blocks page's #101
+const HOSTILE_INPUT = 103;
 
 function matrixModel() {
   const vm = structuredClone(FIXTURE);
@@ -205,6 +298,32 @@ function blocksModel(base) {
     { ...SHORT_CMP, at: A.lastBriefAt }, ...A.reports.slice(0, 1)];
   vm.waiting = waitingOf(vm);
   if (vm.waiting.map((w) => w.key).join() !== `d${BLK_LINKED},d${BLK_DECISION}`) throw new Error(`blocks page waiting: ${J(vm.waiting)}`);
+  if (vm.sessions.some((s) => s.decisions.some((d) => d.id === HOSTILE_DECISION || d.id === HOSTILE_INPUT))) throw new Error('the committed fixture already uses a hostile decision id');
+  // One hostile session: title, report table cell, kv value, decision option and input-field label. Its two open decisions
+  // are deliberately not in vm.waiting: they are a DOM fixture, not alarm fixtures, so check (i) keeps exactly #97 and #101.
+  const hostileAt = A.lastBriefAt + 1;
+  const hostile = structuredClone(A);
+  Object.assign(hostile, {
+    id: HOSTILE_SID, title: HOSTILE_STRINGS[0], paneId: '', tabId: '', tabLabel: '', tabNumber: 0,
+    project: 'qa-hostile', cwd: 'C:/work/qa-hostile', workName: 'hostile', status: 'in_progress', statusKey: 'in_progress', tab: '진행 중', chips: [],
+    headline: 'hostile fixture', changesNew: false, changes: [], done: [], next: '', heldCount: 0, notes: [], flow: [],
+    lastActivityAt: hostileAt, lastBriefAt: hostileAt, alive: true, briefSeq: 1, briefPath: '', sessionFile: '', todo: null, attachments: [], blockSources: {},
+    auto: {}, live: {}, plan: null,
+    decisions: [
+      { id: HOSTILE_DECISION, sessionId: HOSTILE_SID, question: '호스트 결정', options: { A: { text: HOSTILE_STRINGS[3], consequence: '안전' }, B: { text: '중립', consequence: '중립' } },
+        recommend: 'B', reason: '호스트 문자열을 A에 둔다', blocks: false, createdAt: hostileAt, source: 'brief', answered: false, closed: false,
+        questionPrompt: false, answer: null, receipt: null },
+      { id: HOSTILE_INPUT, sessionId: HOSTILE_SID, question: '호스트 입력', options: {}, recommend: '', reason: '호스트 문자열을 라벨에 둔다', blocks: false,
+        fields: [{ id: 'hostile_label', label: HOSTILE_STRINGS[4], kind: 'text', maxLen: 200 }], createdAt: hostileAt, source: 'brief', answered: false, closed: false,
+        questionPrompt: false, answer: null, receipt: null },
+    ],
+    reports: [{ id: HOSTILE_REPORT, title: '호스트 보고서', summary: 'hostile fixture', at: hostileAt, decisionId: null, status: '참고', images: [], blocks: [
+      { kind: 'table', title: '호스트 표', columns: ['열'], rows: [[HOSTILE_STRINGS[1]]] },
+      { kind: 'kv', title: '호스트 항목', items: [{ key: '값', value: HOSTILE_STRINGS[2] }] },
+      { kind: 'compare', title: '호스트 비교', decision: HOSTILE_DECISION, rows: [{ label: '행', A: 'A값', B: 'B값' }] },
+    ] }],
+  });
+  vm.sessions.push(hostile);
   const b = report.blocks;
   const expect = {
     report: { report: report.id, drawn: { kinds: BLOCK_KINDS, tableHead: b[0].columns.length, tableRows: b[0].rows.length, tableCells: b[0].rows.length * b[0].columns.length,
@@ -221,7 +340,9 @@ function blocksModel(base) {
     additions: { why: 'todo 12: a report with all six block kinds at their schema limits and an input decision at its field limits',
       report: { session: A.id, id: report.id, kinds: b.map((x) => x.kind), compareLinks: BLK_LINKED, drawn: expect.report.drawn },
       inputDecision: { id: BLK_DECISION, fields }, superseded: { id: BLK_SUPERSEDED, closed: true, why: 'check (i) needs exactly 2 waiting alarms: #97 and #101' },
-      reportsKept: A.reports.map((r) => r.id), waiting: vm.waiting.map((w) => w.key) },
+      reportsKept: A.reports.map((r) => r.id), waiting: vm.waiting.map((w) => w.key),
+      hostileSession: { why: 'the five hostile strings from test/fixtures/hostile-strings.json, served over http, are drawn as text', id: HOSTILE_SID,
+        report: HOSTILE_REPORT, decision: HOSTILE_DECISION, input: HOSTILE_INPUT, strings: HOSTILE_STRINGS, waitingExcluded: true } },
   };
 }
 
@@ -653,6 +774,9 @@ let page = null;
 let model = null;
 let blk = null; // the blocks page: {vm, fields, expect, additions, url, port, dataJsBytes}
 let boardServer = null;
+let csp = null;
+const cspViolations = [];
+const axCaptures = [];
 const blkAnswers = []; // /answer bodies that reached the blocks page's server (must stay empty)
 
 const send = (method, params) => page.client.send(method, params);
@@ -667,6 +791,74 @@ function listen(method, fn) {
 function noteError(text) {
   if (phase === 'mockup') mockupErrors.push(text);
   else errLog.push(text);
+}
+
+// watchCsp collects into its own array; route every violation into the normal error path (and the result) once per drain.
+function drainCsp() {
+  if (!csp) return;
+  for (const violation of csp.violations.splice(0)) {
+    cspViolations.push(violation);
+    noteError('csp ' + JSON.stringify(violation));
+  }
+}
+
+async function captureAx({ view, name, viewport }) {
+  const snap = await axSnapshot(page);
+  const rawFile = `ax-${viewport}-${name}.json`;
+  const textFile = `ax-${viewport}-${name}.txt`;
+  fs.writeFileSync(path.join(OUT, rawFile), JSON.stringify(snap.raw, null, 2) + '\n');
+  fs.writeFileSync(path.join(OUT, textFile), snap.text + '\n');
+  const findings = axFindings(snap.raw, { view, viewport });
+  axCaptures.push({ view, name, viewport, rawFile, textFile, findings });
+  console.log(`ax ${rawFile}: ${findings.nodes} nodes, ${findings.instances.length} unnamed interactive`);
+  return { raw: rawFile, text: textFile, nodes: findings.nodes, unnamed: findings.instances.length };
+}
+
+// The five hostile strings of test/fixtures/hostile-strings.json, served over http, must be text: each target keeps its
+// exact text, creates no b/script/img/svg/textarea descendant and carries no on* attribute; no script may have run.
+async function assertHostileFixtures() {
+  const H = HOSTILE_STRINGS;
+  await ev(`(BriefPage.open(${J(HOSTILE_SID)}, 'rep'), true)`);
+  await settle();
+  const repSel = `#main [data-block="rep/${HOSTILE_REPORT}"]`;
+  const targets = await ev(`(() => {
+    const checks = [
+      { name: 'title', sel: '#main .cv-h1', expected: ${J(H[0])} },
+      { name: 'table-cell', sel: ${J(`${repSel} [data-block="rep/${HOSTILE_REPORT}/blk/0"] tbody td`)}, expected: ${J(H[1])} },
+      { name: 'kv-value', sel: ${J(`${repSel} [data-block="rep/${HOSTILE_REPORT}/blk/1"] dd`)}, expected: ${J(H[2])} },
+      { name: 'decision-option', sel: ${J(`${repSel} [data-block="rep/${HOSTILE_REPORT}/blk/2"] th.opt`)}, expected: 'A' + ${J(H[3])} },
+    ];
+    return checks.map((x) => {
+      const el = document.querySelector(x.sel);
+      if (!el) return { ...x, found: false };
+      return { ...x, found: true, actual: el.textContent,
+        descendants: [...el.querySelectorAll('b,script,img,svg,textarea')].map((d) => d.tagName.toLowerCase()),
+        eventAttrs: [el, ...el.querySelectorAll('*')].flatMap((e) => [...e.attributes].filter((a) => /^on/i.test(a.name)).map((a) => a.name)) };
+    });
+  })()`);
+  await ev(`(BriefPage.open(${J(HOSTILE_SID)}, 'dec'), true)`);
+  await settle();
+  const label = await ev(`(() => {
+    const el = document.querySelector('#main [data-ans="${HOSTILE_INPUT}"] label[for$="-hostile_label"]');
+    if (!el) return { name: 'input-label', found: false, expected: ${J(H[4])} };
+    return { name: 'input-label', found: true, expected: ${J(H[4])}, actual: el.textContent,
+      descendants: [...el.querySelectorAll('b,script,img,svg,textarea')].map((d) => d.tagName.toLowerCase()),
+      eventAttrs: [el, ...el.querySelectorAll('*')].flatMap((e) => [...e.attributes].filter((a) => /^on/i.test(a.name)).map((a) => a.name)) };
+  })()`);
+  const pwned = await ev('globalThis.pwned === undefined');
+  const problems = [];
+  for (const t of [...targets, label]) {
+    if (!t.found) problems.push(`${t.name}: not found`);
+    else {
+      if (t.actual !== t.expected) problems.push(`${t.name}: text ${J(t.actual)} != ${J(t.expected)}`);
+      if (t.descendants.length) problems.push(`${t.name}: injected descendants ${J(t.descendants)}`);
+      if (t.eventAttrs.length) problems.push(`${t.name}: event attributes ${J(t.eventAttrs)}`);
+    }
+  }
+  if (!pwned) problems.push('globalThis.pwned is defined');
+  if (problems.length) throw new Error('hostile fixture failed: ' + J(problems));
+  return { session: HOSTILE_SID, report: HOSTILE_REPORT, decision: HOSTILE_DECISION, input: HOSTILE_INPUT, pwnedUndefined: pwned,
+    targets: [...targets, label].map(({ expected, ...t }) => t) };
 }
 
 async function mouse(type, x, y, o = {}) {
@@ -713,7 +905,8 @@ async function click(sel, o) {
   await settle();
 }
 async function dblclick(sel) {
-  const p = await point(sel, { scroll: false });
+  const p = await point(sel);
+  if (!p.inside) throw new Error(`a double-click on ${sel} would land on ${p.hit}`);
   await dblclickAt(p.x, p.y);
   await settle();
 }
@@ -748,6 +941,7 @@ async function shot(vp, n, state, o = {}) {
   if (o.k) extra.k = await ev(`__qa.checkK(${J(o.k)})`);
   if (o.l) extra.l = await ev('__qa.checkL()');
   await ev('1'); // every CDP event sent before this reply is in errLog now
+  drainCsp();
   const fresh = errLog.slice(errCursor);
   errCursor = errLog.length;
   const fPass = !fresh.length && !m.errors.length && !m.pageError;
@@ -836,9 +1030,13 @@ async function runViewport(vp, A, B, D) {
   await ev('(localStorage.clear(), sessionStorage.clear(), true)'); // a fresh page: default prefs, no drafts
   await page.goto('about:blank');
   await page.goto(indexUrl);
+  drainCsp();
   const info = await ev('({ seq: BriefPage.state.seq, transport: BriefPage.transport(), live: BriefPage.state.ui.live, innerWidth, innerHeight, title: document.title })');
   if (info.seq !== model.seq || info.transport !== 'file' || info.innerWidth !== vp.width || info.innerHeight !== vp.height) throw new Error('unexpected first paint: ' + J(info));
   await park();
+  const axFile = await captureAx({ view: 'matrix-file', name: 'file', viewport: vp.name });
+  results.axFile = results.axFile || {};
+  results.axFile[vp.name] = axFile;
   let n = 0;
   const next = (state, o) => shot(vp, ++n, state, o);
 
@@ -861,8 +1059,8 @@ async function runViewport(vp, A, B, D) {
   // three tabs, A and B pinned (double-click), the 300-character conversation active
   for (const sid of [A.id, B.id, D.id]) await ev(`(BriefPage.open(${J(sid)}), true)`);
   await settle();
-  await dblclick(`#tabs .tb[data-tab="${A.id}"] .tb-go`);
-  await dblclick(`#tabs .tb[data-tab="${B.id}"] .tb-go`);
+  await dblclick(`#tabs .tb[data-tab="${A.tabId ? 'w:' + A.tabId : A.id}"] .tb-go`);
+  await dblclick(`#tabs .tb[data-tab="${B.tabId ? 'w:' + B.tabId : B.id}"] .tb-go`);
   await click(`#tabs .tb[data-tab="${D.id}"] .tb-go`);
   await park();
   const tabs = await ev("({ order: [...document.querySelectorAll('#tabs .tb')].map((t) => t.getAttribute('data-tab')), pinned: [...document.querySelectorAll('#tabs .tb.pinned')].map((t) => t.getAttribute('data-tab')), active: BriefPage.state.ui.active })");
@@ -870,7 +1068,7 @@ async function runViewport(vp, A, B, D) {
   await next('tabs-pinned', { note: { tabs } });
 
   // A's page, each sub-tab
-  await click(`#tabs .tb[data-tab="${A.id}"] .tb-go`);
+  await click(`#tabs .tb[data-tab="${A.tabId ? 'w:' + A.tabId : A.id}"] .tb-go`);
   await park();
   await scrollMainTop();
   await next('sub-ov');
@@ -1007,8 +1205,16 @@ async function runBlocks(vp) {
       await ev('(localStorage.clear(), sessionStorage.clear(), true)'); // a fresh page: default prefs, no drafts
       await page.goto('about:blank');
       await page.goto(blk.url);
+      drainCsp();
       const info = await ev("({ seq: BriefPage.state.seq, transport: BriefPage.transport(), live: BriefPage.state.ui.live, dark: matchMedia('(prefers-color-scheme: dark)').matches, innerWidth })");
       if (info.seq !== blk.vm.seq || info.transport !== 'http' || info.dark !== (scheme === 'dark') || info.innerWidth !== vp.width) throw new Error('unexpected blocks page: ' + J(info));
+      if (scheme === SCHEMES[0]) {
+        const axBoard = await captureAx({ view: 'matrix-board', name: 'board', viewport: vp.name });
+        results.axFile = results.axFile || {};
+        results.axFile[vp.name] = { ...(results.axFile[vp.name] || {}), board: axBoard };
+        results.hostile = results.hostile || {};
+        results.hostile[vp.name] = await assertHostileFixtures();
+      }
       await ev(`(BriefPage.open(${J(A.id)}, 'rep'), true)`);
       await park();
       if (scheme === SCHEMES[0]) {
@@ -1142,7 +1348,8 @@ try {
   if (blkBytes > MAX_VM_BYTES) throw new Error(`the blocks page model is ${blkBytes} B, over MAX_VM_BYTES ${MAX_VM_BYTES}: the renderer would trim it`);
   const referenced = new Set(b.vm.sessions.flatMap((s) => s.reports.flatMap((r) => r.images.map((i) => i.src.replace(/^assets\//, '')))));
   boardServer = createBoardServer({ portBase: PORT_BASE, portCount: 10, generation: b.vm.gen, token: BLK_TOKEN,
-    getPage: () => pageHtml(b.vm, b.vm.gen, { mode: 'server', token: BLK_TOKEN }), getViewModel: () => b.vm,
+    getPage: ({ nonce } = {}) => pageHtml(b.vm, b.vm.gen, { mode: 'server', token: BLK_TOKEN, nonce })
+      + (INJECT_CSP ? '<script>globalThis.__qaInjectedCsp = true;</script>' : ''), getViewModel: () => b.vm,
     assetsDir: path.join(STATE, 'assets'), assetAllowed: (name) => referenced.has(name),
     onAnswer: async (body) => { blkAnswers.push(body); return { status: 409, json: { ok: false, code: 'QA_MATRIX_NEVER_SENDS' } }; } });
   const { port } = await boardServer.start();
@@ -1151,6 +1358,7 @@ try {
 
   chromeTempBefore = new Set(chromeTempNames());
   page = await launch({ width: 1440, height: 900 });
+  csp = await watchCsp(page); // before the first navigation: the binding and init script must exist before any document
   chrome.browserPid = page.pid;
   chrome.profileDir = page.profileDir;
   chrome.pids = [...new Set([page.pid, ...listProfilePids(page.profileDir)])].sort((x, y) => x - y);
@@ -1232,18 +1440,30 @@ const cleanupOk = !!page && !chrome.closeError && chrome.aliveAfterClose.length 
   && boardServerState.closed === true && !boardServerState.closeError;
 const expectedShots = VIEWPORTS.length * (20 + SCHEMES.length * BLK_STATES.length);
 const failing = all.filter((c) => !c.pass);
+drainCsp();
+if (INJECT_CSP && !cspViolations.length) results.fatal.push({ part: 'csp negative', error: 'csp injection was not observed' });
+const axAllow = readAxAllowlist();
+const axWritten = axAllow.exists ? null : writeAxAllowlist(axCaptures);
+const axEntries = axAllow.exists ? axAllow.entries : axWritten.entries;
+const axSha = axAllow.exists ? axAllow.sha256 : axWritten.sha256;
+const axCmp = compareAx(axCaptures, axEntries);
+const axOk = VIEWPORTS.every((vp) => ['board', 'file'].every((name) => axCaptures.some((c) => c.viewport === vp.name && c.name === name)));
+const cspOk = cspViolations.length === 0;
 results.summary = {
   shots: { build: results.shots.length, buildExpected: expectedShots, mockup: results.mockups.filter((m) => m.file).length, total: results.shots.length + results.mockups.filter((m) => m.file).length },
   checks: { total: all.length, pass: all.length - failing.length, fail: failing.length, byCheck },
   failing: failing.map((c) => `${c.shot} (${c.check})`),
   culprits: [...new Set(results.shots.flatMap((s) => (s.checks.b ? s.checks.b.failures.map((f) => f.simple) : []).concat(s.checks.a ? (s.checks.a.regions || []).flatMap((r) => (r.culprits || []).map((x) => x.simple)) : [])))],
   selfTestsFlipped: selfOk, mockupsComplete: mockOk, cleanupClean: cleanupOk,
+  ax: { captures: axCaptures.length, baseline: axCmp.baseline.length, unexpected: axCmp.unexpected.length,
+    allowlist: { file: 'scripts/qa-ax-allowlist.json', exists: axAllow.exists, wrote: !!axWritten, sha256: axSha, entries: Object.keys(axEntries).length } },
+  csp: { violations: cspViolations.length, notes: csp ? csp.notes.length : 0, injected: INJECT_CSP },
 };
 results.finishedAt = new Date().toISOString();
-const pass = !fatal && !results.fatal.length && results.shots.length === expectedShots && !failing.length && selfOk && mockOk && cleanupOk && !blkAnswers.length;
+const pass = !fatal && !results.fatal.length && results.shots.length === expectedShots && !failing.length && selfOk && mockOk && cleanupOk && !blkAnswers.length && cspOk && axOk && !axCmp.unexpected.length;
 const doc = {
   pass,
-  mode: INJECT ? 'inject-overflow (negative run)' : 'normal',
+  mode: [INJECT ? 'inject-overflow (negative run)' : '', INJECT_CSP ? 'inject-csp-violation (negative run)' : ''].filter(Boolean).join(' + ') || 'normal',
   startedAt, finishedAt: results.finishedAt,
   fatal: fatal ? String(fatal.stack || fatal) : null,
   viewportFatal: results.fatal,
@@ -1252,6 +1472,11 @@ const doc = {
   fixture: fixtureInfo,
   viewports: VIEWPORTS.map((v) => v.name),
   summary: results.summary,
+  csp: { installedBeforeFirstNavigation: !!csp, injected: INJECT_CSP, violations: cspViolations, notes: csp ? csp.notes.slice(0, 200) : [] },
+  ax: { allowlist: { file: 'scripts/qa-ax-allowlist.json', exists: axAllow.exists, wrote: !!axWritten, sha256: axSha, entries: Object.keys(axEntries).length },
+    captures: axCaptures.map((c) => ({ view: c.view, name: c.name, viewport: c.viewport, rawFile: c.rawFile, textFile: c.textFile, nodes: c.findings.nodes, unnamed: c.findings.instances.length })),
+    axBaselineFailures: axCmp.baseline, axUnexpected: axCmp.unexpected },
+  hostile: results.hostile || {},
   chrome: { ...chrome, launched: 1, maxConcurrent: 1, tempFolders: chromeTemp },
   boardServer: { ...boardServerState, portBase: PORT_BASE, url: blk ? blk.url : null, answerBodies: blkAnswers },
   tempDirs,
@@ -1264,6 +1489,6 @@ const doc = {
 };
 fs.writeFileSync(path.join(OUT, 'result.json'), JSON.stringify(doc, null, 2) + '\n');
 fs.writeFileSync(path.join(OUT, 'contact.html'), contactHtml());
-console.log(`${results.summary.shots.build} build + ${results.summary.shots.mockup} mockup shots; checks ${results.summary.checks.pass} pass / ${results.summary.checks.fail} fail; self-tests ${selfOk ? 'flipped' : 'NOT all flipped'}; chrome pids ${chrome.pids.join(',')} alive after close: ${J(chrome.aliveAfterClose)}; temp ${J(tempDirs)}; board server ${J(boardServerState)}`);
+console.log(`${results.summary.shots.build} build + ${results.summary.shots.mockup} mockup shots; checks ${results.summary.checks.pass} pass / ${results.summary.checks.fail} fail; self-tests ${selfOk ? 'flipped' : 'NOT all flipped'}; csp violations ${cspViolations.length}; ax ${axCmp.baseline.length} baseline / ${axCmp.unexpected.length} unexpected; chrome pids ${chrome.pids.join(',')} alive after close: ${J(chrome.aliveAfterClose)}; temp ${J(tempDirs)}; board server ${J(boardServerState)}`);
 console.log(pass ? 'ALL PASS' : 'FAILED');
 process.exit(pass ? 0 : 1);

@@ -72,7 +72,7 @@ const IDS = ['a185', 'p185', 'c184', 'd012', 'e-done', 'f-q', 'g-old'];
 const PREFS = { favs: ['d012', 'gone-1'], tabs: ['a185', 'c184', 'gone-1'], active: 'a185', seen: { 'e-done': NOW - DAY, 'g-old': NOW - 3600e3 } };
 const base = (S, prefs = PREFS) => S.reduce(undefined, { type: 'load', json: JSON.stringify(prefs), known: IDS, now: NOW });
 const saved = (S, st) => JSON.parse(S.serialize(st));
-const DEFAULT_SAVED = { sideOpen: true, sideWidth: 260, view: 'conv', filter: 'all', favs: [], tabs: [], pinned: [], active: null, sub: {}, seen: {}, absent: {} };
+const DEFAULT_SAVED = { sideOpen: true, sideWidth: 260, view: 'conv', filter: 'all', favs: [], tabs: [], pinned: [], active: null, sub: {}, seen: {}, absent: {}, tabSchema: 2, shown: {}, follow: {} };
 
 // html probes
 const all = (html, re) => [...html.matchAll(re)].map((m) => m[1]);
@@ -138,7 +138,7 @@ test('reduce: view switches the one sidebar column, opens it, and refuses unknow
   for (const key of ['nope', '__proto__', 'constructor', '', 7]) assert.equal(S.reduce(closed, { type: 'view', key }), closed, String(key));
   const narrow = S.reduce(closed, { type: 'view', key: 'archive', narrow: true });
   assert.deepEqual([narrow.view, narrow.sideOpen, narrow.peek], ['archive', false, true], 'narrow: the overlay opens, the docked state stays');
-  for (const key of ['conv', 'inbox', 'plans', 'home', 'archive', 'profiles', 'settings']) assert.equal(S.reduce(closed, { type: 'view', key }).view, key);
+  for (const key of ['conv', 'inbox', 'plans', 'home', 'archive', 'profiles', 'settings', 'memento']) assert.equal(S.reduce(closed, { type: 'view', key }).view, key);
 });
 
 test('reduce: filter, search, fav and expand', () => {
@@ -238,6 +238,361 @@ function deepFreeze(o) {
   return o;
 }
 
+// Window fixtures share the real sidebar data; membership is the reducer's model boundary.
+const WIN = {
+  generatedAt: NOW,
+  sessions: [
+    { ...fixture().sessions[0], tabId: 'w4:t185' },
+    { ...fixture().sessions[1], tabId: 'w4:t185' },
+    { id: 'q185', alive: true, tabId: 'w4:t185', title: 'Second pane', lastActivityAt: NOW - 2 * 60e3, decisions: [] },
+    { ...fixture().sessions[4] },
+  ],
+};
+const WK = 'w:w4:t185';
+const winMembers = (model = WIN) => model.sessions.map((s) => ({ id: s.id, tabId: s.tabId || '', alive: s.alive === true, at: s.lastActivityAt || 0 }));
+const winKnown = (S, st = S.defaults(), members = winMembers()) => S.reduce(st, { type: 'known', ids: members.filter((s) => s && typeof s.id === 'string').map((s) => s.id), members, now: NOW });
+const selectedRows = (html) => all(html, /class="sh-row sel(?: sh-prev)?" data-row="([^"]+)"/g);
+
+test('tab bar: window representative stays stable and its bell totals all members', () => {
+  const S = load().BriefShell;
+  const model = { ...WIN, sessions: WIN.sessions.map(s => s.id === 'p185' ? { ...s, decisions: [{ id: 501, question: 'old pending' }] } : s) };
+  let st = winKnown(S, S.defaults(), winMembers(model));
+  st = S.reduce(st, { type: 'open', sid: 'a185', now: NOW });
+  const live = S.tabs(model, st);
+  st = S.reduce(st, { type: 'open', sid: 'p185', now: NOW });
+  const previous = S.tabs(model, st);
+  assert.equal(previous, live, 'shown conversation does not rename or recolour its window tab');
+  assert.deepEqual(tabOrder(previous), [WK]);
+  assert.match(previous, /title="상황판제작 #185 · 상황판 v5 셸 \(두 번 누르면 탭 고정\)"/);
+  assert.match(previous, /aria-label="상황판제작 · 기다리는 결정 3개\(창 전체\)"/);
+  assert.match(marks(previous), /<span class="sh-bdg" title="창 전체">\[bell\]3<\/span>/);
+  assert.match(previous, /class="sh-ico sh-ico-n sh-h1" aria-hidden="true">185<\/span>/);
+  assert.equal(S.windowLiveOf(model, st), 'a185');
+  st = S.reduce(st, { type: 'open', sid: 'q185' });
+  assert.equal(S.windowLiveOf(model, st), null, 'a second alive pane is not a previous conversation');
+});
+
+test('tab bar: standalone output is byte-identical to the legacy tab markup', () => {
+  const S = load().BriefShell;
+  const st = S.reduce(winKnown(S), { type: 'open', sid: 'e-done' });
+  assert.equal(marks(S.tabs(WIN, st)),
+    '<button type="button" class="sh-topen" data-sh="toggleSide" title="사이드바 열기 (Ctrl+\\)" aria-label="사이드바 열기">[panel-left-open]</button>' +
+    '<div class="tb on" data-tab="e-done" title="끝난 설치 작업 (두 번 누르면 탭 고정)">' +
+    '<button type="button" class="tb-go" data-sh="active" data-sid="e-done" aria-pressed="true">' +
+    '<span class="sh-ico" aria-hidden="true">·</span><span class="tt">끝난 설치 작업</span></button>' +
+    '<button type="button" class="tb-x" data-sh="close" data-sid="e-done" aria-label="탭 닫기: 끝난 설치 작업" title="탭 닫기">[x]</button></div>' +
+    '<button type="button" class="sh-tadd" data-sh="view" data-key="home" title="새 탭: 홈" aria-label="홈 보기">[plus]</button>');
+});
+
+test('tab bar: a ghost window is labelled with its window identity', () => {
+  const S = load().BriefShell;
+  const st = { ...S.defaults(), tabs: ['w:missing'], active: 'w:missing' };
+  assert.match(S.tabs({ sessions: [] }, st), /title="\(지금 안 보임\) · 창 missing \(두 번 누르면 탭 고정\)"/);
+  assert.equal(S.windowLiveOf({ sessions: [] }, st), null);
+});
+
+test('hostile tab labels and window keys are escaped in every tab attribute', () => {
+  const S = load().BriefShell;
+  const model = { sessions: [{ id: 'evil', tabId: HOSTILE, tabLabel: HOSTILE, title: HOSTILE, alive: true,
+    decisions: [{ id: 1, question: '?' }] }] };
+  const st = S.reduce(winKnown(S, S.defaults(), winMembers(model)), { type: 'open', sid: 'evil' });
+  const html = S.tabs(model, st), key = esc('w:' + HOSTILE);
+  assert.match(html, new RegExp('data-tab="' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"'));
+  assert.equal(all(html, /data-sid="([^"]*)"/g).every(s => s === key), true);
+  assert.ok(html.includes('aria-label="' + esc(HOSTILE + ' · 기다리는 결정 1개(창 전체)') + '"'));
+  assert.ok(html.includes('title="' + esc(HOSTILE + ' · ' + HOSTILE + ' (두 번 누르면 탭 고정)') + '"'));
+  assert.doesNotMatch(html, /<img|onerror="/);
+});
+
+test('window keys: shared windows, standalone ids, length boundaries and reserved model ids', () => {
+  // Given
+  const S = load().BriefShell;
+  const extra = [
+    { id: 'long', tabId: 't'.repeat(255), alive: true, at: NOW },
+    { id: 'max', tabId: 't'.repeat(256), alive: true, at: NOW },
+    { id: 'oversize', tabId: 't'.repeat(300) },
+    ...['\u0000', '\u001f', '\u007f'].map((c, i) => ({ id: 'control' + i, tabId: 't' + c })),
+    { id: 'w:reserved', tabId: 'w4:t185', alive: true, at: NOW + 1 },
+    { id: '__proto__', tabId: 'bad' }, null, { id: '' },
+  ];
+  // When
+  const st = winKnown(S, S.defaults(), [...winMembers(), ...extra]);
+  // Then
+  for (const sid of ['a185', 'p185', 'q185']) assert.equal(S.keyOf(st, sid), WK);
+  for (const sid of ['e-done', 'oversize', 'control0', 'control1', 'control2', 'w:reserved']) assert.equal(S.keyOf(st, sid), sid);
+  assert.equal(S.keyOf(st, 'long'), 'w:' + 't'.repeat(255));
+  assert.equal(S.keyOf(st, 'max'), 'w:' + 't'.repeat(256));
+  assert.equal(Object.hasOwn(st.members, 'w:reserved'), false);
+  assert.equal(Object.hasOwn(st.members, '__proto__'), false);
+  assert.deepEqual(plain(st.groups[WK]), ['a185', 'q185', 'p185']);
+  assert.deepEqual(plain([st.shown, st.follow, st.seen]), [{}, {}, {}]);
+});
+
+test('shown: selection fallback orders alive first, then activity, then sid without mutating reads', () => {
+  // Given
+  const S = load().BriefShell;
+  const members = [
+    { id: 'ended', tabId: 'tie', alive: false, at: NOW + 10 },
+    { id: 'z', tabId: 'tie', alive: true, at: NOW },
+    { id: 'b', tabId: 'tie', alive: true, at: NOW + 1 },
+    { id: 'a', tabId: 'tie', alive: true, at: NOW + 1 },
+  ];
+  const st = winKnown(S, S.defaults(), members);
+  const ended = { ...st, shown: { 'w:tie': 'ended' }, follow: { 'w:tie': true } };
+  deepFreeze(ended);
+  // When
+  const shown = S.shownOf(ended, 'w:tie');
+  // Then
+  assert.equal(shown, 'ended', 'follow is committed on known, never by shownOf');
+  assert.equal(S.shownOf(st, 'w:tie'), 'a');
+  assert.deepEqual(plain(st.groups['w:tie']), ['a', 'b', 'z', 'ended']);
+  assert.equal(S.shownOf({ ...st, shown: { 'w:tie': 'outside' } }, 'w:tie'), 'a');
+  assert.equal(S.shownOf(winKnown(S, S.defaults(), members.map((s) => ({ ...s, alive: false }))), 'w:tie'), 'ended');
+  assert.equal(S.shownOf({ ...S.defaults(), shown: { 'w:ghost': 'remembered' } }, 'w:ghost'), 'remembered');
+  assert.equal(S.shownOf({ ...st, shown: { 'w:ghost': 'remembered' } }, 'w:ghost'), null);
+  assert.equal(S.shownOf(st, 'e-done'), 'e-done');
+});
+
+test('follow: open a185 alive commits the replacement when its conversation ends', () => {
+  // Given
+  const S = load().BriefShell;
+  const st = S.reduce(winKnown(S), { type: 'open', sid: 'a185', now: NOW });
+  const members = winMembers().map((s) => ({ ...s, alive: false })).concat({ id: 'n1', tabId: 'w4:t185', alive: true, at: NOW + 1 });
+  // When
+  const next = winKnown(S, st, members);
+  // Then
+  assert.equal(next.shown[WK], 'n1');
+  assert.equal(next.follow[WK], true);
+  assert.equal(S.shownOf(next, WK), 'n1');
+  assert.deepEqual(plain(next.tabs), [WK]);
+  assert.deepEqual(plain(next.seen), { a185: NOW }, 'background follow does not mark an unviewed conversation seen');
+});
+
+test('follow: opening ended p185 deliberately preserves look-back after a new live member appears', () => {
+  // Given
+  const S = load().BriefShell;
+  const st = S.reduce(winKnown(S), { type: 'open', sid: 'p185' });
+  // When
+  const next = winKnown(S, st, winMembers().concat({ id: 'n1', tabId: 'w4:t185', alive: true, at: NOW + 1 }));
+  // Then
+  assert.equal(next.shown[WK], 'p185');
+  assert.equal(Object.hasOwn(next.follow, WK), false);
+});
+
+test('follow: restored committed live selection follows on the first already-ended model', () => {
+  // Given: storage loading is task3; this is its restored state before the first known action.
+  const S = load().BriefShell;
+  const restored = { ...S.defaults(), tabs: [WK], active: WK, shown: { [WK]: 'a185' }, follow: { [WK]: true } };
+  const members = winMembers().map((s) => ({ ...s, alive: false })).concat({ id: 'n1', tabId: 'w4:t185', alive: true, at: NOW + 1 });
+  // When
+  const next = winKnown(S, restored, members);
+  // Then
+  assert.deepEqual([next.shown[WK], next.follow[WK]], ['n1', true]);
+  assert.deepEqual(plain(next.seen), {});
+});
+
+test('follow chain: committed selection follows once, keeps a live pane and survives every member ending', () => {
+  const S = load().BriefShell;
+  const opened = S.reduce(winKnown(S), { type: 'open', sid: 'a185' });
+  const ended = winMembers().map((s) => ({ ...s, alive: false }));
+  const cases = [
+    ended.concat({ id: 'n1', tabId: 'w4:t185', alive: true, at: NOW + 1 }),
+    ended.concat({ id: 'n1', tabId: 'w4:t185', alive: true, at: NOW + 1 }, { id: 'n2', tabId: 'w4:t185', alive: true, at: NOW + 2 }),
+    ended.concat({ id: 'n1', tabId: 'w4:t185', alive: false, at: NOW + 1 }, { id: 'n2', tabId: 'w4:t185', alive: false, at: NOW + 2 }),
+  ];
+  let st = opened;
+  for (const members of cases) {
+    // Given
+    const before = st;
+    // When
+    st = winKnown(S, before, members);
+    // Then
+    assert.deepEqual([st.shown[WK], st.follow[WK], S.shownOf(st, WK)], ['n1', true, 'n1']);
+    assert.equal(winKnown(S, st, members), st, 'an unchanged committed model is a reference no-op');
+  }
+});
+
+test('two panes: opening q185 selects the older live pane in the same tab', () => {
+  // Given
+  const S = load().BriefShell;
+  const opened = S.reduce(winKnown(S), { type: 'open', sid: 'a185' });
+  // When
+  const st = S.reduce(opened, { type: 'open', sid: 'q185', sub: 'dec' });
+  // Then
+  assert.deepEqual(plain(st.tabs), [WK]);
+  assert.deepEqual([st.active, st.shown[WK], st.follow[WK], st.sub.q185], [WK, 'q185', true, 'dec']);
+  assert.equal(winKnown(S, st).shown[WK], 'q185', 'newer alive a185 never replaces the clicked live pane');
+});
+
+test('open: a second conversation activates its window and stamps only its own seen', () => {
+  // Given
+  const S = load().BriefShell;
+  const opened = S.reduce(winKnown(S), { type: 'open', sid: 'a185', now: NOW });
+  // When
+  const st = S.reduce(opened, { type: 'open', sid: 'p185', sub: 'rep', now: NOW + 1 });
+  // Then
+  assert.deepEqual(plain(st.tabs), [WK]);
+  assert.deepEqual(plain(st.seen), { a185: NOW, p185: NOW + 1 });
+  assert.deepEqual([st.active, st.shown[WK], st.sub.p185, st.exp.p185], [WK, 'p185', 'rep', true]);
+  assert.equal(Object.hasOwn(st.follow, WK), false);
+});
+
+test('open: previous, inbox, archive, overview and plan-owner targets select their sid and subpage', () => {
+  const S = load().BriefShell;
+  for (const [entry, sid, sub] of [['previous', 'p185', ''], ['inbox', 'p185', 'dec'], ['archive', 'p185', ''], ['overview', 'q185', 'ov'], ['plan-owner', 'a185', 'plan']]) {
+    // Given
+    const st = S.reduce(winKnown(S), { type: 'open', sid: 'a185' });
+    const attrs = { 'data-sh': 'open', 'data-sid': sid, ...(sub ? { 'data-sub': sub } : {}) };
+    // When
+    const next = S.reduce(st, S.actionOf({ getAttribute: (k) => attrs[k] || null }, { now: NOW }));
+    // Then
+    assert.deepEqual(plain(next.tabs), [WK], entry);
+    assert.deepEqual([next.active, S.shownOf(next, WK), next.sub[sid]], [WK, sid, sub || undefined], entry);
+    assert.deepEqual(plain(next.seen), { [sid]: NOW }, entry);
+  }
+});
+
+test('active: window activation marks its shown conversation seen, clears finished inbox and ignores ghosts', () => {
+  // Given
+  const S = load().BriefShell;
+  const st = S.reduce(winKnown(S), { type: 'open', sid: 'p185' });
+  assert.ok(S.inbox(WIN, st).done.some((x) => x.s.id === 'p185'));
+  // When
+  const next = S.reduce(st, { type: 'active', sid: WK, now: NOW });
+  // Then
+  assert.deepEqual(plain(next.seen), { p185: NOW });
+  assert.equal(S.inbox(WIN, next).done.some((x) => x.s.id === 'p185'), false);
+  const ghost = { ...next, tabs: [...next.tabs, 'w:ghost'], shown: { ...next.shown, 'w:ghost': 'missing' } };
+  assert.deepEqual(plain(S.reduce(ghost, { type: 'active', sid: 'w:ghost', now: NOW + 1 }).seen), { p185: NOW });
+});
+
+test('active: round trip keeps q185 shown, highlighted and following without changing selection maps', () => {
+  // Given
+  const S = load().BriefShell;
+  const pane = S.reduce(winKnown(S), { type: 'open', sid: 'q185', sub: 'dec' });
+  const other = S.reduce(pane, { type: 'open', sid: 'e-done' });
+  // When
+  const back = S.reduce(other, { type: 'active', sid: WK, now: NOW });
+  // Then
+  assert.equal(back.shown, pane.shown);
+  assert.equal(back.follow, pane.follow);
+  assert.deepEqual([S.shownOf(back, WK), back.sub.q185], ['q185', 'dec']);
+  assert.deepEqual(selectedRows(S.side(WIN, back)), ['q185']);
+  assert.deepEqual(plain(back.seen), { q185: NOW });
+});
+
+test('active, close and pin: board keys retain pin order and closing clears window selection', () => {
+  // Given
+  const S = load().BriefShell;
+  let st = S.reduce(S.reduce(winKnown(S), { type: 'open', sid: 'a185' }), { type: 'open', sid: 'e-done' });
+  st = S.reduce(st, { type: 'pin', sid: WK });
+  st = S.reduce(st, { type: 'pin', sid: 'e-done' });
+  assert.deepEqual(plain(S.order(st)), [WK, 'e-done']);
+  st = S.reduce(st, { type: 'active', sid: WK });
+  // When
+  const closed = S.reduce(st, { type: 'close', sid: WK });
+  // Then
+  assert.deepEqual([plain(closed.tabs), plain(closed.pinned), closed.active], [['e-done'], ['e-done'], 'e-done']);
+  assert.equal(Object.hasOwn(closed.shown, WK), false);
+  assert.equal(Object.hasOwn(closed.follow, WK), false);
+  const long = winKnown(S, S.defaults(), [{ id: 'long', tabId: 't'.repeat(256), alive: true }]);
+  const opened = S.reduce(long, { type: 'open', sid: 'long' });
+  const pinned = S.reduce(opened, { type: 'pin', sid: opened.active });
+  assert.deepEqual(plain(pinned.pinned), [opened.active]);
+  assert.equal(S.reduce(pinned, { type: 'active', sid: opened.active, now: NOW }).seen.long, NOW);
+  assert.deepEqual(plain(S.reduce(pinned, { type: 'close', sid: opened.active }).tabs), []);
+});
+
+test('cap: an existing window accepts another member at 200 tabs but a new window changes nothing', () => {
+  // Given
+  const S = load().BriefShell;
+  const known = winKnown(S, S.defaults(), [...winMembers(), { id: 'new', tabId: 'new', alive: true }]);
+  let st = S.reduce(known, { type: 'open', sid: 'a185' });
+  for (let i = 0; i < 199; i++) st = S.reduce(st, { type: 'open', sid: 'solo' + i });
+  // When
+  const selected = S.reduce(st, { type: 'open', sid: 'q185', now: NOW });
+  // Then
+  assert.deepEqual([selected.tabs.length, selected.active, selected.shown[WK]], [200, WK, 'q185']);
+  assert.equal(S.reduce(selected, { type: 'open', sid: 'new', now: NOW }), selected);
+});
+
+test('known without members: legacy tabs stay standalone without window metadata or absence stamps', () => {
+  // Given
+  const S = load().BriefShell;
+  const opened = S.reduce(S.defaults(), { type: 'open', sid: 'a185', now: NOW });
+  // When
+  const st = S.reduce(opened, { type: 'known', ids: ['a185'], now: NOW });
+  // Then
+  assert.deepEqual(plain(st.tabs), ['a185']);
+  assert.deepEqual(plain([st.shown, st.follow, st.absent]), [{}, {}, {}]);
+  assert.equal(S.keyOf(st, 'a185'), 'a185');
+  const pending = { ...S.defaults(), tabs: [WK], active: WK, shown: { [WK]: 'a185' }, follow: { [WK]: true } };
+  assert.equal(S.reduce(pending, { type: 'known', ids: [], now: NOW + 40 * DAY }), pending);
+});
+
+test('known without members: previous kids keep legacy markup when their conversation is open', () => {
+  // Given
+  const S = load().BriefShell;
+  const model = { sessions: [
+    { id: 'alive', tabId: 'window', alive: true, lastActivityAt: 2, decisions: [] },
+    { id: 'previous', tabId: 'window', alive: false, lastActivityAt: 1, decisions: [] },
+  ] };
+  const known = S.reduce(S.defaults(), { type: 'known', ids: ['alive', 'previous'], now: NOW });
+  const expanded = S.reduce(known, { type: 'expand', sid: 'alive' });
+  const st = S.reduce(expanded, { type: 'open', sid: 'previous' });
+  // When
+  const html = S.side(model, st);
+  // Then
+  assert.equal(st.members, null);
+  assert.equal(st.active, 'previous');
+  assert.match(html, /class="sh-row sh-kid sh-prev">.*?data-sid="previous"/);
+  assert.doesNotMatch(html, /class="sh-row sh-kid sh-prev sel"/);
+});
+
+test('highlight: shown rows and previous kids select only the shown conversation without expanding hosts', () => {
+  const S = load().BriefShell;
+  const known = winKnown(S);
+  for (const [sid, view] of [['a185', 'conv'], ['a185', 'home'], ['p185', 'conv'], ['e-done', 'archive']]) {
+    // Given
+    const prefs = { ...known, view, favs: sid === 'a185' ? ['a185'] : [], exp: { a185: true, 'sec:recent': true } };
+    // When
+    const st = S.reduce(prefs, { type: 'open', sid });
+    const html = S.side(WIN, st);
+    // Then
+    assert.ok(selectedRows(html).every((id) => id === sid));
+    if (sid === 'p185') {
+      assert.deepEqual(selectedRows(html), []);
+      assert.match(html, /class="sh-row sh-kid sh-prev sel">.*?data-sid="p185"/);
+      assert.doesNotMatch(html, /class="sh-row sh-kid sel"/);
+      assert.doesNotMatch(S.side(WIN, { ...st, exp: {} }), /class="sh-row[^"]*\bsel\b/);
+    } else {
+      assert.ok(selectedRows(html).length > 0);
+      assert.doesNotMatch(html, /class="sh-row sh-kid[^"]*\bsel\b/);
+    }
+  }
+});
+
+test('reduce stays pure with members: frozen state and membership inputs survive every window action', () => {
+  // Given
+  const S = load().BriefShell;
+  const members = deepFreeze(winMembers());
+  const st = deepFreeze(S.reduce(winKnown(S), { type: 'open', sid: 'a185' }));
+  const before = plain(st), input = plain(members);
+  // When
+  const results = [
+    S.reduce(st, { type: 'known', ids: members.map((s) => s.id), members, now: NOW }),
+    S.reduce(st, { type: 'open', sid: 'p185', sub: 'plan', now: NOW }),
+    S.reduce(st, { type: 'active', sid: WK, now: NOW }),
+    S.reduce(st, { type: 'close', sid: WK }),
+    S.reduce(st, { type: 'pin', sid: WK }),
+  ];
+  // Then
+  assert.equal(results[0], st);
+  assert.deepEqual(plain(st.groups[WK]), ['a185', 'q185', 'p185']);
+  assert.deepEqual(plain(st), before);
+  assert.deepEqual(plain(members), input);
+});
+
 test('reduce is pure: a deep-frozen state survives every action unchanged', () => {
   const S = load().BriefShell;
   let st = base(S);
@@ -257,6 +612,219 @@ test('reduce is pure: a deep-frozen state survives every action unchanged', () =
 
 // ---- prefs (C-UI) ---------------------------------------------------------------------------------------------------
 
+test('storage: persist writes only omo-briefing.ui.v2 with tabSchema 2, shown and follow; v1 is never written or removed', () => {
+  // Given
+  const S = load().BriefShell, calls = [];
+  const st = S.reduce(winKnown(S), { type: 'open', sid: 'q185' });
+  const store = { setItem: (key, value) => calls.push(['write', key, JSON.parse(value)]), removeItem: key => calls.push(['remove', key]) };
+  // When
+  const result = S.persist(store, st);
+  // Then
+  assert.equal(result, true);
+  assert.deepEqual(calls, [['write', 'omo-briefing.ui.v2', { ...DEFAULT_SAVED, tabSchema: 2, tabs: [WK], active: WK, shown: { [WK]: 'q185' }, follow: { [WK]: true } }]]);
+});
+
+test('storage: restore reads v2 when present, else v1; corrupt v2 never reads v1', () => {
+  // Given
+  const S = load().BriefShell;
+  for (const v2 of ['{"tabSchema":2,"view":"plans"}', '{bad', null]) {
+    const reads = [];
+    const store = { getItem: key => { reads.push(key); return key.endsWith('v2') ? v2 : '{"view":"home"}'; } };
+    // When
+    const st = S.reduce(null, { type: 'load', json: S.restore(store) });
+    // Then
+    assert.deepEqual(reads, v2 === null ? ['omo-briefing.ui.v2', 'omo-briefing.ui.v1'] : ['omo-briefing.ui.v2']);
+    assert.equal(st.view, v2 === null ? 'home' : v2 === '{bad' ? 'conv' : 'plans');
+    assert.equal(st.prefsError, v2 === '{bad' ? 'corrupt' : '');
+  }
+});
+
+test('legacy: v1 values are conversation ids; a v1 value starting with w: is dropped', () => {
+  // Given
+  const S = load().BriefShell;
+  const raw = { tabs: [WK, 'a185'], pinned: [WK, 'a185'], active: WK, absent: { [WK]: NOW }, shown: { [WK]: 'p185' }, follow: { [WK]: true } };
+  // When
+  const st = S.reduce(null, { type: 'load', json: JSON.stringify(raw) });
+  // Then
+  assert.deepEqual(plain([st.tabs, st.pinned, st.active, st.absent, st.shown, st.follow]), [['a185'], ['a185'], null, {}, {}, {}]);
+});
+
+test('migration: order, pins and active survive the merge; a pinned conversation pins its window', () => {
+  // Given
+  const S = load().BriefShell;
+  const old = S.reduce(null, { type: 'load', json: JSON.stringify({ tabs: ['p185', 'e-done', 'q185', 'a185'], pinned: ['q185', 'e-done'], active: 'q185', sub: { p185: 'rep' }, seen: { a185: NOW } }) });
+  deepFreeze(old);
+  // When
+  const st = winKnown(S, old);
+  // Then
+  assert.deepEqual(plain([st.tabs, st.pinned, st.active, st.shown, st.follow, st.sub, st.seen]), [[WK, 'e-done'], [WK, 'e-done'], WK, { [WK]: 'q185' }, { [WK]: true }, { p185: 'rep' }, { a185: NOW }]);
+});
+
+test('migration: shown takes active source, valid shown, greatest seen, then tab order; migrated slots follow', () => {
+  const S = load().BriefShell;
+  for (const [extra, expected, follows] of [
+    [{ active: 'q185', shown: { [WK]: 'p185' } }, 'q185', true],
+    [{ shown: { [WK]: 'p185' } }, 'p185', false],
+    [{ seen: { p185: 2, q185: 3 } }, 'q185', true],
+    [{}, 'p185', true],
+  ]) {
+    // Given: ended-only groups expose the migration choice without a subsequent live follow.
+    const st = { ...S.defaults(), tabs: ['p185', WK, 'q185'], ...extra };
+    // When
+    const next = winKnown(S, st, winMembers().map(m => ({ ...m, alive: false })));
+    // Then
+    assert.equal(next.shown[WK], expected);
+    assert.equal(next.follow[WK] === true, follows);
+  }
+});
+
+test('migration: reload and delayed first model agree; canonicalising twice returns the same object', () => {
+  // Given
+  const S = load().BriefShell;
+  const raw = JSON.stringify({ tabs: ['p185', 'q185'], active: 'q185', seen: { p185: NOW } });
+  const first = winKnown(S, S.reduce(null, { type: 'load', json: raw }));
+  // When
+  const reload = winKnown(S, S.reduce(null, { type: 'load', json: S.serialize(first) }));
+  const delayed = winKnown(S, S.reduce(S.reduce(null, { type: 'load', json: raw }), { type: 'known', ids: [], now: NOW - 40 * DAY }));
+  // Then
+  assert.deepEqual(saved(S, reload), saved(S, first));
+  assert.deepEqual(saved(S, delayed), saved(S, first));
+  assert.deepEqual(plain(first.tabs), [WK]);
+  assert.equal(winKnown(S, first), first);
+});
+
+for (const [schemaName, schema] of [['legacy', {}], ['v2', { tabSchema: 2 }]]) {
+  test(`migration repair: stale restored ${schemaName} sid-only records wait for membership`, () => {
+    // Given: the reviewer's exact stale conversation-id-only cross-product.
+    const S = load().BriefShell;
+    const raw = { ...schema, tabs: ['returning'], pinned: ['returning'], active: 'returning',
+      sub: { returning: 'rep' }, seen: { returning: NOW - 50 * DAY }, absent: { returning: NOW - 31 * DAY } };
+    const loaded = S.reduce(null, { type: 'load', json: JSON.stringify(raw), known: [], now: NOW });
+    const publication = { type: 'known', ids: ['returning'], members: [{ id: 'returning', tabId: 'win', alive: true, at: NOW }], now: NOW };
+    deepFreeze(loaded);
+    // When
+    const delayed = [NOW, NOW + 1, NOW + 2].reduce((st, now) => S.reduce(st, { type: 'known', ids: [], now }), loaded);
+    const immediate = S.reduce(loaded, publication);
+    const afterDelay = S.reduce(delayed, publication);
+    // Then
+    assert.deepEqual(saved(S, delayed), { ...DEFAULT_SAVED, ...raw });
+    assert.equal(delayed, loaded);
+    assert.equal(loaded.awaitingMembers, true);
+    assert.deepEqual(plain(afterDelay), plain(immediate));
+    assert.deepEqual(plain([afterDelay.tabs, afterDelay.pinned, afterDelay.active, afterDelay.sub, afterDelay.seen, afterDelay.absent]),
+      [['w:win'], ['w:win'], 'w:win', raw.sub, raw.seen, {}]);
+    assert.equal(afterDelay.awaitingMembers, false);
+    assert.equal(S.reduce(afterDelay, publication), afterDelay);
+    assert.equal(Object.hasOwn(saved(S, loaded), 'awaitingMembers'), false);
+    assert.equal(Object.hasOwn(saved(S, afterDelay), 'awaitingMembers'), false);
+  });
+
+  test(`migration repair: actual empty first ${schemaName} membership releases pending and expiry`, () => {
+    // Given
+    const S = load().BriefShell;
+    const raw = { ...schema, tabs: ['returning'], pinned: ['returning'], active: 'returning',
+      sub: { returning: 'rep' }, seen: { returning: NOW - 50 * DAY }, absent: { returning: NOW - 31 * DAY } };
+    const loaded = S.reduce(null, { type: 'load', json: JSON.stringify(raw) });
+    const fresh = S.reduce(null, { type: 'load', json: JSON.stringify({ ...raw, absent: {} }) });
+    // When
+    const empty = S.reduce(loaded, { type: 'known', ids: [], members: [], now: NOW });
+    const stamped = S.reduce(fresh, { type: 'known', ids: [], members: [], now: NOW });
+    // Then
+    assert.equal(loaded.awaitingMembers, true);
+    assert.equal(fresh.awaitingMembers, true);
+    assert.equal(empty.awaitingMembers, false);
+    assert.deepEqual(saved(S, empty), DEFAULT_SAVED);
+    assert.equal(stamped.awaitingMembers, false);
+    assert.deepEqual(plain(stamped.absent), { returning: NOW });
+    assert.equal(S.reduce(stamped, { type: 'known', ids: [], now: NOW + 30 * DAY }), stamped);
+    assert.deepEqual(saved(S, S.reduce(stamped, { type: 'known', ids: [], now: NOW + 30 * DAY + 1 })), DEFAULT_SAVED);
+  });
+}
+
+test('migration repair: invalid and absent prefs do not defer ordinary legacy stamping or expiry', () => {
+  for (const json of [undefined, null, '', '{bad', '[]', 'null', '4']) {
+    // Given
+    const S = load().BriefShell;
+    const loaded = S.reduce(null, { type: 'load', json });
+    const opened = S.reduce(loaded, { type: 'open', sid: 'ordinary', sub: 'rep', now: NOW });
+    // When
+    const missing = S.reduce(opened, { type: 'known', ids: [], now: NOW });
+    // Then
+    assert.equal(loaded.awaitingMembers, false);
+    assert.equal(missing.members, null);
+    assert.deepEqual(plain(missing.absent), { ordinary: NOW });
+    assert.equal(S.reduce(missing, { type: 'known', ids: [], now: NOW + 30 * DAY }), missing);
+    assert.deepEqual(saved(S, S.reduce(missing, { type: 'known', ids: [], now: NOW + 30 * DAY + 1 })), DEFAULT_SAVED);
+  }
+});
+
+test('migration: before any members nothing is pruned or stamped; an empty first model canonicalises', () => {
+  // Given
+  const S = load().BriefShell;
+  const raw = JSON.stringify({ tabSchema: 2, tabs: [WK, 'gone'], active: WK, shown: { [WK]: 'gone' }, follow: { [WK]: true }, absent: { [WK]: NOW - 40 * DAY } });
+  const st = S.reduce(null, { type: 'load', json: raw });
+  // When
+  const before = S.reduce(st, { type: 'known', ids: [], now: NOW });
+  const empty = S.reduce(before, { type: 'known', ids: [], members: [], now: NOW });
+  // Then
+  assert.equal(before, st);
+  assert.deepEqual(plain(st.absent), { [WK]: NOW - 40 * DAY });
+  assert.deepEqual(plain(empty.tabs), ['gone']);
+  assert.deepEqual(plain(empty.absent), { gone: NOW });
+  assert.deepEqual(plain(empty.seen), {});
+});
+
+test('absence: window membership and strict 30-day boundary; sid metadata expires independently and drops shown', () => {
+  // Given
+  const S = load().BriefShell;
+  const opened = S.reduce(S.reduce(winKnown(S), { type: 'open', sid: 'p185', sub: 'rep', now: NOW }), { type: 'fav', sid: 'p185' });
+  const known = (st, members, now) => S.reduce(st, { type: 'known', ids: members.map(m => m.id), members, now });
+  const missing = known(opened, [], NOW);
+  // When
+  const boundary = known(missing, [], NOW + 30 * DAY);
+  const expired = known(missing, [], NOW + 30 * DAY + 1);
+  const surviving = known(known(opened, [{ id: 'other', tabId: 'w4:t185', alive: false }], NOW), [{ id: 'other', tabId: 'w4:t185', alive: false }], NOW + 30 * DAY + 1);
+  // Then
+  assert.equal(boundary, missing);
+  assert.deepEqual(plain([expired.tabs, expired.pinned, expired.active, expired.shown, expired.follow, expired.sub, expired.seen, expired.favs, expired.absent]), [[], [], null, {}, {}, {}, {}, [], {}]);
+  assert.deepEqual(plain(surviving.tabs), [WK]);
+  assert.equal(Object.hasOwn(surviving.absent, WK), false);
+  assert.equal(Object.values(surviving.shown).includes('p185'), false);
+  assert.deepEqual(plain([surviving.sub, surviving.seen, surviving.favs]), [{}, {}, []]);
+});
+
+test('rekey: ghost shown sid reappearing under a new tabId transfers tab, pin and active once', () => {
+  // Given
+  const S = load().BriefShell;
+  const ghost = { ...S.defaults(), tabs: [WK, 'e-done'], pinned: [WK], active: WK, shown: { [WK]: 'q185' }, follow: { [WK]: true } };
+  const members = [{ id: 'q185', tabId: 'new', alive: true, at: NOW }];
+  // When
+  const st = winKnown(S, ghost, members);
+  // Then
+  assert.deepEqual(plain([st.tabs, st.pinned, st.active, st.shown, st.follow]), [['w:new', 'e-done'], ['w:new'], 'w:new', { 'w:new': 'q185' }, { 'w:new': true }]);
+  assert.equal(winKnown(S, st, members), st);
+});
+
+test('R2 regression: reducer-created v2 state survives reload including 258-character window keys', () => {
+  // Given
+  const S = load().BriefShell;
+  const members = Array.from({ length: 201 }, (_, i) => ({ id: 's' + i, tabId: String(i).padStart(256, 't'), alive: true, at: NOW }));
+  let st = winKnown(S, S.defaults(), members);
+  for (const m of members) {
+    st = S.reduce(st, { type: 'open', sid: m.id, sub: 'dec', now: NOW });
+    st = S.reduce(st, { type: 'pin', sid: S.keyOf(st, m.id) });
+    st = S.reduce(st, { type: 'fav', sid: m.id });
+  }
+  // When
+  const again = winKnown(S, S.reduce(null, { type: 'load', json: S.serialize(st) }), members);
+  // Then
+  assert.deepEqual(saved(S, again), saved(S, st));
+  assert.equal(again.tabs.length, 200);
+  assert.equal(again.tabs[0].length, 258);
+  assert.equal(again.prefsError, '');
+  for (const key of ['members', 'groups', 'exp']) assert.equal(Object.hasOwn(saved(S, st), key), false);
+});
+
 test('load reads every C-UI field and serialize writes exactly the C-UI keys', () => {
   const S = load().BriefShell;
   const prefs = {
@@ -265,10 +833,11 @@ test('load reads every C-UI field and serialize writes exactly the C-UI keys', (
   };
   const st = S.reduce(undefined, { type: 'load', json: JSON.stringify(prefs), known: IDS, now: NOW });
   assert.equal(st.prefsError, '');
-  assert.deepEqual(saved(S, st), prefs);
-  assert.deepEqual(Object.keys(saved(S, st)), ['sideOpen', 'sideWidth', 'view', 'filter', 'favs', 'tabs', 'pinned', 'active', 'sub', 'seen', 'absent']);
+  const v2 = { ...prefs, tabSchema: 2, shown: {}, follow: {} };
+  assert.deepEqual(saved(S, st), v2);
+  assert.deepEqual(Object.keys(saved(S, st)), ['sideOpen', 'sideWidth', 'view', 'filter', 'favs', 'tabs', 'pinned', 'active', 'sub', 'seen', 'absent', 'tabSchema', 'shown', 'follow']);
   const again = S.reduce(undefined, { type: 'load', json: S.serialize(st), known: IDS, now: NOW });
-  assert.deepEqual(saved(S, again), prefs, 'round trip');
+  assert.deepEqual(saved(S, again), v2, 'round trip');
   assert.equal(S.KEY, 'omo-briefing.ui.v1');
 });
 
@@ -279,6 +848,10 @@ test('load keeps ids missing from the model as (지금 안 보임) and prunes th
     type: 'load', known: IDS, now: NOW,
     json: JSON.stringify({ tabs: ['a185', 'gone-1'], pinned: ['gone-1'], favs: ['gone-1'], active: 'gone-1', sub: { 'gone-1': 'dec' }, seen: { 'gone-1': NOW - 40 * DAY } }),
   });
+  assert.equal(st.awaitingMembers, true);
+  assert.deepEqual(plain(st.absent), {}, 'restoration alone does not stamp a missing conversation');
+  st = S.reduce(st, { type: 'known', ids: IDS, members: IDS.map(id => ({ id })), now: NOW });
+  assert.equal(st.awaitingMembers, false);
   assert.equal(st.absent['gone-1'], NOW, 'first missing now');
   assert.deepEqual(plain(st.tabs), ['a185', 'gone-1']);
   const bar = S.tabs(model, st);
@@ -296,7 +869,11 @@ test('load keeps ids missing from the model as (지금 안 보임) and prunes th
   assert.deepEqual(saved(S, pruned), { ...DEFAULT_SAVED, tabs: ['a185'], active: 'a185' });
   assert.doesNotMatch(S.tabs(model, pruned) + S.side(model, pruned), /지금 안 보임/);
 
-  const stale = S.reduce(undefined, { type: 'load', known: IDS, now: NOW, json: JSON.stringify({ favs: ['gone-2'], absent: { 'gone-2': NOW - 31 * DAY } }) });
+  let stale = S.reduce(undefined, { type: 'load', known: IDS, now: NOW, json: JSON.stringify({ favs: ['gone-2'], absent: { 'gone-2': NOW - 31 * DAY } }) });
+  assert.equal(stale.awaitingMembers, true);
+  assert.deepEqual(plain(stale.favs), ['gone-2'], 'restoration retains stale records until first membership');
+  stale = S.reduce(stale, { type: 'known', ids: IDS, members: IDS.map(id => ({ id })), now: NOW });
+  assert.equal(stale.awaitingMembers, false);
   assert.deepEqual(plain(stale.favs), [], 'a stored absence older than 30 days is pruned at load');
   assert.equal(S.reduce(st, { type: 'known', ids: 'nope', now: NOW + 99 * DAY }), st, 'no id list: nothing is judged');
   assert.equal(S.reduce(st, { type: 'known', ids: IDS }), st, 'no clock: nothing is judged');
@@ -373,7 +950,11 @@ test('failure: a corrupted omo-briefing.ui.v1 falls back to the defaults without
   };
   const json = JSON.stringify(foreign).replace('"sub":{', '"sub":{"__proto__":"dec",');
   assert.match(json, /"sub":\{"__proto__":"dec","a185"/);
-  const st = S.reduce(undefined, { type: 'load', json, known: IDS, now: NOW });
+  let st = S.reduce(undefined, { type: 'load', json, known: IDS, now: NOW });
+  assert.equal(st.awaitingMembers, true);
+  assert.deepEqual(plain(st.absent), {}, 'accepted restored fields await membership before absence stamping');
+  st = S.reduce(st, { type: 'known', ids: IDS, members: IDS.map(id => ({ id })), now: NOW });
+  assert.equal(st.awaitingMembers, false);
   assert.equal(st.prefsError, '');
   assert.deepEqual(saved(S, st), {
     ...DEFAULT_SAVED, tabs: ['a185', 'c184'], pinned: ['c184'], sub: { a185: 'dec', constructor: 'plan' }, seen: { d012: NOW },
@@ -383,7 +964,7 @@ test('failure: a corrupted omo-briefing.ui.v1 falls back to the defaults without
   assert.equal(Object.hasOwn(JSON.parse(S.serialize(st)).sub, '__proto__'), false, '__proto__ is never taken as an id');
 });
 
-test('persist and restore use only omo-briefing.ui.v1 and never throw on blocked storage', () => {
+test('persist uses v2 and restore falls back to v1 without throwing on blocked storage', () => {
   const warns = [];
   const ctx = load({ console: { warn: (...a) => warns.push(a.map(String).join(' ')) } });
   const S = ctx.BriefShell;
@@ -391,7 +972,7 @@ test('persist and restore use only omo-briefing.ui.v1 and never throw on blocked
   const store = { getItem: (k) => (k === 'omo-briefing.ui.v1' ? '{"view":"home"}' : null), setItem: (k, v) => writes.push([k, v]) };
   assert.equal(S.restore(store), '{"view":"home"}');
   assert.equal(S.persist(store, S.defaults()), true);
-  assert.deepEqual(writes.map((w) => w[0]), ['omo-briefing.ui.v1']);
+  assert.deepEqual(writes.map((w) => w[0]), ['omo-briefing.ui.v2']);
   assert.deepEqual(JSON.parse(writes[0][1]), DEFAULT_SAVED);
   const blocked = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('quota'); } };
   assert.equal(S.restore(blocked), null);
@@ -399,8 +980,9 @@ test('persist and restore use only omo-briefing.ui.v1 and never throw on blocked
   assert.equal(S.restore(null), null);
   assert.equal(warns.length, 2, warns.join('\n'));
   const src = read('src/page/shell.js');
-  assert.equal((src.match(/\.(?:setItem|getItem|removeItem)\(/g) || []).length, 2);
-  assert.equal((src.match(/\.(?:setItem|getItem)\(KEY\b/g) || []).length, 2, 'every storage call uses KEY');
+  assert.equal((src.match(/\.(?:setItem|getItem|removeItem)\(/g) || []).length, 3);
+  assert.equal((src.match(/\.getItem\(KEY\b/g) || []).length, 1, 'v1 remains read-only');
+  assert.equal((src.match(/\.(?:setItem|getItem)\(KEY_V2\b/g) || []).length, 2);
   assert.match(S.KEY, /^omo-briefing\./);
 });
 
@@ -411,26 +993,26 @@ test('rail: home first, then every destination, a spacer and settings; sidebar c
   const st = base(S);
   const html = S.rail(fixture(), st);
   assert.equal(all(marks(html), /class="sh-ri"[^>]*>([^<]*)</g).join(' '),
-    '[house] [message-square] [inbox] [list-todo] [archive] [users] [settings]');
-  assert.equal((html.match(/class="ic ic-rail"/g) || []).length, 6, 'rail-sized icons');
+    '[house] [message-square] [inbox] [list-todo] [lightbulb] [archive] [users] [settings]');
+  assert.equal((html.match(/class="ic ic-rail"/g) || []).length, 7, 'rail-sized icons');
   assert.match(html, /data-key="conv"[^>]*><span class="sh-ri" aria-hidden="true"><svg class="ic ic-rail ic-sel"/, 'the selected view: a heavier stroke');
   assert.equal((html.match(/ic-sel/g) || []).length, 1);
   assert.doesNotMatch(html, /data-sh="toggleSide"/);
   assert.match(marks(S.sideFrame(st)), /data-sh="toggleSide"[^>]*>\[panel-left-close\]/, 'the header control closes');
   assert.match(marks(S.tabs(fixture(), S.reduce(st, { type: 'toggleSide' }))), /^<button[^>]*class="sh-topen"[^>]*>\[panel-left-open\]/, 'the tab-bar control opens');
-  assert.deepEqual(all(html, /class="sh-tip"[^>]*>([^<]*)</g), ['홈', '대화', '수신함', '계획', '닫힌 창', '프로필·에이전트', '설정']);
+  assert.deepEqual(all(html, /class="sh-tip"[^>]*>([^<]*)</g), ['홈', '대화', '수신함', '계획', '메멘토', '닫힌 창', '프로필·에이전트', '설정']);
   assert.match(html, /data-key="inbox" aria-label="수신함 6개"/, 'the count is spoken, not shown in the tooltip');
   assert.match(marks(html), /\[archive\]<\/span><span class="sh-tip"[^>]*>닫힌 창<\/span><\/button><button[^>]*data-key="profiles"[\s\S]*?\[users\]<\/span><span class="sh-tip"[^>]*>프로필·에이전트<\/span><\/button><span class="sh-rsp" aria-hidden="true"><\/span><button[^>]*data-key="settings"/);
   assert.match(html, /<span class="sh-n" aria-hidden="true">6<\/span>/);
   assert.match(html, /class="sh-rb on" data-sh="view" data-key="conv"/);
-  assert.equal((html.match(/<button /g) || []).length, 7, 'every destination, no rail toggle or second panel');
+  assert.equal((html.match(/<button /g) || []).length, 8, 'every destination, no rail toggle or second panel');
 });
 
 test('regression R4: the inbox tooltip is exactly 수신함 while its badge carries the count', () => {
   const S = load().BriefShell;
   const vm = { sessions: [{ id: 'one', decisions: [{ id: 1, answered: false, closed: false }] }] };
   const html = S.rail(vm, S.defaults());
-  assert.deepEqual(all(html, /class="sh-tip"[^>]*>([^<]*)</g), ['홈', '대화', '수신함', '계획', '닫힌 창', '프로필·에이전트', '설정']);
+  assert.deepEqual(all(html, /class="sh-tip"[^>]*>([^<]*)</g), ['홈', '대화', '수신함', '계획', '메멘토', '닫힌 창', '프로필·에이전트', '설정']);
   assert.match(marks(html), /\[inbox\]<\/span><span class="sh-n" aria-hidden="true">1<\/span><span class="sh-tip" aria-hidden="true">수신함<\/span>/);
   assert.doesNotMatch(S.rail({ sessions: [] }, S.defaults()), /sh-n|수신함 0/, 'nothing waiting: no badge, plain label');
 });
@@ -936,4 +1518,85 @@ test('Escape shuts the narrow overlay with preventDefault; wide, shut, modified,
   assert.equal(narrow.seen.length, 1, 'only the plain Escape acted');
   assert.deepEqual([shut.seen, wide.seen, layered.seen], [[], [], []]);
   assert.deepEqual([...pass, shutEv, wideEv, layeredEv].map((ev) => ev.prevented), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+});
+
+test('fold parity: side, rail, tabs, search and inbox render identically with folding on and off apart from the 접힘 marker', () => {
+  const S = load().BriefShell;
+  const baseModel = fixture(), markedModel = fixture();
+  const basePrev = baseModel.sessions.find((s) => s.id === 'p185');
+  const prev = markedModel.sessions.find((s) => s.id === 'p185');
+  const decision = { id: 501, question: 'fold parity decision', options: { A: { text: 'yes' } }, answered: false, closed: false, createdAt: NOW - 3600e3 };
+  basePrev.decisions = [decision];
+  prev.decisions = [decision];
+  prev.folded = { reports: 2, decisions: 1, key: 'a'.repeat(20) };
+  const st = S.reduce(base(S), { type: 'expand', sid: 'a185' });
+  const strip = (html) => html.replace(/<span class="sh-fold">접힘<\/span>/g, '');
+  const normalize = (html) => strip(html).replace(/<span class="sh-sub"><\/span>/g, '');
+  const parity = (a, b, label, markedRow = false) => {
+    if (markedRow) assert.ok(b.includes('<span class="sh-fold">접힘</span>'), label + ' carries the marker');
+    assert.equal(normalize(b), a, label);
+  };
+  parity(S.side(baseModel, S.reduce(st, { type: 'view', key: 'archive' })), S.side(markedModel, S.reduce(st, { type: 'view', key: 'archive' })), '닫힌 창', true);
+  parity(S.side(baseModel, st), S.side(markedModel, st), '대화 side', true);
+  parity(S.rail(baseModel, st), S.rail(markedModel, st), 'rail');
+  parity(S.tabs(baseModel, st), S.tabs(markedModel, st), 'tabs');
+  parity(S.side(baseModel, S.reduce(st, { type: 'search', text: '설치' })), S.side(markedModel, S.reduce(st, { type: 'search', text: '설치' })), 'search');
+  parity(S.side(baseModel, S.reduce(st, { type: 'view', key: 'inbox' })), S.side(markedModel, S.reduce(st, { type: 'view', key: 'inbox' })), 'inbox');
+  const recent = { id: 'recent-fold', alive: false, status: 'done', statusKey: 'done', tab: '끝남', title: '최근 접힘', headline: '최근', lastActivityAt: NOW - 2 * DAY, decisions: [] };
+  const recentFolded = Object.assign({}, recent, { folded: { reports: 1, decisions: 0, key: 'b'.repeat(20) }, chips: ['접어 둠'] });
+  const stRecent = S.reduce(undefined, { type: 'load', json: JSON.stringify({ view: 'conv', favs: ['recent-fold'] }), known: ['recent-fold'], now: NOW });
+  const openRecent = S.reduce(stRecent, { type: 'expand', sid: 'sec:recent' });
+  const plainRecent = S.side({ generatedAt: NOW, sessions: [recent] }, openRecent);
+  const markedRecent = S.side({ generatedAt: NOW, sessions: [recentFolded] }, openRecent);
+  assert.equal((markedRecent.match(/<span class="sh-fold">접힘<\/span>/g) || []).length, 2, 'favourite and recent rows each carry the marker');
+  assert.equal(normalize(markedRecent), plainRecent, 'empty grey subtext containers differ only by the marker');
+});
+
+test('fold marker placement: 접힘 is a shrink-0 sibling outside the ellipsized .sh-t for every row caller', () => {
+  const S = load().BriefShell;
+  const model = fixture();
+  const prev = model.sessions.find((s) => s.id === 'p185');
+  prev.folded = { reports: 2, decisions: 1, key: 'a'.repeat(20) };
+  const st = S.reduce(base(S), { type: 'expand', sid: 'a185' });
+  const archive = S.side(model, S.reduce(st, { type: 'view', key: 'archive' }));
+  const conv = S.side(model, st);
+  const recent = {
+    id: 'recent-fold', alive: false, status: 'done', statusKey: 'done', tab: '끝남', title: '최근 접힘', headline: '최근',
+    lastActivityAt: NOW - 2 * DAY, decisions: [], folded: { reports: 1, decisions: 0, key: 'b'.repeat(20) }, chips: ['접어 둠'],
+  };
+  const stRecent = S.reduce(undefined, { type: 'load', json: JSON.stringify({ view: 'conv', favs: ['recent-fold'] }), known: ['recent-fold'], now: NOW });
+  const openRecent = S.reduce(stRecent, { type: 'expand', sid: 'sec:recent' });
+  const recentHtml = S.side({ generatedAt: NOW, sessions: [recent] }, openRecent);
+  const marker = '<span class="sh-fold">접힘</span>';
+  const outside = (html, label) => {
+    assert.ok(html.includes(marker), label + ' carries the marker');
+    assert.match(html, /<\/span><span class="sh-fold">접힘<\/span>/, label + ' places the marker after the closed .sh-t');
+    const subs = [...html.matchAll(/<span class="sh-sub">([\s\S]*?)<\/span>/g)].map((m) => m[1]);
+    assert.ok(subs.every((s) => !s.includes('sh-fold')), label + ' keeps the marker out of .sh-sub');
+    return html;
+  };
+  outside(archive, '닫힌 창');
+  outside(conv, '이전 대화 kid');
+  outside(recentHtml, '즐겨찾기 and 최근 항목');
+  assert.equal((recentHtml.match(/<span class="sh-fold">접힘<\/span>/g) || []).length, 2, 'favourite and recent rows each carry the marker');
+  const row = /<div class="sh-row[^"]*" data-row="p185">([\s\S]*?)<\/div>/.exec(archive)?.[1] || '';
+  const at = row.indexOf(marker);
+  const before = row.slice(0, at);
+  assert.ok(at > 0 && before.lastIndexOf('<span class="sh-t"') >= 0 && before.lastIndexOf('</span>') > before.lastIndexOf('<span class="sh-t"'), 'the marker follows the closed .sh-t');
+  assert.match(archive, /<button type="button" class="sh-go" data-sh="open" data-sid="p185">/, 'row action hook is unchanged');
+  assert.match(archive, /class="sh-fav" data-sh="fav" data-sid="p185" aria-pressed="false"/, 'favourite action hook is unchanged');
+});
+
+test('fold row metadata: phone compaction preserves the title and previous-row contrast', () => {
+  const css = read('src/page/shell.css');
+  assert.match(css, /\.sh-fold \{[^}]*font-size: var\(--fs-base\)/, 'desktop marker text is 14px');
+  assert.match(css, /\.sh-prev \.sh-t \{[^}]*color: var\(--tx\)/, 'previous-row title meets contrast after ancestor opacity');
+  assert.match(css, /\.sh-prev \.sh-fold \{[^}]*color: var\(--tx\)/, 'previous-row marker meets contrast after ancestor opacity');
+  assert.ok(css.includes('.sh-row:has(> .sh-go > .sh-fold) { gap: var(--sp-2); }'), 'folded phone rows keep the minimum action gap');
+  assert.ok(css.includes('.sh-row:has(> .sh-go > .sh-fold) > .sh-tg[aria-hidden="true"] { width: var(--sp-2); min-width: var(--sp-2); }'), 'the non-interactive folded spacer gives width back to the title');
+  assert.ok(css.includes('.sh-row:has(> .sh-go > .sh-fold) .sh-go { gap: var(--sp-1); padding: 0 var(--sp-1); }'), 'the folded row keeps compact internal spacing');
+  assert.ok(css.includes('.sh-row:has(> .sh-go > .sh-fold) .sh-ico { min-width: var(--sp-4); }'), 'the folded icon column is compact');
+  assert.ok(css.includes('.sh-row:has(> .sh-go > .sh-fold) .sh-ki { width: var(--sp-4); }'), 'the previous-kid icon column is compact');
+  assert.ok(css.includes('.sh-row:has(> .sh-go > .sh-fold) .sh-fold { font-size: var(--fs-sm); }'), 'phone marker keeps the 15px secondary size');
+  assert.match(read('src/page/page.css'), /\.cv-fold-note \{[^}]*font-size: var\(--fs-base\)/, 'the fold instruction is 14px on desktop');
 });
