@@ -915,13 +915,11 @@ async function pass(mode) {
           const values={};const writes=[];const fake={getItem:k=>values[k]??null,setItem:(k,v)=>{writes.push(k);values[k]=v}};
           BriefShell.persist(fake,BriefPage.state.ui);
           const v1WriteGuard=!writes.includes('omo-briefing.ui.v1')&&writes.includes('omo-briefing.ui.v2');
-          const mutantWrites=writes.concat('omo-briefing.ui.v1');const v1WriteNegative=mutantWrites.includes('omo-briefing.ui.v1');
           const priorityStorage={getItem:k=>k.endsWith('.v2')?'corrupt-v2':${J(PREFS)}};
           const v2Priority=BriefShell.restore(priorityStorage)==='corrupt-v2';
           const wrongLiveLine=BriefShell.windowLiveOf(BriefPage.state.model,{...BriefPage.state.ui,shown:{...BriefPage.state.ui.shown,${J(A)}:'q185'}})===null;
           const card=BriefPage.state.full.get('fold185|fold-card-1');const foldGuard=card?.card?.reports?.length===3;
-          const foldNegative=({...card,card:{...card?.card,reports:[]}}).card.reports.length!==3;
-          return {wrongShown,duplicateTab,v1WriteGuard,v1WriteNegative,v2Priority,wrongLiveLine,foldGuard,foldNegative};
+          return {wrongShown,duplicateTab,v1WriteGuard,v2Priority,wrongLiveLine,foldGuard};
         })()`);
         for (const [key, value] of Object.entries(evidence)) assert.equal(value, true, key);
         await ev(`(() => {const b=document.createElement('button');b.id='qa-unnamed-negative';document.body.appendChild(b);return true})()`);
@@ -1172,8 +1170,8 @@ const failed = Object.entries(results).filter(([, r]) => !r.pass).map(([key]) =>
 const report = { executionDoneClaim: false, overallAdmission: 'PENDING_DUAL_REVIEW', build, started,
   ended: new Date().toISOString(), negative: NEGATIVE, scenarios: results, passed: Object.keys(results).length - failed.length,
   failed: failed.length, failures: failed, captures: captures.length, additionalCaptures: extras.length, cleanup,
-  adversarialClasses: ['legacy-open-sid', 'v1-write', 'storage-v2-priority', 'wrong-shown-selection', 'live-pane-prevline',
-    'follow-vs-lookback', 'fold-card-hydration', 'AX-empty-name', 'surface-contrast-overflow-targets-focus'] };
+  adversarialClasses: ['legacy-open-sid', 'storage-v2-priority', 'wrong-shown-selection', 'live-pane-prevline',
+    'follow-vs-lookback', 'AX-empty-name', 'surface-contrast-overflow-targets-focus'] };
 writeJson(NEGATIVE ? 'negative-result.json' : 'result.json', report);
 writeJson(NEGATIVE ? 'negative-build.json' : 'build.json', build);
 if (captures.length) writeJson('capture-index.json', { build, manifestHash: sha(J(captures)), count: captures.length, captures,
