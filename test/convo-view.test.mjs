@@ -85,6 +85,84 @@ function oldCard(ctx, s, ui = {}) {
   return ctx.BriefView.renderOverview({ generatedAt: NOW, sessions: [s] }, { tab, live: true, answers: {}, expanded: {}, wallNow: WALL, ...ui });
 }
 
+test('prev line: with ctx.windowLive the first child precedes the header outside every block', () => {
+  const ctx = load();
+  for (const sub of SUB_KEYS) {
+    const html = ctx.BriefConvo.render(A, { sub }, { now: NOW, windowLive: 'a185' });
+    const root = parse(html), page = cls(root, 'cv-page')[0], line = cls(root, 'cv-prevline')[0];
+    assert.ok(line, 'previous-conversation line exists');
+    assert.equal(page.kids[0], line);
+    assert.equal(page.kids[1], cls(root, 'cv-head')[0]);
+    assert.equal(line.tag, 'p');
+    assert.equal(flat(line), '이전 대화 보는 중 · 지금 대화로');
+    assert.equal(line.attrs.role, undefined);
+    assert.equal(line.attrs['data-block'], undefined);
+    const go = cls(line, 'cv-prevgo')[0];
+    assert.deepEqual(go.attrs, { type: 'button', class: 'cv-prevgo', 'data-sh': 'open', 'data-sid': 'a185' });
+    for (let p = go; p; p = p.parent) assert.equal(p.attrs['data-block'], undefined);
+  }
+});
+
+test('prev line: without ctx.windowLive the output is byte-identical to the base render', () => {
+  const ctx = load();
+  // Exact render() snapshot from Task4 HEAD 086da0d, using the same unchanged
+  // helpers and clock in a separate realm so local date formatting stays portable.
+  const baseline = load(), source = read('src/page/convo-view.js');
+  const start = source.indexOf('  function render(session, ui, ctx) {');
+  const end = source.indexOf('\n  g.BriefConvo =', start);
+  assert.ok(start >= 0 && end > start);
+  vm.runInContext(source.slice(0, start) + `
+  function render(session, ui, ctx) {
+    var s = obj(session) || {};
+    var u = obj(ui) || {};
+    var now = toMs(obj(ctx) ? ctx.now : null);
+    var U = { live: u.live === true, answers: obj(u.answers) || {}, expanded: obj(u.expanded) || {}, focus: obj(u.focus), wallNow: num(u.wallNow),
+      decision: ctx && typeof ctx.decision === 'function' ? ctx.decision : null, checked: ctx && typeof ctx.checked === 'function' ? ctx.checked : null };
+    var sid = str(s.id), sub = subOf(u, sid), panelId = 'cvp-' + safeId(sid);
+    var counts = countsOf(s);
+    var fold = ctx && obj(ctx.fold) && obj(s.folded) ? ctx.fold : null;
+    var body = fold ? foldPanel(s, fold) : sub === 'plan' ? planPanel(s, U, now) : sub === 'wk' ? workersPanel(s, U) : sub === 'dec' ? decisionsPanel(s, U, now)
+      : sub === 'rep' ? reportsPanel(s, U, now) : overview(s, U, now, counts);
+    var name = SUBS.filter(function (t) { return t[0] === sub; })[0][1];
+    return '<div class="cv-page" data-sid="' + esc(sid) + '" data-sub="' + sub + '">' + header(s, U, now) + subTabs(s, sub, counts, panelId) +
+      '<div class="ann-tray" data-ann-tray="' + esc(sid) + '"></div>' +
+      '<section class="cv-panel" id="' + panelId + '" role="tabpanel" data-sub="' + sub + '" aria-label="' + name + '"' +
+      (obj(s.folded) ? ' tabindex="-1" data-fold-focus' : '') + '>' + body + '</section></div>';
+  }
+` + source.slice(end), baseline);
+  SUB_KEYS.forEach(sub => {
+    const html = render(ctx, A, sub);
+    assert.equal(html, render(baseline, A, sub), sub);
+    const folded = { ...A, folded: { reports: 5, decisions: 2 } };
+    assert.equal(ctx.BriefConvo.render(folded, { sub }, { now: NOW, fold: { status: 'loading' } }),
+      baseline.BriefConvo.render(folded, { sub }, { now: NOW, fold: { status: 'loading' } }));
+    for (const windowLive of [undefined, null, '', false, 185, {}]) {
+      assert.equal(ctx.BriefConvo.render(A, { sub, live: true, expanded: {}, answers: {}, wallNow: WALL }, { now: NOW, windowLive }), html);
+    }
+  });
+});
+
+test('prev line: the folded placeholder also carries the line', () => {
+  const ctx = load(), s = { ...A, folded: { reports: 5, decisions: 2 } };
+  for (const status of ['loading', 'error', 'restart']) {
+    const root = parse(ctx.BriefConvo.render(s, {}, { now: NOW, windowLive: 'a185', fold: { status, reason: 'network' } }));
+    assert.ok(cls(root, 'cv-prevline')[0], 'folded previous-conversation line exists');
+    assert.equal(cls(root, 'cv-page')[0].kids[0], cls(root, 'cv-prevline')[0]);
+    assert.equal(cls(root, 'cv-fold').length, 1);
+    assert.equal(cls(root, 'cv-prevgo')[0].attrs['data-sid'], 'a185');
+  }
+});
+
+test('prev line: a hostile sid is escaped', () => {
+  const ctx = load();
+  const html = ctx.BriefConvo.render(A, {}, { now: NOW, windowLive: HOSTILE });
+  const root = parse(html), go = cls(root, 'cv-prevgo')[0];
+  assert.equal(go.attrs['data-sid'], HOSTILE);
+  assert.equal(Object.keys(go.attrs).length, 4);
+  assert.equal(els(root, e => e.tag === 'script').length, 0);
+  assert.ok(!html.includes(HOSTILE));
+});
+
 // ---- fixture -----------------------------------------------------------------------------------------------------------
 
 test('fixture: every C-VM, C-NOTE and C-REPORT field, and one PNG, JPEG and WebP named by their sha256', () => {

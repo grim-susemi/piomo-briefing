@@ -7,6 +7,10 @@
   --cv-fs-h: var(--fs-md); --cv-fs-v: var(--fs-xl); --cv-fs-h1: var(--fs-xl); --cv-ico: 40px; --stabs-h: var(--bar-h);
 }
 .cv-page { min-width: 0; padding: var(--cv-pad-y) var(--cv-pad-x) var(--sp-8); font-size: var(--cv-fs); line-height: 1.5; word-break: keep-all; overflow-wrap: normal; }
+.cv-prevline { margin: 0 0 var(--sp-2); color: var(--muted); font-size: var(--cv-fs-s); }
+.cv-prevgo { padding: var(--sp-1) var(--sp-3); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); color: var(--fg); font-size: var(--cv-fs-s); }
+.cv-prevgo:hover { background: var(--fill-hover); }
+.cv-prevgo:focus-visible { outline: var(--hair) solid var(--accent); outline-offset: var(--sp-1); }
 /* Model text can carry one unbroken run (a path, an id, a long name). These surfaces break inside such a run only when it
  * cannot fit a line; word-break stays keep-all, so Korean prose still wraps between words. */
 .cv-sub, .cv-hl, .cv-next, .cv-fs, .scard-v, .cv-page .rt, .cv-page .plan-stage-note, .cv-auto .kv, .cv-goal,

@@ -527,6 +527,7 @@
           target = groups[k].querySelector('[data-act="ans-cancel"]'); break;
         }
       }
+      if (!target && active.matches('.cv-prevgo')) target = el.querySelector('.stabs [aria-selected="true"]');
       if (target && !target.hasAttribute('disabled')) {
         target.focus({ preventScroll: true });
         if (typeof start === 'number' && typeof target.setSelectionRange === 'function') target.setSelectionRange(start, end, direction);

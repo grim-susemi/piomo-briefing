@@ -50,6 +50,30 @@ function assertWindow(e, sid, sub) {
   assert.deepEqual(e.errors, []);
 }
 
+test('prev line: shown over p185 only; never over q185 while a185 is alive; returning focuses the selected sub-tab', () => {
+  const e = makeController(); e.page.receive(windowModel(1));
+  e.page.open('a185', 'plan');
+  assert.equal(e.byId.main.querySelector('.cv-prevline'), null);
+  e.page.open('q185', 'plan'); assertWindow(e, 'q185', 'plan');
+  assert.equal(e.byId.main.querySelector('.cv-prevline'), null, 'a second alive pane is not a previous conversation');
+  e.page.open('e-done', 'ov');
+  assert.equal(e.byId.main.querySelector('.cv-prevline'), null, 'standalone ended conversations have no line');
+  click(e, '#tabs [data-sh="close"][data-sid="e-done"]');
+  e.page.open('p185', 'dec'); assertWindow(e, 'p185', 'dec');
+  const go = e.byId.main.querySelector('.cv-prevgo');
+  assert.ok(go);
+  assert.equal(go.getAttribute('data-sh'), 'open');
+  assert.equal(go.getAttribute('data-sid'), 'a185');
+  go.focus();
+  e.advance(600); e.page.receive(windowModel(2, windowSessions().map(s => s.id === 'p185' ? { ...s, headline: 'updated previous' } : s)));
+  const kept = e.byId.main.querySelector('.cv-prevgo');
+  assert.equal(e.document.activeElement, kept, 'a surviving return button retains focus');
+  click(e, '#main .cv-prevgo'); assertWindow(e, 'a185', 'plan');
+  assert.equal(e.byId.main.querySelector('.cv-prevline'), null);
+  assert.equal(e.document.activeElement, e.byId.main.querySelector('.stabs [aria-selected="true"]'));
+  assert.equal(e.document.activeElement.getAttribute('data-sub'), 'plan');
+});
+
 test('window entry points: every rendered navigation target shares one tab and highlights only the shown rows', () => {
   const contexts = [];
   const e = makeController({ configure(ctx) {

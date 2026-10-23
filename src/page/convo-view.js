@@ -649,7 +649,10 @@
     var body = fold ? foldPanel(s, fold) : sub === 'plan' ? planPanel(s, U, now) : sub === 'wk' ? workersPanel(s, U) : sub === 'dec' ? decisionsPanel(s, U, now)
       : sub === 'rep' ? reportsPanel(s, U, now) : overview(s, U, now, counts);
     var name = SUBS.filter(function (t) { return t[0] === sub; })[0][1];
-    return '<div class="cv-page" data-sid="' + esc(sid) + '" data-sub="' + sub + '">' + header(s, U, now) + subTabs(s, sub, counts, panelId) +
+    var windowLive = ctx && typeof ctx.windowLive === 'string' ? ctx.windowLive : '';
+    var prev = windowLive ? '<p class="cv-prevline">이전 대화 보는 중 · <button type="button" class="cv-prevgo" data-sh="open" data-sid="' +
+      esc(windowLive) + '">지금 대화로</button></p>' : '';
+    return '<div class="cv-page" data-sid="' + esc(sid) + '" data-sub="' + sub + '">' + prev + header(s, U, now) + subTabs(s, sub, counts, panelId) +
       '<div class="ann-tray" data-ann-tray="' + esc(sid) + '"></div>' +
       '<section class="cv-panel" id="' + panelId + '" role="tabpanel" data-sub="' + sub + '" aria-label="' + name + '"' +
       (obj(s.folded) ? ' tabindex="-1" data-fold-focus' : '') + '>' + body + '</section></div>';
