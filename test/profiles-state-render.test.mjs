@@ -15,7 +15,7 @@ import { formatJsonText, openProfilesStore } from '../src/profiles/store.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, '..');
 const GOLDEN = path.join(here, 'fixtures', 'profiles', 'goldens', 'apply-gpt-kimi-deepseek', 'files');
-const REAL_INVENTORY = JSON.parse(fs.readFileSync(path.join(ROOT, 'src', 'profiles', 'inventory-5.1.38.json'), 'utf8'));
+const REAL_INVENTORY = JSON.parse(fs.readFileSync(path.join(ROOT, 'src', 'profiles', 'inventory-5.1.40.json'), 'utf8'));
 const STYLE = { bom: false, eol: '\n', indent: '  ', keySep: ': ', trailingNewline: true };
 const PLUGIN_BODY = 'state-render-plugin-body';
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -98,30 +98,30 @@ const textOf = (html) => html.replace(/<[^>]*>/g, ' ').replace(/&lt;/g, '<').rep
 
 const rowOf = (state, section, role) => state.routing.rows.find((row) => row.section === section && row.role === role);
 
-test('real state(): a 5.1.38-absent role is read-only, labelled and keeps its config', (t) => {
+test('real state(): a 5.1.40-absent role is read-only, labelled and keeps its config', (t) => {
   const fx = makeFixture(t);
   const state = fx.store.state();
   const oracle = rowOf(state, 'agents', 'oracle');
   assert.ok(oracle, 'oracle row stays visible');
   assert.equal(oracle.readOnly, true);
-  assert.equal(oracle.absentIn, '5.1.38');
-  assert.equal(oracle.stateLabel, '5.1.38에 없음');
+  assert.equal(oracle.absentIn, '5.1.40');
+  assert.equal(oracle.stateLabel, '5.1.40에 없음');
   assert.equal(oracle.model, 'sol', 'the configured alias is kept');
   assert.deepEqual(oracle.config, state.routing.layer.agents.oracle, 'the layer config is preserved');
   assert.equal(rowOf(state, 'agents', 'explore').readOnly, false, 'live role stays editable');
   assert.equal(rowOf(state, 'agents', 'explore').stateLabel, null);
 
   const html = loadView().render(state, liveEdit());
-  assert.match(textOf(html), /5\.1\.38에 없음/);
+  assert.match(textOf(html), /5\.1\.40에 없음/);
   assert.match(html, /data-pf-route="agents\/oracle"/);
   assert.doesNotMatch(html, /data-route="agents\/oracle"/, 'an absent role renders no edit controls');
 });
 
-test('real state(): the guide pins both 5.1.38 sources and rows carry real recommendation statuses', (t) => {
+test('real state(): the guide pins both 5.1.40 sources and rows carry real recommendation statuses', (t) => {
   const fx = makeFixture(t);
   const state = fx.store.state();
   assert.ok(state.guide, 'guide is not null');
-  assert.equal(state.guide.version, '5.1.38');
+  assert.equal(state.guide.version, '5.1.40');
   assert.deepEqual(state.guide.sources, [
     { path: fx.inventory.sources.omo.path, sha256: fx.inventory.sources.omo.sha256 },
     { path: fx.inventory.sources.omoTask.path, sha256: fx.inventory.sources.omoTask.sha256 },

@@ -713,14 +713,14 @@ test('guide: heading, chip and subtitle derive the one runtime inventory version
   const P = load();
   const state = clone(STATE);
   state.guide.title = 'OMO 권장 배치 · 설치판 5.1.33';
-  state.guide.version = '5.1.38';
+  state.guide.version = '5.1.40';
   state.inventory.version = '9.9.9';
   const html = P.render(state, live());
   const sec = /<section class="pf-sec" id="pf-sec-guide"[\s\S]*?<\/section>/.exec(html)[0];
   const head = textOf(/<div class="pf-guide-h">([\s\S]*?)<\/div>/.exec(sec)[1]);
   assert.match(head, /OMO 권장 배치 · 9\.9\.9/);
   assert.match(head, /9\.9\.9/);
-  assert.doesNotMatch(head, /5\.1\.33|5\.1\.38/);
+  assert.doesNotMatch(head, /5\.1\.33|5\.1\.40/);
   assert.equal(textOf(/<p class="pf-sec-s">([\s\S]*?)<\/p>/.exec(sec)[1]), '9.9.9 기준 경로와 sha256');
   assert.doesNotMatch(sec, /설치판 5\.1\.33/, 'the stale manifest edition label never reaches the guide');
 });

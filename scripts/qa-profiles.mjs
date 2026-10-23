@@ -42,8 +42,8 @@ import {
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const GOLDEN = path.join(ROOT, 'test/fixtures/profiles/goldens/apply-gpt-kimi-deepseek/files');
-const PLUGIN = 'C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.38-r1/package/plugin/extensions/omo.js';
-const INVENTORY = path.join(ROOT, 'src/profiles/inventory-5.1.38.json');
+const PLUGIN = 'C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.40-r1/package/plugin/extensions/omo.js';
+const INVENTORY = path.join(ROOT, 'src/profiles/inventory-5.1.40.json');
 const VM_FILE = path.join(ROOT, 'test/fixtures/view-model-board.json');
 const LIVE_BOARD = [47317, 47326];
 const LIVE_FILES = {
@@ -54,7 +54,7 @@ const LIVE_FILES = {
   primarySettings: 'C:/Users/USER/.omo/agent/settings.json',
 };
 const LIVE_SERVER = 'C:/Users/USER/.omo-stable-500/home/.omo/agent/briefing/state/server.json';
-const LIVE_OMOTASK = 'C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.38-r1/package/plugin/extensions/omo-task.js';
+const LIVE_OMOTASK = 'C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.40-r1/package/plugin/extensions/omo-task.js';
 const FIXED_NOW = Date.parse('2026-10-20T12:00:00Z');
 const PS_STYLE = { bom: true, eol: '\r\n', indent: '    ', keySep: ':  ', trailingNewline: true };
 const VIEWPORTS = [
@@ -1183,11 +1183,11 @@ async function main() {
     assert.equal(run.checks.negativeControls.overflowDetected, true, 'overflow probe cannot see a 2000px node');
     assert.equal(run.checks.negativeControls.targetDetected, true, 'target probe cannot see a 10px control');
 
-    // Todo-22 carried states from todos 20/21: absent-in-5.1.38 row, recommendation pins and
+    // Todo-22 carried states from todos 20/21: absent-in-5.1.40 row, recommendation pins and
     // the extension-owned remembered model, all read through the real store state.
     run.checks.addedStates = await page.eval(`(() => {
       const absent = [...document.querySelectorAll('.pf-route')]
-        .filter((row) => row.textContent.includes('5.1.38에 없음'))
+        .filter((row) => row.textContent.includes('5.1.40에 없음'))
         .map((row) => ({ route: row.getAttribute('data-pf-route'), selects: row.querySelectorAll('select').length }));
       const guide = document.querySelector('.pf-guide');
       const remembered = document.querySelector('[data-pf-agent="sisyphus"] .pf-mem');
@@ -1198,8 +1198,8 @@ async function main() {
       };
     })()`);
     assert.ok(run.checks.addedStates.absentRows.some((row) => row.route === 'agents/oracle' && row.selects === 0),
-      'the 5.1.38-absent Oracle row is not read-only');
-    assert.equal(run.checks.addedStates.guide?.sources, 2, 'the recommendation guide does not pin both 5.1.38 sources');
+      'the 5.1.40-absent Oracle row is not read-only');
+    assert.equal(run.checks.addedStates.guide?.sources, 2, 'the recommendation guide does not pin both 5.1.40 sources');
     assert.match(run.checks.addedStates.guide.text, /omo-task\.js/, 'the guide omits the omo-task.js pin');
     assert.match(run.checks.addedStates.remembered, /gpt-6\.1-sol/, 'the remembered model is not rendered');
 

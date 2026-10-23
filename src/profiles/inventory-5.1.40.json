@@ -1,16 +1,16 @@
 {
   "schema": 1,
-  "version": "5.1.38",
+  "version": "5.1.40",
   "sources": {
     "omoTask": {
-      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.38-r1\\package\\plugin\\extensions\\omo-task.js",
-      "sha256": "1149550465cbfde272891e27d78087ecb8003c0a3dbf32bef7aaa8dbc237cef0",
-      "bytes": 1103816
+      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.40-r1\\package\\plugin\\extensions\\omo-task.js",
+      "sha256": "64112d39dcdc24069e759481c92b420a109c879c6fdaab7087de054d573204c4",
+      "bytes": 1108996
     },
     "omo": {
-      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.38-r1\\package\\plugin\\extensions\\omo.js",
-      "sha256": "4a8aef923825ccd5fbb5ab6d4b3b72e0ae145b670309f1db3ead53827c029476",
-      "bytes": 1533145
+      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.40-r1\\package\\plugin\\extensions\\omo.js",
+      "sha256": "de8408a08dc84a389316af6f6fc407fa260d129b04748e354e291b104cee8c6c",
+      "bytes": 1402380
     }
   },
   "agents": [

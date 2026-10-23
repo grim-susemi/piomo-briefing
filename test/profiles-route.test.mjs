@@ -15,7 +15,7 @@ import { formatJsonText, openProfilesStore } from '../src/profiles/store.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const GOLDEN = path.join(here, 'fixtures', 'profiles', 'goldens', 'apply-gpt-kimi-deepseek', 'files');
-const REAL_INVENTORY = JSON.parse(fs.readFileSync(path.join(here, '..', 'src', 'profiles', 'inventory-5.1.38.json'), 'utf8'));
+const REAL_INVENTORY = JSON.parse(fs.readFileSync(path.join(here, '..', 'src', 'profiles', 'inventory-5.1.40.json'), 'utf8'));
 const STYLE = { bom: false, eol: '\n', indent: '  ', keySep: ': ', trailingNewline: true };
 const PLUGIN_BODY = 'route-plugin-body';
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');

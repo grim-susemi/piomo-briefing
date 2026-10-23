@@ -27,7 +27,7 @@
 //   Tool parameters: plain JSON Schema is accepted (pi-ai validateToolArguments handles non-TypeBox schemas);
 //     length budgets are enforced by src/schema.mjs so the model gets field names and limits back.
 import * as nodeFs from 'node:fs';
-import { basename, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { execFile as nodeExecFile, execFileSync as nodeExecFileSync } from 'node:child_process';
@@ -1127,6 +1127,12 @@ export function createBriefingExtension(opts = {}) {
     const profilesStoreOptions = { ...(opts.profilesStoreOptions ?? {}) };
     if (!Object.hasOwn(profilesStoreOptions, 'registry')) {
       profilesStoreOptions.registry = () => profilesCtx?.modelRegistry ?? null;
+    }
+    if (!Object.hasOwn(profilesStoreOptions, 'pluginPath')) {
+      const stablePlugin = env.OMO_STABLE_PLUGIN;
+      if (stablePlugin) {
+        profilesStoreOptions.pluginPath = join(stablePlugin, 'extensions', 'omo.js');
+      }
     }
     const profilesStore = (opts.createProfilesStore ?? openProfilesStore)(profilesStoreOptions);
     function setupLive(ctx) {

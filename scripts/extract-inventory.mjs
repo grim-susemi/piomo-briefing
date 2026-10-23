@@ -1,25 +1,25 @@
 #!/usr/bin/env node
-// Reads the installed omo-ai 5.1.38 plugin bundles and writes the profile inventory.
+// Reads the installed omo-ai 5.1.40 plugin bundles and writes the profile inventory.
 // Anchor-string search (never a fixed byte offset) for:
-//   * builtin agent ids            -> var dC=[...]            (extensions/omo.js)
-//   * builtin category ids         -> ,mb=[...]               (extensions/omo.js)
-//   * lane-id array Rde            -> var Rde=[...]           (extensions/omo.js)
-//   * strict-schema key sets       -> Mu=Kl({...}).strict()   (root)
-//                                    Cu=Kl({...}).strict()   ([native]/[senpi] layer)
+//   * builtin agent ids            -> var iE=[...] or var dC=[...] (extensions/omo.js)
+//   * builtin category ids         -> ,yb=[...] or ,mb=[...]       (extensions/omo.js)
+//   * lane-id array Rde            -> var noe=[...] or var Rde=[...] (extensions/omo.js)
+//   * strict-schema key sets       -> Ru=Kl({...}).strict() or Mu=Kl({...}).strict() (root)
+//                                    Nu=Kl({...}).strict() or Cu=Kl({...}).strict() ([native]/[senpi] layer)
 //                                    Hd=_d(...,Kl({...}).strict()) (agent entry)
 // Usage: node scripts/extract-inventory.mjs [--plugin <dir>] [--check]
-// Writes src/profiles/inventory-5.1.38.json and src/profiles/inventory-diff.md.
+// Writes src/profiles/inventory-5.1.40.json and src/profiles/inventory-diff.md.
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const DEFAULT_PLUGIN = 'C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.38-r1/package/plugin';
-export const INVENTORY_VERSION = '5.1.38';
+export const DEFAULT_PLUGIN = 'C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.40-r1/package/plugin';
+export const INVENTORY_VERSION = '5.1.40';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
-const inventoryPath = path.join(repoRoot, 'src', 'profiles', 'inventory-5.1.38.json');
+const inventoryPath = path.join(repoRoot, 'src', 'profiles', 'inventory-5.1.40.json');
 const diffPath = path.join(repoRoot, 'src', 'profiles', 'inventory-diff.md');
 
 function fail(message) { throw new Error(`extract-inventory: ${message}`); }
@@ -68,32 +68,35 @@ function objectKeys(body) {
   return keys.filter(Boolean);
 }
 
-function findAnchor(source, anchor, file) {
-  const index = source.indexOf(anchor);
-  if (index < 0) fail(`anchor not found in ${file}: ${anchor}`);
-  return index;
+function findAnchor(source, anchors, file) {
+  const list = Array.isArray(anchors) ? anchors : [anchors];
+  for (const a of list) {
+    const index = source.indexOf(a);
+    if (index >= 0) return { index, anchor: a };
+  }
+  fail(`anchor not found in ${file}: ${list.join(' OR ')}`);
 }
 
 export function extractInventory({ omo, omoTask, omoPath, omoTaskPath }) {
-  const agentAnchor = findAnchor(omo, 'var dC=[', 'omo.js');
-  const agents = JSON.parse(extractBalanced(omo, omo.indexOf('[', agentAnchor)));
+  const agentAnchor = findAnchor(omo, ['var iE=[', 'var dC=['], 'omo.js');
+  const agents = JSON.parse(extractBalanced(omo, omo.indexOf('[', agentAnchor.index)));
   if (!Array.isArray(agents) || agents.length === 0) fail('agent id array is empty');
 
-  const categoryAnchor = findAnchor(omo, ',mb=[', 'omo.js');
-  const categoryArray = extractBalanced(omo, omo.indexOf('[', categoryAnchor));
+  const categoryAnchor = findAnchor(omo, [',yb=[', ',mb=['], 'omo.js');
+  const categoryArray = extractBalanced(omo, omo.indexOf('[', categoryAnchor.index));
   const categories = [...categoryArray.matchAll(/\{name:"([a-z0-9-]+)",config:/g)].map((match) => match[1]);
   if (categories.length === 0) fail('category id array is empty');
 
-  const laneAnchor = findAnchor(omo, 'var Rde=[', 'omo.js');
-  const lanes = JSON.parse(extractBalanced(omo, omo.indexOf('[', laneAnchor)));
+  const laneAnchor = findAnchor(omo, ['var noe=[', 'var Rde=['], 'omo.js');
+  const lanes = JSON.parse(extractBalanced(omo, omo.indexOf('[', laneAnchor.index)));
   if (!Array.isArray(lanes) || lanes.length === 0) fail('lane id array is empty');
 
-  const rootAnchor = findAnchor(omo, 'Mu=Kl({', 'omo.js');
-  const rootKeys = objectKeys(extractBalanced(omo, omo.indexOf('{', rootAnchor), '{', '}'));
-  const nativeAnchor = findAnchor(omo, 'Cu=Kl({', 'omo.js');
-  const nativeKeys = objectKeys(extractBalanced(omo, omo.indexOf('{', nativeAnchor), '{', '}'));
+  const rootAnchor = findAnchor(omo, ['Ru=Kl({', 'Mu=Kl({'], 'omo.js');
+  const rootKeys = objectKeys(extractBalanced(omo, omo.indexOf('{', rootAnchor.index), '{', '}'));
+  const nativeAnchor = findAnchor(omo, ['Nu=Kl({', 'Cu=Kl({'], 'omo.js');
+  const nativeKeys = objectKeys(extractBalanced(omo, omo.indexOf('{', nativeAnchor.index), '{', '}'));
   const agentEntryAnchor = findAnchor(omo, 'Hd=_d(', 'omo.js');
-  const agentEntryKl = omo.indexOf('Kl({', agentEntryAnchor);
+  const agentEntryKl = omo.indexOf('Kl({', agentEntryAnchor.index);
   if (agentEntryKl < 0) fail('agent entry schema not found after Hd=_d(');
   const agentEntryKeys = objectKeys(extractBalanced(omo, omo.indexOf('{', agentEntryKl), '{', '}'));
 
@@ -115,14 +118,14 @@ export function extractInventory({ omo, omoTask, omoPath, omoTaskPath }) {
 
 function diffMarkdown(inventory, roleInventory) {
   const lines = [
-    '# omo-ai 5.1.38 role inventory diff',
+    '# omo-ai 5.1.40 role inventory diff',
     '',
-    `Generated by \`scripts/extract-inventory.mjs\` from the installed 5.1.38 bundles.`,
+    `Generated by \`scripts/extract-inventory.mjs\` from the installed 5.1.40 bundles.`,
     '',
     `- omo.js: \`${inventory.sources.omo.path}\` (sha256 \`${inventory.sources.omo.sha256}\`)`,
     `- omo-task.js: \`${inventory.sources.omoTask.path}\` (sha256 \`${inventory.sources.omoTask.sha256}\`)`,
     '',
-    '| section | in ported RoleInventory | in 5.1.38 | new in 5.1.38 | absent from 5.1.38 |',
+    '| section | in ported RoleInventory | in 5.1.40 | new in 5.1.40 | absent from 5.1.40 |',
     '| --- | --- | --- | --- | --- |',
   ];
   for (const section of ['agents', 'categories']) {
@@ -156,7 +159,7 @@ async function main() {
   const json = `${JSON.stringify(inventory, null, 2)}\n`;
   if (args.includes('--check')) {
     const current = await readFile(inventoryPath, 'utf8').catch(() => '');
-    if (current !== json) fail('inventory-5.1.38.json is stale; re-run without --check');
+    if (current !== json) fail('inventory-5.1.40.json is stale; re-run without --check');
     console.log('inventory current');
     return;
   }

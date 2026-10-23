@@ -6,7 +6,7 @@
 //
 // Write pipeline (preview performs only the first four steps):
 //   parse body -> read targets -> apply the change kinds to parsed values ->
-//   validate (todo-7 merge layer + 5.1.38 key allowlist + protected settings) ->
+//   validate (todo-7 merge layer + 5.1.40 key allowlist + protected settings) ->
 //   compare-and-swap every read target's sha256 against `expected` -> back up the
 //   bytes under <primaryHome>/runtime/native-profile-switcher-backups -> atomic text
 //   write (same-directory wx tmp -> fsync -> rename with the contract's retry ladder)
@@ -39,7 +39,7 @@ import {
   CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE, PROFILE_META, ROLE_INVENTORY, buildRoutingRows,
   expandLayerRoles, getMemoryReasoning, getProfile, newRouteRow,
 } from './model.mjs';
-import { chatGptPickerModels, recommendationGuide, refreshRoutingRows } from './refresh-5.1.38.mjs';
+import { chatGptPickerModels, recommendationGuide, refreshRoutingRows } from './refresh-5.1.40.mjs';
 import { compareRecommendation, getRecommendationManifestShape } from './recommend.mjs';
 
 export const PRIMARY_HOME_DEFAULT = 'C:/Users/USER/.omo';
@@ -48,11 +48,11 @@ export const MIRROR_HOME_DEFAULTS = [
   'C:/Users/USER/.somo/home/.omo',
 ];
 export const STABLE_HOME_DEFAULT = 'C:/Users/USER/.omo-stable-500/home/.omo';
-export const PLUGIN_DEFAULT = 'C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.38-r1/package/plugin/extensions/omo.js';
+export const PLUGIN_DEFAULT = 'C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.40-r1/package/plugin/extensions/omo.js';
 // The switcher's recommendation table is read-only reference data; the board never
 // writes it and tests inject their own object instead of touching the desktop app.
 export const RECOMMENDATION_MANIFEST_DEFAULT = 'C:/Users/USER/Desktop/OpenCode_Modes/OMO_Native_Recommendation.json';
-export const INVENTORY_PATH = fileURLToPath(new URL('./inventory-5.1.38.json', import.meta.url));
+export const INVENTORY_PATH = fileURLToPath(new URL('./inventory-5.1.40.json', import.meta.url));
 export const BACKUP_DIR = ['runtime', 'native-profile-switcher-backups'];
 export const REDACTED = '<redacted>';
 export const INVENTORY_STALE_LABEL = '인벤토리 갱신 필요';
@@ -286,7 +286,7 @@ function readTarget(spec, file, fs, kind) {
 // ── validation ────────────────────────────────────────────────────────────────
 function checkKeys(object, allowed, at, errors) {
   for (const key of Object.keys(object)) {
-    if (!allowed.has(key)) errors.push(`${at}.${key}: not allowed by inventory-5.1.38.json`);
+    if (!allowed.has(key)) errors.push(`${at}.${key}: not allowed by inventory-5.1.40.json`);
   }
 }
 
@@ -547,7 +547,7 @@ export function openProfilesStore(options = {}) {
       const key = `${row.section}/${row.role}`;
       let item = byKey.get(key);
       if (!item) {
-        // A role that exists only in the 5.1.38 inventory is not in expandLayerRoles;
+        // A role that exists only in the 5.1.40 inventory is not in expandLayerRoles;
         // compare its own row so it still carries a real status, never 'unknown'.
         const alias = typeof row.model === 'string' ? row.model : '';
         const entry = alias && isPlainObject(catalog) ? catalog[alias] : null;
@@ -688,7 +688,7 @@ export function openProfilesStore(options = {}) {
     if (inventoryRaw) {
       try {
         // The switcher's manifest still names 5.1.33 in its source URLs; only its
-        // descriptive fields belong in the 5.1.38 guide, whose pins come from inventory.
+        // descriptive fields belong in the 5.1.40 guide, whose pins come from inventory.
         guide = recommendationGuide({
           inventory: inventoryRaw,
           manifest: manifestRead.manifest
