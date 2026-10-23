@@ -119,8 +119,8 @@ test('a11y: every select and input has a visible label and an accessible name', 
   const html = P.render(STATE, live());
   const { labels, controls } = labelledControls(html);
   const selects = controls.filter((c) => c.tag === 'select');
-  assert.equal(selects.length, 42, 'the fixture renders 42 selects');
-  assert.equal(controls.length, 45, '42 selects + 3 text inputs');
+  assert.equal(selects.length, 47, 'the fixture renders 47 selects');
+  assert.equal(controls.length, 48, '47 selects + 1 text input');
   for (const c of controls) {
     const name = c.aria || c.ref || labels.get(c.id) || '';
     assert.ok(name.trim(), `${c.tag} [data-pf=${c.pf || '?'}] has no accessible name`);
@@ -130,13 +130,21 @@ test('a11y: every select and input has a visible label and an accessible name', 
   for (const c of byPf('route-provider')) assert.equal(labels.get(c.id), '서비스');
   for (const c of byPf('route-model')) assert.equal(labels.get(c.id), '모델');
   for (const c of byPf('route-thinking')) assert.equal(labels.get(c.id), '추론');
+  for (const c of byPf('summarizer-provider')) assert.equal(labels.get(c.id), '1. 제공사');
+  for (const c of byPf('summarizer-model')) assert.equal(labels.get(c.id), '2. AI 모델');
   for (const c of byPf('memory-mode')) assert.equal(labels.get(c.id), '모드');
-  for (const c of byPf('memory-model')) assert.equal(labels.get(c.id), '모델');
-  for (const c of byPf('memory-thinking')) assert.equal(labels.get(c.id), '추론');
+  for (const c of byPf('memory-service')) assert.equal(labels.get(c.id), '1. 구독 서비스');
+  for (const c of byPf('memory-model')) assert.equal(labels.get(c.id), '2. AI 모델');
+  for (const c of byPf('memory-thinking')) assert.equal(labels.get(c.id), '3. 추론 강도');
   for (const c of byPf('agent-pin-thinking')) assert.equal(labels.get(c.id), '추론');
   assert.equal(byPf('route-provider').length, STATE.routing.rows.length);
   assert.equal(byPf('agent-pin-thinking').length, 4);
+  assert.equal(byPf('summarizer-provider').length, 1);
+  assert.equal(byPf('summarizer-model').length, 1);
   assert.equal(byPf('memory-mode').length, 2);
+  assert.equal(byPf('memory-service').length, 2);
+  assert.equal(byPf('memory-model').length, 2);
+  assert.equal(byPf('memory-thinking').length, 2);
 });
 
 test('phone: the view raises its local control token to the 44 px --hit target', () => {
@@ -270,7 +278,7 @@ test('selects: every control titles its selected label and declares an ellipsis'
   const P = load();
   const html = P.render(STATE, live());
   const tags = [...html.matchAll(/<select\b([^>]*)>/g)].map((m) => m[1]);
-  assert.equal(tags.length, 42);
+  assert.equal(tags.length, 47);
   for (const attrs of tags) assert.match(attrs, /\btitle="[^"]+"/, 'select without a full-value title');
   const model = /<select[^>]*data-pf="route-model"[^>]*>/.exec(html)[0];
   assert.match(model, /title="[^"]*·[^"]*\/[^"]*"/, 'model title carries alias and full id');
@@ -592,28 +600,31 @@ test('page wiring: Reflection and Kibitzer memory edits stay separate through th
   e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => STATE });
   await tick();
 
-  async function setRow(key, model, thinking) {
+  async function setRow(key, service, model, thinking) {
     let mode = e.byId.main.querySelector('[data-pf="memory-mode"][data-memory="' + key + '"]');
     assert.ok(mode, key + ' mode control');
     mode.value = 'custom';
     e.fire(mode, 'change');
     await tick();
-    // The deterministic DOM does not carry select values across a re-render, so set every
-    // control on the current tree and fire one change; the delegated handler reads the row.
-    mode = e.byId.main.querySelector('[data-pf="memory-mode"][data-memory="' + key + '"]');
-    const input = e.byId.main.querySelector('[data-pf="memory-model"][data-memory="' + key + '"]');
-    assert.ok(input, key + ' model control');
+    const svc = e.byId.main.querySelector('[data-pf="memory-service"][data-memory="' + key + '"]');
+    assert.ok(svc, key + ' service control');
+    svc.value = service;
+    e.fire(svc, 'change');
+    await tick();
+    const mdl = e.byId.main.querySelector('[data-pf="memory-model"][data-memory="' + key + '"]');
+    assert.ok(mdl, key + ' model control');
+    mdl.value = model;
+    e.fire(mdl, 'change');
+    await tick();
     const think = e.byId.main.querySelector('[data-pf="memory-thinking"][data-memory="' + key + '"]');
     assert.ok(think, key + ' thinking control');
-    mode.value = 'custom';
-    input.value = model;
     think.value = thinking;
     e.fire(think, 'change');
     await tick();
   }
 
-  await setRow('kibitzer', 'openai/gpt-6-sol', 'high');
-  await setRow('reflection', 'chatgpt-subscription/gpt-reflection-sentinel', 'high');
+  await setRow('kibitzer', 'anthropic', 'anthropic/claude-opus-5-5', 'high');
+  await setRow('reflection', 'chatgpt-subscription', 'chatgpt-subscription/gpt-6.1-sol', 'high');
   const pendingText = e.byId.main.querySelector('.pf-pending').textContent;
   assert.match(pendingText, /Kibitzer 메모리 행/);
   assert.match(pendingText, /Reflection 메모리 행/);
@@ -623,8 +634,8 @@ test('page wiring: Reflection and Kibitzer memory edits stay separate through th
   assert.equal(post.url, '/profiles');
   const changes = JSON.parse(post.opts.body).changes;
   assert.deepEqual(changes.map((c) => c.row || 'kibitzer').sort(), ['kibitzer', 'reflection']);
-  assert.equal(changes.find((c) => c.row === 'kibitzer').model, 'openai/gpt-6-sol');
-  assert.equal(changes.find((c) => c.row === 'reflection').model, 'chatgpt-subscription/gpt-reflection-sentinel');
+  assert.equal(changes.find((c) => c.row === 'kibitzer').model, 'anthropic/claude-opus-5-5');
+  assert.equal(changes.find((c) => c.row === 'reflection').model, 'chatgpt-subscription/gpt-6.1-sol');
 });
 
 test('page wiring: 다시 적용 posts the journal payload through the protected apply route', async () => {
@@ -857,7 +868,7 @@ test('busy: a held apply rejects controller mutations and disables every editor 
     pending: [{ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' }] });
   for (const name of ['agent-lane', 'agent-pin', 'agent-pin-thinking', 'route-provider', 'route-model',
     'route-thinking', 'main-provider', 'main-model', 'main-thinking', 'lane-select', 'lane-literal',
-    'summarizer-model', 'memory-mode', 'memory-model', 'memory-thinking', 'reset-memory', 'drop',
+    'summarizer-provider', 'summarizer-model', 'memory-mode', 'memory-service', 'memory-model', 'memory-thinking', 'reset-memory', 'drop',
     'clear-cancel', 'clear-confirm']) {
     const tags = [...html.matchAll(new RegExp('<[^>]*data-pf="' + name + '"[^>]*>', 'g'))].map((m) => m[0]);
     assert.ok(tags.length > 0, name + ' control missing from the busy render');
@@ -1030,3 +1041,223 @@ test('compact title: the profiles page keeps its sticky title and section nav', 
   assert.match(side, /data-pf-side/);
   assert.match(side, /data-pf="jump"/);
 });
+
+function selectedValueOf(el) {
+  if (!el) return '';
+  if (el.value) return el.value;
+  for (const opt of el.querySelectorAll('option')) {
+    if (opt.hasAttribute('selected')) return opt.getAttribute('value') || '';
+  }
+  return '';
+}
+
+test('memory rows: quick shows the effective quick tuple read-only; custom starts empty', async () => {
+  const state = clone(STATE);
+  state.catalog = {
+    'flash-high': {
+      model: 'opencode-go/deepseek-v4-flash',
+      variant: 'high',
+      served: { primary: true, stable: true },
+      levels: ['off', 'medium', 'high']
+    },
+    'antigrav-opus': {
+      model: 'antigravity-ocx/google-antigravity/claude-opus-5-5',
+      variant: 'high',
+      served: { primary: true, stable: true },
+      levels: ['low', 'medium', 'high']
+    },
+    'unserved-argon': {
+      model: 'opencode/gemini-4-argon',
+      variant: 'high',
+      served: { primary: true, stable: false },
+      levels: ['high']
+    }
+  };
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'profiles-view', 'annotate'] });
+  e.page.receive({ seq: 1, generatedAt: 0, sessions: [] });
+  e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
+  e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => state });
+  await tick();
+
+  for (const key of ['kibitzer', 'reflection']) {
+    const mode = e.byId.main.querySelector('[data-pf="memory-mode"][data-memory="' + key + '"]');
+    const svc = e.byId.main.querySelector('[data-pf="memory-service"][data-memory="' + key + '"]');
+    const mdl = e.byId.main.querySelector('[data-pf="memory-model"][data-memory="' + key + '"]');
+    const eff = e.byId.main.querySelector('[data-pf="memory-thinking"][data-memory="' + key + '"]');
+    assert.equal(selectedValueOf(mode), 'quick');
+    assert.equal(svc.hasAttribute('disabled'), true);
+    assert.equal(mdl.hasAttribute('disabled'), true);
+    assert.equal(eff.hasAttribute('disabled'), true);
+    assert.equal(selectedValueOf(svc), 'opencode-go');
+    assert.equal(selectedValueOf(mdl), 'opencode-go/deepseek-v4-flash');
+    assert.equal(selectedValueOf(eff), 'high');
+    const curText = e.byId.main.querySelector('[data-pf-memory-current="' + key + '"]').textContent;
+    const pendText = e.byId.main.querySelector('[data-pf-memory-pending="' + key + '"]').textContent;
+    assert.match(curText, /^현재: quick · opencode-go\/deepseek-v4-flash \/ high/);
+    assert.match(pendText, /^보류: /);
+  }
+  assert.doesNotMatch(e.byId.main.innerHTML, /<input[^>]*data-pf="memory-model"/, 'free-text memory input is replaced');
+  assert.doesNotMatch(e.byId.main.innerHTML, /opencode\/gemini-4-argon/, 'unserved model is excluded from custom options');
+
+  const kMode = e.byId.main.querySelector('[data-pf="memory-mode"][data-memory="kibitzer"]');
+  kMode.value = 'custom';
+  e.fire(kMode, 'change');
+  await tick();
+
+  const kSvc = e.byId.main.querySelector('[data-pf="memory-service"][data-memory="kibitzer"]');
+  const kMdl = e.byId.main.querySelector('[data-pf="memory-model"][data-memory="kibitzer"]');
+  const kEff = e.byId.main.querySelector('[data-pf="memory-thinking"][data-memory="kibitzer"]');
+  assert.equal(kSvc.hasAttribute('disabled'), false);
+  assert.equal(kMdl.hasAttribute('disabled'), false);
+  assert.equal(kEff.hasAttribute('disabled'), false);
+  assert.equal(selectedValueOf(kSvc), '');
+  assert.equal(selectedValueOf(kMdl), '');
+  assert.equal(selectedValueOf(kEff), '');
+  assert.equal(e.page.state.ui.profilesState.pending.some((c) => c.kind === 'setMemoryRow' && c.row === 'kibitzer'), false);
+});
+
+test('memory rows: service change clears model and effort; model change clears effort', async () => {
+  const state = clone(STATE);
+  state.catalog = {
+    'antigrav-opus': {
+      model: 'antigravity-ocx/google-antigravity/claude-opus-5-5',
+      variant: 'high',
+      served: { primary: true, stable: true },
+      levels: ['low', 'medium', 'high']
+    },
+    'flash-high': {
+      model: 'opencode-go/deepseek-v4-flash',
+      variant: 'high',
+      served: { primary: true, stable: true },
+      levels: ['off', 'high']
+    }
+  };
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'profiles-view', 'annotate'] });
+  e.page.receive({ seq: 1, generatedAt: 0, sessions: [] });
+  e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
+  e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => state });
+  await tick();
+
+  let mode = e.byId.main.querySelector('[data-pf="memory-mode"][data-memory="kibitzer"]');
+  mode.value = 'custom';
+  e.fire(mode, 'change');
+  await tick();
+
+  let svc = e.byId.main.querySelector('[data-pf="memory-service"][data-memory="kibitzer"]');
+  svc.value = 'antigravity-ocx';
+  e.fire(svc, 'change');
+  await tick();
+  assert.equal(selectedValueOf(e.byId.main.querySelector('[data-pf="memory-service"][data-memory="kibitzer"]')), 'antigravity-ocx');
+  assert.equal(selectedValueOf(e.byId.main.querySelector('[data-pf="memory-model"][data-memory="kibitzer"]')), '');
+  assert.equal(selectedValueOf(e.byId.main.querySelector('[data-pf="memory-thinking"][data-memory="kibitzer"]')), '');
+
+  let mdl = e.byId.main.querySelector('[data-pf="memory-model"][data-memory="kibitzer"]');
+  mdl.value = 'antigravity-ocx/google-antigravity/claude-opus-5-5';
+  e.fire(mdl, 'change');
+  await tick();
+  assert.equal(selectedValueOf(e.byId.main.querySelector('[data-pf="memory-service"][data-memory="kibitzer"]')), 'antigravity-ocx');
+  assert.equal(selectedValueOf(e.byId.main.querySelector('[data-pf="memory-model"][data-memory="kibitzer"]')), 'antigravity-ocx/google-antigravity/claude-opus-5-5');
+  assert.equal(selectedValueOf(e.byId.main.querySelector('[data-pf="memory-thinking"][data-memory="kibitzer"]')), '');
+  const effOptions = [...e.byId.main.querySelector('[data-pf="memory-thinking"][data-memory="kibitzer"]').querySelectorAll('option')]
+    .map((o) => o.getAttribute('value')).filter(Boolean);
+  assert.deepEqual(effOptions, ['low', 'medium', 'high']);
+
+  let eff = e.byId.main.querySelector('[data-pf="memory-thinking"][data-memory="kibitzer"]');
+  eff.value = 'high';
+  e.fire(eff, 'change');
+  await tick();
+  assert.equal(e.page.state.ui.profilesState.pending.some((c) => c.kind === 'setMemoryRow' && c.row === 'kibitzer' && c.mode === 'custom'), true);
+
+  // Changing service clears model and effort and unstages the incomplete custom selection
+  svc = e.byId.main.querySelector('[data-pf="memory-service"][data-memory="kibitzer"]');
+  svc.value = 'opencode-go';
+  e.fire(svc, 'change');
+  await tick();
+  assert.equal(selectedValueOf(e.byId.main.querySelector('[data-pf="memory-service"][data-memory="kibitzer"]')), 'opencode-go');
+  assert.equal(selectedValueOf(e.byId.main.querySelector('[data-pf="memory-model"][data-memory="kibitzer"]')), '');
+  assert.equal(selectedValueOf(e.byId.main.querySelector('[data-pf="memory-thinking"][data-memory="kibitzer"]')), '');
+  assert.equal(e.page.state.ui.profilesState.pending.some((c) => c.kind === 'setMemoryRow' && c.row === 'kibitzer'), false);
+});
+
+test('memory rows: kibitzer and reflection are independent and render Must-have-4 strings and states', async () => {
+  const P = load();
+  const state = clone(STATE);
+  const html = P.render(state, live());
+  for (const required of [
+    '공통 설정 · Kibitzer 회상',
+    '공통 설정 · Reflection 성찰',
+    '공통 / 전체 · Kibitzer 회상',
+    '공통 / 전체 · Reflection 성찰',
+    'quick 공유 (기본)',
+    '직접 선택',
+    '1. 구독 서비스',
+    '2. AI 모델',
+    '3. 추론 강도',
+    '현재: ',
+    '보류: ',
+    '1. 제공사',
+    '원본 기본 컴팩션',
+  ]) {
+    assert.ok(html.includes(required), 'missing Must-have-4 string: ' + required);
+  }
+  const savedHtml = P.render(state, live({ memorySaved: { kibitzer: true } }));
+  assert.ok(savedHtml.includes('저장됨 · 다음 대화부터 반영'), 'missing saved state string');
+  assert.doesNotMatch(
+    /<p[^>]*data-pf-memory-pending="reflection"[^>]*>([\s\S]*?)<\/p>/.exec(savedHtml)[1],
+    /저장됨 · 다음 대화부터 반영/,
+    'reflection pending state stays independent of kibitzer saved state'
+  );
+
+  const errHtml = P.render(state, live({ memoryErrors: { reflection: '외부 카테고리 충돌' } }));
+  assert.ok(errHtml.includes('실패 · 보류 유지: 외부 카테고리 충돌'), 'missing failure state string');
+  assert.doesNotMatch(
+    /<p[^>]*data-pf-memory-pending="kibitzer"[^>]*>([\s\S]*?)<\/p>/.exec(errHtml)[1],
+    /실패 · 보류 유지:/,
+    'kibitzer pending state stays independent of reflection error'
+  );
+});
+
+test('summarizer: provider then model; 원본 기본 컴팩션 clears compaction.model and no effort control exists', async () => {
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'profiles-view', 'annotate'] });
+  e.page.receive({ seq: 1, generatedAt: 0, sessions: [] });
+  e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
+  e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => STATE });
+  await tick();
+
+  const sumSec = e.byId.main.querySelector('#pf-sec-summarizer');
+  assert.ok(sumSec, 'summarizer section exists');
+  assert.equal(sumSec.querySelectorAll('select').length, 2, 'summarizer has exactly two selects (provider and model, no effort)');
+
+  let prov = sumSec.querySelector('[data-pf="summarizer-provider"]');
+  const firstOpt = prov.querySelectorAll('option')[0];
+  assert.equal(firstOpt.getAttribute('value'), '');
+  assert.equal(firstOpt.textContent, '원본 기본 컴팩션');
+  assert.equal(selectedValueOf(prov), 'commandcode');
+
+  // Choosing 원본 기본 컴팩션 clears compaction.model
+  prov.value = '';
+  e.fire(prov, 'change');
+  await tick();
+  assert.deepEqual(
+    plain(e.page.state.ui.profilesState.pending.find((c) => c.kind === 'setSummarizer')),
+    { kind: 'setSummarizer', modelId: '' }
+  );
+  assert.equal(e.byId.main.querySelector('[data-pf="summarizer-model"]').hasAttribute('disabled'), true);
+
+  // Choosing a provider then a model stages that model
+  prov = e.byId.main.querySelector('[data-pf="summarizer-provider"]');
+  prov.value = 'anthropic';
+  e.fire(prov, 'change');
+  await tick();
+  assert.equal(e.page.state.ui.profilesState.pending.some((c) => c.kind === 'setSummarizer'), false);
+  const mdl = e.byId.main.querySelector('[data-pf="summarizer-model"]');
+  assert.equal(mdl.hasAttribute('disabled'), false);
+  mdl.value = 'anthropic/claude-opus-5-5';
+  e.fire(mdl, 'change');
+  await tick();
+  assert.deepEqual(
+    plain(e.page.state.ui.profilesState.pending.find((c) => c.kind === 'setSummarizer')),
+    { kind: 'setSummarizer', modelId: 'anthropic/claude-opus-5-5' }
+  );
+});
+

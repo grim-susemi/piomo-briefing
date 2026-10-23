@@ -166,7 +166,13 @@
     Object.keys(cat).forEach(function (alias) {
       var entry = obj(cat[alias]);
       if (!entry) return;
-      out.push({ alias: alias, model: str(entry.model), variant: str(entry.variant) || str(entry.reasoning) });
+      out.push({
+        alias: alias,
+        model: str(entry.model),
+        variant: str(entry.variant) || str(entry.reasoning),
+        served: obj(entry.served),
+        levels: Array.isArray(entry.levels) ? entry.levels.slice() : null
+      });
     });
     // The ChatGPT-subscription picker is completed from the live host registry.
     // Registry-only models are appended; the catalog stays the source of truth for
@@ -177,7 +183,13 @@
       if (model.indexOf('/') < 0 && item && str(item.provider)) model = str(item.provider) + '/' + model;
       if (!providerOf(model)) return;
       for (var i = 0; i < out.length; i++) if (out[i].model === model) return;
-      out.push({ alias: str(item && item.alias) || bareModel(model), model: model, variant: str(item && item.variant) });
+      out.push({
+        alias: str(item && item.alias) || bareModel(model),
+        model: model,
+        variant: str(item && item.variant),
+        served: obj(item && item.served),
+        levels: item && Array.isArray(item.levels) ? item.levels.slice() : null
+      });
     });
     return out;
   }
@@ -241,16 +253,110 @@
     if (!opts) opts = '<option value="" selected>(모델 없음)</option>';
     return select(name, attrs, opts, disabled);
   }
-  function summarizerOptions(entries, current) {
-    var opts = '<option value=""' + (current ? '' : ' selected') + '>(설정 안 함)</option>', found = false, seen = map();
+  function isEntryServed(entry, view) {
+    if (view && obj(view.registry) && arr(view.registry.unknownHomes).length > 0) return false;
+    var served = obj(entry && entry.served);
+    if (!served) return true;
+    var keys = Object.keys(served);
+    if (!keys.length) return false;
+    for (var i = 0; i < keys.length; i++) if (served[keys[i]] !== true) return false;
+    return true;
+  }
+  function servedEntries(view) {
+    return catalogEntries(view).filter(function (e) { return isEntryServed(e, view); });
+  }
+  function memoryCandidates(view) {
+    var list = servedEntries(view), out = [], seen = map();
+    list.forEach(function (e) {
+      if (!e.model || has(seen, e.model)) return;
+      seen[e.model] = true;
+      var levels = Array.isArray(e.levels) ? e.levels.slice() : THINKING.slice();
+      out.push({ alias: e.alias, model: e.model, provider: providerOf(e.model), levels: levels });
+    });
+    return out;
+  }
+  function quickTupleOf(view, m, entries) {
+    var q = obj(m && m.quick);
+    if (q && str(q.model)) {
+      return { provider: providerOf(q.model), model: str(q.model), reasoning: str(q.reasoning) };
+    }
+    var rows = arr(obj(view && view.routing) && view.routing.rows);
+    for (var i = 0; i < rows.length; i++) {
+      var r = obj(rows[i]);
+      if (r && r.section === 'categories' && r.role === 'quick' && str(r.model)) {
+        var entry = entryOf(entries, str(r.model), str(r.model));
+        var full = entry ? entry.model : str(r.model);
+        var reas = str(r.reasoning) || (entry ? entry.variant : '');
+        return { provider: providerOf(full), model: full, reasoning: reas };
+      }
+    }
+    if (m && str(m.mode) !== 'custom' && str(m.model)) {
+      return { provider: providerOf(m.model), model: str(m.model), reasoning: str(m.reasoning) };
+    }
+    return { provider: '', model: '', reasoning: '' };
+  }
+  function summarizerProviderOptions(entries, currentProvider) {
+    var opts = '<option value=""' + (currentProvider ? '' : ' selected') + '>원본 기본 컴팩션</option>';
+    var providers = providersOf(entries, currentProvider);
+    providers.forEach(function (p) {
+      opts += '<option value="' + esc(p) + '"' + (p === currentProvider ? ' selected' : '') + '>' + esc(p) + '</option>';
+    });
+    return opts;
+  }
+  function summarizerModelOptions(entries, provider, currentModel) {
+    var opts = '<option value=""' + (currentModel ? '' : ' selected') + '>(선택)</option>', found = false, seen = map();
     entries.forEach(function (e) {
-      if (e.model === current) found = true;
+      if (!provider || providerOf(e.model) !== provider) return;
+      if (e.model === currentModel) found = true;
       if (has(seen, e.model)) return;
       seen[e.model] = true;
-      opts += '<option value="' + esc(e.model) + '"' + (e.model === current ? ' selected' : '') + '>' +
+      opts += '<option value="' + esc(e.model) + '"' + attr('data-provider', providerOf(e.model)) + (e.model === currentModel ? ' selected' : '') + '>' +
         esc(e.alias + ' · ' + e.model) + '</option>';
     });
-    if (current && !found) opts += '<option value="' + esc(current) + '" selected>' + esc(current) + '</option>';
+    if (currentModel && !found) {
+      opts += '<option value="' + esc(currentModel) + '"' + attr('data-provider', providerOf(currentModel)) + ' selected>' + esc(currentModel) + '</option>';
+    }
+    return opts;
+  }
+  function memoryServiceOptions(candidates, provider) {
+    var opts = '<option value=""' + (provider ? '' : ' selected') + '>(선택)</option>';
+    var providers = [];
+    candidates.forEach(function (c) {
+      if (c.provider && providers.indexOf(c.provider) < 0) providers.push(c.provider);
+    });
+    if (provider && providers.indexOf(provider) < 0) providers.push(provider);
+    providers.sort().forEach(function (p) {
+      opts += '<option value="' + esc(p) + '"' + (p === provider ? ' selected' : '') + '>' + esc(p) + '</option>';
+    });
+    return opts;
+  }
+  function memoryModelOptions(candidates, provider, model) {
+    var opts = '<option value=""' + (model ? '' : ' selected') + '>(선택)</option>', found = false;
+    candidates.forEach(function (c) {
+      if (!provider || c.provider !== provider) return;
+      if (c.model === model) found = true;
+      opts += '<option value="' + esc(c.model) + '"' + attr('data-provider', c.provider) + (c.model === model ? ' selected' : '') + '>' +
+        esc(c.alias + ' · ' + c.model) + '</option>';
+    });
+    if (model && !found) {
+      opts += '<option value="' + esc(model) + '"' + attr('data-provider', providerOf(model)) + ' selected>' + esc('미해결: ' + model) + '</option>';
+    }
+    return opts;
+  }
+  function memoryThinkingOptions(candidates, model, reasoning) {
+    var opts = '<option value=""' + (reasoning ? '' : ' selected') + '>(선택)</option>', found = false;
+    var cand = null;
+    for (var i = 0; i < candidates.length; i++) {
+      if (candidates[i].model === model) { cand = candidates[i]; break; }
+    }
+    var levels = cand ? cand.levels : [];
+    levels.forEach(function (level) {
+      if (level === reasoning) found = true;
+      opts += '<option value="' + esc(level) + '"' + (level === reasoning ? ' selected' : '') + '>' + esc(level) + '</option>';
+    });
+    if (reasoning && !found) {
+      opts += '<option value="' + esc(reasoning) + '" selected>' + esc(cand ? '미해결: ' + reasoning : reasoning) + '</option>';
+    }
     return opts;
   }
   function recommendationOf(row) {
@@ -478,7 +584,7 @@
   function agentRows(view, edit, ro) {
     var roster = obj(view && view.roster) || {};
     var agents = obj(roster.agents) || {};
-    var entries = catalogEntries(view);
+    var entries = servedEntries(view);
     var pending = pendingOf(edit);
     var busy = !!(edit && edit.busy === true);
     var rows = AGENTS.map(function (pair) {
@@ -565,7 +671,7 @@
 
   function routingRows(view, edit, ro) {
     var rows = arr(obj(view && view.routing) && view.routing.rows);
-    var entries = catalogEntries(view);
+    var entries = servedEntries(view);
     var busy = !!(edit && edit.busy === true);
     var groups = [], index = map();
     rows.forEach(function (r) {
@@ -625,7 +731,7 @@
     var provider = pending ? str(pending.provider) : draft && str(draft.provider) ? str(draft.provider) : str(override && override.provider) || str(effective.provider);
     var model = pending ? str(pending.model) : draft && str(draft.model) ? str(draft.model) : str(override && override.model) || str(effective.model);
     var thinking = pending ? str(pending.thinking) : draft && str(draft.thinking) ? str(draft.thinking) : str(override && override.thinking) || str(effective.thinking);
-    var entries = catalogEntries(view);
+    var entries = servedEntries(view);
     var providers = providersOf(entries, provider);
     var body;
     if (!effective.provider && !override && !pending) {
@@ -673,42 +779,98 @@
 
   function summarizer(view, edit, ro) {
     var pending = firstOf(pendingOf(edit), 'setSummarizer');
+    var d = draftOf(edit, 'summarizer');
     var busy = !!(edit && edit.busy === true);
     var s = obj(view && view.summarizer) || null;
-    var current = pending ? str(pending.modelId) : s ? str(s.provider) + '/' + str(s.model) : '';
-    var entries = catalogEntries(view);
+    var savedModel = s && str(s.provider) && str(s.model) ? str(s.provider) + '/' + str(s.model) : '';
+    var savedProvider = s && str(s.provider) ? str(s.provider) : providerOf(savedModel);
+    var current = pending ? str(pending.modelId) : d && has(d, 'model') ? str(d.model) : savedModel;
+    var provider = pending ? providerOf(str(pending.modelId)) : d && has(d, 'provider') ? str(d.provider) : (current ? providerOf(current) : savedProvider);
+    var entries = servedEntries(view);
     var warnings = summarizerWarnings(current);
     var body = ro
-      ? '<div class="pf-sum-ro"><span class="pf-ro-val">' + valueOrDash(current || '설정 안 함') + '</span></div>'
-      : '<div class="pf-sum" data-pf-sum><div class="pf-field pf-field-grow">' +
-        labelled('요약 모델', 'pf-summarizer-model', select('summarizer-model', withId('pf-summarizer-model', ' data-sum="1"'), summarizerOptions(entries, current), busy)) + '</div>' +
+      ? '<div class="pf-sum-ro"><span class="pf-ro-val">' + valueOrDash(current || '원본 기본 컴팩션') + '</span></div>'
+      : '<div class="pf-sum" data-pf-sum>' +
+        '<div class="pf-field">' +
+        labelled('1. 제공사', 'pf-summarizer-provider', select('summarizer-provider', withId('pf-summarizer-provider', ' data-sum="1"'), summarizerProviderOptions(entries, provider), busy)) + '</div>' +
+        '<div class="pf-field pf-field-grow">' +
+        labelled('2. AI 모델', 'pf-summarizer-model', select('summarizer-model', withId('pf-summarizer-model', ' data-sum="1"'), summarizerModelOptions(entries, provider, current), busy || !provider)) + '</div>' +
         '<div class="pf-field pf-field-act">' + chip('pf-c-gray', 'compaction.model') + '</div></div>' +
         warnings.map(function (w) { return '<p class="pf-warn pf-warn-' + esc(w.level) + '">' + ic('info', 'ic-sm') + ' ' + esc(w.text) + '</p>'; }).join('');
     return section('summarizer', body, null);
   }
 
   function memoryRows(view, edit, ro) {
-    var draft = obj(edit && edit.draft);
     var busy = !!(edit && edit.busy === true);
     var mem = obj(view && view.memory) || {};
+    var allEntries = catalogEntries(view);
+    var candidates = memoryCandidates(view);
+    var memErrors = obj(edit && edit.memoryErrors) || {};
+    var memSaved = obj(edit && edit.memorySaved) || {};
     var rows = ['kibitzer', 'reflection'].map(function (key) {
       var m = obj(mem[key]) || {};
       var pending = memoryChangeOf(pendingOf(edit), key);
-      var d = draft && has(draft, 'memory:' + key) && obj(draft['memory:' + key]) ? draft['memory:' + key] : null;
-      var mode = pending ? str(pending.mode) : d && str(d.mode) ? str(d.mode) : str(m.mode) || 'quick';
-      var model = pending ? str(pending.model) : d && str(d.model) ? str(d.model) : str(m.model);
-      var reasoning = pending ? str(pending.reasoning) : d && str(d.reasoning) ? str(d.reasoning) : str(m.reasoning);
+      var d = draftOf(edit, 'memory:' + key);
+      var hasDraft = d !== null;
+      var savedMode = str(m.mode) === 'custom' ? 'custom' : 'quick';
+      var mode = pending ? str(pending.mode) : hasDraft && str(d.mode) ? str(d.mode) : savedMode;
+      var quick = quickTupleOf(view, m, allEntries);
+      var provider = '', model = '', reasoning = '';
+      if (mode === 'quick') {
+        provider = quick.provider;
+        model = quick.model;
+        reasoning = quick.reasoning;
+      } else if (hasDraft) {
+        provider = str(d.service) || (str(d.model) ? providerOf(d.model) : '');
+        model = str(d.model);
+        reasoning = str(d.reasoning);
+      } else if (pending) {
+        model = str(pending.model);
+        provider = str(pending.provider) || providerOf(model);
+        reasoning = str(pending.reasoning);
+      } else if (savedMode === 'custom') {
+        model = str(m.model);
+        provider = providerOf(model);
+        reasoning = str(m.reasoning);
+      }
+      var rowTitle = key === 'kibitzer' ? '공통 / 전체 · Kibitzer 회상' : '공통 / 전체 · Reflection 성찰';
+      var secTitle = key === 'kibitzer' ? '공통 설정 · Kibitzer 회상' : '공통 설정 · Reflection 성찰';
+      var curCat = str(m.category) || 'quick';
+      var curModel = str(m.model) || quick.model;
+      var curReasoning = str(m.reasoning) || quick.reasoning;
+      var curLine = '현재: ' + curCat + ' · ' + curModel + ' / ' + curReasoning + (m.external || m.unresolved ? ' (외부 / 미해결)' : '');
+      var rowErr = str(memErrors[key]) || str(m.error);
+      var rowSaved = !!(memSaved[key] || m.saved);
+      var stateTag = rowErr ? 'failure' : (pending || hasDraft) ? 'pending' : rowSaved ? 'saved' : 'current';
+      var pendLine;
+      if (rowErr) {
+        pendLine = '실패 · 보류 유지: ' + rowErr;
+      } else if (pending || hasDraft) {
+        pendLine = '보류: ' + (mode === 'quick' ? 'quick 공유' : (model && reasoning ? model + ' / ' + reasoning : '서비스 / 모델 / 추론 강도를 직접 선택하세요'));
+      } else if (rowSaved) {
+        pendLine = '보류: 없음 · 저장됨 · 다음 대화부터 반영 (실행 중 대화는 그대로)';
+      } else {
+        pendLine = '보류: 없음 · ' + (key === 'kibitzer'
+          ? 'Kibitzer 회상만 변경 · 다른 역할 / 성찰 / Dream / 사실 추출은 그대로'
+          : 'Reflection 성찰만 변경 · 다른 역할 / Kibitzer 회상 / Dream / 사실 추출은 그대로');
+      }
       var controls;
       if (ro) {
-        controls = '<span class="pf-ro-val">' + valueOrDash(mode) + ' · ' + valueOrDash(model) + (reasoning ? ' / ' + esc(reasoning) : '') + '</span>';
+        controls = '<span class="pf-ro-val">' + valueOrDash(mode === 'quick' ? 'quick 공유 (기본)' : '직접 선택') + ' · ' +
+          valueOrDash(provider) + ' · ' + valueOrDash(model) + (reasoning ? ' / ' + esc(reasoning) : '') + '</span>';
       } else {
         var memId = 'pf-memory-' + slug(key);
+        var dis = busy || mode !== 'custom';
         controls = '<div class="pf-mem-sels" data-pf-memory="' + esc(key) + '">' +
           labelled('모드', memId + '-mode', select('memory-mode', withId(memId + '-mode', ' data-memory="' + esc(key) + '"'),
-            '<option value="quick"' + (mode === 'quick' ? ' selected' : '') + '>quick</option>' +
-            '<option value="custom"' + (mode === 'custom' ? ' selected' : '') + '>custom</option>', busy)) +
-          labelled('모델', memId + '-model', textInput('memory-model', withId(memId + '-model', ' data-memory="' + esc(key) + '"'), model, busy || mode !== 'custom', '예: opencode-go/deepseek-v4-flash')) +
-          labelled('추론', memId + '-thinking', select('memory-thinking', withId(memId + '-thinking', ' data-memory="' + esc(key) + '"'), thinkingOptions(reasoning, true), busy || mode !== 'custom')) +
+            '<option value="quick"' + (mode === 'quick' ? ' selected' : '') + '>quick 공유 (기본)</option>' +
+            '<option value="custom"' + (mode === 'custom' ? ' selected' : '') + '>직접 선택</option>', busy)) +
+          labelled('1. 구독 서비스', memId + '-service', select('memory-service', withId(memId + '-service', ' data-memory="' + esc(key) + '"'),
+            memoryServiceOptions(candidates, provider), dis)) +
+          labelled('2. AI 모델', memId + '-model', select('memory-model', withId(memId + '-model', ' data-memory="' + esc(key) + '"'),
+            memoryModelOptions(candidates, provider, model), dis)) +
+          labelled('3. 추론 강도', memId + '-thinking', select('memory-thinking', withId(memId + '-thinking', ' data-memory="' + esc(key) + '"'),
+            memoryThinkingOptions(candidates, model, reasoning), dis)) +
           '</div>';
       }
       var chips = [];
@@ -716,9 +878,13 @@
       if (m.external) chips.push(chip('pf-c-amber', '외부 행'));
       if (m.unresolved) chips.push(chip('pf-c-red', '미해결'));
       if (m.hasDedicated) chips.push(chip('pf-c-gray', '전용 행'));
-      return '<article class="pf-mem-row"><div class="pf-mem-id">' + tag(key) + '<b>' + esc(key === 'kibitzer' ? 'Kibitzer' : 'Reflection') + '</b>' +
-        '<span class="pf-mem-cat">' + esc(str(m.category) || '—') + '</span>' + chips.join('') + '</div>' +
-        '<div class="pf-mem-val">' + controls + '</div></article>';
+      return '<article class="pf-mem-row" data-pf-memory-row="' + esc(key) + '">' +
+        '<div class="pf-mem-id">' + tag(secTitle) + '<b>' + esc(rowTitle) + '</b>' +
+        '<span class="pf-mem-cat">' + esc(curCat) + '</span>' + chips.join('') + '</div>' +
+        '<div class="pf-mem-val">' + controls + '</div>' +
+        '<p class="pf-note pf-mem-cur" data-pf-memory-current="' + esc(key) + '">' + esc(curLine) + '</p>' +
+        '<p class="pf-note pf-mem-pend' + (rowErr ? ' pf-err' : '') + '" data-pf-memory-pending="' + esc(key) + '"' +
+        attr('data-state', stateTag) + '>' + esc(pendLine) + '</p></article>';
     }).join('');
     return section('memory', '<div class="pf-mems">' + rows + '</div>', 2);
   }
@@ -873,14 +1039,15 @@
     var fetchFn = opt.fetch;
     var tokenFn = opt.token;
     var notify = typeof opt.onChange === 'function' ? opt.onChange : function () {};
-    var s = { view: null, pending: [], draft: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false };
+    var s = { view: null, pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false };
     var seq = 0;
 
     function snapshot() {
       return {
-        view: s.view, pending: s.pending.slice(), draft: copyMap(s.draft), preview: s.preview,
-        conflict: s.conflict, error: s.error, errorKind: s.errorKind, status: s.status, result: s.result,
-        loading: s.loading, busy: s.busy, confirmClear: s.confirmClear
+        view: s.view, pending: s.pending.slice(), draft: copyMap(s.draft),
+        memoryErrors: copyMap(s.memoryErrors), memorySaved: copyMap(s.memorySaved),
+        preview: s.preview, conflict: s.conflict, error: s.error, errorKind: s.errorKind,
+        status: s.status, result: s.result, loading: s.loading, busy: s.busy, confirmClear: s.confirmClear
       };
     }
     function changed() { notify(snapshot()); }
@@ -965,6 +1132,11 @@
         return !sameTarget(c, change);
       });
       if (change.kind === 'selectProfile') next.unshift(change); else next.push(change);
+      if (change.kind === 'setMemoryRow') {
+        var mRow = str(change.row) || 'kibitzer';
+        delete s.memoryErrors[mRow];
+        delete s.memorySaved[mRow];
+      }
       s.pending = next;
       s.preview = null;
       s.result = null;
@@ -989,7 +1161,7 @@
     function clear() {
       // Discarding removes pending edits but does not make the loaded targets/revision fresh.
       if (s.busy) return snapshot();
-      s.pending = []; s.draft = map(); s.preview = null; s.result = null;
+      s.pending = []; s.draft = map(); s.memoryErrors = map(); s.memorySaved = map(); s.preview = null; s.result = null;
       if (!s.conflict) { s.error = ''; s.status = ''; }
       s.confirmClear = false;
       changed();
@@ -1012,6 +1184,11 @@
       if (s.busy) return snapshot();
       var k = str(key);
       if (!k) return snapshot();
+      if (k.indexOf('memory:') === 0) {
+        var mKey = k.slice(7);
+        delete s.memoryErrors[mKey];
+        delete s.memorySaved[mKey];
+      }
       s.draft[k] = Object.assign({}, draftOf({ draft: s.draft }, k) || {}, obj(patch) || {});
       return snapshot();
     }
@@ -1019,6 +1196,18 @@
     function removeKind(kind) {
       if (s.busy) return snapshot();
       s.pending = s.pending.filter(function (c) { return !obj(c) || c.kind !== kind; });
+      s.preview = null; s.result = null;
+      if (!s.conflict) { s.error = ''; s.status = ''; }
+      s.confirmClear = false;
+      changed();
+      return snapshot();
+    }
+    function removeMemoryRow(row) {
+      if (s.busy) return snapshot();
+      var target = str(row) || 'kibitzer';
+      s.pending = s.pending.filter(function (c) {
+        return !obj(c) || c.kind !== 'setMemoryRow' || (str(c.row) || 'kibitzer') !== target;
+      });
       s.preview = null; s.result = null;
       if (!s.conflict) { s.error = ''; s.status = ''; }
       s.confirmClear = false;
@@ -1074,6 +1263,12 @@
             return snapshot();
           }
           s.result = json; s.preview = null; s.conflict = false; s.error = ''; s.errorKind = '';
+          var savedRows = map();
+          list.forEach(function (c) {
+            if (c && c.kind === 'setMemoryRow') savedRows[str(c.row) || 'kibitzer'] = true;
+          });
+          s.memorySaved = savedRows;
+          s.memoryErrors = map();
           if (!reapply) { s.pending = []; s.draft = map(); }
           s.status = reapply ? '다시 적용했어요' : '적용했어요';
           changed();
@@ -1087,6 +1282,16 @@
         s.status = '실패';
         s.errorKind = 'server';
         s.error = (json && (str(json.message) || str(json.code))) || ('HTTP ' + res.status + ' - 다시 시도해 주세요');
+        var memInList = list.filter(function (c) { return c && c.kind === 'setMemoryRow'; });
+        if (json && (json.row === 'kibitzer' || json.row === 'reflection')) {
+          s.memoryErrors[json.row] = s.error;
+        } else if (/reflection/i.test(s.error)) {
+          s.memoryErrors.reflection = s.error;
+        } else if (/kibitzer|recall/i.test(s.error)) {
+          s.memoryErrors.kibitzer = s.error;
+        } else if (memInList.length === 1) {
+          s.memoryErrors[str(memInList[0].row) || 'kibitzer'] = s.error;
+        }
         changed();
         return snapshot();
       }).catch(function (err) {
@@ -1111,6 +1316,7 @@
       setDraft: setDraft,
       touch: touch,
       removeKind: removeKind,
+      removeMemoryRow: removeMemoryRow,
       preview: function () { return send('preview'); },
       apply: function () { return send('apply'); },
       reapply: function () {
@@ -1212,6 +1418,18 @@
       if (!c || c.snapshot().busy) return;
       c.setDraft('lane', { literal: str(t.value) });
     }
+    function selectVal(el) {
+      if (!el) return '';
+      var v = str(el.value);
+      if (v) return v;
+      if (typeof el.querySelectorAll === 'function') {
+        var opts = el.querySelectorAll('option');
+        for (var i = 0; i < opts.length; i++) {
+          if (opts[i].hasAttribute && opts[i].hasAttribute('selected')) return str(opts[i].getAttribute('value'));
+        }
+      }
+      return '';
+    }
     function firstOptionFor(selectEl, provider) {
       if (!selectEl || typeof selectEl.querySelectorAll !== 'function') return '';
       var options = selectEl.querySelectorAll('option');
@@ -1288,21 +1506,61 @@
         c.setDraft('lane', { selection: selection, literal: str(t.value) });
         if (selection === 'custom-literal' && str(t.value)) c.add({ kind: 'setModelProfile', selection: 'custom-literal', literal: str(t.value) });
         else if (selection === 'custom-literal' && !str(t.value)) c.removeKind('setModelProfile');
+      } else if (act === 'summarizer-provider') {
+        var sumProvider = str(t.value);
+        c.setDraft('summarizer', { provider: sumProvider, model: '' });
+        if (!sumProvider) c.add({ kind: 'setSummarizer', modelId: '' });
+        else { c.removeKind('setSummarizer'); c.touch(); }
       } else if (act === 'summarizer-model') {
-        c.add({ kind: 'setSummarizer', modelId: str(t.value) });
-      } else if (act === 'memory-mode' || act === 'memory-model' || act === 'memory-thinking') {
+        var sumModel = str(t.value);
+        var sumRow = t.closest('[data-pf-sum]');
+        var sumProvEl = sumRow ? sumRow.querySelector('[data-pf="summarizer-provider"]') : null;
+        var sumProv = (sumProvEl ? selectVal(sumProvEl) : '') || providerOf(sumModel);
+        c.setDraft('summarizer', { provider: sumProv, model: sumModel });
+        if (sumModel) c.add({ kind: 'setSummarizer', modelId: sumModel });
+        else if (!sumProv) c.add({ kind: 'setSummarizer', modelId: '' });
+        else { c.removeKind('setSummarizer'); c.touch(); }
+      } else if (act === 'memory-mode' || act === 'memory-service' || act === 'memory-model' || act === 'memory-thinking') {
         var memRow = t.closest('[data-pf-memory]');
-        var key = memRow ? str(memRow.getAttribute('data-pf-memory')) : '';
-        var mode = memRow ? str(memRow.querySelector('[data-pf="memory-mode"]').value) : 'quick';
+        var key = memRow ? str(memRow.getAttribute('data-pf-memory')) : str(t.getAttribute('data-memory'));
+        if (!key) return;
+        var prevDraft = draftOf(c.snapshot(), 'memory:' + key);
+        var modeEl = memRow ? memRow.querySelector('[data-pf="memory-mode"]') : null;
+        var serviceEl = memRow ? memRow.querySelector('[data-pf="memory-service"]') : null;
         var modelEl = memRow ? memRow.querySelector('[data-pf="memory-model"]') : null;
         var thinkEl = memRow ? memRow.querySelector('[data-pf="memory-thinking"]') : null;
-        var modelValue = modelEl ? str(modelEl.value) : '';
-        var thinkValue = thinkEl ? str(thinkEl.value) : '';
-        if (!key) return;
-        c.setDraft('memory:' + key, { mode: mode, model: modelValue, reasoning: thinkValue });
+        var mode = act === 'memory-mode' ? str(t.value) : (selectVal(modeEl) || str(prevDraft && prevDraft.mode) || 'quick');
+        var serviceValue = '';
+        var modelValue = '';
+        var thinkValue = '';
+        if (act === 'memory-mode') {
+          c.setDraft('memory:' + key, { mode: mode, service: '', model: '', reasoning: '' });
+          if (mode === 'quick') c.add({ kind: 'setMemoryRow', row: key, mode: 'quick' });
+          else { c.removeMemoryRow(key); c.touch(); }
+          return;
+        }
+        if (act === 'memory-service') {
+          serviceValue = str(t.value);
+          c.setDraft('memory:' + key, { mode: 'custom', service: serviceValue, model: '', reasoning: '' });
+          c.removeMemoryRow(key);
+          c.touch();
+          return;
+        }
+        if (act === 'memory-model') {
+          modelValue = str(t.value);
+          serviceValue = selectVal(serviceEl) || str(prevDraft && prevDraft.service) || providerOf(modelValue);
+          c.setDraft('memory:' + key, { mode: 'custom', service: serviceValue, model: modelValue, reasoning: '' });
+          c.removeMemoryRow(key);
+          c.touch();
+          return;
+        }
+        thinkValue = str(t.value);
+        modelValue = selectVal(modelEl) || str(prevDraft && prevDraft.model);
+        serviceValue = selectVal(serviceEl) || str(prevDraft && prevDraft.service) || providerOf(modelValue);
+        c.setDraft('memory:' + key, { mode: mode, service: serviceValue, model: modelValue, reasoning: thinkValue });
         if (mode === 'quick') c.add({ kind: 'setMemoryRow', row: key, mode: 'quick' });
         else if (modelValue && thinkValue) c.add({ kind: 'setMemoryRow', row: key, mode: 'custom', model: modelValue, reasoning: thinkValue });
-        else c.touch();
+        else { c.removeMemoryRow(key); c.touch(); }
       }
     }
     root.addEventListener('click', onClick);
