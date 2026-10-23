@@ -964,7 +964,8 @@ async function openFromTabbar(sid) {
   await click('[data-sh="view"][data-key="conv"]', 'rail conversations');
   await click('#side .sh-row[data-row="alive-00"] .sh-go', 'alive-00 row');
   await waitDom(`document.querySelector('#main .cv-page[data-sid="alive-00"]') !== null`, 'opened alive-00');
-  await click(`#tabs .tb[data-tab="${sid}"] .tb-go`, `tab ${sid}`);
+  const row = fullModel.sessions.find((s) => s.id === sid);
+  await click(`#tabs .tb[data-tab="${row.tabId ? 'w:' + row.tabId : row.id}"] .tb-go`, `tab ${sid}`);
 }
 
 async function showReports(sid, expected) {
@@ -1002,7 +1003,8 @@ async function assertEntry(name, sid, opener) {
       falseEmpty: document.getElementById('main').textContent.includes('보고서 0'),
     };
   })()`);
-  assert.equal(after.active, sid, `${name}: active sid`);
+  const row = fullModel.sessions.find((s) => s.id === sid);
+  assert.equal(after.active, row.tabId ? 'w:' + row.tabId : row.id, `${name}: active board key`);
   assert.equal(after.sub, 'rep', `${name}: reports sub-tab`);
   assert.equal(after.rendered, expected, `${name}: rendered report blocks`);
   assert.equal(after.cacheReports, expected, `${name}: cached full card reports`);

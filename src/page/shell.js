@@ -571,6 +571,12 @@
       }
     };
   }
+  function windowLiveOf(model, st) {
+    if (!isWindow(st.active)) return null;
+    var c = context(model), sid = shownOf(st, st.active);
+    var s = has(c.byId, sid) ? c.byId[sid] : null;
+    return s && c.isPrev(s) ? c.host(s).id : null;
+  }
 
   function query(st) { return str(st.search).trim().toLowerCase(); }
   function found(s, q) {
@@ -842,15 +848,19 @@
     var c = context(model);
     var html = '<button type="button" class="sh-topen" data-sh="toggleSide" title="사이드바 열기 (Ctrl+\\)" aria-label="사이드바 열기">' + ic('panel-left-open', 'ic-md') + '</button>';
     order(st).forEach(function (id) {
-      var s = has(c.byId, id) ? c.byId[id] : null;
+      var window = isWindow(id), sid = window ? rep(st, id) : id;
+      var s = has(c.byId, sid) ? c.byId[sid] : null;
       var on = st.active === id, pin = st.pinned.indexOf(id) >= 0;
       var name = s ? nameOf(s) : GONE;
-      var o = s ? openDecs(s).length : 0;
+      var o = window ? (has(st.groups, id) ? st.groups[id] : []).reduce(function (n, member) {
+        return n + (has(c.byId, member) ? openDecs(c.byId[member]).length : 0);
+      }, 0) : s ? openDecs(s).length : 0;
       html += '<div class="tb' + (on ? ' on' : '') + (pin ? ' pinned' : '') + (s ? '' : ' sh-gone') + '" data-tab="' + esc(id) + '" title="' +
-        esc((s ? fullOf(s) : GONE + ' · ' + id) + ' (두 번 누르면 탭 고정' + (pin ? ' 풀기' : '') + ')') + '">' +
-        '<button type="button" class="tb-go" data-sh="active" data-sid="' + esc(id) + '" aria-pressed="' + on + '">' +
+        esc((s ? fullOf(s) : GONE + ' · ' + (window ? '창 ' + id.slice(2) : id)) + ' (두 번 누르면 탭 고정' + (pin ? ' 풀기' : '') + ')') + '">' +
+        '<button type="button" class="tb-go" data-sh="active" data-sid="' + esc(id) + '" aria-pressed="' + on + '"' +
+        (window && o ? ' aria-label="' + esc(name + ' · 기다리는 결정 ' + o + '개(창 전체)') + '"' : '') + '>' +
         (pin ? '<span class="tb-pin" aria-hidden="true">' + ic('pin', 'ic-xs') + '</span>' : '') + (s ? icon(s, c) : '<span class="sh-ico" aria-hidden="true">·</span>') +
-        '<span class="tt">' + esc(name) + '</span>' + (o ? '<span class="sh-bdg">' + ic('bell', 'ic-xs') + o + '</span>' : '') + '</button>' +
+        '<span class="tt">' + esc(name) + '</span>' + (o ? '<span class="sh-bdg"' + (window ? ' title="창 전체"' : '') + '>' + ic('bell', 'ic-xs') + o + '</span>' : '') + '</button>' +
         '<button type="button" class="tb-x" data-sh="close" data-sid="' + esc(id) + '" aria-label="탭 닫기: ' + esc(name) + '" title="탭 닫기">' + ic('x', 'ic-xs') + '</button></div>';
     });
     return html + '<button type="button" class="sh-tadd" data-sh="view" data-key="home" title="새 탭: 홈" aria-label="홈 보기">' + ic('plus', 'ic-md') + '</button>';
@@ -1073,7 +1083,7 @@
 
   g.BriefShell = {
     KEY: KEY, KEY_V2: KEY_V2, MIN_W: MIN_W, MAX_W: MAX_W, DEF_W: DEF_W, KEEP_MS: KEEP_MS, LIST_MAX: LIST_MAX, GONE: GONE,
-    defaults: defaults, reduce: reduce, order: order, keyOf: keyOf, shownOf: shownOf, serialize: serialize, restore: restore, persist: persist,
+    defaults: defaults, reduce: reduce, order: order, keyOf: keyOf, shownOf: shownOf, windowLiveOf: windowLiveOf, serialize: serialize, restore: restore, persist: persist,
     tabOf: tabOf, inbox: inbox, badge: badge,
     rail: rail, side: side, tabs: tabs, sideFrame: sideFrame, skeleton: skeleton,
     sync: sync, keyAction: keyAction, actionOf: actionOf, bind: bind

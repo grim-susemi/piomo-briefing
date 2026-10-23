@@ -257,8 +257,9 @@
     if (has(base, 'notes')) out.notes = base.notes; else delete out.notes;
     return out;
   }
+  function shownSid() { return g.BriefShell.shownOf(state.ui, state.ui.active); }
   function currentSession() {
-    var base = sessionById(state.ui.active);
+    var base = sessionById(shownSid());
     if (!base) return null;
     var full = cachedFull(base);
     return full ? mergeFull(base, full) : base;
@@ -291,7 +292,7 @@
     return { status: current ? current.status : 'loading', reason: current ? current.reason : null, httpStatus: current ? current.httpStatus : null };
   }
   function applyFold(sid) {
-    if (state.ui.active !== sid) return;
+    if (shownSid() !== sid) return;
     if (busy()) { state.foldDeferred = true; return; }
     state.foldDeferred = false;
     render();
@@ -370,7 +371,7 @@
         state.fold[row.id] = { status: 'error', key: rowKey, reason: 'missing' }; // completed script supplied no usable card
         missing = true;
       }
-      if (missing) { state.foldedFor = null; applyFold(state.ui.active); }
+      if (missing) { state.foldedFor = null; applyFold(shownSid()); }
     });
     sc.addEventListener('error', function () {
       delete state.fullFlight[flight];
@@ -382,7 +383,7 @@
         var rowKey = foldKeyOf(list[i]);
         if (rowKey) state.fold[list[i].id] = { status: 'error', key: rowKey, reason: 'file' };
       }
-      applyFold(state.ui.active);
+      applyFold(shownSid());
     });
     doc.head.appendChild(sc);
   }
@@ -411,13 +412,13 @@
         delete state.fullFlight['file|' + body.key];
         if (changed) {
           state.foldedFor = body.key;
-          applyFold(state.ui.active);
+          applyFold(shownSid());
         }
       } catch (e) { warn('folded.js', e); }
     };
   }
   function foldRetry() {
-    var base = sessionById(state.ui.active);
+    var base = sessionById(shownSid());
     if (!base) return;
     var keepFocus = doc.activeElement && main.contains(doc.activeElement) &&
       doc.activeElement.getAttribute('data-act') === 'fold-retry';
@@ -430,7 +431,10 @@
       if (panel) panel.focus({ preventScroll: true });
     }
   }
-  function mainKey() { return state.ui.view === 'memento' ? 'memento' : state.ui.active ? state.ui.active + '/' + (state.ui.sub[state.ui.active] || 'ov') : 'overview'; }
+  function mainKey() {
+    var sid = shownSid() || state.ui.active;
+    return state.ui.view === 'memento' ? 'memento' : sid ? sid + '/' + (state.ui.sub[sid] || 'ov') : 'overview';
+  }
   function saveScroll() {
     if (renderedKey !== null) scrollMemory[renderedKey] = { y: main.scrollTop, anchor: captureAnchor() };
   }
@@ -532,7 +536,7 @@
   }
   function render() {
     saveScroll();
-    var base = sessionById(state.ui.active);
+    var base = sessionById(shownSid());
     if (base && foldKeyOf(base) && !cachedFull(base)) ensureFull(base.id);
     var key = mainKey(), sideY = sideList.scrollTop;
     try {
@@ -556,7 +560,7 @@
       var s = currentSession();
       var cards = state.ui.view === 'memento';
       if (!cards && cardsView) { cardsView.destroy(); cardsView = null; cardsEpoch++; }
-      var html = cards ? CARDS_REGION : s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision, checked: isChecked, fold: foldStatus(s) })
+      var html = cards ? CARDS_REGION : s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision, checked: isChecked, fold: foldStatus(s), windowLive: g.BriefShell.windowLiveOf(model, state.ui) })
         : state.ui.active ? '<p class="empty">(지금 안 보임)</p>' : g.BriefView.renderOverview(model, state.ui);
       if (region('main', main, html)) {
         g.BriefAnnotate.decorate();
@@ -636,7 +640,7 @@
   }
 
   function setFlash(id, on) {
-    if (state.ui.active === id) {
+    if (shownSid() === id) {
       var blocks = main.querySelectorAll('[data-block]');
       for (var b = 0; b < blocks.length; b++) blocks[b].classList[on ? 'add' : 'remove']('flash');
     }
@@ -669,7 +673,11 @@
     state.model = model; state.seq = seqOf(model); state.appliedAt = state.now();
     pruneFull();
     state.ui = g.BriefShell.reduce(state.ui, { type: 'known',
-      ids: (Array.isArray(model.sessions) ? model.sessions : []).filter(function (s) { return s && typeof s.id === 'string'; }).map(function (s) { return s.id; }), now: state.now() });
+      ids: (Array.isArray(model.sessions) ? model.sessions : []).filter(function (s) { return s && typeof s.id === 'string'; }).map(function (s) { return s.id; }),
+      members: (Array.isArray(model.sessions) ? model.sessions : []).filter(function (s) { return s && typeof s.id === 'string'; }).map(function (s) {
+        var at = typeof s.lastActivityAt === 'number' ? s.lastActivityAt : typeof s.lastActivityAt === 'string' ? Date.parse(s.lastActivityAt) : 0;
+        return { id: s.id, tabId: typeof s.tabId === 'string' ? s.tabId : '', alive: s.alive === true, at: isFinite(at) ? at : 0 };
+      }), now: state.now() });
     g.BriefShell.persist(undefined, state.ui);
     runHooks(hooks.beforeApply, model);
     render();
@@ -879,7 +887,7 @@
     var act = t.getAttribute('data-act');
     if (act && act.indexOf('ans-') === 0) { answerClick(act, t); return; }
     if (act === 'sub') {
-      open(t.getAttribute('data-sid') || state.ui.active, t.getAttribute('data-sub'));
+      open(t.getAttribute('data-sid') || shownSid(), t.getAttribute('data-sub'));
     } else if (act === 'ann-new') {
       var sid = t.getAttribute('data-sid');
       clearAnnotationRequest(sid);
@@ -920,7 +928,7 @@
   // re-render: state.ui.answers[id] = {open, draft, confirm: {option}|{text}|null, phase: ''|'sending'|'sent'|'closed', error,
   // sentOption: the option of the send, '' for a reply}. A report's 이걸로 고르기 (data-dec) uses the same state and confirm row,
   // in place on the report (convo-view.js).
-  // Conversation and sub-tab identity live in state.ui.active/sub, independently of decision classification.
+  // The shown conversation and its sub-tab are independent of the active board key and decision classification.
   // A 200 only means the answer is stored: 전달됨 comes from the next view model (render.mjs delivery text), never from here.
   var REPLY_MAX = 500; // = view.js maxlength; <= 500 UTF-16 units is always within the server's 500 code points
   var POST_TIMEOUT_MS = 15000; // over the server's own bounds (2 s body read, 10 s write: it answers 408/504 first)
@@ -1242,7 +1250,7 @@
         annotationSent[sid] = res.json.key;
         A.status(sid, { text: '보냄 · 전달 상태 기다리는 중…', ok: true });
         state.ui.expanded['cv:' + sid + ':notes'] = true;
-        if (state.ui.active === sid) open(sid, 'ov');
+        if (shownSid() === sid) open(sid, 'ov');
       } else if (res.status === 403 && !reloadedFor403 && rememberForReload()) {
         A.status(sid, null);
         reloadedFor403 = true;

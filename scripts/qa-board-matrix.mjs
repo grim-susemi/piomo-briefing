@@ -1058,8 +1058,8 @@ async function runViewport(vp, A, B, D) {
   // three tabs, A and B pinned (double-click), the 300-character conversation active
   for (const sid of [A.id, B.id, D.id]) await ev(`(BriefPage.open(${J(sid)}), true)`);
   await settle();
-  await dblclick(`#tabs .tb[data-tab="${A.id}"] .tb-go`);
-  await dblclick(`#tabs .tb[data-tab="${B.id}"] .tb-go`);
+  await dblclick(`#tabs .tb[data-tab="${A.tabId ? 'w:' + A.tabId : A.id}"] .tb-go`);
+  await dblclick(`#tabs .tb[data-tab="${B.tabId ? 'w:' + B.tabId : B.id}"] .tb-go`);
   await click(`#tabs .tb[data-tab="${D.id}"] .tb-go`);
   await park();
   const tabs = await ev("({ order: [...document.querySelectorAll('#tabs .tb')].map((t) => t.getAttribute('data-tab')), pinned: [...document.querySelectorAll('#tabs .tb.pinned')].map((t) => t.getAttribute('data-tab')), active: BriefPage.state.ui.active })");
@@ -1067,7 +1067,7 @@ async function runViewport(vp, A, B, D) {
   await next('tabs-pinned', { note: { tabs } });
 
   // A's page, each sub-tab
-  await click(`#tabs .tb[data-tab="${A.id}"] .tb-go`);
+  await click(`#tabs .tb[data-tab="${A.tabId ? 'w:' + A.tabId : A.id}"] .tb-go`);
   await park();
   await scrollMainTop();
   await next('sub-ov');

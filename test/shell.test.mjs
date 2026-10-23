@@ -253,6 +253,57 @@ const winMembers = (model = WIN) => model.sessions.map((s) => ({ id: s.id, tabId
 const winKnown = (S, st = S.defaults(), members = winMembers()) => S.reduce(st, { type: 'known', ids: members.filter((s) => s && typeof s.id === 'string').map((s) => s.id), members, now: NOW });
 const selectedRows = (html) => all(html, /class="sh-row sel(?: sh-prev)?" data-row="([^"]+)"/g);
 
+test('tab bar: window representative stays stable and its bell totals all members', () => {
+  const S = load().BriefShell;
+  const model = { ...WIN, sessions: WIN.sessions.map(s => s.id === 'p185' ? { ...s, decisions: [{ id: 501, question: 'old pending' }] } : s) };
+  let st = winKnown(S, S.defaults(), winMembers(model));
+  st = S.reduce(st, { type: 'open', sid: 'a185', now: NOW });
+  const live = S.tabs(model, st);
+  st = S.reduce(st, { type: 'open', sid: 'p185', now: NOW });
+  const previous = S.tabs(model, st);
+  assert.equal(previous, live, 'shown conversation does not rename or recolour its window tab');
+  assert.deepEqual(tabOrder(previous), [WK]);
+  assert.match(previous, /title="상황판제작 #185 · 상황판 v5 셸 \(두 번 누르면 탭 고정\)"/);
+  assert.match(previous, /aria-label="상황판제작 · 기다리는 결정 3개\(창 전체\)"/);
+  assert.match(marks(previous), /<span class="sh-bdg" title="창 전체">\[bell\]3<\/span>/);
+  assert.match(previous, /class="sh-ico sh-ico-n sh-h1" aria-hidden="true">185<\/span>/);
+  assert.equal(S.windowLiveOf(model, st), 'a185');
+  st = S.reduce(st, { type: 'open', sid: 'q185' });
+  assert.equal(S.windowLiveOf(model, st), null, 'a second alive pane is not a previous conversation');
+});
+
+test('tab bar: standalone output is byte-identical to the legacy tab markup', () => {
+  const S = load().BriefShell;
+  const st = S.reduce(winKnown(S), { type: 'open', sid: 'e-done' });
+  assert.equal(marks(S.tabs(WIN, st)),
+    '<button type="button" class="sh-topen" data-sh="toggleSide" title="사이드바 열기 (Ctrl+\\)" aria-label="사이드바 열기">[panel-left-open]</button>' +
+    '<div class="tb on" data-tab="e-done" title="끝난 설치 작업 (두 번 누르면 탭 고정)">' +
+    '<button type="button" class="tb-go" data-sh="active" data-sid="e-done" aria-pressed="true">' +
+    '<span class="sh-ico" aria-hidden="true">·</span><span class="tt">끝난 설치 작업</span></button>' +
+    '<button type="button" class="tb-x" data-sh="close" data-sid="e-done" aria-label="탭 닫기: 끝난 설치 작업" title="탭 닫기">[x]</button></div>' +
+    '<button type="button" class="sh-tadd" data-sh="view" data-key="home" title="새 탭: 홈" aria-label="홈 보기">[plus]</button>');
+});
+
+test('tab bar: a ghost window is labelled with its window identity', () => {
+  const S = load().BriefShell;
+  const st = { ...S.defaults(), tabs: ['w:missing'], active: 'w:missing' };
+  assert.match(S.tabs({ sessions: [] }, st), /title="\(지금 안 보임\) · 창 missing \(두 번 누르면 탭 고정\)"/);
+  assert.equal(S.windowLiveOf({ sessions: [] }, st), null);
+});
+
+test('hostile tab labels and window keys are escaped in every tab attribute', () => {
+  const S = load().BriefShell;
+  const model = { sessions: [{ id: 'evil', tabId: HOSTILE, tabLabel: HOSTILE, title: HOSTILE, alive: true,
+    decisions: [{ id: 1, question: '?' }] }] };
+  const st = S.reduce(winKnown(S, S.defaults(), winMembers(model)), { type: 'open', sid: 'evil' });
+  const html = S.tabs(model, st), key = esc('w:' + HOSTILE);
+  assert.match(html, new RegExp('data-tab="' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"'));
+  assert.equal(all(html, /data-sid="([^"]*)"/g).every(s => s === key), true);
+  assert.ok(html.includes('aria-label="' + esc(HOSTILE + ' · 기다리는 결정 1개(창 전체)') + '"'));
+  assert.ok(html.includes('title="' + esc(HOSTILE + ' · ' + HOSTILE + ' (두 번 누르면 탭 고정)') + '"'));
+  assert.doesNotMatch(html, /<img|onerror="/);
+});
+
 test('window keys: shared windows, standalone ids, length boundaries and reserved model ids', () => {
   // Given
   const S = load().BriefShell;

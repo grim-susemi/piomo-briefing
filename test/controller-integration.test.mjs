@@ -28,6 +28,139 @@ function prepare(e, s = session()) {
   e.ctx.BriefAnnotate.decorate();
 }
 
+const WINDOW_KEY = 'w:w4:t185';
+const windowSessions = () => [
+  session({ id: 'a185', title: 'Current', tabId: 'w4:t185', tabLabel: 'Window', tabNumber: 185, lastActivityAt: '2026-10-23T02:00:00Z',
+    plan: { planId: 'wp', goal: 'Window plan', tasks: [{ id: '1', state: 'doing', label: 'work' }] } }),
+  session({ id: 'p185', title: 'Previous', tabId: 'w4:t185', alive: false, status: 'done', statusKey: 'done', lastActivityAt: 1,
+    decisions: [{ id: 501, question: 'Previous decision', options: { A: { text: 'yes' } } }] }),
+  session({ id: 'q185', title: 'Second pane', tabId: 'w4:t185', lastActivityAt: 2,
+    planLink: { ownerId: 'a185', goal: 'Window plan' },
+    plan: { planId: 'qp', goal: 'Pane plan', ownerSessionId: 'a185', tasks: [{ id: '1', state: 'doing', label: 'work' }] } }),
+  session({ id: 'e-done', title: 'Standalone', alive: false, status: 'done', statusKey: 'done' }),
+];
+const windowModel = (seq, sessions = windowSessions()) => ({ seq, gen: 9, generatedAt: 0, sessions });
+const shownWindow = e => e.ctx.BriefShell.shownOf(e.page.state.ui, e.page.state.ui.active);
+function assertWindow(e, sid, sub) {
+  assert.deepEqual(Array.from(e.page.state.ui.tabs), [WINDOW_KEY]);
+  assert.equal(e.page.state.ui.active, WINDOW_KEY);
+  assert.equal(shownWindow(e), sid);
+  if (sub) assert.equal(e.page.state.ui.sub[sid], sub);
+  assert.ok(e.byId.main.querySelector('.cv-page[data-sid="' + sid + '"]'), 'main shows ' + sid);
+  assert.deepEqual(e.errors, []);
+}
+
+test('window entry points: every rendered navigation target shares one tab and highlights only the shown rows', () => {
+  const contexts = [];
+  const e = makeController({ configure(ctx) {
+    const render = ctx.BriefConvo.render;
+    ctx.BriefConvo.render = (s, ui, context) => { contexts.push({ sid: s.id, windowLive: context.windowLive }); return render(s, ui, context); };
+  } }); e.page.receive(windowModel(1));
+  click(e, '#side [data-row="a185"] [data-sh="open"]'); assertWindow(e, 'a185');
+  if (e.document.querySelector('#side [data-sh="expand"][data-sid="a185"]').getAttribute('aria-expanded') !== 'true') {
+    click(e, '#side [data-sh="expand"][data-sid="a185"]');
+  }
+  click(e, '#side .sh-prev [data-sid="p185"]'); assertWindow(e, 'p185');
+  assert.deepEqual(contexts.at(-1), { sid: 'p185', windowLive: 'a185' });
+  assert.ok(e.byId.side.querySelector('.sh-kid.sel [data-sid="p185"]'));
+  assert.equal(e.byId.side.querySelector('[data-row="a185"]').classList.contains('sel'), false);
+  click(e, '#rail [data-key="inbox"]');
+  click(e, '#side .sh-it[data-sid="p185"]'); assertWindow(e, 'p185', 'dec');
+  click(e, '#rail [data-key="conv"]');
+  click(e, '#side [data-sh="fav"][data-sid="q185"]');
+  click(e, '#side [data-sec="fav"] [data-sh="open"][data-sid="q185"]'); assertWindow(e, 'q185');
+  assert.deepEqual(contexts.at(-1), { sid: 'q185', windowLive: null });
+  const search = e.document.querySelector('[data-sh="search"]'); search.value = 'Second pane'; e.fire(search, 'input');
+  click(e, '#side [data-row="q185"] [data-sh="open"]'); assertWindow(e, 'q185');
+  for (const row of e.byId.side.querySelectorAll('[data-row]')) assert.equal(row.classList.contains('sel'), row.getAttribute('data-row') === 'q185');
+  search.value = ''; e.fire(search, 'input');
+  click(e, '#rail [data-key="plans"]');
+  click(e, '#side .sh-it[data-sid="q185"]'); assertWindow(e, 'q185', 'plan');
+  click(e, '#main [data-sh="open"][data-sid="a185"]'); assertWindow(e, 'a185');
+  click(e, '#rail [data-key="archive"]');
+  click(e, '#side [data-row="p185"] [data-sh="open"]'); assertWindow(e, 'p185');
+  assert.ok(e.byId.side.querySelector('[data-row="p185"]').classList.contains('sel'));
+  click(e, '#tabs [data-sh="close"]');
+  click(e, '#main [data-sh="open"][data-sid="a185"]'); assertWindow(e, 'a185');
+});
+
+test('window history: sub pages, scroll, glow, sub fallback and annotation completion use the shown conversation', async () => {
+  const e = makeController(); e.page.receive(windowModel(1)); e.page.open('p185', 'dec');
+  assertWindow(e, 'p185', 'dec');
+  const main = e.byId.main;
+  main.scrollTop = 171;
+  e.page.open('q185', 'plan'); main.scrollTop = 283;
+  e.page.open('p185', 'dec'); assert.equal(main.scrollTop, 171);
+  e.page.open('q185', 'plan'); assert.equal(main.scrollTop, 283);
+  const fallback = e.document.createElement('button');
+  fallback.setAttribute('data-act', 'sub'); fallback.setAttribute('data-sub', 'ov'); main.appendChild(fallback);
+  e.fire(fallback, 'click'); assertWindow(e, 'q185', 'ov');
+  e.advance(600); e.page.receive(windowModel(2, windowSessions().map(s => s.id === 'q185' ? { ...s, headline: 'changed pane' } : s)));
+  assert.equal(main.querySelector('[data-block="head"]').classList.contains('flash'), true);
+  e.advance(900); assert.equal(main.querySelector('[data-block="head"]').classList.contains('flash'), false);
+  e.page.open('q185', 'plan');
+  assert.equal(e.ctx.BriefAnnotate.add('q185', note).ok, true); e.ctx.BriefAnnotate.decorate();
+  click(e, '[data-ann-act="send"]');
+  assert.equal(JSON.parse(posts(e)[0].opts.body).sessionId, 'q185');
+  reply(posts(e)[0], 200, { ok: true, key: 'window-note' }); await flush();
+  assertWindow(e, 'q185', 'ov');
+});
+
+test('window hydration: legacy prefs, empty publication, real members and reload retain the selected window', () => {
+  const storage = memoryStorage();
+  const legacy = JSON.stringify({ tabs: ['p185', 'q185'], pinned: ['p185'], active: 'q185', sub: { q185: 'plan' } });
+  storage.setItem('omo-briefing.ui.v1', legacy);
+  const e = makeController({ localStorage: storage });
+  e.page.receive(windowModel(1, []));
+  assert.equal(e.page.state.ui.awaitingMembers, false);
+  e.advance(600); e.page.receive(windowModel(2)); assertWindow(e, 'q185', 'plan');
+  const next = makeController({ localStorage: storage });
+  next.page.receive(windowModel(3)); assertWindow(next, 'q185', 'plan');
+  assert.deepEqual(Array.from(next.page.state.ui.pinned), [WINDOW_KEY]);
+  assert.equal(storage.getItem('omo-briefing.ui.v1'), legacy);
+  assert.equal(e.page.state.ui.members.a185.at, Date.parse('2026-10-23T02:00:00Z'));
+});
+
+test('window restart: live follows replacement after publication and reload while look-back stays', () => {
+  for (const lookBack of [false, true]) {
+    const storage = memoryStorage(), e = makeController({ localStorage: storage });
+    e.page.receive(windowModel(1)); e.page.open(lookBack ? 'p185' : 'a185', 'ov');
+    const changed = windowSessions().map(s => s.id === 'a185' ? { ...s, alive: false } : s);
+    changed.push(session({ id: 'new185', title: 'Replacement', tabId: 'w4:t185', lastActivityAt: 1792728000000 }));
+    e.advance(600); e.page.receive(windowModel(2, changed)); assertWindow(e, lookBack ? 'p185' : 'new185');
+    const next = makeController({ localStorage: storage }); next.page.receive(windowModel(3, changed));
+    assertWindow(next, lookBack ? 'p185' : 'new185');
+    assert.equal(next.ctx.BriefShell.windowLiveOf(next.page.state.model, next.page.state.ui), lookBack ? 'new185' : null);
+  }
+});
+
+test('window round trip: activating its tab preserves the selected pane and sub page', () => {
+  const e = makeController(); e.page.receive(windowModel(1)); e.page.open('q185', 'plan'); e.page.open('e-done', 'ov');
+  click(e, '#tabs [data-sh="active"][data-sid="w:w4:t185"]');
+  assert.equal(shownWindow(e), 'q185');
+  assert.equal(e.page.state.ui.sub.q185, 'plan');
+  assert.ok(e.byId.main.querySelector('.cv-page[data-sid="q185"]'));
+  assert.ok(e.byId.side.querySelector('[data-row="q185"]').classList.contains('sel'));
+  assert.deepEqual(e.errors, []);
+});
+
+test('window fold: each shown folded member loads once and a late sibling reply cannot repaint main', async () => {
+  const e = makeController();
+  const rows = [foldedRow({ id: 'p185', tabId: 'w4:t185' }), foldedRow({ id: 'old185', tabId: 'w4:t185' })];
+  e.page.receive(windowModel(1, [...windowSessions().filter(s => s.id !== 'p185'), ...rows]));
+  e.page.open('p185', 'rep'); e.page.open('p185', 'rep');
+  assert.equal(convoCalls(e).length, 1); assert.equal(convoCalls(e)[0].url, '/convo/p185.json');
+  sendConvo(convoCalls(e)[0], 200, { schema: 1, gen: 9, key: FOLD_KEY, session: fullCard({ id: 'p185' }) }); await flushTwice();
+  assert.equal(e.byId.main.querySelectorAll('.rep').length, 3);
+  e.page.open('old185', 'rep'); assert.equal(convoCalls(e)[1].url, '/convo/old185.json');
+  e.page.open('q185', 'ov'); const html = e.byId.main.innerHTML, writes = e.byId.main.writes;
+  sendConvo(convoCalls(e)[1], 200, { schema: 1, gen: 9, key: FOLD_KEY, session: fullCard({ id: 'old185', title: 'Late old card' }) }); await flushTwice();
+  assert.equal(e.byId.main.innerHTML, html); assert.equal(e.byId.main.writes, writes);
+  e.page.open('old185', 'rep'); assert.equal(convoCalls(e).length, 2);
+  assert.equal(e.byId.main.querySelectorAll('.rep').length, 3);
+  assertWindow(e, 'old185', 'rep');
+});
+
 test('C-CAP2 integration: trimmed notice is present only with the counter', () => {
   const e = makeController();
   e.page.receive(model(1, session(), { trimmed: { cards: 3 } }));
@@ -154,16 +287,10 @@ test('known: every applied model records absence and prunes after 30 days withou
   assert.equal(next.page.state.ui.awaitingMembers, true);
   assert.deepEqual(JSON.parse(next.ctx.BriefShell.serialize(next.page.state.ui)), remembered);
   next.advance(31 * 86400000);
-  next.page.receive({ seq: 3, sessions: [session({ id: 's2' })] });
   assert.equal(next.page.state.ui.awaitingMembers, true);
   assert.deepEqual(JSON.parse(next.ctx.BriefShell.serialize(next.page.state.ui)), remembered);
-  // Task 3 publishes membership through the real reducer; normal controller wiring belongs to Task 4.
-  const members = next.page.state.model.sessions.map(s => ({ id: s.id, tabId: s.tabId || '', alive: s.alive === true, at: 0 }));
-  next.page.state.ui = next.ctx.BriefShell.reduce(next.page.state.ui, {
-    type: 'known', ids: members.map(s => s.id), members, now: next.page.state.now(),
-  });
-  next.ctx.BriefShell.persist(next.ctx.localStorage, next.page.state.ui);
-  next.page.render();
+  // The first applied model now publishes membership through the controller itself.
+  next.page.receive({ seq: 3, sessions: [session({ id: 's2' })] });
   assert.equal(next.page.state.ui.awaitingMembers, false);
   assert.equal(next.page.state.ui.tabs.includes('s1'), false);
   assert.equal(next.page.state.ui.absent.s1, undefined);
