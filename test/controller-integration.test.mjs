@@ -142,13 +142,29 @@ test('known: every applied model records absence and prunes after 30 days withou
   const storage = memoryStorage();
   const e = makeController({ localStorage: storage });
   e.page.receive(model(1)); e.page.open('s1', 'dec');
+  e.fire(e.byId.tabs.querySelector('[data-tab="s1"]'), 'dblclick');
   e.advance(600); e.page.receive({ seq: 2, sessions: [] });
   assert.equal(e.page.state.ui.absent.s1, 1600);
   assert.equal(e.page.state.ui.active, 's1');
   assert.match(e.byId.main.textContent, /지금 안 보임/);
+  const remembered = JSON.parse(e.ctx.BriefShell.serialize(e.page.state.ui));
+  assert.deepEqual([remembered.tabs, remembered.pinned, remembered.active, remembered.sub, remembered.seen, remembered.absent],
+    [['s1'], ['s1'], 's1', { s1: 'dec' }, { s1: 1000 }, { s1: 1600 }]);
   const next = makeController({ localStorage: storage });
+  assert.equal(next.page.state.ui.awaitingMembers, true);
+  assert.deepEqual(JSON.parse(next.ctx.BriefShell.serialize(next.page.state.ui)), remembered);
   next.advance(31 * 86400000);
   next.page.receive({ seq: 3, sessions: [session({ id: 's2' })] });
+  assert.equal(next.page.state.ui.awaitingMembers, true);
+  assert.deepEqual(JSON.parse(next.ctx.BriefShell.serialize(next.page.state.ui)), remembered);
+  // Task 3 publishes membership through the real reducer; normal controller wiring belongs to Task 4.
+  const members = next.page.state.model.sessions.map(s => ({ id: s.id, tabId: s.tabId || '', alive: s.alive === true, at: 0 }));
+  next.page.state.ui = next.ctx.BriefShell.reduce(next.page.state.ui, {
+    type: 'known', ids: members.map(s => s.id), members, now: next.page.state.now(),
+  });
+  next.ctx.BriefShell.persist(next.ctx.localStorage, next.page.state.ui);
+  next.page.render();
+  assert.equal(next.page.state.ui.awaitingMembers, false);
   assert.equal(next.page.state.ui.tabs.includes('s1'), false);
   assert.equal(next.page.state.ui.absent.s1, undefined);
   assert.equal(next.page.state.ui.active, null);

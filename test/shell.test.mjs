@@ -72,7 +72,7 @@ const IDS = ['a185', 'p185', 'c184', 'd012', 'e-done', 'f-q', 'g-old'];
 const PREFS = { favs: ['d012', 'gone-1'], tabs: ['a185', 'c184', 'gone-1'], active: 'a185', seen: { 'e-done': NOW - DAY, 'g-old': NOW - 3600e3 } };
 const base = (S, prefs = PREFS) => S.reduce(undefined, { type: 'load', json: JSON.stringify(prefs), known: IDS, now: NOW });
 const saved = (S, st) => JSON.parse(S.serialize(st));
-const DEFAULT_SAVED = { sideOpen: true, sideWidth: 260, view: 'conv', filter: 'all', favs: [], tabs: [], pinned: [], active: null, sub: {}, seen: {}, absent: {} };
+const DEFAULT_SAVED = { sideOpen: true, sideWidth: 260, view: 'conv', filter: 'all', favs: [], tabs: [], pinned: [], active: null, sub: {}, seen: {}, absent: {}, tabSchema: 2, shown: {}, follow: {} };
 
 // html probes
 const all = (html, re) => [...html.matchAll(re)].map((m) => m[1]);
@@ -561,6 +561,219 @@ test('reduce is pure: a deep-frozen state survives every action unchanged', () =
 
 // ---- prefs (C-UI) ---------------------------------------------------------------------------------------------------
 
+test('storage: persist writes only omo-briefing.ui.v2 with tabSchema 2, shown and follow; v1 is never written or removed', () => {
+  // Given
+  const S = load().BriefShell, calls = [];
+  const st = S.reduce(winKnown(S), { type: 'open', sid: 'q185' });
+  const store = { setItem: (key, value) => calls.push(['write', key, JSON.parse(value)]), removeItem: key => calls.push(['remove', key]) };
+  // When
+  const result = S.persist(store, st);
+  // Then
+  assert.equal(result, true);
+  assert.deepEqual(calls, [['write', 'omo-briefing.ui.v2', { ...DEFAULT_SAVED, tabSchema: 2, tabs: [WK], active: WK, shown: { [WK]: 'q185' }, follow: { [WK]: true } }]]);
+});
+
+test('storage: restore reads v2 when present, else v1; corrupt v2 never reads v1', () => {
+  // Given
+  const S = load().BriefShell;
+  for (const v2 of ['{"tabSchema":2,"view":"plans"}', '{bad', null]) {
+    const reads = [];
+    const store = { getItem: key => { reads.push(key); return key.endsWith('v2') ? v2 : '{"view":"home"}'; } };
+    // When
+    const st = S.reduce(null, { type: 'load', json: S.restore(store) });
+    // Then
+    assert.deepEqual(reads, v2 === null ? ['omo-briefing.ui.v2', 'omo-briefing.ui.v1'] : ['omo-briefing.ui.v2']);
+    assert.equal(st.view, v2 === null ? 'home' : v2 === '{bad' ? 'conv' : 'plans');
+    assert.equal(st.prefsError, v2 === '{bad' ? 'corrupt' : '');
+  }
+});
+
+test('legacy: v1 values are conversation ids; a v1 value starting with w: is dropped', () => {
+  // Given
+  const S = load().BriefShell;
+  const raw = { tabs: [WK, 'a185'], pinned: [WK, 'a185'], active: WK, absent: { [WK]: NOW }, shown: { [WK]: 'p185' }, follow: { [WK]: true } };
+  // When
+  const st = S.reduce(null, { type: 'load', json: JSON.stringify(raw) });
+  // Then
+  assert.deepEqual(plain([st.tabs, st.pinned, st.active, st.absent, st.shown, st.follow]), [['a185'], ['a185'], null, {}, {}, {}]);
+});
+
+test('migration: order, pins and active survive the merge; a pinned conversation pins its window', () => {
+  // Given
+  const S = load().BriefShell;
+  const old = S.reduce(null, { type: 'load', json: JSON.stringify({ tabs: ['p185', 'e-done', 'q185', 'a185'], pinned: ['q185', 'e-done'], active: 'q185', sub: { p185: 'rep' }, seen: { a185: NOW } }) });
+  deepFreeze(old);
+  // When
+  const st = winKnown(S, old);
+  // Then
+  assert.deepEqual(plain([st.tabs, st.pinned, st.active, st.shown, st.follow, st.sub, st.seen]), [[WK, 'e-done'], [WK, 'e-done'], WK, { [WK]: 'q185' }, { [WK]: true }, { p185: 'rep' }, { a185: NOW }]);
+});
+
+test('migration: shown takes active source, valid shown, greatest seen, then tab order; migrated slots follow', () => {
+  const S = load().BriefShell;
+  for (const [extra, expected, follows] of [
+    [{ active: 'q185', shown: { [WK]: 'p185' } }, 'q185', true],
+    [{ shown: { [WK]: 'p185' } }, 'p185', false],
+    [{ seen: { p185: 2, q185: 3 } }, 'q185', true],
+    [{}, 'p185', true],
+  ]) {
+    // Given: ended-only groups expose the migration choice without a subsequent live follow.
+    const st = { ...S.defaults(), tabs: ['p185', WK, 'q185'], ...extra };
+    // When
+    const next = winKnown(S, st, winMembers().map(m => ({ ...m, alive: false })));
+    // Then
+    assert.equal(next.shown[WK], expected);
+    assert.equal(next.follow[WK] === true, follows);
+  }
+});
+
+test('migration: reload and delayed first model agree; canonicalising twice returns the same object', () => {
+  // Given
+  const S = load().BriefShell;
+  const raw = JSON.stringify({ tabs: ['p185', 'q185'], active: 'q185', seen: { p185: NOW } });
+  const first = winKnown(S, S.reduce(null, { type: 'load', json: raw }));
+  // When
+  const reload = winKnown(S, S.reduce(null, { type: 'load', json: S.serialize(first) }));
+  const delayed = winKnown(S, S.reduce(S.reduce(null, { type: 'load', json: raw }), { type: 'known', ids: [], now: NOW - 40 * DAY }));
+  // Then
+  assert.deepEqual(saved(S, reload), saved(S, first));
+  assert.deepEqual(saved(S, delayed), saved(S, first));
+  assert.deepEqual(plain(first.tabs), [WK]);
+  assert.equal(winKnown(S, first), first);
+});
+
+for (const [schemaName, schema] of [['legacy', {}], ['v2', { tabSchema: 2 }]]) {
+  test(`migration repair: stale restored ${schemaName} sid-only records wait for membership`, () => {
+    // Given: the reviewer's exact stale conversation-id-only cross-product.
+    const S = load().BriefShell;
+    const raw = { ...schema, tabs: ['returning'], pinned: ['returning'], active: 'returning',
+      sub: { returning: 'rep' }, seen: { returning: NOW - 50 * DAY }, absent: { returning: NOW - 31 * DAY } };
+    const loaded = S.reduce(null, { type: 'load', json: JSON.stringify(raw), known: [], now: NOW });
+    const publication = { type: 'known', ids: ['returning'], members: [{ id: 'returning', tabId: 'win', alive: true, at: NOW }], now: NOW };
+    deepFreeze(loaded);
+    // When
+    const delayed = [NOW, NOW + 1, NOW + 2].reduce((st, now) => S.reduce(st, { type: 'known', ids: [], now }), loaded);
+    const immediate = S.reduce(loaded, publication);
+    const afterDelay = S.reduce(delayed, publication);
+    // Then
+    assert.deepEqual(saved(S, delayed), { ...DEFAULT_SAVED, ...raw });
+    assert.equal(delayed, loaded);
+    assert.equal(loaded.awaitingMembers, true);
+    assert.deepEqual(plain(afterDelay), plain(immediate));
+    assert.deepEqual(plain([afterDelay.tabs, afterDelay.pinned, afterDelay.active, afterDelay.sub, afterDelay.seen, afterDelay.absent]),
+      [['w:win'], ['w:win'], 'w:win', raw.sub, raw.seen, {}]);
+    assert.equal(afterDelay.awaitingMembers, false);
+    assert.equal(S.reduce(afterDelay, publication), afterDelay);
+    assert.equal(Object.hasOwn(saved(S, loaded), 'awaitingMembers'), false);
+    assert.equal(Object.hasOwn(saved(S, afterDelay), 'awaitingMembers'), false);
+  });
+
+  test(`migration repair: actual empty first ${schemaName} membership releases pending and expiry`, () => {
+    // Given
+    const S = load().BriefShell;
+    const raw = { ...schema, tabs: ['returning'], pinned: ['returning'], active: 'returning',
+      sub: { returning: 'rep' }, seen: { returning: NOW - 50 * DAY }, absent: { returning: NOW - 31 * DAY } };
+    const loaded = S.reduce(null, { type: 'load', json: JSON.stringify(raw) });
+    const fresh = S.reduce(null, { type: 'load', json: JSON.stringify({ ...raw, absent: {} }) });
+    // When
+    const empty = S.reduce(loaded, { type: 'known', ids: [], members: [], now: NOW });
+    const stamped = S.reduce(fresh, { type: 'known', ids: [], members: [], now: NOW });
+    // Then
+    assert.equal(loaded.awaitingMembers, true);
+    assert.equal(fresh.awaitingMembers, true);
+    assert.equal(empty.awaitingMembers, false);
+    assert.deepEqual(saved(S, empty), DEFAULT_SAVED);
+    assert.equal(stamped.awaitingMembers, false);
+    assert.deepEqual(plain(stamped.absent), { returning: NOW });
+    assert.equal(S.reduce(stamped, { type: 'known', ids: [], now: NOW + 30 * DAY }), stamped);
+    assert.deepEqual(saved(S, S.reduce(stamped, { type: 'known', ids: [], now: NOW + 30 * DAY + 1 })), DEFAULT_SAVED);
+  });
+}
+
+test('migration repair: invalid and absent prefs do not defer ordinary legacy stamping or expiry', () => {
+  for (const json of [undefined, null, '', '{bad', '[]', 'null', '4']) {
+    // Given
+    const S = load().BriefShell;
+    const loaded = S.reduce(null, { type: 'load', json });
+    const opened = S.reduce(loaded, { type: 'open', sid: 'ordinary', sub: 'rep', now: NOW });
+    // When
+    const missing = S.reduce(opened, { type: 'known', ids: [], now: NOW });
+    // Then
+    assert.equal(loaded.awaitingMembers, false);
+    assert.equal(missing.members, null);
+    assert.deepEqual(plain(missing.absent), { ordinary: NOW });
+    assert.equal(S.reduce(missing, { type: 'known', ids: [], now: NOW + 30 * DAY }), missing);
+    assert.deepEqual(saved(S, S.reduce(missing, { type: 'known', ids: [], now: NOW + 30 * DAY + 1 })), DEFAULT_SAVED);
+  }
+});
+
+test('migration: before any members nothing is pruned or stamped; an empty first model canonicalises', () => {
+  // Given
+  const S = load().BriefShell;
+  const raw = JSON.stringify({ tabSchema: 2, tabs: [WK, 'gone'], active: WK, shown: { [WK]: 'gone' }, follow: { [WK]: true }, absent: { [WK]: NOW - 40 * DAY } });
+  const st = S.reduce(null, { type: 'load', json: raw });
+  // When
+  const before = S.reduce(st, { type: 'known', ids: [], now: NOW });
+  const empty = S.reduce(before, { type: 'known', ids: [], members: [], now: NOW });
+  // Then
+  assert.equal(before, st);
+  assert.deepEqual(plain(st.absent), { [WK]: NOW - 40 * DAY });
+  assert.deepEqual(plain(empty.tabs), ['gone']);
+  assert.deepEqual(plain(empty.absent), { gone: NOW });
+  assert.deepEqual(plain(empty.seen), {});
+});
+
+test('absence: window membership and strict 30-day boundary; sid metadata expires independently and drops shown', () => {
+  // Given
+  const S = load().BriefShell;
+  const opened = S.reduce(S.reduce(winKnown(S), { type: 'open', sid: 'p185', sub: 'rep', now: NOW }), { type: 'fav', sid: 'p185' });
+  const known = (st, members, now) => S.reduce(st, { type: 'known', ids: members.map(m => m.id), members, now });
+  const missing = known(opened, [], NOW);
+  // When
+  const boundary = known(missing, [], NOW + 30 * DAY);
+  const expired = known(missing, [], NOW + 30 * DAY + 1);
+  const surviving = known(known(opened, [{ id: 'other', tabId: 'w4:t185', alive: false }], NOW), [{ id: 'other', tabId: 'w4:t185', alive: false }], NOW + 30 * DAY + 1);
+  // Then
+  assert.equal(boundary, missing);
+  assert.deepEqual(plain([expired.tabs, expired.pinned, expired.active, expired.shown, expired.follow, expired.sub, expired.seen, expired.favs, expired.absent]), [[], [], null, {}, {}, {}, {}, [], {}]);
+  assert.deepEqual(plain(surviving.tabs), [WK]);
+  assert.equal(Object.hasOwn(surviving.absent, WK), false);
+  assert.equal(Object.values(surviving.shown).includes('p185'), false);
+  assert.deepEqual(plain([surviving.sub, surviving.seen, surviving.favs]), [{}, {}, []]);
+});
+
+test('rekey: ghost shown sid reappearing under a new tabId transfers tab, pin and active once', () => {
+  // Given
+  const S = load().BriefShell;
+  const ghost = { ...S.defaults(), tabs: [WK, 'e-done'], pinned: [WK], active: WK, shown: { [WK]: 'q185' }, follow: { [WK]: true } };
+  const members = [{ id: 'q185', tabId: 'new', alive: true, at: NOW }];
+  // When
+  const st = winKnown(S, ghost, members);
+  // Then
+  assert.deepEqual(plain([st.tabs, st.pinned, st.active, st.shown, st.follow]), [['w:new', 'e-done'], ['w:new'], 'w:new', { 'w:new': 'q185' }, { 'w:new': true }]);
+  assert.equal(winKnown(S, st, members), st);
+});
+
+test('R2 regression: reducer-created v2 state survives reload including 258-character window keys', () => {
+  // Given
+  const S = load().BriefShell;
+  const members = Array.from({ length: 201 }, (_, i) => ({ id: 's' + i, tabId: String(i).padStart(256, 't'), alive: true, at: NOW }));
+  let st = winKnown(S, S.defaults(), members);
+  for (const m of members) {
+    st = S.reduce(st, { type: 'open', sid: m.id, sub: 'dec', now: NOW });
+    st = S.reduce(st, { type: 'pin', sid: S.keyOf(st, m.id) });
+    st = S.reduce(st, { type: 'fav', sid: m.id });
+  }
+  // When
+  const again = winKnown(S, S.reduce(null, { type: 'load', json: S.serialize(st) }), members);
+  // Then
+  assert.deepEqual(saved(S, again), saved(S, st));
+  assert.equal(again.tabs.length, 200);
+  assert.equal(again.tabs[0].length, 258);
+  assert.equal(again.prefsError, '');
+  for (const key of ['members', 'groups', 'exp']) assert.equal(Object.hasOwn(saved(S, st), key), false);
+});
+
 test('load reads every C-UI field and serialize writes exactly the C-UI keys', () => {
   const S = load().BriefShell;
   const prefs = {
@@ -569,10 +782,11 @@ test('load reads every C-UI field and serialize writes exactly the C-UI keys', (
   };
   const st = S.reduce(undefined, { type: 'load', json: JSON.stringify(prefs), known: IDS, now: NOW });
   assert.equal(st.prefsError, '');
-  assert.deepEqual(saved(S, st), prefs);
-  assert.deepEqual(Object.keys(saved(S, st)), ['sideOpen', 'sideWidth', 'view', 'filter', 'favs', 'tabs', 'pinned', 'active', 'sub', 'seen', 'absent']);
+  const v2 = { ...prefs, tabSchema: 2, shown: {}, follow: {} };
+  assert.deepEqual(saved(S, st), v2);
+  assert.deepEqual(Object.keys(saved(S, st)), ['sideOpen', 'sideWidth', 'view', 'filter', 'favs', 'tabs', 'pinned', 'active', 'sub', 'seen', 'absent', 'tabSchema', 'shown', 'follow']);
   const again = S.reduce(undefined, { type: 'load', json: S.serialize(st), known: IDS, now: NOW });
-  assert.deepEqual(saved(S, again), prefs, 'round trip');
+  assert.deepEqual(saved(S, again), v2, 'round trip');
   assert.equal(S.KEY, 'omo-briefing.ui.v1');
 });
 
@@ -583,6 +797,10 @@ test('load keeps ids missing from the model as (지금 안 보임) and prunes th
     type: 'load', known: IDS, now: NOW,
     json: JSON.stringify({ tabs: ['a185', 'gone-1'], pinned: ['gone-1'], favs: ['gone-1'], active: 'gone-1', sub: { 'gone-1': 'dec' }, seen: { 'gone-1': NOW - 40 * DAY } }),
   });
+  assert.equal(st.awaitingMembers, true);
+  assert.deepEqual(plain(st.absent), {}, 'restoration alone does not stamp a missing conversation');
+  st = S.reduce(st, { type: 'known', ids: IDS, members: IDS.map(id => ({ id })), now: NOW });
+  assert.equal(st.awaitingMembers, false);
   assert.equal(st.absent['gone-1'], NOW, 'first missing now');
   assert.deepEqual(plain(st.tabs), ['a185', 'gone-1']);
   const bar = S.tabs(model, st);
@@ -600,7 +818,11 @@ test('load keeps ids missing from the model as (지금 안 보임) and prunes th
   assert.deepEqual(saved(S, pruned), { ...DEFAULT_SAVED, tabs: ['a185'], active: 'a185' });
   assert.doesNotMatch(S.tabs(model, pruned) + S.side(model, pruned), /지금 안 보임/);
 
-  const stale = S.reduce(undefined, { type: 'load', known: IDS, now: NOW, json: JSON.stringify({ favs: ['gone-2'], absent: { 'gone-2': NOW - 31 * DAY } }) });
+  let stale = S.reduce(undefined, { type: 'load', known: IDS, now: NOW, json: JSON.stringify({ favs: ['gone-2'], absent: { 'gone-2': NOW - 31 * DAY } }) });
+  assert.equal(stale.awaitingMembers, true);
+  assert.deepEqual(plain(stale.favs), ['gone-2'], 'restoration retains stale records until first membership');
+  stale = S.reduce(stale, { type: 'known', ids: IDS, members: IDS.map(id => ({ id })), now: NOW });
+  assert.equal(stale.awaitingMembers, false);
   assert.deepEqual(plain(stale.favs), [], 'a stored absence older than 30 days is pruned at load');
   assert.equal(S.reduce(st, { type: 'known', ids: 'nope', now: NOW + 99 * DAY }), st, 'no id list: nothing is judged');
   assert.equal(S.reduce(st, { type: 'known', ids: IDS }), st, 'no clock: nothing is judged');
@@ -677,7 +899,11 @@ test('failure: a corrupted omo-briefing.ui.v1 falls back to the defaults without
   };
   const json = JSON.stringify(foreign).replace('"sub":{', '"sub":{"__proto__":"dec",');
   assert.match(json, /"sub":\{"__proto__":"dec","a185"/);
-  const st = S.reduce(undefined, { type: 'load', json, known: IDS, now: NOW });
+  let st = S.reduce(undefined, { type: 'load', json, known: IDS, now: NOW });
+  assert.equal(st.awaitingMembers, true);
+  assert.deepEqual(plain(st.absent), {}, 'accepted restored fields await membership before absence stamping');
+  st = S.reduce(st, { type: 'known', ids: IDS, members: IDS.map(id => ({ id })), now: NOW });
+  assert.equal(st.awaitingMembers, false);
   assert.equal(st.prefsError, '');
   assert.deepEqual(saved(S, st), {
     ...DEFAULT_SAVED, tabs: ['a185', 'c184'], pinned: ['c184'], sub: { a185: 'dec', constructor: 'plan' }, seen: { d012: NOW },
@@ -687,7 +913,7 @@ test('failure: a corrupted omo-briefing.ui.v1 falls back to the defaults without
   assert.equal(Object.hasOwn(JSON.parse(S.serialize(st)).sub, '__proto__'), false, '__proto__ is never taken as an id');
 });
 
-test('persist and restore use only omo-briefing.ui.v1 and never throw on blocked storage', () => {
+test('persist uses v2 and restore falls back to v1 without throwing on blocked storage', () => {
   const warns = [];
   const ctx = load({ console: { warn: (...a) => warns.push(a.map(String).join(' ')) } });
   const S = ctx.BriefShell;
@@ -695,7 +921,7 @@ test('persist and restore use only omo-briefing.ui.v1 and never throw on blocked
   const store = { getItem: (k) => (k === 'omo-briefing.ui.v1' ? '{"view":"home"}' : null), setItem: (k, v) => writes.push([k, v]) };
   assert.equal(S.restore(store), '{"view":"home"}');
   assert.equal(S.persist(store, S.defaults()), true);
-  assert.deepEqual(writes.map((w) => w[0]), ['omo-briefing.ui.v1']);
+  assert.deepEqual(writes.map((w) => w[0]), ['omo-briefing.ui.v2']);
   assert.deepEqual(JSON.parse(writes[0][1]), DEFAULT_SAVED);
   const blocked = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('quota'); } };
   assert.equal(S.restore(blocked), null);
@@ -703,8 +929,9 @@ test('persist and restore use only omo-briefing.ui.v1 and never throw on blocked
   assert.equal(S.restore(null), null);
   assert.equal(warns.length, 2, warns.join('\n'));
   const src = read('src/page/shell.js');
-  assert.equal((src.match(/\.(?:setItem|getItem|removeItem)\(/g) || []).length, 2);
-  assert.equal((src.match(/\.(?:setItem|getItem)\(KEY\b/g) || []).length, 2, 'every storage call uses KEY');
+  assert.equal((src.match(/\.(?:setItem|getItem|removeItem)\(/g) || []).length, 3);
+  assert.equal((src.match(/\.getItem\(KEY\b/g) || []).length, 1, 'v1 remains read-only');
+  assert.equal((src.match(/\.(?:setItem|getItem)\(KEY_V2\b/g) || []).length, 2);
   assert.match(S.KEY, /^omo-briefing\./);
 });
 

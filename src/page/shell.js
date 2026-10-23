@@ -42,7 +42,7 @@
  *     decisions never count, C-HOLD 4). On the server page (st.live) every open decision in 'wait' carries 보류
  *     (data-act="ans-hold", data-where="inbox") and, while st.answers[id].confirm.hold, the hold confirm row; 'held'
  *     items carry 다시 열기 (data-act="ans-reopen"). page.js handles those clicks.
- *   g.BriefShell.restore(storage?) / persist(storage?, st): localStorage['omo-briefing.ui.v1']; never throw
+ *   g.BriefShell.restore(storage?) / persist(storage?, st): v2 preferences, with read-only v1 fallback; never throw
  * Stored (C-UI): {sideOpen, sideWidth, view, filter, favs[], tabs[], pinned[], active, sub:{sid:key}, seen:{sid:ms},
  *   absent:{sid:firstMissingAt}}. peek, search, expanded rows/sections, the inbox sub-tab and prefsError stay in memory.
  * tabOf and the legend mirror view.js, which does not export them (test/shell.test.mjs checks both against view.js). */
@@ -50,6 +50,7 @@
   'use strict';
 
   var KEY = 'omo-briefing.ui.v1';
+  var KEY_V2 = 'omo-briefing.ui.v2';
   var MIN_W = 200;
   var MAX_W = 480;
   var DEF_W = 260;
@@ -153,7 +154,7 @@
   function defaults() {
     return {
       sideOpen: true, sideWidth: DEF_W, view: 'conv', filter: 'all', favs: [], tabs: [], pinned: [], active: null,
-      sub: map(), seen: map(), absent: map(), shown: map(), follow: map(), members: null, groups: null,
+      sub: map(), seen: map(), absent: map(), shown: map(), follow: map(), members: null, groups: null, awaitingMembers: false,
       peek: false, search: '', exp: map(), box: 'wait', prefsError: ''
     };
   }
@@ -205,8 +206,8 @@
         Object.keys(members).every(function (sid) { return members[sid] === st.members[sid]; })) members = st.members;
     if (st.groups && Object.keys(st.groups).length === Object.keys(groups).length &&
         Object.keys(groups).every(function (key) { return groups[key] === st.groups[key]; })) groups = st.groups;
-    var next = patched(st, { members: members, groups: groups });
-    var shown = st.shown, follow = st.follow;
+    st = canonical(patched(st, { members: members, groups: groups, awaitingMembers: false }));
+    var next = st, shown = st.shown, follow = st.follow;
     // Commit follow only on known. Reads and tab-bar activation must retain the owner's last selected live pane.
     st.tabs.forEach(function (key) {
       if (!isWindow(key) || !rep(next, key)) return;
@@ -222,6 +223,55 @@
       }
     });
     return patched(next, { shown: shown, follow: follow });
+  }
+
+  // Collapse sources in opening order before the follow commit chooses a live replacement.
+  function canonical(st) {
+    var sources = map(), mapped = map(), tabs = [], shown = copy(st.shown), follow = copy(st.follow);
+    st.tabs.forEach(function (source) {
+      var sid = isWindow(source) ? st.shown[source] : source;
+      var key = keyOf(st, source);
+      if (isWindow(source) && !rep(st, source) && has(st.members, sid) && isWindow(keyOf(st, sid))) key = keyOf(st, sid);
+      mapped[source] = key;
+      if (tabs.indexOf(key) < 0) tabs.push(key);
+      if (isWindow(key) && key !== source) {
+        if (!has(sources, key)) sources[key] = [];
+        sources[key].push({ source: source, sid: sid });
+        if (isWindow(source)) { delete shown[source]; delete follow[source]; }
+      }
+    });
+    Object.keys(sources).forEach(function (key) {
+      var list = sources[key], choice = null;
+      if (mapped[st.active] === key) {
+        choice = list.filter(function (entry) { return entry.source === st.active; })[0] || null;
+        if (!choice && st.active === key && has(st.members, st.shown[key]) && st.members[st.shown[key]].key === key) {
+          choice = { sid: st.shown[key], source: key };
+        }
+      }
+      if (!choice && has(st.members, st.shown[key]) && st.members[st.shown[key]].key === key) return;
+      if (!choice) {
+        choice = list[0];
+        list.forEach(function (entry) {
+          if ((st.seen[entry.sid] || 0) > (st.seen[choice.sid] || 0)) choice = entry;
+        });
+      }
+      shown[key] = choice.sid;
+      if (choice.source !== key) follow[key] = true;
+    });
+    var pinned = [];
+    st.pinned.forEach(function (source) {
+      var key = has(mapped, source) ? mapped[source] : keyOf(st, source);
+      if (tabs.indexOf(key) >= 0 && pinned.indexOf(key) < 0) pinned.push(key);
+    });
+    var equalList = function (a, b) { return a.length === b.length && a.every(function (v, i) { return v === b[i]; }); };
+    var equalMap = function (a, b) { return Object.keys(a).length === Object.keys(b).length && Object.keys(a).every(function (k) { return a[k] === b[k]; }); };
+    return patched(st, {
+      tabs: equalList(tabs, st.tabs) ? st.tabs : tabs,
+      pinned: equalList(pinned, st.pinned) ? st.pinned : pinned,
+      active: has(mapped, st.active) ? mapped[st.active] : st.active,
+      shown: equalMap(shown, st.shown) ? st.shown : shown,
+      follow: equalMap(follow, st.follow) ? st.follow : follow
+    });
   }
 
   function openTab(st, a) {
@@ -268,15 +318,16 @@
   // gone for more than KEEP_MS they leave every list and map. Without a list of ids or a clock nothing is judged.
   function reconcile(st, known, now) {
     if (!Array.isArray(known) || typeof now !== 'number' || !isFinite(now)) return st;
+    if (st.awaitingMembers || (st.members === null && st.tabs.some(isWindow))) return st;
     var here = map();
     known.forEach(function (id) { if (okId(id)) here[id] = true; });
     var tracked = map();
-    [st.favs, st.tabs, st.pinned, st.active ? [st.active] : [], Object.keys(st.sub), Object.keys(st.seen), Object.keys(st.absent)]
+    [st.favs, st.tabs, st.pinned, st.active ? [st.active] : [], Object.keys(st.sub), Object.keys(st.seen), Object.keys(st.absent), Object.keys(st.shown).map(function (key) { return st.shown[key]; })]
       .forEach(function (list) { list.forEach(function (id) { tracked[id] = true; }); });
     var absent = copy(st.absent), gone = map(), changed = false, pruned = false, id;
     for (id in tracked) {
-      if (isWindow(id)) continue; // window absence and expiry belong to the v2 reconciliation
-      if (here[id]) {
+      if (isWindow(id) && st.members === null) continue;
+      if (isWindow(id) ? rep(st, id) !== null : here[id]) {
         if (has(absent, id)) { delete absent[id]; changed = true; }
         continue;
       }
@@ -294,6 +345,8 @@
       p.sub = keepMap(st.sub, keep);
       p.seen = keepMap(st.seen, keep);
       p.exp = keepMap(st.exp, function (k) { return has(SECTIONS, k) || keep(k); });
+      p.shown = keepMap(st.shown, function (key) { return keep(key) && keep(st.shown[key]); });
+      p.follow = keepMap(st.follow, function (key) { return has(p.shown, key); });
       if (st.active && gone[st.active]) {
         var left = order({ tabs: p.tabs, pinned: p.pinned });
         p.active = left.length ? left[0] : null;
@@ -309,19 +362,19 @@
 
   // valid, distinct ids (within `only` when given); stops at LIST_MAX + 1, one more than open/fav can make, which is
   // how load knows a stored list was longer
-  function idList(v, only) {
+  function idList(v, valid, only) {
     var list = arr(v), out = [], got = map(), allowed = null, i, id;
     if (only) { allowed = map(); only.forEach(function (x) { allowed[x] = true; }); }
     for (i = 0; i < list.length && out.length <= LIST_MAX; i++) {
       id = list[i];
-      if (okId(id) && !got[id] && (!allowed || allowed[id])) { got[id] = true; out.push(id); }
+      if (valid(id) && !got[id] && (!allowed || allowed[id])) { got[id] = true; out.push(id); }
     }
     return out;
   }
-  function idMap(v, ok) {
+  function idMap(v, ok, valid) {
     var out = map(), m = obj(v);
     if (!m) return out;
-    for (var k in m) if (has(m, k) && okId(k) && ok(m[k])) out[k] = m[k];
+    for (var k in m) if (has(m, k) && (valid || okId)(k) && ok(m[k])) out[k] = m[k];
     return out;
   }
   function stamp(v) { return typeof v === 'number' && isFinite(v) && v >= 0; }
@@ -336,19 +389,28 @@
       if (!st.prefsError && !obj(raw)) { st.prefsError = 'shape'; raw = null; }
     }
     if (raw) {
+      st.awaitingMembers = true; // Restored records await an actual membership publication, including an empty one.
       if (typeof raw.sideOpen === 'boolean') st.sideOpen = raw.sideOpen;
       if (typeof raw.sideWidth === 'number' && isFinite(raw.sideWidth)) st.sideWidth = clampW(raw.sideWidth);
       if (VIEWS.indexOf(raw.view) >= 0) st.view = raw.view;
       if (keys(FILTERS).indexOf(raw.filter) >= 0) st.filter = raw.filter;
-      var favList = idList(raw.favs), tabList = idList(raw.tabs);
+      var legacyId = function (v) { return okId(v) && !isWindow(v); };
+      var valid = raw.tabSchema === 2 ? okBoardKey : legacyId;
+      var sidValid = raw.tabSchema === 2 ? okId : legacyId;
+      var favList = idList(raw.favs, sidValid), tabList = idList(raw.tabs, valid);
       if (favList.length > LIST_MAX || tabList.length > LIST_MAX) st.prefsError = 'trimmed'; // longer than open/fav can make
       st.favs = favList.slice(0, LIST_MAX);
       st.tabs = tabList.slice(0, LIST_MAX);
-      st.pinned = idList(raw.pinned, st.tabs);
-      st.active = okId(raw.active) && st.tabs.indexOf(raw.active) >= 0 ? raw.active : null;
-      st.sub = idMap(raw.sub, function (v) { return SUBS.indexOf(v) >= 0; });
-      st.seen = idMap(raw.seen, stamp);
-      st.absent = idMap(raw.absent, stamp);
+      st.pinned = idList(raw.pinned, valid, st.tabs);
+      st.active = valid(raw.active) && st.tabs.indexOf(raw.active) >= 0 ? raw.active : null;
+      st.sub = idMap(raw.sub, function (v) { return SUBS.indexOf(v) >= 0; }, sidValid);
+      st.seen = idMap(raw.seen, stamp, sidValid);
+      st.absent = idMap(raw.absent, stamp, valid);
+      if (raw.tabSchema === 2) {
+        var windowKey = function (v) { return isWindow(v) && okBoardKey(v); };
+        st.shown = idMap(raw.shown, okId, windowKey);
+        st.follow = idMap(raw.follow, function (v) { return v === true; }, windowKey);
+      }
     }
     return reconcile(st, known, now);
   }
@@ -410,7 +472,8 @@
   function serialize(st) {
     return JSON.stringify({
       sideOpen: st.sideOpen, sideWidth: st.sideWidth, view: st.view, filter: st.filter, favs: st.favs, tabs: st.tabs,
-      pinned: st.pinned, active: st.active, sub: st.sub, seen: st.seen, absent: st.absent
+      pinned: st.pinned, active: st.active, sub: st.sub, seen: st.seen, absent: st.absent,
+      tabSchema: 2, shown: st.shown, follow: st.follow
     });
   }
   // storage: undefined = the page's own localStorage; reading that property can itself throw (blocked storage)
@@ -418,7 +481,8 @@
     try {
       var s = storage !== undefined ? storage : g.localStorage;
       if (!s) return null;
-      var v = s.getItem(KEY);
+      var v = s.getItem(KEY_V2);
+      if (typeof v !== 'string') v = s.getItem(KEY);
       return typeof v === 'string' ? v : null;
     } catch (e) {
       warnOnce('restore', '저장된 화면 설정을 읽을 수 없어 기본값으로 시작합니다', e);
@@ -429,7 +493,7 @@
     try {
       var s = storage !== undefined ? storage : g.localStorage;
       if (!s) return false;
-      s.setItem(KEY, serialize(st));
+      s.setItem(KEY_V2, serialize(st));
       return true;
     } catch (e) {
       warnOnce('persist', '화면 설정을 저장할 수 없음 - 새로 열면 기본값으로 돌아갑니다', e);
@@ -1008,7 +1072,7 @@
   }
 
   g.BriefShell = {
-    KEY: KEY, MIN_W: MIN_W, MAX_W: MAX_W, DEF_W: DEF_W, KEEP_MS: KEEP_MS, LIST_MAX: LIST_MAX, GONE: GONE,
+    KEY: KEY, KEY_V2: KEY_V2, MIN_W: MIN_W, MAX_W: MAX_W, DEF_W: DEF_W, KEEP_MS: KEEP_MS, LIST_MAX: LIST_MAX, GONE: GONE,
     defaults: defaults, reduce: reduce, order: order, keyOf: keyOf, shownOf: shownOf, serialize: serialize, restore: restore, persist: persist,
     tabOf: tabOf, inbox: inbox, badge: badge,
     rail: rail, side: side, tabs: tabs, sideFrame: sideFrame, skeleton: skeleton,

@@ -45,7 +45,7 @@ test('polish: separator keys resize, clamp, update aria and persist through the 
   assert.equal(e.page.state.ui.sideWidth, 480);
   press('Home'); press('ArrowLeft');
   assert.equal(e.page.state.ui.sideWidth, 200);
-  assert.equal(JSON.parse(e.ctx.localStorage.getItem('omo-briefing.ui.v1')).sideWidth, 200);
+  assert.equal(JSON.parse(e.ctx.localStorage.getItem('omo-briefing.ui.v2')).sideWidth, 200);
   assert.equal(e.document.activeElement, rz);
   assert.deepEqual(e.errors, []);
 });
