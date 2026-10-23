@@ -142,28 +142,18 @@
                                           ],
                                 "modesCite":  "PS:5935-5936"
                             },
-                 "lane":  {
-                              "component":  "ModelProfileSelector / ModelProfileLiteral",
-                              "cite":  "PS:4222-4241"
-                          },
-                 "main":  {
-                              "component":  "MainProviderCombo / MainModelCombo / MainThinkingCombo",
-                              "cite":  "PS:4243-4289",
-                              "save":  "Save-MainModelOverride",
-                              "saveCite":  "PS:7475, 7494"
-                          },
                  "summarizer":  {
                                     "component":  "SummarizerProviderCombo / SummarizerModelCombo",
                                     "cite":  "PS:4292-4340",
                                     "firstItem":  "원본 기본 컴팩션",
                                     "firstItemCite":  "PS:4390"
                                 },
-                 "apply":  {
-                               "cardCite":  "PS:7143-7205",
-                               "detailCite":  "PS:4200-4211, 7517-7545",
-                               "pendingTitleCite":  "PS:4529-4535",
-                               "keysCite":  "PS:7382-7395"
-                           }
+                 "main":  {
+                              "component":  "MainProviderCombo / MainModelCombo / MainThinkingCombo",
+                              "cite":  "PS:4243-4289",
+                              "save":  "Save-MainModelOverride",
+                              "saveCite":  "PS:7475, 7494"
+                          }
              },
     "tasks":  {
                   "role":  [
@@ -179,7 +169,7 @@
                                    "scrolls":  1
                                },
                                {
-                                   "control":  "role:agents-explore:service",
+                                   "control":  "role:agents/explore:service",
                                    "region":  "roles",
                                    "box":  {
                                                "x":  8,
@@ -190,7 +180,7 @@
                                    "scrolls":  2
                                },
                                {
-                                   "control":  "role:agents-explore:model",
+                                   "control":  "role:agents/explore:model",
                                    "region":  "roles",
                                    "box":  {
                                                "x":  193,
@@ -201,7 +191,7 @@
                                    "scrolls":  2
                                },
                                {
-                                   "control":  "role:agents-explore:effort",
+                                   "control":  "role:agents/explore:effort",
                                    "region":  "roles",
                                    "box":  {
                                                "x":  378,

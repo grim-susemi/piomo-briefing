@@ -194,25 +194,29 @@ try {
     )
 
     # Inspect control bounds for steps
-    $roleRow = $script:RoutingContainer.Controls['RoutingRow-agents-explore']
-    $sCombo = $roleRow.Controls['RoutingService-agents-explore']
-    $mCombo = $roleRow.Controls['RoutingModel-agents-explore']
-    $eCombo = $roleRow.Controls['RoutingReasoning-agents-explore']
+    $roleSection = 'agents'
+    $roleName = 'explore'
+    $roleWinFormsKey = "$roleSection-$roleName"
+
+    $roleRow = $script:RoutingContainer.Controls["RoutingRow-$roleWinFormsKey"]
+    $sCombo = $roleRow.Controls["RoutingService-$roleWinFormsKey"]
+    $mCombo = $roleRow.Controls["RoutingModel-$roleWinFormsKey"]
+    $eCombo = $roleRow.Controls["RoutingReasoning-$roleWinFormsKey"]
 
     $stepRoleS = [ordered]@{
-        control = 'role:agents-explore:service'
+        control = "role:$($roleSection)/$($roleName):service"
         region = 'roles'
         box = [ordered]@{ x = $sCombo.Left; y = ($roleRow.Top + $sCombo.Top); w = $sCombo.Width; h = $sCombo.Height }
         scrolls = [int][Math]::Ceiling([Math]::Max(0, ($roleRow.Bottom - $script:RoutingContainer.Height)) / [double]$script:RoutingContainer.Height)
     }
     $stepRoleM = [ordered]@{
-        control = 'role:agents-explore:model'
+        control = "role:$($roleSection)/$($roleName):model"
         region = 'roles'
         box = [ordered]@{ x = $mCombo.Left; y = ($roleRow.Top + $mCombo.Top); w = $mCombo.Width; h = $mCombo.Height }
         scrolls = $stepRoleS.scrolls
     }
     $stepRoleE = [ordered]@{
-        control = 'role:agents-explore:effort'
+        control = "role:$($roleSection)/$($roleName):effort"
         region = 'roles'
         box = [ordered]@{ x = $eCombo.Left; y = ($roleRow.Top + $eCombo.Top); w = $eCombo.Width; h = $eCombo.Height }
         scrolls = $stepRoleS.scrolls
@@ -417,27 +421,17 @@ try {
                 modes = @('quick 공유 (기본)', '직접 선택')
                 modesCite = 'PS:5935-5936'
             }
-            lane = [ordered]@{
-                component = 'ModelProfileSelector / ModelProfileLiteral'
-                cite = 'PS:4222-4241'
-            }
-            main = [ordered]@{
-                component = 'MainProviderCombo / MainModelCombo / MainThinkingCombo'
-                cite = 'PS:4243-4289'
-                save = 'Save-MainModelOverride'
-                saveCite = 'PS:7475, 7494'
-            }
             summarizer = [ordered]@{
                 component = 'SummarizerProviderCombo / SummarizerModelCombo'
                 cite = 'PS:4292-4340'
                 firstItem = '원본 기본 컴팩션'
                 firstItemCite = 'PS:4390'
             }
-            apply = [ordered]@{
-                cardCite = 'PS:7143-7205'
-                detailCite = 'PS:4200-4211, 7517-7545'
-                pendingTitleCite = 'PS:4529-4535'
-                keysCite = 'PS:7382-7395'
+            main = [ordered]@{
+                component = 'MainProviderCombo / MainModelCombo / MainThinkingCombo'
+                cite = 'PS:4243-4289'
+                save = 'Save-MainModelOverride'
+                saveCite = 'PS:7475, 7494'
             }
         }
         tasks = [ordered]@{
@@ -461,10 +455,16 @@ try {
         }
     }
 
-    # Save flow-map.winforms.json to stage and outDir
+    # Save flow-map.winforms.json to stage, repo and outDir
     $flowMapJson = $flowMap | ConvertTo-Json -Depth 10
     $stagePath = 'C:/Users/USER/orca/projects/기타 작업/.omo/evidence/switcher-flow-restore/task-3/stage/test/fixtures/profiles/flow-map.winforms.json'
-    [IO.File]::WriteAllText($stagePath, $flowMapJson, (New-Object Text.UTF8Encoding($false)))
+    if (Test-Path -LiteralPath (Split-Path $stagePath -Parent)) {
+        [IO.File]::WriteAllText($stagePath, $flowMapJson, (New-Object Text.UTF8Encoding($false)))
+    }
+    $repoPath = Join-Path $PSScriptRoot 'flow-map.winforms.json'
+    if (Test-Path -LiteralPath $repoPath) {
+        [IO.File]::WriteAllText($repoPath, $flowMapJson, (New-Object Text.UTF8Encoding($false)))
+    }
     if ($EvidenceDir -ne 'C:/Users/USER/orca/projects/기타 작업/.omo/evidence/switcher-flow-restore/task-3') {
         [IO.File]::WriteAllText((Join-Path $EvidenceDir 'flow-map.winforms.json'), $flowMapJson, (New-Object Text.UTF8Encoding($false)))
     }

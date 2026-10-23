@@ -13,6 +13,10 @@ const REQUIRED_SECTIONS = [
   'categories:quick-general', 'categories:deep', 'categories:specialist', 'lane', 'main', 'summarizer', 'apply'
 ];
 
+const EXPECTED_ROW_KEYS = ['role', 'memory', 'summarizer', 'main'];
+
+const CONTROL_ID_REGEX = /^(?:card:[a-z0-9_-]+|apply:card:[a-z0-9_-]+|apply:detail|role:[a-z0-9_-]+\/[a-z0-9_-]+:(?:service|model|effort)|memory:(?:kibitzer|reflection):(?:mode|service|model|effort))$/;
+
 function validateFlowMap(map, sourceName) {
   assert.equal(map.schema, 'flow-map/1', `${sourceName}: schema must be flow-map/1`);
   assert.ok(map.source === 'winforms' || map.source === 'board', `${sourceName}: source must be winforms or board`);
@@ -50,6 +54,12 @@ function validateFlowMap(map, sourceName) {
 
   // rows validation
   assert.ok(map.rows, `${sourceName}: rows must exist`);
+  const actualRowKeys = Object.keys(map.rows);
+  assert.deepEqual(
+    actualRowKeys.slice().sort(),
+    EXPECTED_ROW_KEYS.slice().sort(),
+    `${sourceName}: rows keys must be exactly [${EXPECTED_ROW_KEYS.join(', ')}], got [${actualRowKeys.join(', ')}]`
+  );
   assert.ok(map.rows.role, `${sourceName}: rows.role must exist`);
   assert.ok(map.rows.memory, `${sourceName}: rows.memory must exist`);
   assert.ok(map.rows.summarizer, `${sourceName}: rows.summarizer must exist`);
@@ -64,6 +74,11 @@ function validateFlowMap(map, sourceName) {
   for (const taskName of ['role', 'profile', 'memory']) {
     for (const step of map.tasks[taskName]) {
       assert.equal(typeof step.control, 'string', `${sourceName} ${taskName}: step control must be string`);
+      assert.match(
+        step.control,
+        CONTROL_ID_REGEX,
+        `${sourceName} ${taskName}: step control '${step.control}' must match plan control grammar`
+      );
       assert.equal(typeof step.region, 'string', `${sourceName} ${taskName}: step region must be string`);
       assert.ok(step.box, `${sourceName} ${taskName}: step box must exist`);
       assert.equal(typeof step.box.x, 'number');
@@ -75,16 +90,41 @@ function validateFlowMap(map, sourceName) {
   }
 }
 
-test('flow-map.winforms.json conforms to flow-map/1 schema', () => {
-  // Check either in stage or repo
+function loadFlowMap() {
   let p = join(process.cwd(), 'test/fixtures/profiles/flow-map.winforms.json');
   if (!existsSync(p)) {
-    // Check evidence stage
     p = 'C:/Users/USER/orca/projects/기타 작업/.omo/evidence/switcher-flow-restore/task-3/stage/test/fixtures/profiles/flow-map.winforms.json';
   }
   assert.ok(existsSync(p), `flow-map.winforms.json must exist at ${p}`);
   const raw = readFileSync(p, 'utf8');
-  const map = JSON.parse(raw);
+  return { map: JSON.parse(raw), path: p };
+}
+
+test('flow-map.winforms.json has exact rows keys [role, memory, summarizer, main]', () => {
+  const { map } = loadFlowMap();
+  const actualRowKeys = Object.keys(map.rows);
+  assert.deepEqual(
+    actualRowKeys.slice().sort(),
+    EXPECTED_ROW_KEYS.slice().sort(),
+    `rows keys must be exactly [${EXPECTED_ROW_KEYS.join(', ')}], got [${actualRowKeys.join(', ')}]`
+  );
+});
+
+test('flow-map.winforms.json task step control IDs match plan grammar', () => {
+  const { map } = loadFlowMap();
+  for (const taskName of ['role', 'profile', 'memory']) {
+    for (const step of map.tasks[taskName]) {
+      assert.match(
+        step.control,
+        CONTROL_ID_REGEX,
+        `${taskName} step control '${step.control}' must match plan grammar`
+      );
+    }
+  }
+});
+
+test('flow-map.winforms.json conforms to flow-map/1 schema', () => {
+  const { map } = loadFlowMap();
   validateFlowMap(map, 'flow-map.winforms.json');
 });
 
