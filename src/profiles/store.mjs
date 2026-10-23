@@ -807,6 +807,42 @@ export function openProfilesStore(options = {}) {
       effective: resolveMainDefaults(profile, sidecar),
       override: mainOverride,
     } : { effective: null, override: null };
+    const buildProfileDetail = (pMeta) => {
+      const pProfile = getProfile(pMeta.key);
+      const pLayer = layerOf(config, pProfile);
+      const pRows = routingRowsFor(inventoryRaw, pLayer).map((row) => {
+        const entry = pLayer?.[row.section]?.[row.role];
+        const model = isPlainObject(entry) ? entry.model ?? null : null;
+        const reasoning = isPlainObject(entry) ? entry.reasoning ?? entry.variant ?? null : null;
+        const canonical = model && catalog?.[model]?.model ? catalog[model].model : model;
+        const status = checkModelServed(canonical);
+        const outRow = { ...row, model, reasoning };
+        if (status.unsupported) {
+          outRow.unsupported = true;
+          outRow.unsupportedReason = status.reason;
+          outRow.unsupportedHome = status.home;
+        }
+        return outRow;
+      });
+      const pRec = attachRecommendations(pRows, catalog, pLayer, manifestRead.manifest);
+      const pMainOverride = pProfile ? readMainOverride(sidecar, pProfile.omoProfile) : null;
+      const pMain = pProfile ? {
+        effective: resolveMainDefaults(pProfile, sidecar),
+        override: pMainOverride,
+      } : { effective: null, override: null };
+      const pModelProfile = settings ? getModelProfileSettings(config ?? {}, pProfile?.omoProfile ?? '') : null;
+      return {
+        routing: { rows: pRows, layer: pLayer, recommendation: pRec },
+        main: pMain,
+        modelProfile: pModelProfile,
+      };
+    };
+
+    const details = {};
+    for (const item of PROFILE_META) {
+      details[item.key] = buildProfileDetail(item);
+    }
+
     const comments = Boolean(configFile?.comments);
     const readOnly = inventoryView.stale || comments || !configFile?.exists || !settingsFile?.exists
       || Boolean(configFile?.error) || Boolean(settingsFile?.error);
@@ -854,6 +890,7 @@ export function openProfilesStore(options = {}) {
         current: profile?.key === item.key,
       })),
       routing: { rows, layer, recommendation },
+      details,
       guide,
       main,
       modelProfile: settings ? getModelProfileSettings(config ?? {}, profile?.omoProfile ?? '') : null,
@@ -1370,7 +1407,11 @@ export function openProfilesStore(options = {}) {
       }
     }
 
-    for (const change of body.changes) {
+    const selectProfileChanges = body.changes.filter((c) => c.kind === 'selectProfile');
+    const otherChanges = body.changes.filter((c) => c.kind !== 'selectProfile');
+    const orderedChanges = [...otherChanges, ...selectProfileChanges];
+
+    for (const change of orderedChanges) {
       const result = applyChange(context, change);
       if (!result.ok) return result;
     }

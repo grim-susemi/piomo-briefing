@@ -1039,12 +1039,13 @@
     var fetchFn = opt.fetch;
     var tokenFn = opt.token;
     var notify = typeof opt.onChange === 'function' ? opt.onChange : function () {};
-    var s = { view: null, pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false };
+    var s = { view: null, shown: '', pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false };
     var seq = 0;
 
     function snapshot() {
       return {
-        view: s.view, pending: s.pending.slice(), draft: copyMap(s.draft),
+        view: s.view, shown: s.shown || str(obj(s.view && s.view.activeProfile) && s.view.activeProfile.key),
+        pending: s.pending.slice(), draft: copyMap(s.draft),
         memoryErrors: copyMap(s.memoryErrors), memorySaved: copyMap(s.memorySaved),
         preview: s.preview, conflict: s.conflict, error: s.error, errorKind: s.errorKind,
         status: s.status, result: s.result, loading: s.loading, busy: s.busy, confirmClear: s.confirmClear
@@ -1099,6 +1100,7 @@
           if (mine !== seq) return snapshot();
           if (!obj(json)) return settleFailure({ message: 'invalid-json' });
           s.view = obj(json);
+          if (!s.shown) s.shown = str(obj(s.view && s.view.activeProfile) && s.view.activeProfile.key);
           s.loading = false;
           s.error = '';
           s.errorKind = '';
@@ -1111,8 +1113,16 @@
       }, settleFailure);
     }
 
+    function isGlobalKind(kind) {
+      return kind === 'setSummarizer' || kind === 'setMemoryRow' || kind === 'setAgentLane' || kind === 'setAgentPin' || kind === 'resetAgentMemory' || kind === 'migrateReviewerKeys';
+    }
     function sameTarget(a, b) {
       if (!obj(a) || !obj(b) || a.kind !== b.kind) return false;
+      if (!isGlobalKind(a.kind)) {
+        var aProf = str(a.profileKey || a.omoProfile);
+        var bProf = str(b.profileKey || b.omoProfile);
+        if (aProf !== bProf) return false;
+      }
       if (a.kind === 'setRoute') return a.section === b.section && a.role === b.role;
       if (a.kind === 'setAgentLane' || a.kind === 'setAgentPin' || a.kind === 'resetAgentMemory') return a.agentId === b.agentId;
       if (a.kind === 'setMemoryRow') return (str(a.row) || 'kibitzer') === (str(b.row) || 'kibitzer');
@@ -1131,12 +1141,12 @@
         if (agentKind(change.kind) && agentKind(c.kind) && c.agentId === change.agentId) return false;
         return !sameTarget(c, change);
       });
-      if (change.kind === 'selectProfile') next.unshift(change); else next.push(change);
       if (change.kind === 'setMemoryRow') {
         var mRow = str(change.row) || 'kibitzer';
         delete s.memoryErrors[mRow];
         delete s.memorySaved[mRow];
       }
+      next.push(change);
       s.pending = next;
       s.preview = null;
       s.result = null;
@@ -1147,11 +1157,24 @@
       changed();
       return snapshot();
     }
+    function draftKeyOfChange(c) {
+      if (!obj(c)) return null;
+      if (c.kind === 'setRoute') return 'route:' + str(c.section) + '/' + str(c.role);
+      if (c.kind === 'setAgentLane' || c.kind === 'setAgentPin') return 'agent:' + str(c.agentId);
+      if (c.kind === 'setMain') return 'main';
+      if (c.kind === 'setModelProfile') return 'lane';
+      if (c.kind === 'setSummarizer') return 'summarizer';
+      if (c.kind === 'setMemoryRow') return 'memory:' + (str(c.row) || 'kibitzer');
+      return null;
+    }
     function drop(index) {
       if (s.busy) return snapshot();
       var i = typeof index === 'string' && /^\d+$/.test(index) ? Number(index) : num(index);
       if (i === null || i < 0 || i >= s.pending.length) return snapshot();
+      var removed = s.pending[i];
       s.pending = s.pending.slice(0, i).concat(s.pending.slice(i + 1));
+      var dKey = draftKeyOfChange(removed);
+      if (dKey && has(s.draft, dKey)) delete s.draft[dKey];
       s.preview = null; s.result = null;
       if (!s.conflict) { s.error = ''; s.status = ''; }
       s.confirmClear = false;
@@ -1215,10 +1238,34 @@
       return snapshot();
     }
 
+    function isGlobalKind(kind) {
+      return kind === 'setSummarizer' || kind === 'setMemoryRow' || kind === 'setAgentLane' || kind === 'setAgentPin' || kind === 'resetAgentMemory' || kind === 'migrateReviewerKeys';
+    }
+    function changesForProfile(targetProfileKey) {
+      var activeKey = str(obj(s.view && s.view.activeProfile) && s.view.activeProfile.key);
+      var profKey = str(targetProfileKey || s.shown || activeKey);
+      var list = [];
+      s.pending.forEach(function (c) {
+        if (!obj(c)) return;
+        var cProf = str(c.profileKey || c.omoProfile);
+        if (isGlobalKind(c.kind) || !cProf || cProf === profKey) {
+          list.push(c);
+        }
+      });
+      if (profKey) {
+        list.push({ kind: 'selectProfile', profileKey: profKey });
+      }
+      return list;
+    }
     function send(action, changesOverride, options) {
       var opt = obj(options) || {};
       var reapply = opt.reapply === true;
-      var list = Array.isArray(changesOverride) ? changesOverride.slice() : s.pending.slice();
+      var applyProfileKey = opt.profileKey || s.shown || (obj(s.view && s.view.activeProfile) && s.view.activeProfile.key);
+      var list = Array.isArray(changesOverride)
+        ? changesOverride.slice()
+        : action === 'apply' || action === 'preview'
+          ? changesForProfile(applyProfileKey)
+          : s.pending.slice();
       if (s.busy) return Promise.resolve(snapshot());
       // A 409 makes the loaded roster revision stale: neither preview nor apply may post it again
       // until a successful state read. The latch survives add/drop/removeKind/clear; only load() lifts it.
@@ -1269,7 +1316,11 @@
           });
           s.memorySaved = savedRows;
           s.memoryErrors = map();
-          if (!reapply) { s.pending = []; s.draft = map(); }
+          if (!reapply) {
+            var sentSet = new Set(list);
+            s.pending = s.pending.filter(function (c) { return !sentSet.has(c); });
+            s.draft = map();
+          }
           s.status = reapply ? '다시 적용했어요' : '적용했어요';
           changed();
           return load().then(function () { return snapshot(); });
@@ -1317,8 +1368,14 @@
       touch: touch,
       removeKind: removeKind,
       removeMemoryRow: removeMemoryRow,
-      preview: function () { return send('preview'); },
-      apply: function () { return send('apply'); },
+      show: function (profileKey) {
+        if (s.busy) return snapshot();
+        s.shown = str(profileKey);
+        changed();
+        return snapshot();
+      },
+      preview: function (profileKey) { return send('preview', null, { profileKey: profileKey }); },
+      apply: function (profileKey) { return send('apply', null, { profileKey: profileKey }); },
       reapply: function () {
         if (s.busy || s.conflict) return Promise.resolve(snapshot());
         var journal = obj(s.view && s.view.applyJournal);
@@ -1379,7 +1436,7 @@
         if (!el && doc && typeof doc.querySelector === 'function') el = doc.querySelector('#' + id);
         if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'start' });
       } else if (act === 'select-profile') {
-        c.add({ kind: 'selectProfile', profileKey: t.getAttribute('data-profile') });
+        c.show(t.getAttribute('data-profile'));
       } else if (act === 'reset-memory') {
         c.add({ kind: 'resetAgentMemory', agentId: t.getAttribute('data-agent') });
       } else if (act === 'preview') {

@@ -485,7 +485,10 @@ test('controller: load -> preview -> apply -> reload, with the exact POST body a
   const body = JSON.parse(calls[1].opts.body);
   assert.deepEqual(Object.keys(body).sort(), ['action', 'changes', 'expected', 'rosterRevision']);
   assert.equal(body.action, 'preview');
-  assert.deepEqual(body.changes, [{ kind: 'setRoute', section: 'agents', role: 'explore', provider: 'anthropic', model: 'anthropic/claude-opus-5-5', thinking: 'medium' }]);
+  assert.deepEqual(body.changes, [
+    { kind: 'setRoute', section: 'agents', role: 'explore', provider: 'anthropic', model: 'anthropic/claude-opus-5-5', thinking: 'medium' },
+    { kind: 'selectProfile', profileKey: 'gpt-kimi-deepseek' },
+  ]);
   assert.deepEqual(body.expected, STATE.targets);
   assert.equal(body.rosterRevision, 3);
   assert.equal(preview.preview.diffs[0].file, 'omo.jsonc');
@@ -633,7 +636,7 @@ test('page wiring: Reflection and Kibitzer memory edits stay separate through th
   const post = e.fetches[e.fetches.length - 1];
   assert.equal(post.url, '/profiles');
   const changes = JSON.parse(post.opts.body).changes;
-  assert.deepEqual(changes.map((c) => c.row || 'kibitzer').sort(), ['kibitzer', 'reflection']);
+  assert.deepEqual(changes.filter((c) => c.kind !== 'selectProfile').map((c) => c.row || 'kibitzer').sort(), ['kibitzer', 'reflection']);
   assert.equal(changes.find((c) => c.row === 'kibitzer').model, 'anthropic/claude-opus-5-5');
   assert.equal(changes.find((c) => c.row === 'reflection').model, 'chatgpt-subscription/gpt-6.1-sol');
 });
@@ -1260,4 +1263,127 @@ test('summarizer: provider then model; 원본 기본 컴팩션 clears compaction
     { kind: 'setSummarizer', modelId: 'anthropic/claude-opus-5-5' }
   );
 });
+
+test('per-profile: a card click shows that profile and adds no pending', async () => {
+  const P = load();
+  const c = P.createController({ fetch: async () => ({ status: 200, json: async () => STATE }), token: 't' });
+  await c.load();
+  assert.equal(c.snapshot().shown, 'gpt-kimi-deepseek');
+  assert.equal(c.snapshot().pending.length, 0);
+
+  c.show('experimental-custom');
+  assert.equal(c.snapshot().shown, 'experimental-custom');
+  assert.equal(c.snapshot().pending.length, 0, 'showing another profile must add no pending changes');
+});
+
+test("per-profile: edit A, show B, edit B, apply B writes B's edits and the shared ones; A's stay pending", async () => {
+  const P = load();
+  let appliedBody = null;
+  const c = P.createController({
+    fetch: (url, opts) => {
+      if (opts && opts.body) appliedBody = JSON.parse(opts.body);
+      return Promise.resolve({
+        status: 200,
+        json: async () => (opts && opts.body ? { ok: true, action: 'apply', backups: [], writes: [] } : STATE),
+      });
+    },
+    token: 't',
+  });
+  await c.load();
+
+  // Edit in profile A (glm-deepseek)
+  c.add({ kind: 'setRoute', profileKey: 'glm-deepseek', section: 'agents', role: 'explore', provider: 'openai-opencodex', model: 'openai-opencodex/gpt-5.6-sol', thinking: 'high' });
+  // Shared global edit
+  c.add({ kind: 'setSummarizer', modelId: 'anthropic/claude-opus-5-5' });
+  assert.equal(c.snapshot().pending.length, 2);
+
+  // Show profile B and edit in B (experimental-custom)
+  c.show('experimental-custom');
+  c.add({ kind: 'setRoute', profileKey: 'experimental-custom', section: 'agents', role: 'explore', provider: 'opencode-go', model: 'opencode-go/muse-spark-1.3-contributor', thinking: 'medium' });
+  assert.equal(c.snapshot().pending.length, 3);
+
+  // Apply profile B
+  await c.apply('experimental-custom');
+  assert.ok(appliedBody, 'apply should have sent request');
+  const sentChanges = appliedBody.changes;
+
+  // Submitted changes must contain B's edit, global summarizer, and selectProfile for B
+  assert.ok(sentChanges.some((x) => x.kind === 'setRoute' && x.profileKey === 'experimental-custom'));
+  assert.ok(sentChanges.some((x) => x.kind === 'setSummarizer'));
+  assert.ok(sentChanges.some((x) => x.kind === 'selectProfile' && x.profileKey === 'experimental-custom'));
+  // Must NOT contain A's edit
+  assert.ok(!sentChanges.some((x) => x.kind === 'setRoute' && x.profileKey === 'glm-deepseek'));
+
+  // After apply success: A's edits stay pending!
+  const remainingPending = c.snapshot().pending;
+  assert.equal(remainingPending.length, 1);
+  assert.equal(remainingPending[0].profileKey, 'glm-deepseek');
+});
+
+test('order: a category edit plus activation in one apply leaves the active scope equal to the edited layer', async (t) => {
+  const { openProfilesStore } = await import('../src/profiles/store.mjs');
+  const os = await import('node:os');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piomo-order-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const primary = path.join(root, 'primary');
+  const stable = path.join(root, 'stable');
+  fs.mkdirSync(path.join(primary, 'agent'), { recursive: true });
+  fs.mkdirSync(path.join(stable, 'agent'), { recursive: true });
+  const goldenDir = path.join(ROOT, 'test', 'fixtures', 'profiles', 'goldens', 'apply-gpt-kimi-deepseek', 'files');
+  fs.writeFileSync(path.join(primary, 'omo.jsonc'), fs.readFileSync(path.join(goldenDir, 'primary/omo.jsonc.json'), 'utf8'));
+  fs.writeFileSync(path.join(primary, 'agent', 'settings.json'), fs.readFileSync(path.join(goldenDir, 'primary/settings.json.json'), 'utf8'));
+  fs.writeFileSync(path.join(primary, 'native-profile-selection.json'), JSON.stringify({ key: 'gpt-kimi-deepseek', profile: 'native-gpt-kimi-deepseek', appliedAt: 'seed' }, null, 2));
+  fs.writeFileSync(path.join(primary, 'agent', 'native-profile-selection.json'), JSON.stringify({ key: 'gpt-kimi-deepseek', profile: 'native-gpt-kimi-deepseek', appliedAt: 'seed' }, null, 2));
+  fs.writeFileSync(path.join(stable, 'omo.jsonc'), fs.readFileSync(path.join(goldenDir, 'stable/omo.jsonc.json'), 'utf8'));
+
+  const store = openProfilesStore({
+    roots: { primaryHome: primary, stableHome: stable, mirrorHomes: [] },
+    now: () => 1700000000000,
+  });
+  const st = store.state();
+  assert.ok(st.details, 'store.state() must expose details');
+
+  // Apply a category route change on a profile together with selecting that profile
+  const targetProfile = 'experimental-custom';
+  const res = await store.apply({
+    action: 'apply',
+    rosterRevision: st.roster.revision,
+    expected: st.targets,
+    changes: [
+      {
+        kind: 'setRoute',
+        profileKey: 'native-experimental-custom',
+        section: 'categories',
+        role: 'deep-high',
+        provider: 'openai-opencodex',
+        model: 'openai-opencodex/gpt-5.6-sol',
+        thinking: 'high',
+      },
+      {
+        kind: 'selectProfile',
+        profileKey: targetProfile,
+      },
+    ],
+  });
+  assert.equal(res.ok, true, 'apply must succeed');
+  const fresh = store.state();
+  assert.equal(fresh.activeProfile.key, targetProfile);
+  const activeScopeCategory = fresh.routing.layer.categories['deep-high'];
+  const targetLayerCategory = fresh.details[targetProfile].routing.layer.categories['deep-high'];
+  assert.deepEqual(activeScopeCategory, targetLayerCategory, 'active scope must equal the edited layer after activation');
+});
+
+test('drop: removes the draft too', () => {
+  const P = load();
+  const c = P.createController({ fetch: async () => ({ status: 200, json: async () => STATE }), token: 't' });
+  c.setDraft('route:agents/explore', { provider: 'anthropic', model: 'anthropic/claude-opus-5-5', thinking: 'medium' });
+  c.add({ kind: 'setRoute', section: 'agents', role: 'explore', provider: 'anthropic', model: 'anthropic/claude-opus-5-5', thinking: 'medium' });
+  assert.ok(c.snapshot().draft['route:agents/explore']);
+  assert.equal(c.snapshot().pending.length, 1);
+
+  c.drop(0);
+  assert.equal(c.snapshot().pending.length, 0);
+  assert.equal(c.snapshot().draft['route:agents/explore'], undefined, 'drop must remove draft too');
+});
+
 
