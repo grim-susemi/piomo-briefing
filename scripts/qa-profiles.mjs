@@ -189,6 +189,10 @@ function seedHomes(root) {
   write(path.join(primary, 'agent', 'native-profile-selection.json'), { key: 'gpt-kimi-deepseek', profile: 'native-gpt-kimi-deepseek' });
   write(path.join(stable, 'omo.jsonc'), JSON.parse(fs.readFileSync(path.join(GOLDEN, 'stable/omo.jsonc.json'), 'utf8')));
   fs.writeFileSync(path.join(stable, 'agent', 'settings.json'), '{"packages":["stable"]}');
+  const regPrimary = path.join(ROOT, 'test/fixtures/profiles/registry/primary/agent/models.json');
+  const regStable = path.join(ROOT, 'test/fixtures/profiles/registry/stable/agent/models.json');
+  if (fs.existsSync(regPrimary)) fs.copyFileSync(regPrimary, path.join(primary, 'agent', 'models.json'));
+  if (fs.existsSync(regStable)) fs.copyFileSync(regStable, path.join(stable, 'agent', 'models.json'));
   // The board only reads the extension-owned memory sidecars; one valid file makes the
   // remembered-model row visible in the real state-to-render path.
   const memoryDir = path.join(stable, 'agent', 'primary-agents', 'memory');

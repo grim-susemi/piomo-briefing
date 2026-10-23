@@ -36,9 +36,11 @@ import {
   syncStable500RoleModels,
 } from './merge.mjs';
 import {
-  CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE, PROFILE_META, ROLE_INVENTORY, buildRoutingRows,
-  expandLayerRoles, getMemoryReasoning, getProfile, newRouteRow,
+  CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE, ENGINE_SURFACED_MODELS, PROFILE_META, ROLE_INVENTORY, buildRoutingRows,
+  expandLayerRoles, getMemoryReasoning, getModelIdWithoutProvider, getProfile, getProviderChoiceForModel,
+  newRouteRow,
 } from './model.mjs';
+import { composeHomeRegistry, getServedModelIds, validateSelection } from './registry.mjs';
 import { chatGptPickerModels, recommendationGuide, refreshRoutingRows } from './refresh-5.1.40.mjs';
 import { compareRecommendation, getRecommendationManifestShape } from './recommend.mjs';
 
@@ -236,6 +238,7 @@ function targetSpecs(roots, fs) {
     { id: 'native-profile-selection.json', root: 'primary', rel: 'native-profile-selection.json', kind: 'json', backup: 'selection', optional: true },
     { id: 'agent/native-profile-selection.json', root: 'primary', rel: 'agent/native-profile-selection.json', kind: 'json', backup: 'agent-selection', optional: true },
     { id: 'stable/omo.jsonc', root: 'stable', rel: 'omo.jsonc', kind: 'jsonc', backup: 'stable-omo', optional: true },
+    { id: 'stable/agent/models.json', root: 'stable', rel: 'agent/models.json', kind: 'json', backup: 'stable-models', optional: true, neverWrite: true },
     { id: 'agent/primary-agents/roster.json', root: 'stable', rel: 'agent/primary-agents/roster.json', kind: 'roster', backup: 'roster', optional: true },
   ];
   for (const [index, root] of roots.mirrorHomes.entries()) {
@@ -488,6 +491,36 @@ export function openProfilesStore(options = {}) {
     }
   }
 
+  function agentDirOf(homeKey) {
+    if (homeKey === 'primary') return join(roots.primaryHome, 'agent');
+    if (homeKey === 'stable') return join(roots.stableHome, 'agent');
+    for (const [index, root] of roots.mirrorHomes.entries()) {
+      if (mirrorLabel(root, index) === homeKey) return join(root, 'agent');
+    }
+    return join(roots.primaryHome, 'agent');
+  }
+
+  function getHomeRegistry(homeKey) {
+    if (options.registries) {
+      const reg = options.registries[homeKey] ?? (options.registries.get ? options.registries.get(homeKey) : null);
+      if (reg) return reg;
+    }
+    if (typeof options.composer === 'function') {
+      return options.composer(agentDirOf(homeKey));
+    }
+    return composeHomeRegistry(agentDirOf(homeKey), { lib: options.lib, timeoutMs: options.timeoutMs });
+  }
+
+  function getRequiredHomes() {
+    const list = ['primary', 'stable'];
+    for (const [index, root] of roots.mirrorHomes.entries()) {
+      let exists = false;
+      try { exists = fs.statSync(join(root, 'omo.jsonc')).isFile(); } catch { exists = false; }
+      if (exists) list.push(mirrorLabel(root, index));
+    }
+    return list;
+  }
+
   // The host registry is handed over as a getter: extension.mjs points it at the live
   // session context, while tests pass an array. Only the ChatGPT-subscription models
   // are added to the picker, so the catalog stays the source of every other provider.
@@ -498,30 +531,31 @@ export function openProfilesStore(options = {}) {
     if (available && typeof available.getAvailable === 'function') {
       try { available = available.getAvailable(); } catch { available = []; }
     }
-    if (!Array.isArray(available)) return [];
     const models = [];
-    for (const item of available) {
-      if (typeof item === 'string') {
-        const at = item.indexOf('/');
-        models.push(at > 0 ? { provider: item.slice(0, at), id: item.slice(at + 1) } : { provider: null, id: item });
-        continue;
-      }
-      if (!isPlainObject(item)) continue;
-      const raw = typeof item.id === 'string' ? item.id
-        : typeof item.modelId === 'string' ? item.modelId
-          : typeof item.model === 'string' ? item.model : '';
-      if (!raw) continue;
-      let provider = typeof item.provider === 'string' ? item.provider : null;
-      let id = raw;
-      const at = raw.indexOf('/');
-      if (at > 0) {
-        const prefix = raw.slice(0, at);
-        if (!provider || provider === prefix) {
-          provider = provider ?? prefix;
-          id = raw.slice(at + 1);
+    if (Array.isArray(available)) {
+      for (const item of available) {
+        if (typeof item === 'string') {
+          const at = item.indexOf('/');
+          models.push(at > 0 ? { provider: item.slice(0, at), id: item.slice(at + 1) } : { provider: null, id: item });
+          continue;
         }
+        if (!isPlainObject(item)) continue;
+        const raw = typeof item.id === 'string' ? item.id
+          : typeof item.modelId === 'string' ? item.modelId
+            : typeof item.model === 'string' ? item.model : '';
+        if (!raw) continue;
+        let provider = typeof item.provider === 'string' ? item.provider : null;
+        let id = raw;
+        const at = raw.indexOf('/');
+        if (at > 0) {
+          const prefix = raw.slice(0, at);
+          if (!provider || provider === prefix) {
+            provider = provider ?? prefix;
+            id = raw.slice(at + 1);
+          }
+        }
+        models.push({ provider, id });
       }
-      models.push({ provider, id });
     }
     return chatGptPickerModels({ registryModels: models }).map((id) => ({
       provider: CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE,
@@ -673,13 +707,66 @@ export function openProfilesStore(options = {}) {
     if (rosterRead.warning) warnings.push(rosterRead.warning.message ?? rosterRead.warning);
     if (configFile?.error) warnings.push(`omo.jsonc: ${configFile.error.message}`);
     if (settingsFile?.error) warnings.push(`agent/settings.json: ${settingsFile.error.message}`);
+    const requiredHomes = getRequiredHomes();
+    const homeRegistries = {};
+    const unknownHomes = [];
+    for (const h of requiredHomes) {
+      const reg = getHomeRegistry(h);
+      homeRegistries[h] = reg;
+      if (!reg || reg.unknown) unknownHomes.push(h);
+    }
+
+    if (catalog) {
+      for (const [, entry] of Object.entries(catalog)) {
+        if (!isPlainObject(entry)) continue;
+        const canonicalModelId = entry.model;
+        const served = {};
+        let levelsIntersection = null;
+        for (const h of requiredHomes) {
+          const reg = homeRegistries[h];
+          const isServed = reg && !reg.unknown && getServedModelIds(reg).has(canonicalModelId);
+          served[h] = Boolean(isServed);
+          const modelDef = reg?.models?.find((m) => m.modelId === canonicalModelId);
+          const homeLevels = modelDef?.levels ?? [];
+          if (levelsIntersection === null) {
+            levelsIntersection = new Set(homeLevels);
+          } else {
+            levelsIntersection = new Set(homeLevels.filter((lvl) => levelsIntersection.has(lvl)));
+          }
+        }
+        entry.served = served;
+        entry.levels = levelsIntersection ? [...levelsIntersection] : [];
+      }
+    }
+
+    const checkModelServed = (modelId) => {
+      if (!modelId) return { unsupported: false };
+      for (const h of requiredHomes) {
+        const reg = homeRegistries[h];
+        if (!reg || reg.unknown || !getServedModelIds(reg).has(modelId)) {
+          return { unsupported: true, reason: 'UNSUPPORTED_MODEL', home: h };
+        }
+      }
+      return { unsupported: false };
+    };
+
     const rows = routingRowsFor(inventoryRaw, layer).map((row) => {
       const entry = layer?.[row.section]?.[row.role];
-      return {
+      const model = isPlainObject(entry) ? entry.model ?? null : null;
+      const reasoning = isPlainObject(entry) ? entry.reasoning ?? entry.variant ?? null : null;
+      const canonical = model && catalog?.[model]?.model ? catalog[model].model : model;
+      const status = checkModelServed(canonical);
+      const outRow = {
         ...row,
-        model: isPlainObject(entry) ? entry.model ?? null : null,
-        reasoning: isPlainObject(entry) ? entry.reasoning ?? entry.variant ?? null : null,
+        model,
+        reasoning,
       };
+      if (status.unsupported) {
+        outRow.unsupported = true;
+        outRow.unsupportedReason = status.reason;
+        outRow.unsupportedHome = status.home;
+      }
+      return outRow;
     });
     const manifestRead = readRecommendationManifest();
     if (manifestRead.warning) warnings.push(manifestRead.warning);
@@ -729,6 +816,20 @@ export function openProfilesStore(options = {}) {
           : configFile?.error || settingsFile?.error ? 'INVALID_CONFIG' : null;
     const targetsView = {};
     for (const [id, file] of files) targetsView[id] = file.exists ? sha256(file.bytes) : null;
+    const surfacedModels = [];
+    for (const [provider, surfacedIds] of Object.entries(ENGINE_SURFACED_MODELS)) {
+      for (const surfacedId of surfacedIds) {
+        const surfacedModelId = `${provider}/${surfacedId}`;
+        const allServed = requiredHomes.length > 0 && requiredHomes.every((h) => {
+          const reg = homeRegistries[h];
+          return reg && !reg.unknown && getServedModelIds(reg).has(surfacedModelId);
+        });
+        if (allServed) {
+          surfacedModels.push({ provider, model: surfacedModelId });
+        }
+      }
+    }
+
     const view = {
       v: 1,
       generatedAt: new Date(nowFn()).toISOString(),
@@ -762,6 +863,7 @@ export function openProfilesStore(options = {}) {
         reflection: getReflectionMemorySelectionFromConfig(config, profile?.omoProfile ?? ''),
       } : null,
       catalog,
+      registry: { unknownHomes, surfacedModels },
       registryModels: registryPickerModels(),
       roster: { revision: rosterRead.roster.revision, agents: rosterAgents, warning: rosterRead.warning },
       targets: targetsView,
@@ -874,13 +976,40 @@ export function openProfilesStore(options = {}) {
       }
       case 'setRoute': {
         if (!config) return refusal('MISSING_CONFIG', 'omo.jsonc is missing');
+        const catalog = (config['[senpi]'] ?? config['[native]'])?.models;
+        const requiredHomes = getRequiredHomes();
+        const homeRegistries = {};
+        for (const h of requiredHomes) homeRegistries[h] = getHomeRegistry(h);
+
+        let resolvedModel = change.model;
+        let resolvedEffort = change.thinking;
+        let resolvedProvider = change.provider;
+        if (change.alias && catalog && catalog[change.alias]) {
+          const aliasEntry = catalog[change.alias];
+          resolvedModel = aliasEntry.model ?? resolvedModel;
+          resolvedEffort = aliasEntry.reasoning ?? aliasEntry.variant ?? resolvedEffort;
+          resolvedProvider = resolvedProvider ?? getProviderChoiceForModel(resolvedModel);
+        }
+
+        const valid = validateSelection({
+          kind: 'role',
+          homes: requiredHomes,
+          provider: resolvedProvider,
+          model: resolvedModel,
+          effort: resolvedEffort,
+          registries: homeRegistries,
+          catalog,
+        });
+        if (!valid.ok) {
+          return refusal(valid.code, valid.message ?? `${valid.code} in home ${valid.home}`, { home: valid.home });
+        }
+
         let route;
         try {
           route = routeChange(config, change, context.selectedProfile ?? activeProfile(context.files));
         } catch (error) {
           return refusal('BAD_REQUEST', error.message);
         }
-        const catalog = (config['[senpi]'] ?? config['[native]'])?.models;
         const preflight = commandCodeWarning({
           catalog, alias: route.alias, registry: readSubscriptions(), profileKey: route.profileKey,
         });
@@ -900,6 +1029,22 @@ export function openProfilesStore(options = {}) {
         const thinking = typeof change.thinking === 'string' && change.thinking.trim()
           ? change.thinking : profile.mainThinking;
         if (!THINKING.includes(thinking)) return refusal('BAD_REQUEST', `unknown thinking level ${thinking}`);
+
+        const requiredHomes = getRequiredHomes();
+        const homeRegistries = {};
+        for (const h of requiredHomes) homeRegistries[h] = getHomeRegistry(h);
+        const valid = validateSelection({
+          kind: 'main',
+          homes: requiredHomes,
+          provider: change.provider,
+          model: change.model,
+          effort: thinking,
+          registries: homeRegistries,
+        });
+        if (!valid.ok) {
+          return refusal(valid.code, valid.message ?? `${valid.code} in home ${valid.home}`, { home: valid.home });
+        }
+
         const main = { provider: change.provider, model: change.model, thinking };
         sidecar.value = setMainLayerOverride({
           state: sidecar.value,
@@ -929,6 +1074,23 @@ export function openProfilesStore(options = {}) {
       }
       case 'setSummarizer': {
         if (!settings) return refusal('MISSING_CONFIG', 'agent/settings.json is missing');
+        const modelId = change.modelId ?? change.model ?? '';
+        if (modelId) {
+          const requiredHomes = getRequiredHomes();
+          const homeRegistries = {};
+          for (const h of requiredHomes) homeRegistries[h] = getHomeRegistry(h);
+          const provider = change.provider ?? modelId.split('/')[0];
+          const valid = validateSelection({
+            kind: 'summarizer',
+            homes: requiredHomes,
+            provider,
+            model: modelId,
+            registries: homeRegistries,
+          });
+          if (!valid.ok) {
+            return refusal(valid.code, valid.message ?? `${valid.code} in home ${valid.home}`, { home: valid.home });
+          }
+        }
         let result;
         try { result = summarizerChange(settings.value, change); }
         catch (error) { return refusal('BAD_REQUEST', error.message); }
@@ -938,6 +1100,24 @@ export function openProfilesStore(options = {}) {
       }
       case 'setMemoryRow': {
         if (!config) return refusal('MISSING_CONFIG', 'omo.jsonc is missing');
+        if (change.mode === 'custom') {
+          const memoryHomes = getRequiredHomes();
+          const homeRegistries = {};
+          for (const h of memoryHomes) homeRegistries[h] = getHomeRegistry(h);
+          const catalog = (config['[senpi]'] ?? config['[native]'])?.models;
+          const valid = validateSelection({
+            kind: change.row ?? 'memory',
+            homes: memoryHomes,
+            provider: change.provider,
+            model: change.model,
+            effort: change.reasoning ?? change.thinking,
+            registries: homeRegistries,
+            catalog,
+          });
+          if (!valid.ok) {
+            return refusal(valid.code, valid.message ?? `${valid.code} in home ${valid.home}`, { home: valid.home });
+          }
+        }
         try {
           memoryRowChange(config, change, context.selectedProfile ?? activeProfile(context.files));
         } catch (error) {

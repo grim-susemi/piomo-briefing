@@ -43,7 +43,10 @@ function makeFixture(t, options = {}) {
     JSON.stringify({ key: 'gpt-kimi-deepseek', profile: 'native-gpt-kimi-deepseek', appliedAt: 'seed' }, null, 2));
   fs.writeFileSync(path.join(primary, 'agent', 'native-profile-selection.json'),
     JSON.stringify({ key: 'gpt-kimi-deepseek', profile: 'native-gpt-kimi-deepseek', appliedAt: 'seed' }, null, 2));
-  fs.writeFileSync(path.join(primary, 'agent', 'models.json'), JSON.stringify({ models: {} }, null, 2));
+  const regPrimary = path.join(here, 'fixtures', 'profiles', 'registry', 'primary', 'agent', 'models.json');
+  const regStable = path.join(here, 'fixtures', 'profiles', 'registry', 'stable', 'agent', 'models.json');
+  if (fs.existsSync(regPrimary)) fs.copyFileSync(regPrimary, path.join(primary, 'agent', 'models.json'));
+  if (fs.existsSync(regStable)) fs.copyFileSync(regStable, path.join(stable, 'agent', 'models.json'));
   fs.writeFileSync(path.join(primary, 'auth.json'), '{"token":"SECRET-DO-NOT-TOUCH"}');
   if (options.mainOverride !== undefined) {
     fs.mkdirSync(path.join(primary, 'runtime'), { recursive: true });
@@ -98,7 +101,7 @@ test('preview returns path-level diffs and writes nothing', (t) => {
   const fx = makeFixture(t);
   const before = hashFile(path.join(fx.primary, 'agent', 'settings.json'));
   const beforeOmo = hashFile(path.join(fx.primary, 'omo.jsonc'));
-  const result = fx.store.preview(body('preview', [{ kind: 'setSummarizer', modelId: 'ollama/glm-5.3' }], fx.store));
+  const result = fx.store.preview(body('preview', [{ kind: 'setSummarizer', modelId: 'openai/gpt-6-sol' }], fx.store));
   assert.equal(result.ok, true);
   assert.deepEqual(result.writes, ['agent/settings.json']);
   assert.ok(result.diffs[0].changes.some((entry) => entry.path === '$.compaction.model'));
@@ -125,11 +128,11 @@ test('apply backs up before the write and changes only compaction.model', (t) =>
     },
     now: () => Date.parse('2026-10-20T12:00:00Z'),
   });
-  const result = store.apply(body('apply', [{ kind: 'setSummarizer', modelId: 'ollama/glm-5.3' }], store));
+  const result = store.apply(body('apply', [{ kind: 'setSummarizer', modelId: 'openai/gpt-6-sol' }], store));
   assert.equal(result.ok, true);
   assert.deepEqual(observed, { backup: result.backups[0], exists: true });
   const after = readJsonFile(settingsPath);
-  assert.equal(after.compaction.model, 'ollama/glm-5.3');
+  assert.equal(after.compaction.model, 'openai/gpt-6-sol');
   assert.equal(store.journal().status, 'completed');
 });
 
@@ -342,7 +345,7 @@ test('CRLF/LF, BOM and the `:  ` separator survive a write; an unchanged round-t
     const raw = fs.readFileSync(file);
     const text = raw.toString('utf8');
     assert.equal(formatJsonText(JSON.parse(text.replace(/^\uFEFF/, '')), detectStyle(text)), text);
-    const result = fx.store.apply(body('apply', [{ kind: 'setSummarizer', modelId: 'ollama/glm-5.3' }], fx.store));
+    const result = fx.store.apply(body('apply', [{ kind: 'setSummarizer', modelId: 'openai/gpt-6-sol' }], fx.store));
     assert.equal(result.ok, true);
     const rewritten = fs.readFileSync(file, 'utf8');
     assert.equal(rewritten.charCodeAt(0) === 0xfeff, style.bom);
@@ -357,7 +360,7 @@ test('an unchanged target is never rewritten (byte-identical)', (t) => {
   const fx = makeFixture(t);
   const omo = path.join(fx.primary, 'omo.jsonc');
   const before = fs.readFileSync(omo);
-  const result = fx.store.apply(body('apply', [{ kind: 'setSummarizer', modelId: 'ollama/glm-5.3' }], fx.store));
+  const result = fx.store.apply(body('apply', [{ kind: 'setSummarizer', modelId: 'openai/gpt-6-sol' }], fx.store));
   assert.equal(result.ok, true);
   assert.deepEqual(fs.readFileSync(omo), before);
 });
@@ -496,7 +499,7 @@ test('a completed apply records its request; reapply is explicit and CAS-checked
   const interrupted = {
     v: 1, id: 'crash-1', action: 'apply', status: 'running',
     startedAt: '2026-10-20T11:00:00.000Z',
-    request: { changes: [{ kind: 'setSummarizer', modelId: 'ollama/glm-5.3' }], rosterRevision: 0 },
+    request: { changes: [{ kind: 'setSummarizer', modelId: 'openai/gpt-6-sol' }], rosterRevision: 0 },
     steps: [{ step: 'write', target: 'agent/settings.json', status: 'ok' }],
   };
   atomicWriteText(journalPath, JSON.stringify(interrupted, null, 2));
@@ -512,7 +515,7 @@ test('a completed apply records its request; reapply is explicit and CAS-checked
 
   const replayed = fx.store.apply(body('apply', state.applyJournal.reapply.changes, fx.store));
   assert.equal(replayed.ok, true, JSON.stringify(replayed));
-  assert.equal(readJsonFile(settingsPath).compaction.model, 'ollama/glm-5.3');
+  assert.equal(readJsonFile(settingsPath).compaction.model, 'openai/gpt-6-sol');
   assert.equal(fx.store.journal().status, 'completed');
   assert.notEqual(fx.store.journal().id, 'crash-1');
 });

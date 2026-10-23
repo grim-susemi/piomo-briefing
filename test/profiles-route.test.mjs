@@ -39,13 +39,25 @@ function makeStore(t) {
   fs.writeFileSync(path.join(primary, 'agent', 'native-profile-selection.json'), JSON.stringify({ key: 'gpt-kimi-deepseek', profile: 'native-gpt-kimi-deepseek' }));
   fs.writeFileSync(path.join(stable, 'omo.jsonc'), formatJsonText(stableOmo, STYLE));
   fs.writeFileSync(path.join(stable, 'agent', 'settings.json'), '{"packages":["stable"]}');
+  const regPrimary = path.join(here, 'fixtures', 'profiles', 'registry', 'primary', 'agent', 'models.json');
+  const regStable = path.join(here, 'fixtures', 'profiles', 'registry', 'stable', 'agent', 'models.json');
+  if (fs.existsSync(regPrimary)) fs.copyFileSync(regPrimary, path.join(primary, 'agent', 'models.json'));
+  if (fs.existsSync(regStable)) fs.copyFileSync(regStable, path.join(stable, 'agent', 'models.json'));
   const plugin = path.join(root, 'omo.js');
   fs.writeFileSync(plugin, PLUGIN_BODY);
+  const fakeRegistry = {
+    models: [
+      { provider: 'antigravity-ocx', modelId: 'antigravity-ocx/google-antigravity/gemini-4-argon', reasoning: true, levels: ['low', 'medium', 'high'] },
+      { provider: 'openai', modelId: 'openai/gpt-6-sol', reasoning: true, levels: ['off', 'low', 'medium', 'high'] },
+    ],
+    errors: [],
+  };
   const store = openProfilesStore({
     primaryHome: primary,
     stableHome: stable,
     mirrorHomes: [],
     pluginPath: plugin,
+    registries: { primary: fakeRegistry, stable: fakeRegistry },
     inventory: { ...REAL_INVENTORY, sources: { ...REAL_INVENTORY.sources, omo: { ...REAL_INVENTORY.sources.omo, sha256: sha(Buffer.from(PLUGIN_BODY)) } } },
     now: () => Date.parse('2026-10-20T12:00:00Z'),
   });
@@ -282,7 +294,7 @@ test('reapply is refused on a hash mismatch and leaves the journal running', asy
   const { port, stable, primary } = await withServer(t);
   const journalPath = path.join(stable, 'agent', 'primary-agents', 'apply-journal.json');
   fs.mkdirSync(path.dirname(journalPath), { recursive: true });
-  const recorded = { changes: [{ kind: 'setSummarizer', modelId: 'ollama/glm-5.3' }], rosterRevision: 0 };
+  const recorded = { changes: [{ kind: 'setSummarizer', modelId: 'openai/gpt-6-sol' }], rosterRevision: 0 };
   fs.writeFileSync(journalPath, JSON.stringify({
     v: 1, id: 'crash-stale', action: 'apply', status: 'running',
     startedAt: '2026-10-20T11:00:00.000Z', request: recorded, steps: [],
@@ -356,11 +368,57 @@ test('GET /profiles/state is 404 when no profiles store is wired', async (t) => 
   assert.equal(res.status, 404);
 });
 
+test('forged POST /profiles with opencode/gemini-4-argon for memory returns refusal and files unchanged', async (t) => {
+  const { port, store, primary, stable } = await withServer(t);
+  const hash = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+
+  const files = [
+    path.join(primary, 'omo.jsonc'),
+    path.join(primary, 'agent', 'settings.json'),
+    path.join(primary, 'native-profile-selection.json'),
+    path.join(primary, 'agent', 'native-profile-selection.json'),
+    path.join(stable, 'omo.jsonc'),
+    path.join(stable, 'agent', 'settings.json'),
+  ];
+  const beforeHashes = files.map(hash);
+
+  const forgedBody = JSON.stringify({
+    action: 'apply',
+    changes: [
+      {
+        kind: 'setMemoryRow',
+        row: 'kibitzer',
+        mode: 'custom',
+        model: 'opencode/gemini-4-argon',
+        reasoning: 'high',
+      },
+    ],
+    expected: store.state().targets,
+    rosterRevision: store.state().roster.revision,
+  });
+
+  const res = await request({
+    port,
+    path: '/profiles',
+    method: 'POST',
+    headers: JSON_HEADERS(port),
+    body: forgedBody,
+  });
+
+  assert.equal(res.status, 400, res.body);
+  const json = JSON.parse(res.body);
+  assert.equal(json.ok, false);
+  assert.equal(json.code, 'UNSUPPORTED_MODEL');
+
+  const afterHashes = files.map(hash);
+  assert.deepEqual(afterHashes, beforeHashes, 'all fixture homes hashes must remain unchanged');
+});
+
 test('the profile controller reapply reaches the real route and completes the journal', async (t) => {
   const { port, stable, primary } = await withServer(t);
   const journalPath = path.join(stable, 'agent', 'primary-agents', 'apply-journal.json');
   fs.mkdirSync(path.dirname(journalPath), { recursive: true });
-  const recorded = { changes: [{ kind: 'setSummarizer', modelId: 'ollama/glm-5.3' }], rosterRevision: 0 };
+  const recorded = { changes: [{ kind: 'setSummarizer', modelId: 'openai/gpt-6-sol' }], rosterRevision: 0 };
   fs.writeFileSync(journalPath, JSON.stringify({
     v: 1, id: 'crash-controller', action: 'apply', status: 'running',
     startedAt: '2026-10-20T11:00:00.000Z', request: recorded, steps: [],
@@ -390,5 +448,5 @@ test('the profile controller reapply reaches the real route and completes the jo
   assert.equal(result.result.action, 'apply');
   assert.equal(JSON.parse(fs.readFileSync(journalPath, 'utf8')).status, 'completed');
   assert.equal(JSON.parse(fs.readFileSync(path.join(primary, 'agent', 'settings.json'), 'utf8')).compaction.model,
-    'ollama/glm-5.3');
+    'openai/gpt-6-sol');
 });
