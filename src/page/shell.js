@@ -120,6 +120,20 @@
   }
   // '__proto__' is refused outright: an id must survive being copied into an ordinary object later
   function okId(v) { return typeof v === 'string' && v.length > 0 && v.length <= 256 && v !== '__proto__' && !/[\u0000-\u001f\u007f]/.test(v); }
+  function isWindow(key) { return typeof key === 'string' && key.indexOf('w:') === 0; }
+  function okBoardKey(v) { return okId(v) || (isWindow(v) && v.length >= 3 && v.length <= 258 && !/[\u0000-\u001f\u007f]/.test(v)); }
+  function keyOf(st, sid) {
+    var member = has(st.members, sid) ? st.members[sid] : null;
+    var tabId = member ? member.tabId : '';
+    return typeof tabId === 'string' && tabId && okBoardKey('w:' + tabId) ? 'w:' + tabId : sid;
+  }
+  function rep(st, key) { return has(st.groups, key) && st.groups[key].length ? st.groups[key][0] : null; }
+  function shownOf(st, key) {
+    if (!isWindow(key)) return key;
+    var sid = st.shown[key];
+    if (has(st.members, sid) && st.members[sid].key === key) return sid;
+    return rep(st, key) || (st.members === null ? sid || null : null);
+  }
   function okKey(v) { return has(SECTIONS, v) || okId(v); }
   function keys(list) { return list.map(function (x) { return x[0]; }); }
   function clampW(px) { return Math.min(MAX_W, Math.max(MIN_W, Math.round(px))); }
@@ -139,7 +153,7 @@
   function defaults() {
     return {
       sideOpen: true, sideWidth: DEF_W, view: 'conv', filter: 'all', favs: [], tabs: [], pinned: [], active: null,
-      sub: map(), seen: map(), absent: map(),
+      sub: map(), seen: map(), absent: map(), shown: map(), follow: map(), members: null, groups: null,
       peek: false, search: '', exp: map(), box: 'wait', prefsError: ''
     };
   }
@@ -168,13 +182,65 @@
     return p;
   }
 
+  // Membership is replaced by each model; reuse equal records and groups so repeated publications are no-ops.
+  function withMembers(st, list) {
+    var members = map(), groups = map();
+    list.forEach(function (m) {
+      if (!obj(m) || !okId(m.id) || isWindow(m.id) || has(members, m.id)) return;
+      var tabId = typeof m.tabId === 'string' ? m.tabId : '';
+      var member = { tabId: tabId, key: tabId && okBoardKey('w:' + tabId) ? 'w:' + tabId : m.id, alive: m.alive === true, at: num(m.at) === null ? 0 : m.at };
+      var old = has(st.members, m.id) ? st.members[m.id] : null;
+      members[m.id] = old && old.tabId === member.tabId && old.key === member.key && old.alive === member.alive && old.at === member.at ? old : member;
+      if (!has(groups, member.key)) groups[member.key] = [];
+      groups[member.key].push(m.id);
+    });
+    Object.keys(groups).forEach(function (key) {
+      groups[key].sort(function (a, b) {
+        return Number(members[b].alive) - Number(members[a].alive) || members[b].at - members[a].at || (a < b ? -1 : a > b ? 1 : 0);
+      });
+      var old = has(st.groups, key) ? st.groups[key] : null;
+      if (old && old.length === groups[key].length && old.every(function (sid, i) { return sid === groups[key][i]; })) groups[key] = old;
+    });
+    if (st.members && Object.keys(st.members).length === Object.keys(members).length &&
+        Object.keys(members).every(function (sid) { return members[sid] === st.members[sid]; })) members = st.members;
+    if (st.groups && Object.keys(st.groups).length === Object.keys(groups).length &&
+        Object.keys(groups).every(function (key) { return groups[key] === st.groups[key]; })) groups = st.groups;
+    var next = patched(st, { members: members, groups: groups });
+    var shown = st.shown, follow = st.follow;
+    // Commit follow only on known. Reads and tab-bar activation must retain the owner's last selected live pane.
+    st.tabs.forEach(function (key) {
+      if (!isWindow(key) || !rep(next, key)) return;
+      var sid = shown[key], valid = has(members, sid) && members[sid].key === key;
+      var first = rep(next, key), live = members[first].alive;
+      if (valid && !(follow[key] && !members[sid].alive && live)) return;
+      if (shown === st.shown) shown = copy(shown);
+      shown[key] = first;
+      if (!valid && (follow[key] === true) !== live) {
+        if (follow === st.follow) follow = copy(follow);
+        if (live) follow[key] = true;
+        else delete follow[key];
+      }
+    });
+    return patched(next, { shown: shown, follow: follow });
+  }
+
   function openTab(st, a) {
     var sid = a.sid;
     if (!okId(sid)) return st;
-    var p = { active: sid, peek: false };
-    if (st.tabs.indexOf(sid) < 0) {
+    var key = keyOf(st, sid);
+    var p = { active: key, peek: false };
+    if (st.tabs.indexOf(key) < 0) {
       if (st.tabs.length >= LIST_MAX) return st; // refused here, so a reload never has to drop a tab
-      p.tabs = st.tabs.concat([sid]);
+      p.tabs = st.tabs.concat([key]);
+    }
+    if (isWindow(key)) {
+      if (st.shown[key] !== sid) { p.shown = copy(st.shown); p.shown[key] = sid; }
+      var live = has(st.members, sid) && st.members[sid].alive;
+      if ((st.follow[key] === true) !== live) {
+        p.follow = copy(st.follow);
+        if (live) p.follow[key] = true;
+        else delete p.follow[key];
+      }
     }
     if (SUBS.indexOf(a.sub) >= 0 && st.sub[sid] !== a.sub) { p.sub = copy(st.sub); p.sub[sid] = a.sub; }
     if (!expanded(st, sid)) { p.exp = copy(st.exp); p.exp[sid] = true; } // v5: the opened row shows its kids
@@ -182,13 +248,15 @@
   }
 
   function closeTab(st, sid) {
-    if (!okId(sid) || st.tabs.indexOf(sid) < 0) return st;
+    if (!okBoardKey(sid) || st.tabs.indexOf(sid) < 0) return st;
     var before = order(st);
     var at = before.indexOf(sid);
     var p = {
       tabs: st.tabs.filter(function (x) { return x !== sid; }),
       pinned: st.pinned.filter(function (x) { return x !== sid; })
     };
+    if (has(st.shown, sid)) { p.shown = copy(st.shown); delete p.shown[sid]; }
+    if (has(st.follow, sid)) { p.follow = copy(st.follow); delete p.follow[sid]; }
     if (st.active === sid) {
       var after = before.filter(function (x) { return x !== sid; });
       p.active = after.length ? after[Math.max(0, at - 1)] : null;
@@ -207,6 +275,7 @@
       .forEach(function (list) { list.forEach(function (id) { tracked[id] = true; }); });
     var absent = copy(st.absent), gone = map(), changed = false, pruned = false, id;
     for (id in tracked) {
+      if (isWindow(id)) continue; // window absence and expiry belong to the v2 reconciliation
       if (here[id]) {
         if (has(absent, id)) { delete absent[id]; changed = true; }
         continue;
@@ -323,13 +392,16 @@
       case 'close':
         return closeTab(st, a.sid);
       case 'pin':
-        return okId(a.sid) && st.tabs.indexOf(a.sid) >= 0 ? patched(st, { pinned: toggled(st.pinned, a.sid) }) : st;
-      case 'active':
-        return okId(a.sid) && st.tabs.indexOf(a.sid) >= 0 ? patched(st, withSeen(st, a.sid, a.now, { active: a.sid })) : st;
+        return okBoardKey(a.sid) && st.tabs.indexOf(a.sid) >= 0 ? patched(st, { pinned: toggled(st.pinned, a.sid) }) : st;
+      case 'active': {
+        if (!okBoardKey(a.sid) || st.tabs.indexOf(a.sid) < 0) return st;
+        var sid = shownOf(st, a.sid), active = { active: a.sid };
+        return patched(st, sid === null ? active : withSeen(st, sid, a.now, active));
+      }
       case 'load':
         return load(a.json, a.known, a.now);
       case 'known':
-        return reconcile(st, a.ids, a.now);
+        return reconcile(Array.isArray(a.members) ? withMembers(st, a.members) : st, a.ids, a.now);
     }
     return st;
   }
@@ -541,13 +613,13 @@
     var kids = !o.flat && isAlive(s);
     var open = kids && expanded(st, id);
     var sub = o.sub !== undefined ? o.sub : (isAlive(s) && str(s.tabLabel) ? str(s.title) : '');
-    var html = '<div class="sh-row' + (st.active === id ? ' sel' : '') + (c.isPrev(s) ? ' sh-prev' : '') + '" data-row="' + esc(id) + '">' +
+    var html = '<div class="sh-row' + (shownOf(st, st.active) === id ? ' sel' : '') + (c.isPrev(s) ? ' sh-prev' : '') + '" data-row="' + esc(id) + '">' +
       (kids ? '<button type="button" class="sh-tg" data-sh="expand" data-sid="' + esc(id) + '" aria-expanded="' + open + '" aria-label="' +
         (open ? '접기' : '펼치기') + '">' + ic(open ? 'chevron-down' : 'chevron-right', 'ic-xs') + '</button>' : '<span class="sh-tg" aria-hidden="true"></span>') +
       '<button type="button" class="sh-go" data-sh="open" data-sid="' + esc(id) + '">' + icon(s, c) +
       '<span class="sh-t" title="' + esc(fullOf(s)) + '">' + esc(nameOf(s)) + (sub ? '<span class="sh-sub">' + esc(sub) + '</span>' : '') + '</span>' +
       foldMark(s) + rowBadge(s, st) + '</button>' + favBtn(id, st) + '</div>';
-    if (open) html += '<div class="sh-kids" role="group" aria-label="' + esc(nameOf(s)) + ' 펼침">' + kidRows(s, c) + '</div>';
+    if (open) html += '<div class="sh-kids" role="group" aria-label="' + esc(nameOf(s)) + ' 펼침">' + kidRows(s, c, st) + '</div>';
     return html;
   }
   function kid(sid, sub, icon, text, extra, folded) {
@@ -555,13 +627,13 @@
       '<button type="button" class="sh-go" data-sh="open" data-sid="' + esc(sid) + '"' + (sub ? ' data-sub="' + sub + '"' : '') + '>' +
       '<span class="sh-ki" aria-hidden="true">' + ic(icon, 'ic-sm') + '</span><span class="sh-t" title="' + esc(text) + '">' + esc(text) + '</span>' + (folded ? '<span class="sh-fold">접힘</span>' : '') + '</button></div>';
   }
-  function kidRows(s, c) {
+  function kidRows(s, c, st) {
     var html = '';
     if (hasPlan(s)) { var pc = planCount(s); html += kid(s.id, 'plan', 'list-todo', '계획' + (pc ? ' ' + pc : '')); }
     var w = workers(s);
     if (w) html += kid(s.id, 'wk', 'users', '작업자 ' + w);
     html += kid(s.id, 'dec', 'bell', '결정 ' + openDecs(s).length + ' 대기 · ' + answeredDecs(s).length + ' 답함');
-    c.prevsOf(s).forEach(function (p) { html += kid(p.id, '', 'rotate-ccw-clock', '이전 대화 · ' + (str(p.title) || '(제목 없음)'), ' sh-prev', !!obj(p.folded)); });
+    c.prevsOf(s).forEach(function (p) { html += kid(p.id, '', 'rotate-ccw-clock', '이전 대화 · ' + (str(p.title) || '(제목 없음)'), ' sh-prev' + (st.members !== null && p.id === shownOf(st, st.active) ? ' sel' : ''), !!obj(p.folded)); });
     return html;
   }
   // a remembered id the model does not have now: shown, not openable from here; its star still takes it off the favourites
@@ -937,7 +1009,7 @@
 
   g.BriefShell = {
     KEY: KEY, MIN_W: MIN_W, MAX_W: MAX_W, DEF_W: DEF_W, KEEP_MS: KEEP_MS, LIST_MAX: LIST_MAX, GONE: GONE,
-    defaults: defaults, reduce: reduce, order: order, serialize: serialize, restore: restore, persist: persist,
+    defaults: defaults, reduce: reduce, order: order, keyOf: keyOf, shownOf: shownOf, serialize: serialize, restore: restore, persist: persist,
     tabOf: tabOf, inbox: inbox, badge: badge,
     rail: rail, side: side, tabs: tabs, sideFrame: sideFrame, skeleton: skeleton,
     sync: sync, keyAction: keyAction, actionOf: actionOf, bind: bind

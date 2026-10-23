@@ -238,6 +238,310 @@ function deepFreeze(o) {
   return o;
 }
 
+// Window fixtures share the real sidebar data; membership is the reducer's model boundary.
+const WIN = {
+  generatedAt: NOW,
+  sessions: [
+    { ...fixture().sessions[0], tabId: 'w4:t185' },
+    { ...fixture().sessions[1], tabId: 'w4:t185' },
+    { id: 'q185', alive: true, tabId: 'w4:t185', title: 'Second pane', lastActivityAt: NOW - 2 * 60e3, decisions: [] },
+    { ...fixture().sessions[4] },
+  ],
+};
+const WK = 'w:w4:t185';
+const winMembers = (model = WIN) => model.sessions.map((s) => ({ id: s.id, tabId: s.tabId || '', alive: s.alive === true, at: s.lastActivityAt || 0 }));
+const winKnown = (S, st = S.defaults(), members = winMembers()) => S.reduce(st, { type: 'known', ids: members.filter((s) => s && typeof s.id === 'string').map((s) => s.id), members, now: NOW });
+const selectedRows = (html) => all(html, /class="sh-row sel(?: sh-prev)?" data-row="([^"]+)"/g);
+
+test('window keys: shared windows, standalone ids, length boundaries and reserved model ids', () => {
+  // Given
+  const S = load().BriefShell;
+  const extra = [
+    { id: 'long', tabId: 't'.repeat(255), alive: true, at: NOW },
+    { id: 'max', tabId: 't'.repeat(256), alive: true, at: NOW },
+    { id: 'oversize', tabId: 't'.repeat(300) },
+    ...['\u0000', '\u001f', '\u007f'].map((c, i) => ({ id: 'control' + i, tabId: 't' + c })),
+    { id: 'w:reserved', tabId: 'w4:t185', alive: true, at: NOW + 1 },
+    { id: '__proto__', tabId: 'bad' }, null, { id: '' },
+  ];
+  // When
+  const st = winKnown(S, S.defaults(), [...winMembers(), ...extra]);
+  // Then
+  for (const sid of ['a185', 'p185', 'q185']) assert.equal(S.keyOf(st, sid), WK);
+  for (const sid of ['e-done', 'oversize', 'control0', 'control1', 'control2', 'w:reserved']) assert.equal(S.keyOf(st, sid), sid);
+  assert.equal(S.keyOf(st, 'long'), 'w:' + 't'.repeat(255));
+  assert.equal(S.keyOf(st, 'max'), 'w:' + 't'.repeat(256));
+  assert.equal(Object.hasOwn(st.members, 'w:reserved'), false);
+  assert.equal(Object.hasOwn(st.members, '__proto__'), false);
+  assert.deepEqual(plain(st.groups[WK]), ['a185', 'q185', 'p185']);
+  assert.deepEqual(plain([st.shown, st.follow, st.seen]), [{}, {}, {}]);
+});
+
+test('shown: selection fallback orders alive first, then activity, then sid without mutating reads', () => {
+  // Given
+  const S = load().BriefShell;
+  const members = [
+    { id: 'ended', tabId: 'tie', alive: false, at: NOW + 10 },
+    { id: 'z', tabId: 'tie', alive: true, at: NOW },
+    { id: 'b', tabId: 'tie', alive: true, at: NOW + 1 },
+    { id: 'a', tabId: 'tie', alive: true, at: NOW + 1 },
+  ];
+  const st = winKnown(S, S.defaults(), members);
+  const ended = { ...st, shown: { 'w:tie': 'ended' }, follow: { 'w:tie': true } };
+  deepFreeze(ended);
+  // When
+  const shown = S.shownOf(ended, 'w:tie');
+  // Then
+  assert.equal(shown, 'ended', 'follow is committed on known, never by shownOf');
+  assert.equal(S.shownOf(st, 'w:tie'), 'a');
+  assert.deepEqual(plain(st.groups['w:tie']), ['a', 'b', 'z', 'ended']);
+  assert.equal(S.shownOf({ ...st, shown: { 'w:tie': 'outside' } }, 'w:tie'), 'a');
+  assert.equal(S.shownOf(winKnown(S, S.defaults(), members.map((s) => ({ ...s, alive: false }))), 'w:tie'), 'ended');
+  assert.equal(S.shownOf({ ...S.defaults(), shown: { 'w:ghost': 'remembered' } }, 'w:ghost'), 'remembered');
+  assert.equal(S.shownOf({ ...st, shown: { 'w:ghost': 'remembered' } }, 'w:ghost'), null);
+  assert.equal(S.shownOf(st, 'e-done'), 'e-done');
+});
+
+test('follow: open a185 alive commits the replacement when its conversation ends', () => {
+  // Given
+  const S = load().BriefShell;
+  const st = S.reduce(winKnown(S), { type: 'open', sid: 'a185', now: NOW });
+  const members = winMembers().map((s) => ({ ...s, alive: false })).concat({ id: 'n1', tabId: 'w4:t185', alive: true, at: NOW + 1 });
+  // When
+  const next = winKnown(S, st, members);
+  // Then
+  assert.equal(next.shown[WK], 'n1');
+  assert.equal(next.follow[WK], true);
+  assert.equal(S.shownOf(next, WK), 'n1');
+  assert.deepEqual(plain(next.tabs), [WK]);
+  assert.deepEqual(plain(next.seen), { a185: NOW }, 'background follow does not mark an unviewed conversation seen');
+});
+
+test('follow: opening ended p185 deliberately preserves look-back after a new live member appears', () => {
+  // Given
+  const S = load().BriefShell;
+  const st = S.reduce(winKnown(S), { type: 'open', sid: 'p185' });
+  // When
+  const next = winKnown(S, st, winMembers().concat({ id: 'n1', tabId: 'w4:t185', alive: true, at: NOW + 1 }));
+  // Then
+  assert.equal(next.shown[WK], 'p185');
+  assert.equal(Object.hasOwn(next.follow, WK), false);
+});
+
+test('follow: restored committed live selection follows on the first already-ended model', () => {
+  // Given: storage loading is task3; this is its restored state before the first known action.
+  const S = load().BriefShell;
+  const restored = { ...S.defaults(), tabs: [WK], active: WK, shown: { [WK]: 'a185' }, follow: { [WK]: true } };
+  const members = winMembers().map((s) => ({ ...s, alive: false })).concat({ id: 'n1', tabId: 'w4:t185', alive: true, at: NOW + 1 });
+  // When
+  const next = winKnown(S, restored, members);
+  // Then
+  assert.deepEqual([next.shown[WK], next.follow[WK]], ['n1', true]);
+  assert.deepEqual(plain(next.seen), {});
+});
+
+test('follow chain: committed selection follows once, keeps a live pane and survives every member ending', () => {
+  const S = load().BriefShell;
+  const opened = S.reduce(winKnown(S), { type: 'open', sid: 'a185' });
+  const ended = winMembers().map((s) => ({ ...s, alive: false }));
+  const cases = [
+    ended.concat({ id: 'n1', tabId: 'w4:t185', alive: true, at: NOW + 1 }),
+    ended.concat({ id: 'n1', tabId: 'w4:t185', alive: true, at: NOW + 1 }, { id: 'n2', tabId: 'w4:t185', alive: true, at: NOW + 2 }),
+    ended.concat({ id: 'n1', tabId: 'w4:t185', alive: false, at: NOW + 1 }, { id: 'n2', tabId: 'w4:t185', alive: false, at: NOW + 2 }),
+  ];
+  let st = opened;
+  for (const members of cases) {
+    // Given
+    const before = st;
+    // When
+    st = winKnown(S, before, members);
+    // Then
+    assert.deepEqual([st.shown[WK], st.follow[WK], S.shownOf(st, WK)], ['n1', true, 'n1']);
+    assert.equal(winKnown(S, st, members), st, 'an unchanged committed model is a reference no-op');
+  }
+});
+
+test('two panes: opening q185 selects the older live pane in the same tab', () => {
+  // Given
+  const S = load().BriefShell;
+  const opened = S.reduce(winKnown(S), { type: 'open', sid: 'a185' });
+  // When
+  const st = S.reduce(opened, { type: 'open', sid: 'q185', sub: 'dec' });
+  // Then
+  assert.deepEqual(plain(st.tabs), [WK]);
+  assert.deepEqual([st.active, st.shown[WK], st.follow[WK], st.sub.q185], [WK, 'q185', true, 'dec']);
+  assert.equal(winKnown(S, st).shown[WK], 'q185', 'newer alive a185 never replaces the clicked live pane');
+});
+
+test('open: a second conversation activates its window and stamps only its own seen', () => {
+  // Given
+  const S = load().BriefShell;
+  const opened = S.reduce(winKnown(S), { type: 'open', sid: 'a185', now: NOW });
+  // When
+  const st = S.reduce(opened, { type: 'open', sid: 'p185', sub: 'rep', now: NOW + 1 });
+  // Then
+  assert.deepEqual(plain(st.tabs), [WK]);
+  assert.deepEqual(plain(st.seen), { a185: NOW, p185: NOW + 1 });
+  assert.deepEqual([st.active, st.shown[WK], st.sub.p185, st.exp.p185], [WK, 'p185', 'rep', true]);
+  assert.equal(Object.hasOwn(st.follow, WK), false);
+});
+
+test('open: previous, inbox, archive, overview and plan-owner targets select their sid and subpage', () => {
+  const S = load().BriefShell;
+  for (const [entry, sid, sub] of [['previous', 'p185', ''], ['inbox', 'p185', 'dec'], ['archive', 'p185', ''], ['overview', 'q185', 'ov'], ['plan-owner', 'a185', 'plan']]) {
+    // Given
+    const st = S.reduce(winKnown(S), { type: 'open', sid: 'a185' });
+    const attrs = { 'data-sh': 'open', 'data-sid': sid, ...(sub ? { 'data-sub': sub } : {}) };
+    // When
+    const next = S.reduce(st, S.actionOf({ getAttribute: (k) => attrs[k] || null }, { now: NOW }));
+    // Then
+    assert.deepEqual(plain(next.tabs), [WK], entry);
+    assert.deepEqual([next.active, S.shownOf(next, WK), next.sub[sid]], [WK, sid, sub || undefined], entry);
+    assert.deepEqual(plain(next.seen), { [sid]: NOW }, entry);
+  }
+});
+
+test('active: window activation marks its shown conversation seen, clears finished inbox and ignores ghosts', () => {
+  // Given
+  const S = load().BriefShell;
+  const st = S.reduce(winKnown(S), { type: 'open', sid: 'p185' });
+  assert.ok(S.inbox(WIN, st).done.some((x) => x.s.id === 'p185'));
+  // When
+  const next = S.reduce(st, { type: 'active', sid: WK, now: NOW });
+  // Then
+  assert.deepEqual(plain(next.seen), { p185: NOW });
+  assert.equal(S.inbox(WIN, next).done.some((x) => x.s.id === 'p185'), false);
+  const ghost = { ...next, tabs: [...next.tabs, 'w:ghost'], shown: { ...next.shown, 'w:ghost': 'missing' } };
+  assert.deepEqual(plain(S.reduce(ghost, { type: 'active', sid: 'w:ghost', now: NOW + 1 }).seen), { p185: NOW });
+});
+
+test('active: round trip keeps q185 shown, highlighted and following without changing selection maps', () => {
+  // Given
+  const S = load().BriefShell;
+  const pane = S.reduce(winKnown(S), { type: 'open', sid: 'q185', sub: 'dec' });
+  const other = S.reduce(pane, { type: 'open', sid: 'e-done' });
+  // When
+  const back = S.reduce(other, { type: 'active', sid: WK, now: NOW });
+  // Then
+  assert.equal(back.shown, pane.shown);
+  assert.equal(back.follow, pane.follow);
+  assert.deepEqual([S.shownOf(back, WK), back.sub.q185], ['q185', 'dec']);
+  assert.deepEqual(selectedRows(S.side(WIN, back)), ['q185']);
+  assert.deepEqual(plain(back.seen), { q185: NOW });
+});
+
+test('active, close and pin: board keys retain pin order and closing clears window selection', () => {
+  // Given
+  const S = load().BriefShell;
+  let st = S.reduce(S.reduce(winKnown(S), { type: 'open', sid: 'a185' }), { type: 'open', sid: 'e-done' });
+  st = S.reduce(st, { type: 'pin', sid: WK });
+  st = S.reduce(st, { type: 'pin', sid: 'e-done' });
+  assert.deepEqual(plain(S.order(st)), [WK, 'e-done']);
+  st = S.reduce(st, { type: 'active', sid: WK });
+  // When
+  const closed = S.reduce(st, { type: 'close', sid: WK });
+  // Then
+  assert.deepEqual([plain(closed.tabs), plain(closed.pinned), closed.active], [['e-done'], ['e-done'], 'e-done']);
+  assert.equal(Object.hasOwn(closed.shown, WK), false);
+  assert.equal(Object.hasOwn(closed.follow, WK), false);
+  const long = winKnown(S, S.defaults(), [{ id: 'long', tabId: 't'.repeat(256), alive: true }]);
+  const opened = S.reduce(long, { type: 'open', sid: 'long' });
+  const pinned = S.reduce(opened, { type: 'pin', sid: opened.active });
+  assert.deepEqual(plain(pinned.pinned), [opened.active]);
+  assert.equal(S.reduce(pinned, { type: 'active', sid: opened.active, now: NOW }).seen.long, NOW);
+  assert.deepEqual(plain(S.reduce(pinned, { type: 'close', sid: opened.active }).tabs), []);
+});
+
+test('cap: an existing window accepts another member at 200 tabs but a new window changes nothing', () => {
+  // Given
+  const S = load().BriefShell;
+  const known = winKnown(S, S.defaults(), [...winMembers(), { id: 'new', tabId: 'new', alive: true }]);
+  let st = S.reduce(known, { type: 'open', sid: 'a185' });
+  for (let i = 0; i < 199; i++) st = S.reduce(st, { type: 'open', sid: 'solo' + i });
+  // When
+  const selected = S.reduce(st, { type: 'open', sid: 'q185', now: NOW });
+  // Then
+  assert.deepEqual([selected.tabs.length, selected.active, selected.shown[WK]], [200, WK, 'q185']);
+  assert.equal(S.reduce(selected, { type: 'open', sid: 'new', now: NOW }), selected);
+});
+
+test('known without members: legacy tabs stay standalone without window metadata or absence stamps', () => {
+  // Given
+  const S = load().BriefShell;
+  const opened = S.reduce(S.defaults(), { type: 'open', sid: 'a185', now: NOW });
+  // When
+  const st = S.reduce(opened, { type: 'known', ids: ['a185'], now: NOW });
+  // Then
+  assert.deepEqual(plain(st.tabs), ['a185']);
+  assert.deepEqual(plain([st.shown, st.follow, st.absent]), [{}, {}, {}]);
+  assert.equal(S.keyOf(st, 'a185'), 'a185');
+  const pending = { ...S.defaults(), tabs: [WK], active: WK, shown: { [WK]: 'a185' }, follow: { [WK]: true } };
+  assert.equal(S.reduce(pending, { type: 'known', ids: [], now: NOW + 40 * DAY }), pending);
+});
+
+test('known without members: previous kids keep legacy markup when their conversation is open', () => {
+  // Given
+  const S = load().BriefShell;
+  const model = { sessions: [
+    { id: 'alive', tabId: 'window', alive: true, lastActivityAt: 2, decisions: [] },
+    { id: 'previous', tabId: 'window', alive: false, lastActivityAt: 1, decisions: [] },
+  ] };
+  const known = S.reduce(S.defaults(), { type: 'known', ids: ['alive', 'previous'], now: NOW });
+  const expanded = S.reduce(known, { type: 'expand', sid: 'alive' });
+  const st = S.reduce(expanded, { type: 'open', sid: 'previous' });
+  // When
+  const html = S.side(model, st);
+  // Then
+  assert.equal(st.members, null);
+  assert.equal(st.active, 'previous');
+  assert.match(html, /class="sh-row sh-kid sh-prev">.*?data-sid="previous"/);
+  assert.doesNotMatch(html, /class="sh-row sh-kid sh-prev sel"/);
+});
+
+test('highlight: shown rows and previous kids select only the shown conversation without expanding hosts', () => {
+  const S = load().BriefShell;
+  const known = winKnown(S);
+  for (const [sid, view] of [['a185', 'conv'], ['a185', 'home'], ['p185', 'conv'], ['e-done', 'archive']]) {
+    // Given
+    const prefs = { ...known, view, favs: sid === 'a185' ? ['a185'] : [], exp: { a185: true, 'sec:recent': true } };
+    // When
+    const st = S.reduce(prefs, { type: 'open', sid });
+    const html = S.side(WIN, st);
+    // Then
+    assert.ok(selectedRows(html).every((id) => id === sid));
+    if (sid === 'p185') {
+      assert.deepEqual(selectedRows(html), []);
+      assert.match(html, /class="sh-row sh-kid sh-prev sel">.*?data-sid="p185"/);
+      assert.doesNotMatch(html, /class="sh-row sh-kid sel"/);
+      assert.doesNotMatch(S.side(WIN, { ...st, exp: {} }), /class="sh-row[^"]*\bsel\b/);
+    } else {
+      assert.ok(selectedRows(html).length > 0);
+      assert.doesNotMatch(html, /class="sh-row sh-kid[^"]*\bsel\b/);
+    }
+  }
+});
+
+test('reduce stays pure with members: frozen state and membership inputs survive every window action', () => {
+  // Given
+  const S = load().BriefShell;
+  const members = deepFreeze(winMembers());
+  const st = deepFreeze(S.reduce(winKnown(S), { type: 'open', sid: 'a185' }));
+  const before = plain(st), input = plain(members);
+  // When
+  const results = [
+    S.reduce(st, { type: 'known', ids: members.map((s) => s.id), members, now: NOW }),
+    S.reduce(st, { type: 'open', sid: 'p185', sub: 'plan', now: NOW }),
+    S.reduce(st, { type: 'active', sid: WK, now: NOW }),
+    S.reduce(st, { type: 'close', sid: WK }),
+    S.reduce(st, { type: 'pin', sid: WK }),
+  ];
+  // Then
+  assert.equal(results[0], st);
+  assert.deepEqual(plain(st.groups[WK]), ['a185', 'q185', 'p185']);
+  assert.deepEqual(plain(st), before);
+  assert.deepEqual(plain(members), input);
+});
+
 test('reduce is pure: a deep-frozen state survives every action unchanged', () => {
   const S = load().BriefShell;
   let st = base(S);

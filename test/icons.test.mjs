@@ -142,13 +142,13 @@ test('no pictographic emoji left in the rail, the sidebar or the tab bar, in tex
   }
 });
 
-// U5 baseline: accepted M1 base 06cde25, measured with the ordinary fixture, generation 7, file mode:
+// T3 scoped exception (board-tabs-one-per-window, task2): admitted base ecefeb9, ordinary fixture, generation 7, file mode:
 // Buffer.byteLength(pageHtml(test/fixtures/view-model-board.json, 7, { mode: 'file' })).
-// Includes the M1 cards-view wiring/assets in page.js, shell.js, render.mjs and src/page/*; excludes only this
-// branch's folded-history additions. Re-measured from the extracted 06cde25 source (icons-baseline-measure.json):
-// 449015 B. The 16384 B whole-page growth budget is unchanged; the folded states add 11027 B at the page commit.
-const BASELINE_TREE = '06cde252a65e638fceb6fdbafb5ae6864a4f6316';
-const BASELINE_PAGE_BYTES = 449015;
+// Includes the admitted M1 and folded-history work; excludes this branch's window-tab reducer changes.
+// Real-renderer base-shell substitution measured 463375 B; task2 adds 4348 B. Growth alone failed the old baseline;
+// scratch classification retained every assertion (task-2/icons-{before,after}-raw.txt). The 16384 B budget is unchanged.
+const BASELINE_TREE = 'ecefeb9872f4fab991f6bc33931030e82b141757';
+const BASELINE_PAGE_BYTES = 463375;
 
 test('fixture page growth over the accepted tree stays within 16 KB (whole page; icon payload printed too)', (t) => {
   const notice = /<!--\nIcons: Lucide[\s\S]*?-->\n/.exec(PAGE)[0];
