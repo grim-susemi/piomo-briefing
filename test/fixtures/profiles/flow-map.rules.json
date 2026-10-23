@@ -1,0 +1,42 @@
+{
+  "version": "1.0.0",
+  "description": "Flow-map pass rules for switcher layout and interaction equivalence",
+  "rules": {
+    "F1": {
+      "name": "Section order parity",
+      "description": "Sections appear in the exact WinForms order",
+      "check": "sections"
+    },
+    "F2": {
+      "name": "Task step parity",
+      "description": "Each task has the same step list (controls, order, count)",
+      "check": "tasks"
+    },
+    "F3": {
+      "name": "Step region parity",
+      "description": "Each step in the same region",
+      "check": "step_region"
+    },
+    "F4": {
+      "name": "Spatial relation parity",
+      "description": "Any two step controls visible together keep their left/right and above/below relation (centre deltas under 8 px count as equal)",
+      "check": "spatial_relation",
+      "tolerancePx": 8
+    },
+    "F5": {
+      "name": "Scroll budget parity",
+      "description": "Scrolls to reach each step are no more than in WinForms. Scroll count = for each scroll container moved, ceil(px moved / container visible height), summed",
+      "check": "scroll_budget"
+    },
+    "F6": {
+      "name": "Row structure and copy fidelity",
+      "description": "Row structure and the copy of Must have 4 word for word, effort lists supported-only",
+      "check": "row_structure"
+    },
+    "F7": {
+      "name": "Region relations at both sizes",
+      "description": "Region relations at both sizes: status above cards and detail; cards left of detail (with the sidebar docked at 1180x700); guide at the right end of status; apply below the role box inside detail; message below cards and detail",
+      "check": "region_relations"
+    }
+  }
+}

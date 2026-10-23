@@ -1,0 +1,297 @@
+{
+    "schema":  "flow-map/1",
+    "source":  "winforms",
+    "fixtureHash":  "b11d5df59032eb69ef8333ab41e304ddb1ea380d95d8f0adf800001856b8489d",
+    "frame":  {
+                  "width":  1180,
+                  "height":  700,
+                  "inner":  {
+                                "w":  1180,
+                                "h":  700
+                            },
+                  "sidebar":  true
+              },
+    "regions":  [
+                    {
+                        "id":  "status",
+                        "box":  {
+                                    "x":  18,
+                                    "y":  86,
+                                    "w":  1144,
+                                    "h":  72
+                                }
+                    },
+                    {
+                        "id":  "guide",
+                        "box":  {
+                                    "x":  972,
+                                    "y":  29,
+                                    "w":  154,
+                                    "h":  30
+                                }
+                    },
+                    {
+                        "id":  "cards",
+                        "box":  {
+                                    "x":  18,
+                                    "y":  176,
+                                    "w":  481,
+                                    "h":  448
+                                }
+                    },
+                    {
+                        "id":  "detail",
+                        "box":  {
+                                    "x":  523,
+                                    "y":  176,
+                                    "w":  639,
+                                    "h":  448
+                                }
+                    },
+                    {
+                        "id":  "roles",
+                        "box":  {
+                                    "x":  16,
+                                    "y":  130,
+                                    "w":  590,
+                                    "h":  234
+                                }
+                    },
+                    {
+                        "id":  "lane",
+                        "box":  {
+                                    "x":  16,
+                                    "y":  388,
+                                    "w":  573,
+                                    "h":  28
+                                }
+                    },
+                    {
+                        "id":  "main",
+                        "box":  {
+                                    "x":  16,
+                                    "y":  520,
+                                    "w":  590,
+                                    "h":  28
+                                }
+                    },
+                    {
+                        "id":  "summarizer",
+                        "box":  {
+                                    "x":  16,
+                                    "y":  596,
+                                    "w":  590,
+                                    "h":  28
+                                }
+                    },
+                    {
+                        "id":  "apply",
+                        "box":  {
+                                    "x":  16,
+                                    "y":  630,
+                                    "w":  590,
+                                    "h":  30
+                                }
+                    },
+                    {
+                        "id":  "message",
+                        "box":  {
+                                    "x":  18,
+                                    "y":  638,
+                                    "w":  1144,
+                                    "h":  48
+                                }
+                    }
+                ],
+    "sections":  [
+                     "kibitzer",
+                     "reflection",
+                     "agents:explore-research",
+                     "agents:plan-advice",
+                     "agents:review-qa",
+                     "categories:quick-general",
+                     "categories:deep",
+                     "categories:specialist",
+                     "lane",
+                     "main",
+                     "summarizer",
+                     "apply"
+                 ],
+    "rows":  {
+                 "role":  {
+                              "component":  "New-RoutingRow",
+                              "cite":  "PS:5595-5785",
+                              "captions":  [
+                                               "1. 구독 서비스",
+                                               "2. AI 모델",
+                                               "3. 추론 강도"
+                                           ],
+                              "captionsCite":  "PS:5645",
+                              "staging":  "Pending apply on confirm; persists when all three set",
+                              "stagingCite":  "PS:5721-5734",
+                              "placeholderEmpty":  true,
+                              "placeholderCite":  "PS:5704-5711"
+                          },
+                 "memory":  {
+                                "kibitzerComponent":  "New-MemoryRoutingRow",
+                                "reflectionComponent":  "New-ReflectionMemoryRoutingRow",
+                                "cite":  "PS:5790-6056",
+                                "modes":  [
+                                              "quick 공유 (기본)",
+                                              "직접 선택"
+                                          ],
+                                "modesCite":  "PS:5935-5936"
+                            },
+                 "lane":  {
+                              "component":  "ModelProfileSelector / ModelProfileLiteral",
+                              "cite":  "PS:4222-4241"
+                          },
+                 "main":  {
+                              "component":  "MainProviderCombo / MainModelCombo / MainThinkingCombo",
+                              "cite":  "PS:4243-4289",
+                              "save":  "Save-MainModelOverride",
+                              "saveCite":  "PS:7475, 7494"
+                          },
+                 "summarizer":  {
+                                    "component":  "SummarizerProviderCombo / SummarizerModelCombo",
+                                    "cite":  "PS:4292-4340",
+                                    "firstItem":  "원본 기본 컴팩션",
+                                    "firstItemCite":  "PS:4390"
+                                },
+                 "apply":  {
+                               "cardCite":  "PS:7143-7205",
+                               "detailCite":  "PS:4200-4211, 7517-7545",
+                               "pendingTitleCite":  "PS:4529-4535",
+                               "keysCite":  "PS:7382-7395"
+                           }
+             },
+    "tasks":  {
+                  "role":  [
+                               {
+                                   "control":  "card:experimental-custom",
+                                   "region":  "cards",
+                                   "box":  {
+                                               "x":  0,
+                                               "y":  640,
+                                               "w":  481,
+                                               "h":  152
+                                           },
+                                   "scrolls":  1
+                               },
+                               {
+                                   "control":  "role:agents-explore:service",
+                                   "region":  "roles",
+                                   "box":  {
+                                               "x":  8,
+                                               "y":  566,
+                                               "w":  179,
+                                               "h":  21
+                                           },
+                                   "scrolls":  2
+                               },
+                               {
+                                   "control":  "role:agents-explore:model",
+                                   "region":  "roles",
+                                   "box":  {
+                                               "x":  193,
+                                               "y":  566,
+                                               "w":  179,
+                                               "h":  21
+                                           },
+                                   "scrolls":  2
+                               },
+                               {
+                                   "control":  "role:agents-explore:effort",
+                                   "region":  "roles",
+                                   "box":  {
+                                               "x":  378,
+                                               "y":  566,
+                                               "w":  179,
+                                               "h":  21
+                                           },
+                                   "scrolls":  2
+                               },
+                               {
+                                   "control":  "apply:detail",
+                                   "region":  "apply",
+                                   "box":  {
+                                               "x":  16,
+                                               "y":  630,
+                                               "w":  590,
+                                               "h":  30
+                                           },
+                                   "scrolls":  1
+                               }
+                           ],
+                  "profile":  [
+                                  {
+                                      "control":  "apply:card:gpt-deepseek",
+                                      "region":  "cards",
+                                      "box":  {
+                                                  "x":  392,
+                                                  "y":  272,
+                                                  "w":  60,
+                                                  "h":  28
+                                              },
+                                      "scrolls":  0
+                                  }
+                              ],
+                  "memory":  [
+                                 {
+                                     "control":  "memory:kibitzer:mode",
+                                     "region":  "roles",
+                                     "box":  {
+                                                 "x":  8,
+                                                 "y":  62,
+                                                 "w":  549,
+                                                 "h":  21
+                                             },
+                                     "scrolls":  0
+                                 },
+                                 {
+                                     "control":  "memory:kibitzer:service",
+                                     "region":  "roles",
+                                     "box":  {
+                                                 "x":  8,
+                                                 "y":  109,
+                                                 "w":  179,
+                                                 "h":  21
+                                             },
+                                     "scrolls":  0
+                                 },
+                                 {
+                                     "control":  "memory:kibitzer:model",
+                                     "region":  "roles",
+                                     "box":  {
+                                                 "x":  193,
+                                                 "y":  109,
+                                                 "w":  179,
+                                                 "h":  21
+                                             },
+                                     "scrolls":  0
+                                 },
+                                 {
+                                     "control":  "memory:kibitzer:effort",
+                                     "region":  "roles",
+                                     "box":  {
+                                                 "x":  378,
+                                                 "y":  109,
+                                                 "w":  179,
+                                                 "h":  21
+                                             },
+                                     "scrolls":  0
+                                 },
+                                 {
+                                     "control":  "apply:detail",
+                                     "region":  "apply",
+                                     "box":  {
+                                                 "x":  16,
+                                                 "y":  630,
+                                                 "w":  590,
+                                                 "h":  30
+                                             },
+                                     "scrolls":  1
+                                 }
+                             ]
+              }
+}
