@@ -5,22 +5,22 @@
   "readOnlyReason": null,
   "banner": null,
   "inventory": {
-    "version": "5.1.40",
-    "path": "C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.40-r1/package/plugin/extensions/omo.js",
-    "manifestPath": "C:/Users/USER/orca/projects/piomo-briefing-wt/primary-agents-profiles/src/profiles/inventory-5.1.40.json",
-    "pinnedSha256": "de8408a08dc84a389316af6f6fc407fa260d129b04748e354e291b104cee8c6c",
-    "loadedSha256": "de8408a08dc84a389316af6f6fc407fa260d129b04748e354e291b104cee8c6c",
+    "version": "5.1.44",
+    "path": "C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.44-r1/package/plugin/extensions/omo.js",
+    "manifestPath": "C:/Users/USER/orca/projects/piomo-briefing-wt/primary-agents-profiles/src/profiles/inventory-5.1.44.json",
+    "pinnedSha256": "0dde2e35d8b9b52efbc241afc1d2d2ee0b98b2ad14648e70153709a387218743",
+    "loadedSha256": "0dde2e35d8b9b52efbc241afc1d2d2ee0b98b2ad14648e70153709a387218743",
     "stale": false,
     "label": null,
     "readOnly": false
   },
   "guide": {
     "title": "OMO 권장 배치 · 설치판 5.1.33",
-    "version": "5.1.40",
+    "version": "5.1.44",
     "snapshotDate": "2026-10-20",
     "sources": [
-      { "path": "C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.40-r1/package/plugin/extensions/omo.js", "sha256": "de8408a08dc84a389316af6f6fc407fa260d129b04748e354e291b104cee8c6c" },
-      { "path": "C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.40-r1/package/plugin/extensions/omo-task.js", "sha256": "64112d39dcdc24069e759481c92b420a109c879c6fdaab7087de054d573204c4" }
+      { "path": "C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.44-r1/package/plugin/extensions/omo.js", "sha256": "0dde2e35d8b9b52efbc241afc1d2d2ee0b98b2ad14648e70153709a387218743" },
+      { "path": "C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.44-r1/package/plugin/extensions/omo-task.js", "sha256": "ddc64adc69b1fb830bc2280b35dba801ad4bcbe94d4d62abf9468f65ab59c2ff" }
     ]
   },
   "homes": {

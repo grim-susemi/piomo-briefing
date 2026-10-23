@@ -1,17 +1,17 @@
-// Separate 5.1.40 refresh layer, applied after the ported tables so parity tests can exercise
+// Separate 5.1.44 refresh layer, applied after the ported tables so parity tests can exercise
 // the ported layer alone. Pure: no DOM, no file I/O (the board store owns reads/writes).
-// Rules: roles new in 5.1.40 become routing rows (group "extras" when no purpose group fits);
-// roles absent from 5.1.40 stay visible as read-only rows labelled "5.1.40에 없음" and keep
+// Rules: roles new in 5.1.44 become routing rows (group "extras" when no purpose group fits);
+// roles absent from 5.1.44 stay visible as read-only rows labelled "5.1.44에 없음" and keep
 // their config; the ChatGPT-subscription picker lists every registry-served model for the
-// provider; the guide pins the two 5.1.40 bundle files by path + sha256; the four primary
+// provider; the guide pins the two 5.1.44 bundle files by path + sha256; the four primary
 // agents become roster rows (lane select + optional pin) in the todo-4 roster shape.
 import {
   BUILTIN_MODEL_PROFILES, CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE, ROLE_DISPLAY_NAMES,
   ROLE_INVENTORY, ROUTING_GROUPS, buildRoutingRows,
 } from './model.mjs';
 
-export const INVENTORY_VERSION = '5.1.40';
-export const ABSENT_LABEL = '5.1.40에 없음';
+export const INVENTORY_VERSION = '5.1.44';
+export const ABSENT_LABEL = '5.1.44에 없음';
 export const AGENT_IDS = ['sisyphus', 'hephaestus', 'prometheus', 'atlas'];
 export const AGENT_DISPLAY = { sisyphus: 'Sisyphus', hephaestus: 'Hephaestus', prometheus: 'Prometheus', atlas: 'Atlas' };
 export const AGENT_COLORS = { sisyphus: '#00CED1', hephaestus: '#D97706', prometheus: '#A78BFA', atlas: '#10B981' };
@@ -33,7 +33,7 @@ function purposeGroup(section, role) {
   return 'extras';
 }
 
-// Every 5.1.40 inventory id appears as a row; absent ported roles stay visible and read-only.
+// Every 5.1.44 inventory id appears as a row; absent ported roles stay visible and read-only.
 export function refreshRoutingRows({ inventory, layer = null }) {
   const live = Object.fromEntries(['agents', 'categories'].map((section) => [section, new Set(inventoryIds(inventory, section))]));
   const rows = buildRoutingRows({ inventory: ROLE_INVENTORY, layer }).map((row) => {
@@ -77,7 +77,7 @@ export function chatGptPickerModels({ registryModels = [] }) {
   return ids;
 }
 
-// The guide pins the two 5.1.40 source files by path + sha256 instead of the 5.1.33 manifest refs.
+// The guide pins the two 5.1.44 source files by path + sha256 instead of the 5.1.33 manifest refs.
 export function recommendationGuide({ inventory, manifest = null }) {
   const sources = inventory?.sources;
   if (!sources?.omo?.path || !sources?.omo?.sha256 || !sources?.omoTask?.path || !sources?.omoTask?.sha256) {

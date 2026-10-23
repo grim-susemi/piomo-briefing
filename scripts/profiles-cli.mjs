@@ -21,7 +21,7 @@ function usage() {
     'usage:',
     '  profiles-cli.mjs status|dump --primary-home <dir> --stable-home <dir> [--mirror-home <dir>]...',
     '  profiles-cli.mjs apply <intent.json> [--dry-run] --primary-home <dir> --stable-home <dir> [--mirror-home <dir>]...',
-    'options: --plugin <omo.js>  --inventory <inventory-5.1.40.json>',
+    'options: --plugin <omo.js>  --inventory <inventory-5.1.44.json>',
   ].join('\n');
 }
 

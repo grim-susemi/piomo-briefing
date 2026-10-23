@@ -1,4 +1,4 @@
-// 5.1.40 refresh layer tests: inventory rows, absent read-only rows, registry-driven ChatGPT
+// 5.1.44 refresh layer tests: inventory rows, absent read-only rows, registry-driven ChatGPT
 // picker, guide hashes, roster rows.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,25 +10,25 @@ import { fileURLToPath } from 'node:url';
 import {
   ABSENT_LABEL, AGENT_IDS, DEFAULT_LANE, agentRosterRows, buildRoster, chatGptPickerModels,
   inventoryStatus, recommendationGuide, refreshRoutingRows,
-} from '../src/profiles/refresh-5.1.40.mjs';
+} from '../src/profiles/refresh-5.1.44.mjs';
 import { ROLE_INVENTORY } from '../src/profiles/model.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const inventoryPath = path.join(here, '..', 'src', 'profiles', 'inventory-5.1.40.json');
+const inventoryPath = path.join(here, '..', 'src', 'profiles', 'inventory-5.1.44.json');
 const inventory = JSON.parse(await readFile(inventoryPath, 'utf8'));
 
 const sha256 = (buffer) => createHash('sha256').update(buffer).digest('hex');
 
-test('inventory sha256 values equal the current 5.1.40 bundle files', async () => {
+test('inventory sha256 values equal the current 5.1.44 bundle files', async () => {
   for (const key of ['omo', 'omoTask']) {
     const source = inventory.sources[key];
     const bytes = await readFile(source.path);
     assert.equal(sha256(bytes), source.sha256, `${key} source hash`);
   }
-  assert.equal(inventory.version, '5.1.40');
+  assert.equal(inventory.version, '5.1.44');
 });
 
-test('every 5.1.40 inventory id appears as a routing row', () => {
+test('every 5.1.44 inventory id appears as a routing row', () => {
   const layer = {
     agents: { oracle: { model: 'sol' }, ouroboros: { model: 'flash-high' } },
     categories: { 'fast-explore': { model: 'flash-high' } },
@@ -40,7 +40,7 @@ test('every 5.1.40 inventory id appears as a routing row', () => {
   }
 });
 
-test('roles absent from 5.1.40 are read-only, labelled, and keep their config', () => {
+test('roles absent from 5.1.44 are read-only, labelled, and keep their config', () => {
   const layer = {
     agents: { oracle: { model: 'sol' }, ouroboros: { model: 'flash-high' } },
     categories: { 'fast-explore': { model: 'kimi-max' } },
@@ -49,7 +49,7 @@ test('roles absent from 5.1.40 are read-only, labelled, and keep their config', 
   for (const [section, role] of [['agents', 'oracle'], ['agents', 'ouroboros'], ['categories', 'fast-explore']]) {
     const row = rows.find((entry) => entry.section === section && entry.role === role);
     assert.equal(row.readOnly, true, `${section}/${role} read-only`);
-    assert.equal(row.absentIn, '5.1.40');
+    assert.equal(row.absentIn, '5.1.44');
     assert.equal(row.stateLabel, ABSENT_LABEL);
     assert.deepEqual(row.config, layer[section][role]);
   }
@@ -58,7 +58,7 @@ test('roles absent from 5.1.40 are read-only, labelled, and keep their config', 
   assert.equal(live.stateLabel, null);
 });
 
-test('a role new in 5.1.40 becomes a row, group extras when no purpose group fits', () => {
+test('a role new in 5.1.44 becomes a row, group extras when no purpose group fits', () => {
   const extended = {
     ...inventory,
     agents: [...inventory.agents, 'sentinel-agent'],
@@ -91,18 +91,18 @@ test('ChatGPT picker lists every registry-served model for the provider', () => 
   assert.deepEqual(chatGptPickerModels({ registryModels: [] }), []);
 });
 
-test('the guide pins the two 5.1.40 files by path and sha256, never 5.1.33', () => {
+test('the guide pins the two 5.1.44 files by path and sha256, never 5.1.33', () => {
   const guide = recommendationGuide({
     inventory,
     manifest: { title: 'guide', snapshotDate: '2026-10-14', sources: [{ webUrl: 'https://example', ref: 'v5.1.33' }] },
   });
-  assert.equal(guide.version, '5.1.40');
+  assert.equal(guide.version, '5.1.44');
   assert.deepEqual(guide.sources, [
     { path: inventory.sources.omo.path, sha256: inventory.sources.omo.sha256 },
     { path: inventory.sources.omoTask.path, sha256: inventory.sources.omoTask.sha256 },
   ]);
-  assert.equal(inventory.sources.omo.sha256, 'de8408a08dc84a389316af6f6fc407fa260d129b04748e354e291b104cee8c6c');
-  assert.equal(inventory.sources.omoTask.sha256, '64112d39dcdc24069e759481c92b420a109c879c6fdaab7087de054d573204c4');
+  assert.equal(inventory.sources.omo.sha256, '0dde2e35d8b9b52efbc241afc1d2d2ee0b98b2ad14648e70153709a387218743');
+  assert.equal(inventory.sources.omoTask.sha256, 'ddc64adc69b1fb830bc2280b35dba801ad4bcbe94d4d62abf9468f65ab59c2ff');
   assert.equal(JSON.stringify(guide).includes('5.1.33'), false);
   assert.throws(() => recommendationGuide({ inventory: { sources: {} } }), /path and sha256/);
 });
@@ -138,7 +138,7 @@ test('the four primary agents become roster rows with lane select and optional p
 });
 
 test('inventoryStatus flags a stale bundle hash', () => {
-  assert.deepEqual(inventoryStatus({ inventory }), { version: '5.1.40', stale: false, staleSources: [] });
+  assert.deepEqual(inventoryStatus({ inventory }), { version: '5.1.44', stale: false, staleSources: [] });
   const stale = inventoryStatus({ inventory, live: { omo: 'deadbeef' } });
   assert.equal(stale.stale, true);
   assert.deepEqual(stale.staleSources, ['omo']);

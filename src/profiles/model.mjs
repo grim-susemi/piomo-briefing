@@ -2,7 +2,7 @@
 // (ProfileMeta :229-310, RoleInventory/RoutingGroups ~:350, model alias and provider labels
 // :360-580, subscription visible-model lists :527-551, BuiltinModelProfiles :790-807) and from
 // OMO_Native_ReasoningLevels.psm1 (thinking maps). Pure data and pure helpers: no DOM, no file I/O.
-// The 5.1.40 refresh layer lives in refresh-5.1.40.mjs so parity tests exercise this layer alone.
+// The 5.1.44 refresh layer lives in refresh-5.1.44.mjs so parity tests exercise this layer alone.
 
 export const PROFILE_META = [
   {

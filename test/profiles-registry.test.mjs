@@ -22,7 +22,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, '..');
 const GOLDEN = path.join(here, 'fixtures', 'profiles', 'goldens', 'apply-gpt-kimi-deepseek', 'files');
 const REGISTRY_FIXTURE = path.join(here, 'fixtures', 'profiles', 'registry');
-const REAL_INVENTORY = JSON.parse(fs.readFileSync(path.join(ROOT, 'src', 'profiles', 'inventory-5.1.40.json'), 'utf8'));
+const REAL_INVENTORY = JSON.parse(fs.readFileSync(path.join(ROOT, 'src', 'profiles', 'inventory-5.1.44.json'), 'utf8'));
 const PS_STYLE = { bom: true, eol: '\r\n', indent: '    ', keySep: ':  ', trailingNewline: true };
 
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');

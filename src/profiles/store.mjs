@@ -6,7 +6,7 @@
 //
 // Write pipeline (preview performs only the first four steps):
 //   parse body -> read targets -> apply the change kinds to parsed values ->
-//   validate (todo-7 merge layer + 5.1.40 key allowlist + protected settings) ->
+//   validate (todo-7 merge layer + 5.1.44 key allowlist + protected settings) ->
 //   compare-and-swap every read target's sha256 against `expected` -> back up the
 //   bytes under <primaryHome>/runtime/native-profile-switcher-backups -> atomic text
 //   write (same-directory wx tmp -> fsync -> rename with the contract's retry ladder)
@@ -41,7 +41,7 @@ import {
   newRouteRow,
 } from './model.mjs';
 import { composeHomeRegistry, getServedModelIds, validateSelection } from './registry.mjs';
-import { chatGptPickerModels, recommendationGuide, refreshRoutingRows } from './refresh-5.1.40.mjs';
+import { chatGptPickerModels, recommendationGuide, refreshRoutingRows } from './refresh-5.1.44.mjs';
 import { compareRecommendation, getRecommendationManifestShape } from './recommend.mjs';
 
 export const PRIMARY_HOME_DEFAULT = 'C:/Users/USER/.omo';
@@ -50,11 +50,11 @@ export const MIRROR_HOME_DEFAULTS = [
   'C:/Users/USER/.somo/home/.omo',
 ];
 export const STABLE_HOME_DEFAULT = 'C:/Users/USER/.omo-stable-500/home/.omo';
-export const PLUGIN_DEFAULT = 'C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.40-r1/package/plugin/extensions/omo.js';
+export const PLUGIN_DEFAULT = 'C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.44-r1/package/plugin/extensions/omo.js';
 // The switcher's recommendation table is read-only reference data; the board never
 // writes it and tests inject their own object instead of touching the desktop app.
 export const RECOMMENDATION_MANIFEST_DEFAULT = 'C:/Users/USER/Desktop/OpenCode_Modes/OMO_Native_Recommendation.json';
-export const INVENTORY_PATH = fileURLToPath(new URL('./inventory-5.1.40.json', import.meta.url));
+export const INVENTORY_PATH = fileURLToPath(new URL('./inventory-5.1.44.json', import.meta.url));
 export const BACKUP_DIR = ['runtime', 'native-profile-switcher-backups'];
 export const REDACTED = '<redacted>';
 export const INVENTORY_STALE_LABEL = '인벤토리 갱신 필요';
@@ -67,11 +67,11 @@ export const CREDENTIAL_KEY = /^(apiKey|api_key|apikey|accessToken|access_token|
 
 const ROOT_KEYS = new Set(['$schema', 'formatOnMutation', 'gateway', 'categories', 'agents', 'git_master',
   'task', 'teams', 'models', 'model_profiles', 'model_profile', 'memory', 'telemetry', 'side_panel',
-  'computer', 'disabled_skills', '[opencode]', '[native]', '[senpi]', '[codex]', 'profiles',
+  'computer', 'disabled_skills', 'exclude_models', '[opencode]', '[native]', '[senpi]', '[codex]', 'profiles',
   '_migrations', 'legacy_migrations']);
 const NATIVE_KEYS = new Set(['formatOnMutation', 'gateway', 'categories', 'agents', 'git_master', 'task',
   'teams', 'models', 'model_profiles', 'model_profile', 'memory', 'telemetry', 'side_panel',
-  'computer', 'disabled_skills']);
+  'computer', 'disabled_skills', 'exclude_models']);
 const AGENT_ENTRY_KEYS = new Set(['description', 'prompt', 'model', 'models', 'reasoning', 'variant',
   'reasoningEffort', 'tools', 'execution_mode', 'background', 'max_depth', 'allowed_subagents',
   'disallowed_tools', 'max_turns', 'temperature', 'disable', 'permission', 'prompt_append']);
@@ -289,7 +289,7 @@ function readTarget(spec, file, fs, kind) {
 // ── validation ────────────────────────────────────────────────────────────────
 function checkKeys(object, allowed, at, errors) {
   for (const key of Object.keys(object)) {
-    if (!allowed.has(key)) errors.push(`${at}.${key}: not allowed by inventory-5.1.40.json`);
+    if (!allowed.has(key)) errors.push(`${at}.${key}: not allowed by inventory-5.1.44.json`);
   }
 }
 
@@ -581,7 +581,7 @@ export function openProfilesStore(options = {}) {
       const key = `${row.section}/${row.role}`;
       let item = byKey.get(key);
       if (!item) {
-        // A role that exists only in the 5.1.40 inventory is not in expandLayerRoles;
+        // A role that exists only in the 5.1.44 inventory is not in expandLayerRoles;
         // compare its own row so it still carries a real status, never 'unknown'.
         const alias = typeof row.model === 'string' ? row.model : '';
         const entry = alias && isPlainObject(catalog) ? catalog[alias] : null;
@@ -775,7 +775,7 @@ export function openProfilesStore(options = {}) {
     if (inventoryRaw) {
       try {
         // The switcher's manifest still names 5.1.33 in its source URLs; only its
-        // descriptive fields belong in the 5.1.40 guide, whose pins come from inventory.
+        // descriptive fields belong in the 5.1.44 guide, whose pins come from inventory.
         guide = recommendationGuide({
           inventory: inventoryRaw,
           manifest: manifestRead.manifest

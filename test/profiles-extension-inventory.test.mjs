@@ -61,7 +61,7 @@ test('inventory: through extension resolution, installed plugin fixture reports 
   writeFileSync(join(stable, 'omo.jsonc'), '{}');
   writeFileSync(join(stable, 'agent', 'settings.json'), '{}');
 
-  // Copy installed 5.1.40 plugin bundle to fixture
+  // Copy installed 5.1.44 plugin bundle to fixture
   copyFileSync(PLUGIN_DEFAULT, join(extDir, 'omo.js'));
 
   let store = null;
@@ -84,7 +84,7 @@ test('inventory: through extension resolution, installed plugin fixture reports 
   assert.ok(store, 'store was constructed');
   const inv = store.inventory();
   assert.equal(inv.stale, false, 'inventory is not stale');
-  assert.equal(inv.version, '5.1.40');
+  assert.equal(inv.version, '5.1.44');
   assert.equal(inv.readOnly, false);
 
   const state = store.state();
@@ -100,7 +100,7 @@ test('inventory: through extension resolution, single-byte mismatch reports stal
   const extDir = join(fakePluginRoot, 'extensions');
   mkdirSync(extDir, { recursive: true });
 
-  // Copy installed 5.1.40 plugin bundle and mutate 1 byte
+  // Copy installed 5.1.44 plugin bundle and mutate 1 byte
   const bytes = readFileSync(PLUGIN_DEFAULT);
   bytes[0] = bytes[0] ^ 1;
   writeFileSync(join(extDir, 'omo.js'), bytes);
@@ -125,7 +125,7 @@ test('inventory: through extension resolution, single-byte mismatch reports stal
   assert.ok(store, 'store was constructed');
   const inv = store.inventory();
   assert.equal(inv.stale, true, 'inventory is stale');
-  assert.equal(inv.version, '5.1.40');
+  assert.equal(inv.version, '5.1.44');
   assert.equal(inv.readOnly, true);
   assert.equal(inv.label, '인벤토리 갱신 필요');
 
