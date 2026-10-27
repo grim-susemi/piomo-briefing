@@ -39,6 +39,7 @@ import {
   clone, getOrCreateCatalogAlias, removeNullModelProfile, setProfileLayerModel,
   stripEngineSectionAlias,
 } from '../src/profiles/merge.mjs';
+import { composeHomeRegistry, getServedModelIds } from '../src/profiles/registry.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const GOLDEN = path.join(ROOT, 'test/fixtures/profiles/goldens/apply-gpt-kimi-deepseek/files');
@@ -81,6 +82,8 @@ const OUT = arg('--out') ? path.resolve(arg('--out')) : '';
 const EVIDENCE = arg('--evidence') ? path.resolve(arg('--evidence')) : OUT;
 const KEEP = argv.includes('--keep');
 const NEGATIVE = argv.includes('--negative-control');
+const GATE = argv.includes('--gate');
+const FLOW_E2E = argv.includes('--flow-e2e');
 const PREFIX = arg('--prefix') || 'task-13-piomo-primary-agents';
 const TASK = /^task-(\d+)-piomo-primary-agents(?:-r\d+)?$/.exec(PREFIX)?.[1] || '';
 const TOKEN = `piomo-t${TASK}-board-token`;
@@ -258,6 +261,8 @@ const sleepFrame = () => 'new Promise((resolve) => requestAnimationFrame(() => r
 
 async function main() {
   if (NEGATIVE) return negativeControl();
+  if (GATE) return supportGate();
+  if (FLOW_E2E) return flowE2e();
   const liveBefore = liveState();
   run.liveBefore = liveBefore;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `piomo-t${TASK}-`));
@@ -2901,13 +2906,829 @@ function writeEvidence() {
   fs.writeFileSync(path.join(OUT, 'captures.json'), `${JSON.stringify(run, null, 2)}\n`);
 }
 
+// ── todo 9 of plan switcher-flow-restore: the support gate and the three WinForms tasks through the real page ───────
+// --gate      <out>/gate.json: role row, main, summarizer, Kibitzer and Reflection against a fixture registry where
+//             opencode/gemini-4-argon is served=false; <out>/gate-flip.json: the same pick with it served=true.
+// --flow-e2e  <evidence>/e2e.json + e2e.md: the role, profile and memory tasks at 1180x700 and 1600x900 with
+//             scripts/qa-flow-map.mjs's picks. The bytes written must equal the store's own output for the posted apply
+//             body on an identical seed, the golden where a scenario exists, and a behind-the-page edit must answer 409
+//             with no write.
+// Homes are seeded under %TEMP%/omo-switcher-tests/ like qa-flow-map.mjs (goldens + the registry fixture). The gate's
+// fixture registry is the real composition of test/fixtures/profiles/registry handed to the store's `registries`
+// option, so one model can be withheld without a new flag.
+const FLOW_REGISTRY = path.join(ROOT, 'test/fixtures/profiles/registry');
+const PROFILE_FIXTURES = path.join(ROOT, 'test/fixtures/profiles');
+const FIXTURE_PARENT = path.join(os.tmpdir(), 'omo-switcher-tests');
+const LIVE_HOMES = ['C:/Users/USER/.omo', 'C:/Users/USER/.omo-stable-500/home/.omo', 'C:/Users/USER/.omo-original/home/.omo', 'C:/Users/USER/.somo/home/.omo'];
+const FLOW_TASKS = {
+  role: ['card:experimental-custom', 'role:agents/explore:service', 'role:agents/explore:model', 'role:agents/explore:effort', 'apply:detail'],
+  profile: ['apply:card:gpt-deepseek'],
+  memory: ['memory:kibitzer:mode', 'memory:kibitzer:service', 'memory:kibitzer:model', 'memory:kibitzer:effort', 'apply:detail'],
+};
+const FLOW_SIZES = [{ name: '1180x700', width: 1180, height: 700 }, { name: '1600x900', width: 1600, height: 900 }];
+const ARGON_OPENCODE = 'opencode/gemini-4-argon';
+const ARGON_ANTIGRAVITY = 'antigravity-ocx/google-antigravity/gemini-4-argon';
+const ARGON_ALIASES = {
+  'qa-argon-opencode': { model: ARGON_OPENCODE, variant: 'high' },
+  'qa-argon-antigravity': { model: ARGON_ANTIGRAVITY, variant: 'high' },
+};
+const ARGON_SERVICE = { opencode: 'opencode', antigravity: 'antigravity-ocx' };
+// The five editors of the gate. main keeps a provider plus a provider-less model id; the others keep a full model id.
+const GATE_EDITORS = {
+  role: { row: '[data-pf-route="agents/explore"]', service: '[data-flow="role:agents/explore:service"]',
+    model: '[data-flow="role:agents/explore:model"]', effort: '[data-flow="role:agents/explore:effort"]',
+    opencode: ARGON_OPENCODE, antigravity: ARGON_ANTIGRAVITY },
+  main: { row: '#pf-sec-main', service: '[data-pf="main-provider"]', model: '[data-pf="main-model"]',
+    effort: '[data-pf="main-thinking"]', opencode: 'gemini-4-argon', antigravity: 'google-antigravity/gemini-4-argon' },
+  summarizer: { row: '#pf-sec-summarizer', service: '[data-pf="summarizer-provider"]', model: '[data-pf="summarizer-model"]',
+    effort: null, opencode: ARGON_OPENCODE, antigravity: ARGON_ANTIGRAVITY },
+  kibitzer: { row: '[data-flow-sec="kibitzer"]', mode: '[data-flow="memory:kibitzer:mode"]',
+    service: '[data-flow="memory:kibitzer:service"]', model: '[data-flow="memory:kibitzer:model"]',
+    effort: '[data-flow="memory:kibitzer:effort"]', opencode: ARGON_OPENCODE, antigravity: ARGON_ANTIGRAVITY },
+  reflection: { row: '[data-flow-sec="reflection"]', mode: '[data-flow="memory:reflection:mode"]',
+    service: '[data-flow="memory:reflection:service"]', model: '[data-flow="memory:reflection:model"]',
+    effort: '[data-flow="memory:reflection:effort"]', opencode: ARGON_OPENCODE, antigravity: ARGON_ANTIGRAVITY },
+};
+// Golden file name -> path under a fixture root (the test/fixtures/profiles/capture.ps1 layout).
+const GOLDEN_SEED_FILES = {
+  'primary/omo.jsonc': 'primary/omo.jsonc',
+  'primary/settings.json': 'primary/agent/settings.json',
+  'primary/selection.json': 'primary/native-profile-selection.json',
+  'primary/agent-selection.json': 'primary/agent/native-profile-selection.json',
+  'primary/main-override.json': 'primary/runtime/native-profile-switcher-main.json',
+  'stable/omo.jsonc': 'stable/omo.jsonc',
+  'stable/settings.json': 'stable/agent/settings.json',
+};
+const GOLDEN_RUNS = [
+  { task: 'profile', seed: 'goldens/dump-state', golden: 'goldens/apply-gpt-deepseek', steps: [['apply:card:gpt-deepseek', null]] },
+  { task: 'memory', seed: 'goldens-r3a/intent-main-dryrun', golden: 'goldens-r3a/intent-memory-custom-apply',
+    steps: [['memory:kibitzer:mode', 'custom'], ['memory:kibitzer:service', 'openai'], ['memory:kibitzer:model', 'openai/gpt-6-sol'],
+      ['memory:kibitzer:effort', 'high'], ['apply:detail', null]] },
+];
+const ROLE_GOLDEN_GAP = 'every routing golden is activate:false on gpt-kimi-deepseek while its seed (dump-state) has cmd-glm-deepseek '
+  + 'active, and the page applies a role edit together with activating the shown profile (IS-10), so no golden scenario matches';
+// Config files whose saved values the gate follows byte for byte.
+const SAVED_FILES = ['primary/omo.jsonc', 'primary/agent/settings.json', 'primary/runtime/native-profile-switcher-main.json', 'stable/omo.jsonc'];
+const APPLY_SETTLED = `(document.querySelector('[data-pf-result="apply"]') || document.querySelector('.pf-tray .pf-err') ||
+  document.querySelector('.pf-conflict') || /실패/.test((document.querySelector('[data-flow="message"]') || {}).textContent || ''))
+  && document.querySelector('[data-pf-root]').getAttribute('data-pf-busy') === 'false'`;
+// Page-side helpers, installed once per document.
+const QA9_LIB = `(() => {
+  const q = (sel) => document.querySelector(sel);
+  const box = (el) => { const r = el.getBoundingClientRect(); return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }; };
+  const snap = () => window.BriefPage && window.BriefPage.state.ui.profilesState;
+  const opt = (o) => ({ value: o.value, text: o.textContent.trim(), disabled: o.disabled, title: o.title || '', selected: o.selected });
+  window.__qa9 = {
+    reach(sel) { const el = q(sel); if (!el) return null; el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' }); return box(el); },
+    options(sel) { const el = q(sel); return el && el.options ? [...el.options].map(opt) : null; },
+    value(sel) { const el = q(sel); return el ? el.value : null; },
+    selected(sel) {
+      const el = q(sel);
+      if (!el || !el.options) return null;
+      const o = el.options[el.selectedIndex];
+      return { value: o ? o.value : '', text: o ? o.textContent.trim() : '', disabled: el.disabled };
+    },
+    choose(sel, value) { const el = q(sel); if (!el) return null; el.value = value; el.dispatchEvent(new Event('change', { bubbles: true })); return el.value; },
+    // A forged pick: a missing option is added, a disabled option or select enabled, then the real change handler runs.
+    force(sel, value) {
+      const el = q(sel);
+      if (!el) return { missing: true };
+      let o = [...el.options].find((x) => x.value === value);
+      const added = !o;
+      if (!o) { o = document.createElement('option'); o.value = value; o.textContent = value; el.appendChild(o); }
+      const wasDisabled = o.disabled, selectWasDisabled = el.disabled;
+      o.disabled = false;
+      el.disabled = false;
+      el.value = value;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { value: el.value, added, wasDisabled, selectWasDisabled };
+    },
+    click(sel) { q(sel).click(); return true; },
+    pending() { return (snap() && snap().pending || []).map((c) => JSON.parse(JSON.stringify(c))); },
+    text(sel) { const el = q(sel); return el ? el.textContent.replace(/\\s+/g, ' ').trim() : null; },
+    flagIn(sel) {
+      const el = q(sel);
+      if (!el) return null;
+      const m = /(미지원|지원되지|지원 안|지원 불가|제공되지|unsupported|UNSUPPORTED_MODEL)/i.exec(el.textContent);
+      return m ? m[0] : '';
+    },
+    rowFlag(section, role) {
+      const rows = snap() && snap().view && snap().view.routing && snap().view.routing.rows || [];
+      const r = rows.find((x) => x.section === section && x.role === role);
+      return r ? { unsupported: !!r.unsupported, reason: r.unsupportedReason || null, home: r.unsupportedHome || null } : null;
+    },
+    // Providers with a catalog model served in every required home (the view's own rule), as qa-flow-map picks them.
+    servedProviders() {
+      const view = snap() && snap().view || {};
+      if (view.registry && Array.isArray(view.registry.unknownHomes) && view.registry.unknownHomes.length) return [];
+      const out = [];
+      for (const e of Object.values(view.catalog || {})) {
+        if (!e || typeof e.model !== 'string' || e.model.indexOf('/') <= 0) continue;
+        const s = e.served;
+        if (s && !(Object.keys(s).length && Object.values(s).every((v) => v === true))) continue;
+        const p = e.model.slice(0, e.model.indexOf('/'));
+        if (!out.includes(p)) out.push(p);
+      }
+      return out;
+    },
+  };
+  return true;
+})()`;
+
+const slashPath = (p) => path.resolve(p).replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
+// The Assert-FixtureRootIsSafe rule (capture.ps1:70): a root that is, contains or sits inside a live home is refused.
+function assertFixtureRoot(root) {
+  const r = slashPath(root);
+  for (const home of LIVE_HOMES.map(slashPath)) {
+    if (r === home || r.startsWith(home + '/') || home.startsWith(r + '/')) throw new Error(`fixture root ${root} touches live home ${home}`);
+  }
+}
+
+// The qa-flow-map.mjs seed: the apply-gpt-kimi-deepseek golden files plus the registry fixture.
+function seedFlowHomes(root) {
+  assertFixtureRoot(root);
+  const primary = path.join(root, 'primary');
+  const stable = path.join(root, 'stable');
+  fs.mkdirSync(path.join(primary, 'agent'), { recursive: true });
+  fs.mkdirSync(path.join(stable, 'agent'), { recursive: true });
+  const put = (file, value) => fs.writeFileSync(file, formatJsonText(value, PS_STYLE));
+  const golden = (name) => JSON.parse(fs.readFileSync(path.join(GOLDEN, name), 'utf8'));
+  put(path.join(primary, 'omo.jsonc'), golden('primary/omo.jsonc.json'));
+  put(path.join(primary, 'agent', 'settings.json'), golden('primary/settings.json.json'));
+  put(path.join(primary, 'native-profile-selection.json'), { key: 'gpt-kimi-deepseek', profile: 'native-gpt-kimi-deepseek' });
+  put(path.join(primary, 'agent', 'native-profile-selection.json'), { key: 'gpt-kimi-deepseek', profile: 'native-gpt-kimi-deepseek' });
+  put(path.join(stable, 'omo.jsonc'), golden('stable/omo.jsonc.json'));
+  fs.writeFileSync(path.join(stable, 'agent', 'settings.json'), '{"packages":["stable"]}');
+  fs.copyFileSync(path.join(FLOW_REGISTRY, 'primary/agent/models.json'), path.join(primary, 'agent', 'models.json'));
+  fs.copyFileSync(path.join(FLOW_REGISTRY, 'stable/agent/models.json'), path.join(stable, 'agent', 'models.json'));
+  return { root, primary, stable };
+}
+
+// The golden catalog has no Argon alias, so neither Argon could appear in any editor without these two.
+function addArgonAliases(homes) {
+  const file = path.join(homes.primary, 'omo.jsonc');
+  const config = readJsonc(file);
+  Object.assign((config['[senpi]'] ?? config['[native]']).models, ARGON_ALIASES);
+  fs.writeFileSync(file, formatJsonText(config, PS_STYLE));
+}
+
+function goldenFile(scenarioDir, name) {
+  const file = path.join(scenarioDir, 'files', name + '.json');
+  return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
+}
+
+function seedGoldenHomes(root, scenarioDir) {
+  assertFixtureRoot(root);
+  for (const [name, rel] of Object.entries(GOLDEN_SEED_FILES)) {
+    const file = path.join(root, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const value = goldenFile(scenarioDir, name);
+    if (value !== null) fs.writeFileSync(file, formatJsonText(value, PS_STYLE));
+  }
+  for (const home of ['primary', 'stable']) {
+    fs.copyFileSync(path.join(FLOW_REGISTRY, home, 'agent', 'models.json'), path.join(root, home, 'agent', 'models.json'));
+  }
+  return { root, primary: path.join(root, 'primary'), stable: path.join(root, 'stable') };
+}
+
+// The real composition of the fixture homes; served=false withholds opencode/gemini-4-argon in every home.
+function fixtureRegistries(homes, served) {
+  const out = {};
+  for (const home of ['primary', 'stable']) {
+    const registry = composeHomeRegistry(path.join(homes[home], 'agent'));
+    if (registry.unknown) throw new Error(`registry composition failed for the ${home} fixture home`);
+    out[home] = served ? registry : { ...registry, models: registry.models.filter((m) => m.modelId !== ARGON_OPENCODE) };
+  }
+  return out;
+}
+
+function registrySummary(registries) {
+  return Object.fromEntries(Object.entries(registries).map(([home, registry]) => {
+    const served = getServedModelIds(registry);
+    return [home, { models: registry.models.length, [ARGON_OPENCODE]: served.has(ARGON_OPENCODE), [ARGON_ANTIGRAVITY]: served.has(ARGON_ANTIGRAVITY) }];
+  }));
+}
+
+function treeBytes(root) {
+  const out = {};
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(file);
+      else out[path.relative(root, file).replace(/\\/g, '/')] = fs.readFileSync(file);
+    }
+  };
+  walk(root);
+  return out;
+}
+
+const treeChanges = (before, after) => [...new Set([...Object.keys(before), ...Object.keys(after)])].sort()
+  .filter((file) => !before[file] || !after[file] || !before[file].equals(after[file]));
+
+function openFixtureStore(homes, registries = null) {
+  const inventory = JSON.parse(fs.readFileSync(INVENTORY, 'utf8'));
+  return openProfilesStore({
+    primaryHome: homes.primary, stableHome: homes.stable, mirrorHomes: [], pluginPath: PLUGIN, inventory,
+    now: () => FIXED_NOW, ...(registries ? { registries } : {}),
+  });
+}
+
+// The real board over fixture homes. Every POST /profiles answer is recorded; nextExchange() resolves on the next one
+// within a deadline, so a click is followed by the server's answer instead of a sleep.
+async function startFixtureBoard(homes, registries = null) {
+  const store = openFixtureStore(homes, registries);
+  const vm = JSON.parse(fs.readFileSync(VM_FILE, 'utf8'));
+  const exchanges = [];
+  const waiters = [];
+  const server = createBoardServer({
+    portBase: PORT_BASE, portCount: 5, generation: 7, token: TOKEN,
+    getPage: ({ nonce } = {}) => pageHtml(vm, 7, { mode: 'server', token: TOKEN, nonce }),
+    getViewModel: () => vm,
+    profilesState: () => store.state(),
+    onProfiles: (body) => {
+      const answer = store.handle(body);
+      const record = { request: JSON.parse(JSON.stringify(body)), status: answer.status, code: answer.json?.code ?? null };
+      exchanges.push(record);
+      for (const resolve of waiters.splice(0)) resolve(record);
+      return answer;
+    },
+  });
+  const { port } = await server.start();
+  const nextExchange = (timeout = 12000) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout waiting for POST /profiles')), timeout);
+    waiters.push((record) => { clearTimeout(timer); resolve(record); });
+  });
+  return { url: `http://127.0.0.1:${port}/`, port, server, store, exchanges, nextExchange };
+}
+
+// The page-side deadline stays under scripts/cdp.mjs's 15 s call deadline, so a miss names what was awaited.
+function waitIn(page, predicate, what, timeout = 12000) {
+  return page.eval(`new Promise((resolve, reject) => {
+    const check = () => { try { return (${predicate}); } catch (e) { return null; } };
+    const hit = check();
+    if (hit) return resolve(hit);
+    const observer = new MutationObserver(() => { const value = check(); if (value) { done(); resolve(value); } });
+    const timer = setTimeout(() => { done(); reject(new Error(${JSON.stringify('timeout waiting for ' + what)})); }, ${timeout});
+    function done() { observer.disconnect(); clearTimeout(timer); }
+    observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+  })`);
+}
+
+async function settleIn(page) {
+  await page.eval(`document.fonts && document.fonts.ready ? document.fonts.ready.then(() => true) : true`);
+  await page.eval(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
+  await page.eval(`Promise.all(document.getAnimations().filter((a) => a.playState === 'running' &&
+    !(a.effect && a.effect.getTiming && a.effect.getTiming().iterations === Infinity)).map((a) => a.finished.catch(() => null))).then(() => true)`);
+  await page.eval(`new Promise((resolve) => requestAnimationFrame(() => resolve(true)))`);
+}
+
+async function openProfilesScreen(page, url) {
+  await page.goto(url);
+  await page.eval(QA9_LIB);
+  await waitIn(page, `document.querySelector('[data-sh="view"][data-key="profiles"]')`, 'board shell');
+  const docked = await page.eval(`(() => { const s = document.querySelector('.sh-shell');
+    return !!s && s.getAttribute('data-side') === 'open' && !matchMedia('(max-width: 899px)').matches; })()`);
+  if (!docked) {
+    await page.eval(`document.querySelector('.sh-topen').click()`);
+    await waitIn(page, `document.querySelector('.sh-shell').getAttribute('data-side') === 'open'`, 'docked sidebar');
+  }
+  await page.eval(`document.querySelector('[data-sh="view"][data-key="profiles"]').click()`);
+  await waitIn(page, `document.querySelector('[data-pf-root]') && document.querySelector('[data-pf-root]').getAttribute('data-pf-state') === 'view'
+    && document.querySelector('[data-flow="apply:detail"]')`, 'profiles view');
+  await settleIn(page);
+}
+
+async function withBoard(page, homes, registries, fn) {
+  const board = await startFixtureBoard(homes, registries);
+  try {
+    await openProfilesScreen(page, board.url);
+    return await fn(board);
+  } finally {
+    await board.server.close();
+  }
+}
+
+async function chooseIn(page, sel, value) {
+  await page.eval(`window.__qa9.reach(${JSON.stringify(sel)})`);
+  const picked = await page.eval(`window.__qa9.choose(${JSON.stringify(sel)}, ${JSON.stringify(value)})`);
+  await settleIn(page);
+  return picked;
+}
+
+async function forceIn(page, sel, value) {
+  await page.eval(`window.__qa9.reach(${JSON.stringify(sel)})`);
+  const forced = await page.eval(`window.__qa9.force(${JSON.stringify(sel)}, ${JSON.stringify(value)})`);
+  await settleIn(page);
+  return { select: sel, wanted: value, ...forced };
+}
+
+async function applyIn(page, board, sel = '[data-flow="apply:detail"]') {
+  await page.eval(`window.__qa9.reach(${JSON.stringify(sel)})`);
+  await settleIn(page);
+  const answered = board.nextExchange();
+  await page.eval(`window.__qa9.click(${JSON.stringify(sel)})`);
+  const exchange = await answered;
+  await waitIn(page, APPLY_SETTLED, 'apply result');
+  await waitIn(page, `document.querySelector('[data-flow="apply:detail"]')`, 'reload after apply');
+  await settleIn(page);
+  const shown = await page.eval(`(() => ({ ok: !!document.querySelector('[data-pf-result="apply"]'), conflict: !!document.querySelector('.pf-conflict'),
+    message: ((document.querySelector('[data-flow="message"]') || {}).textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 400) }))()`);
+  return { exchange: { status: exchange.status, code: exchange.code, changes: exchange.request.changes }, page: shown };
+}
+
+// One flow step with qa-flow-map.mjs's picks: reach the control, then do what the owner does there.
+async function flowStep(page, board, id) {
+  const sel = `[data-flow="${id}"]`;
+  if (!(await page.eval(`window.__qa9.reach(${JSON.stringify(sel)})`))) return { control: id, missing: true };
+  await settleIn(page);
+  if (id.startsWith('card:')) {
+    await page.eval(`window.__qa9.click(${JSON.stringify(sel)})`);
+    await waitIn(page, `document.querySelector(${JSON.stringify(sel)}).getAttribute('aria-pressed') === 'true'`, id + ' shown');
+    await settleIn(page);
+    return { control: id };
+  }
+  if (id.startsWith('apply:')) {
+    const applied = await applyIn(page, board, sel);
+    return { control: id, status: applied.exchange.status, code: applied.exchange.code, ok: applied.page.ok };
+  }
+  const current = await page.eval(`window.__qa9.value(${JSON.stringify(sel)})`);
+  const options = (await page.eval(`window.__qa9.options(${JSON.stringify(sel)})`) || []).filter((o) => o.value);
+  let pick;
+  if (id.endsWith(':mode')) pick = 'custom';
+  else if (id.endsWith(':service')) {
+    const served = await page.eval(`window.__qa9.servedProviders()`);
+    pick = (options.find((o) => o.value !== current && (id.startsWith('memory:') || served.includes(o.value))) || {}).value;
+  } else if (id.endsWith(':model')) pick = (options.find((o) => o.value !== current) || options[0] || {}).value;
+  else pick = (options[options.length - 1] || {}).value;
+  await chooseIn(page, sel, pick || '');
+  return { control: id, from: current, picked: pick };
+}
+
+// The apply journal names its run (`<now>-<random>`) and the absolute backup paths, so two fixture roots never share
+// its bytes: it is compared with the root replaced by <root> and the run id's random suffix folded. Every other file
+// is compared byte for byte.
+const JOURNAL_FILE = 'stable/agent/primary-agents/apply-journal.json';
+function journalText(bytes, root) {
+  const escapedRoot = JSON.stringify(path.resolve(root)).slice(1, -1);
+  return bytes.toString('utf8').split(escapedRoot).join('<root>').replace(/("id":\s*"[^"]*-)[0-9a-f]{8}"/, '$1<random>"');
+}
+
+// The store's own output: the posted apply body on an identically seeded home, no browser involved.
+function replayThroughStore(homes, body, browser) {
+  if (!body) return { ok: false, reason: 'the page posted no apply body' };
+  const store = openFixtureStore(homes);
+  const state = store.state();
+  const sameInputs = JSON.stringify(state.targets) === JSON.stringify(body.expected) && state.roster.revision === body.rosterRevision;
+  const answer = store.handle(JSON.parse(JSON.stringify(body)));
+  const tree = treeBytes(homes.root);
+  const differing = treeChanges(browser.tree, tree);
+  const journalFolded = differing.includes(JOURNAL_FILE) && !!browser.tree[JOURNAL_FILE] && !!tree[JOURNAL_FILE]
+    && journalText(browser.tree[JOURNAL_FILE], browser.root) === journalText(tree[JOURNAL_FILE], homes.root);
+  const mismatches = differing.filter((file) => !(file === JOURNAL_FILE && journalFolded));
+  return { ok: answer.status === 200 && sameInputs && mismatches.length === 0, status: answer.status, code: answer.json?.code ?? null,
+    sameInputs, files: Object.keys(tree).length, byteEqual: Object.keys(tree).length - differing.length, journalFolded, mismatches };
+}
+
+// Raw text of every value in a JSON document by path, so "byte for byte" compares bytes on disk, not parsed values.
+function jsonSpans(text) {
+  const spans = new Map();
+  let i = text.charCodeAt(0) === 0xfeff ? 1 : 0;
+  const space = () => { while (i < text.length && /\s/.test(text[i])) i++; };
+  const string = () => { const start = i++; while (text[i] !== '"') i += text[i] === '\\' ? 2 : 1; i++; return JSON.parse(text.slice(start, i)); };
+  const value = (at) => {
+    space();
+    const start = i;
+    if (text[i] === '{') {
+      i++; space();
+      if (text[i] === '}') i++;
+      else for (;;) { space(); const key = string(); space(); i++; value([...at, key]); space(); if (text[i++] === '}') break; }
+    } else if (text[i] === '[') {
+      i++; space();
+      if (text[i] === ']') i++;
+      else for (let n = 0; ; n++) { value([...at, n]); space(); if (text[i++] === ']') break; }
+    } else if (text[i] === '"') string();
+    else while (i < text.length && !/[\s,\]}]/.test(text[i])) i++;
+    spans.set(JSON.stringify(at), text.slice(start, i));
+  };
+  value([]);
+  return spans;
+}
+
+function changedJsonPaths(a, b, at = [], out = []) {
+  if (JSON.stringify(a) === JSON.stringify(b)) return out;
+  if (a && b && typeof a === 'object' && typeof b === 'object' && !Array.isArray(a) && !Array.isArray(b)) {
+    for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) changedJsonPaths(a[key], b[key], [...at, key], out);
+  } else out.push(at);
+  return out;
+}
+
+// The parity tests' canonical form: sorted keys, volatile stamps folded.
+const VOLATILE_KEYS = new Set(['appliedAt']);
+const canonicalJson = (v) => (Array.isArray(v) ? v.map(canonicalJson) : v && typeof v === 'object'
+  ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, VOLATILE_KEYS.has(k) ? '<volatile>' : canonicalJson(v[k])])) : v);
+
+function canonicalDiffs(actual, golden, at = '$', out = []) {
+  if (JSON.stringify(canonicalJson(actual)) === JSON.stringify(canonicalJson(golden))) return out;
+  if (actual && golden && typeof actual === 'object' && typeof golden === 'object' && !Array.isArray(actual) && !Array.isArray(golden)) {
+    for (const key of new Set([...Object.keys(actual), ...Object.keys(golden)])) canonicalDiffs(actual[key], golden[key], at + '.' + key, out);
+  } else out.push({ path: at, actual: actual === undefined ? '(absent)' : actual, golden: golden === undefined ? '(absent)' : golden });
+  return out;
+}
+
+async function closeQaChrome(page, pids) {
+  if (!page) return { closed: false, reason: 'Chrome was not launched' };
+  let error = null;
+  try { await page.close(); } catch (e) { error = String(e && e.message || e); }
+  const alive = pids.filter((pid) => isPidAlive(pid));
+  return { closed: !error && alive.length === 0 && !fs.existsSync(page.profileDir), error, alive };
+}
+
+function removeTempRoot(root) {
+  if (KEEP) return { kept: root };
+  fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  return { removed: !fs.existsSync(root) };
+}
+
+// The opencode Argon as offered by one editor: its service, then the model option and any reason shown with it.
+async function gateOffer(page, editor, which) {
+  if (editor.mode) await chooseIn(page, editor.mode, 'custom');
+  const service = ARGON_SERVICE[which];
+  const services = await page.eval(`window.__qa9.options(${JSON.stringify(editor.service)})`) || [];
+  const serviceOffered = services.some((o) => o.value === service && !o.disabled);
+  if (serviceOffered) await chooseIn(page, editor.service, service);
+  const models = await page.eval(`window.__qa9.options(${JSON.stringify(editor.model)})`) || [];
+  const option = models.find((o) => o.value === editor[which]) || null;
+  const reason = option ? option.title || (/(미지원|지원|제공|served|UNSUPPORTED)/i.test(option.text) ? option.text : '') : '';
+  return { service, serviceOffered, model: editor[which], option, reason, modelOptions: models.filter((o) => o.value).length,
+    stageable: !!option && !option.disabled, disabledWithReason: !!option && option.disabled && reason.length > 0 };
+}
+
+// A forced DOM selection of the opencode Argon, then 이 프로필 적용하기: the server must refuse and nothing may be written.
+async function gateForced(page, board, homes, editor) {
+  const forced = [];
+  if (editor.mode) forced.push(await forceIn(page, editor.mode, 'custom'));
+  forced.push(await forceIn(page, editor.service, ARGON_SERVICE.opencode));
+  forced.push(await forceIn(page, editor.model, editor.opencode));
+  if (editor.effort) forced.push(await forceIn(page, editor.effort, 'high'));
+  const pending = await page.eval(`window.__qa9.pending()`);
+  const staged = pending.some((change) => JSON.stringify(change).includes('gemini-4-argon') && !JSON.stringify(change).includes('google-antigravity'));
+  const before = treeBytes(homes.root);
+  const applied = staged ? await applyIn(page, board) : null;
+  const written = treeChanges(before, treeBytes(homes.root));
+  const exchange = applied ? applied.exchange : null;
+  return { forced, pending, staged, exchange, page: applied ? applied.page : null, written,
+    refusedByServer: !!exchange && exchange.status >= 400 && exchange.code === 'UNSUPPORTED_MODEL', zeroWrites: written.length === 0 };
+}
+
+// A normal pick through the offered options, then 이 프로필 적용하기; applied = HTTP 200 and a written file carries the model.
+async function gatePick(page, board, homes, editor, which) {
+  const out = { service: ARGON_SERVICE[which], model: editor[which], serviceOffered: false, modelOffered: false, effort: null, staged: false,
+    exchange: null, written: [], carriedBy: [], applied: false };
+  if (editor.mode) await chooseIn(page, editor.mode, 'custom');
+  const services = await page.eval(`window.__qa9.options(${JSON.stringify(editor.service)})`) || [];
+  out.serviceOffered = services.some((o) => o.value === out.service && !o.disabled);
+  if (!out.serviceOffered) return out;
+  await chooseIn(page, editor.service, out.service);
+  const models = await page.eval(`window.__qa9.options(${JSON.stringify(editor.model)})`) || [];
+  out.modelOffered = models.some((o) => o.value === out.model && !o.disabled);
+  if (!out.modelOffered) return out;
+  await chooseIn(page, editor.model, out.model);
+  if (editor.effort) {
+    out.effortOptions = (await page.eval(`window.__qa9.options(${JSON.stringify(editor.effort)})`) || []).filter((o) => o.value && !o.disabled).map((o) => o.value);
+    out.effort = out.effortOptions.includes('high') ? 'high' : out.effortOptions[out.effortOptions.length - 1] || null;
+    if (out.effort) await chooseIn(page, editor.effort, out.effort);
+  }
+  out.pending = await page.eval(`window.__qa9.pending()`);
+  out.staged = out.pending.some((change) => JSON.stringify(change).includes(out.model));
+  if (!out.staged) return out;
+  const before = treeBytes(homes.root);
+  const applied = await applyIn(page, board);
+  const after = treeBytes(homes.root);
+  out.exchange = applied.exchange;
+  out.page = applied.page;
+  out.written = treeChanges(before, after);
+  out.carriedBy = out.written.filter((file) => after[file] && after[file].toString('utf8').includes(out.model));
+  out.applied = applied.exchange.status === 200 && out.carriedBy.length > 0;
+  return out;
+}
+
+// Saved while it was served, then shown under served=false: every editor keeps the opencode Argon, and an unrelated
+// apply must leave the bytes of each saved value as they were.
+async function gateSaved(page, homes, registries) {
+  const seedTree = treeBytes(homes.root);
+  const writer = openFixtureStore(homes, fixtureRegistries(homes, true));
+  const state = writer.state();
+  const roleRow = state.routing.rows.find((r) => r.section === 'agents' && r.role !== 'explore' && !r.readOnly && !r.absentIn);
+  const changes = [
+    { kind: 'setRoute', profileKey: 'native-gpt-kimi-deepseek', section: roleRow.section, role: roleRow.role, provider: 'opencode', model: ARGON_OPENCODE, thinking: 'high' },
+    { kind: 'setMain', profileKey: 'gpt-kimi-deepseek', provider: 'opencode', model: 'gemini-4-argon', thinking: 'high' },
+    { kind: 'setSummarizer', modelId: ARGON_OPENCODE },
+    { kind: 'setMemoryRow', row: 'kibitzer', mode: 'custom', model: ARGON_OPENCODE, reasoning: 'high' },
+    { kind: 'setMemoryRow', row: 'reflection', mode: 'custom', model: ARGON_OPENCODE, reasoning: 'high' },
+  ];
+  const seeded = writer.handle({ action: 'apply', changes, expected: state.targets, rosterRevision: state.roster.revision });
+  if (seeded.status !== 200) throw new Error('saving the opencode Argon while served failed: ' + JSON.stringify(seeded.json));
+  const savedTree = treeBytes(homes.root);
+  const saved = [];
+  for (const file of SAVED_FILES) {
+    if (!savedTree[file]) continue;
+    const before = seedTree[file] ? JSON.parse(seedTree[file].toString('utf8').replace(/^\uFEFF/, '')) : {};
+    const spans = jsonSpans(savedTree[file].toString('utf8'));
+    for (const at of changedJsonPaths(before, JSON.parse(savedTree[file].toString('utf8').replace(/^\uFEFF/, '')))) {
+      if (spans.has(JSON.stringify(at))) saved.push({ file, path: at, bytes: spans.get(JSON.stringify(at)) });
+    }
+  }
+  const editors = {};
+  const role = `[data-pf-route="${roleRow.section}/${roleRow.role}"]`;
+  let unrelated = null;
+  await withBoard(page, homes, registries, async (board) => {
+    const shown = async (row, selects) => {
+      const out = { row, values: {}, text: await page.eval(`window.__qa9.text(${JSON.stringify(row)})`), flag: await page.eval(`window.__qa9.flagIn(${JSON.stringify(row)})`) };
+      for (const [name, sel] of Object.entries(selects)) out.values[name] = await page.eval(`window.__qa9.selected(${JSON.stringify(sel)})`);
+      return out;
+    };
+    editors.role = await shown(role, { service: role + ' [data-pf="route-provider"]', model: role + ' [data-pf="route-model"]', effort: role + ' [data-pf="route-thinking"]' });
+    editors.role.storeFlag = await page.eval(`window.__qa9.rowFlag(${JSON.stringify(roleRow.section)}, ${JSON.stringify(roleRow.role)})`);
+    for (const name of ['main', 'summarizer', 'kibitzer', 'reflection']) {
+      const e = GATE_EDITORS[name];
+      editors[name] = await shown(e.row, Object.fromEntries(['mode', 'service', 'model', 'effort'].filter((k) => e[k]).map((k) => [k, e[k]])));
+    }
+    // The unrelated apply: another model_profile lane for the shown profile, which none of the five editors owns.
+    const lane = '[data-pf="lane-select"]';
+    const current = await page.eval(`window.__qa9.value(${JSON.stringify(lane)})`);
+    const lanes = (await page.eval(`window.__qa9.options(${JSON.stringify(lane)})`) || [])
+      .filter((o) => o.value && !o.disabled && o.value !== current && o.value !== 'custom-literal').map((o) => o.value);
+    const before = treeBytes(homes.root);
+    await chooseIn(page, lane, lanes[0]);
+    const pending = await page.eval(`window.__qa9.pending()`);
+    const applied = await applyIn(page, board);
+    unrelated = { lane: { from: current, to: lanes[0] }, pending, exchange: applied.exchange, page: applied.page,
+      written: treeChanges(before, treeBytes(homes.root)), staged: pending.some((change) => change.kind === 'setModelProfile') };
+  });
+  const afterTree = treeBytes(homes.root);
+  const spansAfter = Object.fromEntries(SAVED_FILES.filter((f) => afterTree[f]).map((f) => [f, jsonSpans(afterTree[f].toString('utf8'))]));
+  const preserved = saved.map((s) => ({ file: s.file, path: s.path, bytes: Buffer.byteLength(s.bytes),
+    same: !!spansAfter[s.file] && spansAfter[s.file].get(JSON.stringify(s.path)) === s.bytes }));
+  for (const e of Object.values(editors)) {
+    const shownText = Object.values(e.values).map((v) => v ? v.value + ' ' + v.text : '').join(' ');
+    e.shown = /gemini-4-argon|qa-argon-opencode/.test(shownText) && !/google-antigravity/.test(shownText);
+    // A flag is any marker on the shown value (the memory rows prefix 미해결:) or an unsupported reason in the row.
+    e.marker = (/(미해결|미지원|지원되지|지원 안|지원 불가|unsupported)/i.exec(e.values.model ? e.values.model.text : '') || [''])[0];
+    e.flagged = !!e.flag || !!e.marker;
+    e.reasonShown = !!e.flag;
+  }
+  return { roleRow: roleRow.section + '/' + roleRow.role, seeded: { status: seeded.status, changes }, editors, unrelated, preserved,
+    survivesByteForByte: !!unrelated && unrelated.staged && unrelated.exchange.status === 200 && preserved.length > 0 && preserved.every((p) => p.same) };
+}
+
+async function supportGate() {
+  const liveBefore = liveState();
+  const tempRoot = path.join(FIXTURE_PARENT, 'qa9-gate-' + Date.now().toString(36));
+  assertFixtureRoot(tempRoot);
+  const startedAt = new Date().toISOString();
+  const gate = { schema: 'qa9-gate/1', registry: 'served=false', model: ARGON_OPENCODE, startedAt, head: gitHead(), editors: {}, saved: null, errors: [] };
+  const flip = { schema: 'qa9-gate/1', registry: 'served=true', model: ARGON_OPENCODE, startedAt, head: gate.head, editors: {}, errors: [] };
+  let page = null;
+  let csp = null;
+  let pids = [];
+  let seq = 0;
+  const fresh = (label) => {
+    seq += 1;
+    const homes = seedFlowHomes(path.join(tempRoot, String(seq).padStart(2, '0') + '-' + label));
+    addArgonAliases(homes);
+    return homes;
+  };
+  try {
+    page = await launch({ width: 1600, height: 900 });
+    csp = await watchCsp(page);
+    pids = [...new Set([page.pid, ...listProfilePids(page.profileDir)])];
+    for (const [name, editor] of Object.entries(GATE_EDITORS)) {
+      console.error('gate ' + name);
+      const record = gate.editors[name] = {};
+      let homes = fresh(name + '-unserved');
+      let registries = fixtureRegistries(homes, false);
+      record.registry = registrySummary(registries);
+      await withBoard(page, homes, registries, async (board) => {
+        record.offer = await gateOffer(page, editor, 'opencode');
+        record.forced = await gateForced(page, board, homes, editor);
+      });
+      homes = fresh(name + '-antigravity');
+      registries = fixtureRegistries(homes, false);
+      await withBoard(page, homes, registries, async (board) => {
+        record.antigravity = await gatePick(page, board, homes, editor, 'antigravity');
+      });
+      homes = fresh(name + '-flip');
+      registries = fixtureRegistries(homes, true);
+      const flipped = flip.editors[name] = { registry: registrySummary(registries) };
+      await withBoard(page, homes, registries, async (board) => {
+        flipped.offer = await gateOffer(page, editor, 'opencode');
+        flipped.pick = await gatePick(page, board, homes, editor, 'opencode');
+      });
+    }
+    console.error('gate saved');
+    const homes = fresh('saved');
+    gate.saved = await gateSaved(page, homes, fixtureRegistries(homes, false));
+  } catch (error) {
+    gate.errors.push(String(error && error.stack || error));
+  } finally {
+    gate.cleanup = { chrome: await closeQaChrome(page, pids), temp: removeTempRoot(tempRoot) };
+  }
+  const liveAfter = liveState();
+  const live = { unchanged: JSON.stringify(liveAfter.hashes) === JSON.stringify(liveBefore.hashes)
+    && JSON.stringify(liveAfter.server) === JSON.stringify(liveBefore.server), hashes: liveAfter.hashes };
+  const violations = csp ? csp.violations : [];
+  gate.verdicts = Object.fromEntries(Object.entries(gate.editors).map(([name, r]) => [name, {
+    optionDisabledWithReason: !!r.offer?.disabledWithReason,
+    notStageable: !!r.offer && !r.offer.stageable,
+    forcedRefusedByServer: !!r.forced?.refusedByServer,
+    forcedZeroWrites: !!r.forced?.zeroWrites,
+    antigravityApplies: !!r.antigravity?.applied,
+    savedShown: !!gate.saved?.editors?.[name]?.shown,
+    savedFlagged: !!gate.saved?.editors?.[name]?.flagged,
+  }]));
+  gate.verdicts.savedSurvivesUnrelatedApplyByteForByte = !!gate.saved?.survivesByteForByte;
+  gate.failing = Object.entries(gate.verdicts).flatMap(([name, v]) => (typeof v === 'boolean' ? (v ? [] : [name])
+    : Object.entries(v).filter(([, ok]) => !ok).map(([check]) => name + '.' + check)));
+  gate.csp = { violations, count: violations.length };
+  gate.live = live;
+  gate.finishedAt = new Date().toISOString();
+  gate.verdict = gate.failing.length || gate.errors.length || violations.length || !live.unchanged || !gate.cleanup.chrome.closed ? 'FAIL' : 'PASS';
+  flip.verdicts = Object.fromEntries(Object.entries(flip.editors).map(([name, r]) => [name, {
+    offeredAndEnabled: !!r.offer?.stageable, staged: !!r.pick?.staged, appliedHttp200: r.pick?.exchange?.status === 200 }]));
+  flip.failing = Object.entries(flip.verdicts).flatMap(([name, v]) => Object.entries(v).filter(([, ok]) => !ok).map(([check]) => name + '.' + check));
+  flip.csp = gate.csp;
+  flip.live = live;
+  flip.finishedAt = gate.finishedAt;
+  flip.verdict = flip.failing.length || gate.errors.length || violations.length || !live.unchanged ? 'FAIL' : 'PASS';
+  fs.writeFileSync(path.join(OUT, 'gate.json'), JSON.stringify(gate, null, 2) + '\n');
+  fs.writeFileSync(path.join(OUT, 'gate-flip.json'), JSON.stringify(flip, null, 2) + '\n');
+  console.log(JSON.stringify({ gate: gate.verdict, gateFailing: gate.failing, flip: flip.verdict, flipFailing: flip.failing, csp: violations.length,
+    live: live.unchanged, errors: gate.errors }, null, 2));
+  process.exitCode = gate.verdict === 'PASS' && flip.verdict === 'PASS' ? 0 : 1;
+}
+
+async function flowTask(page, tempRoot, size, task) {
+  const homes = seedFlowHomes(path.join(tempRoot, size.name + '-' + task));
+  const record = { size: size.name, task, steps: [], apply: [], previews: 0, written: [], replay: null };
+  await withBoard(page, homes, null, async (board) => {
+    const before = treeBytes(homes.root);
+    for (const id of FLOW_TASKS[task]) record.steps.push(await flowStep(page, board, id));
+    const after = treeBytes(homes.root);
+    const applies = board.exchanges.filter((e) => e.request.action === 'apply');
+    record.previews = board.exchanges.filter((e) => e.request.action === 'preview').length;
+    record.apply = applies.map((e) => ({ status: e.status, code: e.code, changes: e.request.changes }));
+    record.written = treeChanges(before, after);
+    record.replay = replayThroughStore(seedFlowHomes(path.join(tempRoot, size.name + '-' + task + '-replay')), applies[0]?.request, { root: homes.root, tree: after });
+  });
+  record.ok = record.previews === 0 && record.apply.length === 1 && record.apply[0].status === 200 && record.written.length > 0 && record.replay.ok;
+  return record;
+}
+
+// A golden scenario through the page: seeded from the scenario's own seed, compared the way the parity tests compare.
+async function goldenThroughPage(page, tempRoot, spec) {
+  const seedDir = path.join(PROFILE_FIXTURES, spec.seed);
+  const goldenDir = path.join(PROFILE_FIXTURES, spec.golden);
+  const homes = seedGoldenHomes(path.join(tempRoot, 'golden-' + spec.task), seedDir);
+  const record = { task: spec.task, seed: spec.seed, golden: spec.golden, steps: [], apply: [], written: [], files: [], replay: null };
+  await withBoard(page, homes, null, async (board) => {
+    const before = treeBytes(homes.root);
+    for (const [id, value] of spec.steps) {
+      if (value === null) { record.steps.push(await flowStep(page, board, id)); continue; }
+      const sel = `[data-flow="${id}"]`;
+      const offered = (await page.eval(`window.__qa9.options(${JSON.stringify(sel)})`) || []).filter((o) => o.value && !o.disabled).map((o) => o.value);
+      if (!offered.includes(value)) {
+        record.steps.push({ control: id, wanted: value, offered });
+        record.blocked = `${id} does not offer ${value}`;
+        return;
+      }
+      record.steps.push({ control: id, picked: await chooseIn(page, sel, value) });
+    }
+    const after = treeBytes(homes.root);
+    record.written = treeChanges(before, after);
+    const applies = board.exchanges.filter((e) => e.request.action === 'apply');
+    record.apply = applies.map((e) => ({ status: e.status, code: e.code, changes: e.request.changes }));
+    for (const [name, rel] of Object.entries(GOLDEN_SEED_FILES)) {
+      const golden = goldenFile(goldenDir, name);
+      if (golden === null) continue;
+      const seed = goldenFile(seedDir, name);
+      const actual = after[rel] ? JSON.parse(after[rel].toString('utf8').replace(/^\uFEFF/, '')) : null;
+      const diffs = canonicalDiffs(actual, golden);
+      record.files.push({ golden: name, file: rel, boardWrote: record.written.includes(rel),
+        goldenChangedFromSeed: JSON.stringify(canonicalJson(seed)) !== JSON.stringify(canonicalJson(golden)), equal: diffs.length === 0, diffs: diffs.slice(0, 8) });
+    }
+    record.replay = replayThroughStore(seedGoldenHomes(path.join(tempRoot, 'golden-' + spec.task + '-replay'), seedDir), applies[0]?.request, { root: homes.root, tree: after });
+  });
+  record.ok = !record.blocked && record.apply.length === 1 && record.apply[0].status === 200 && record.files.every((f) => f.equal) && !!record.replay?.ok;
+  return record;
+}
+
+// Stage the role task, edit omo.jsonc behind the page, then apply: the store must answer 409 and write nothing.
+async function behindThePageEdit(page, tempRoot) {
+  const homes = seedFlowHomes(path.join(tempRoot, 'stale'));
+  const record = { steps: [] };
+  await withBoard(page, homes, null, async (board) => {
+    for (const id of FLOW_TASKS.role.slice(0, -1)) record.steps.push(await flowStep(page, board, id));
+    record.pending = await page.eval(`window.__qa9.pending()`);
+    fs.appendFileSync(path.join(homes.primary, 'omo.jsonc'), '\r\n');
+    const before = treeBytes(homes.root);
+    const sel = '[data-flow="apply:detail"]';
+    await page.eval(`window.__qa9.reach(${JSON.stringify(sel)})`);
+    await settleIn(page);
+    const answered = board.nextExchange();
+    await page.eval(`window.__qa9.click(${JSON.stringify(sel)})`);
+    const exchange = await answered;
+    await waitIn(page, `document.querySelector('.pf-conflict')`, 'conflict after the behind-the-page edit');
+    await settleIn(page);
+    record.exchange = { status: exchange.status, code: exchange.code };
+    record.conflictText = await page.eval(`window.__qa9.text('.pf-conflict')`);
+    record.pendingAfter = await page.eval(`window.__qa9.pending()`);
+    record.written = treeChanges(before, treeBytes(homes.root));
+  });
+  record.ok = record.exchange?.status === 409 && record.written.length === 0 && record.pendingAfter.length === record.pending.length;
+  return record;
+}
+
+function e2eSummary(report) {
+  const lines = [`# todo 9 e2e - 세 작업을 실제 페이지로 (${report.startedAt} .. ${report.finishedAt})`, '',
+    `HEAD ${report.head} · CSP 위반 ${report.csp.violations.length} · 라이브 홈 변화 없음 ${report.live.unchanged} · 결과 ${report.ok ? 'PASS' : 'FAIL'}`, '',
+    '| 크기 | 작업 | 단계 | apply | 쓴 파일 | 스토어 재생과 바이트 비교 | 판정 |', '|---|---|---|---|---|---|---|'];
+  for (const t of report.tasks) {
+    const replay = t.replay?.mismatches ? (t.replay.mismatches.length ? '다름 ' + t.replay.mismatches.join(', ')
+      : `같음 (${t.replay.byteEqual}/${t.replay.files}개 파일 바이트 동일${t.replay.journalFolded ? ', journal 은 루트·실행 id 접어 비교' : ''}, 입력 동일 ${t.replay.sameInputs})`) : t.replay?.reason;
+    lines.push(`| ${t.size} | ${t.task} | ${t.steps.map((s) => s.control.split(':').pop() + (s.picked ? '=' + s.picked : '')).join(' → ')} | ${t.apply.map((a) => a.status).join(',')} | ${t.written.length} | ${replay} | ${t.ok ? 'PASS' : 'FAIL'} |`);
+  }
+  lines.push('', '## golden', '');
+  for (const g of report.goldens) {
+    if (!g.golden) { lines.push(`- ${g.task}: 해당 시나리오 없음 — ${g.reason}`); continue; }
+    lines.push(`- ${g.task}: ${g.seed} → ${g.golden} · ${g.ok ? 'PASS' : 'FAIL'}${g.blocked ? ' · 막힘: ' + g.blocked : ''} · apply ${g.apply.map((a) => a.status + (a.code ? ' ' + a.code : '')).join(',')} · 스토어 재생 ${g.replay ? (g.replay.ok ? '같음' : '다름 ' + JSON.stringify(g.replay.mismatches || g.replay.reason)) : '-'}`);
+    for (const f of g.files) lines.push(`  - ${f.golden}: ${f.equal ? '같음' : '다름'} (보드가 씀 ${f.boardWrote}, golden 이 시드에서 바꿈 ${f.goldenChangedFromSeed})${f.equal ? '' : ' ' + JSON.stringify(f.diffs.slice(0, 3))}`);
+  }
+  const s = report.stale || {};
+  lines.push('', '## 페이지 뒤 편집 (409)', '', `- apply 응답 ${s.exchange?.status} ${s.exchange?.code} · 쓴 파일 ${JSON.stringify(s.written)} · 보류 유지 ${s.pendingAfter?.length}/${s.pending?.length} · ${s.ok ? 'PASS' : 'FAIL'}`);
+  if (report.errors.length) lines.push('', '## 오류', '', ...report.errors.map((e) => '- ' + e.split('\n')[0]));
+  return lines.join('\n') + '\n';
+}
+
+async function flowE2e() {
+  const liveBefore = liveState();
+  const tempRoot = path.join(FIXTURE_PARENT, 'qa9-e2e-' + Date.now().toString(36));
+  assertFixtureRoot(tempRoot);
+  const report = { schema: 'qa9-e2e/1', startedAt: new Date().toISOString(), head: gitHead(), tempRoot, tasks: [], goldens: [], stale: null, errors: [] };
+  let page = null;
+  let csp = null;
+  let pids = [];
+  try {
+    page = await launch({ width: FLOW_SIZES[0].width, height: FLOW_SIZES[0].height });
+    csp = await watchCsp(page);
+    pids = [...new Set([page.pid, ...listProfilePids(page.profileDir)])];
+    for (const size of FLOW_SIZES) {
+      await page.client.send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, deviceScaleFactor: 1, mobile: false });
+      for (const task of Object.keys(FLOW_TASKS)) {
+        console.error(`e2e ${size.name} ${task}`);
+        report.tasks.push(await flowTask(page, tempRoot, size, task));
+      }
+    }
+    await page.client.send('Emulation.setDeviceMetricsOverride', { width: FLOW_SIZES[0].width, height: FLOW_SIZES[0].height, deviceScaleFactor: 1, mobile: false });
+    for (const spec of GOLDEN_RUNS) {
+      console.error('golden ' + spec.task);
+      report.goldens.push(await goldenThroughPage(page, tempRoot, spec));
+    }
+    report.goldens.push({ task: 'role', golden: null, reason: ROLE_GOLDEN_GAP });
+    console.error('behind-the-page edit');
+    report.stale = await behindThePageEdit(page, tempRoot);
+  } catch (error) {
+    report.errors.push(String(error && error.stack || error));
+  } finally {
+    report.cleanup = { chrome: await closeQaChrome(page, pids), temp: removeTempRoot(tempRoot) };
+  }
+  const liveAfter = liveState();
+  report.live = { unchanged: JSON.stringify(liveAfter.hashes) === JSON.stringify(liveBefore.hashes)
+    && JSON.stringify(liveAfter.server) === JSON.stringify(liveBefore.server), hashes: liveAfter.hashes };
+  report.csp = { violations: csp ? csp.violations : [], notes: csp ? csp.notes.length : 0 };
+  report.finishedAt = new Date().toISOString();
+  report.verdicts = {
+    tasksEqualStoreBytes: report.tasks.length === 6 && report.tasks.every((t) => t.ok),
+    goldensEqual: report.goldens.filter((g) => g.golden && !g.blocked).every((g) => g.ok),
+    goldensDrivableThroughPage: report.goldens.filter((g) => g.golden).every((g) => !g.blocked),
+    behindThePageEdit409NoWrite: !!report.stale?.ok,
+    csp: report.csp.violations.length === 0,
+    chromeClosed: !!report.cleanup.chrome.closed,
+    liveUnchanged: report.live.unchanged,
+  };
+  report.ok = Object.values(report.verdicts).every(Boolean) && report.errors.length === 0;
+  fs.writeFileSync(path.join(EVIDENCE, 'e2e.json'), JSON.stringify(report, null, 2) + '\n');
+  fs.writeFileSync(path.join(EVIDENCE, 'e2e.md'), e2eSummary(report));
+  console.log(JSON.stringify({ ok: report.ok, verdicts: report.verdicts, errors: report.errors }, null, 2));
+  process.exitCode = report.ok ? 0 : 1;
+}
+
 function gitHead() {
   const out = spawnSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 10000 });
   return out.status === 0 ? out.stdout.trim() : 'unknown';
 }
 
 await main();
-if (!NEGATIVE) {
+if (!NEGATIVE && !GATE && !FLOW_E2E) {
   if (!run.ok) process.exit(1);
   console.log(`PASS ${run.captures.length} captures; build ${run.build.hash}; e2e ${path.join(EVIDENCE, `${PREFIX}-e2e.txt`)}`);
 }
