@@ -448,9 +448,10 @@
   function agentChange(pending, id, kind) {
     return findChange(pending, function (c) { return c && c.kind === kind && c.agentId === id; });
   }
-  // A role or main edit belongs to one profile: setMain names it by the card key, setRoute by the omo layer the store
-  // writes (store routeChange), and both mean that card. The card line and the detail pane read edits through this one
-  // filter, so the detail shows only the shown profile's edits (IS-10) and agrees with its card.
+  // A role, main or lane edit belongs to one profile: setMain and setModelProfile name it by the card key (store
+  // getProfile), setRoute by the omo layer the store writes (store routeChange), and all mean that card. The card line
+  // and the detail pane read edits through this one filter, so the detail shows only the shown profile's edits (IS-10)
+  // and agrees with its card.
   function ofProfile(c, p) {
     var key = str(c.profileKey);
     return !!key && !!p && (key === p.key || key === str(p.omoProfile));
@@ -460,6 +461,9 @@
   }
   function mainChangeOf(pending, p) {
     return findChange(pending, function (c) { return c && c.kind === 'setMain' && ofProfile(c, p); });
+  }
+  function laneChangeOf(pending, p) {
+    return findChange(pending, function (c) { return c && c.kind === 'setModelProfile' && ofProfile(c, p); });
   }
   function firstOf(pending, kind) {
     return findChange(pending, function (c) { return c && c.kind === kind; });
@@ -889,7 +893,7 @@
   }
 
   function modelLane(view, edit, ro) {
-    var pending = firstOf(pendingOf(edit), 'setModelProfile');
+    var pending = laneChangeOf(pendingOf(edit), profileOf(view, shownKeyOf(view, edit)));
     var busy = !!(edit && edit.busy === true);
     var draft = draftOf(edit, 'lane');
     var current = str(obj(view && view.modelProfile) && view.modelProfile.model_profile);
@@ -1421,9 +1425,13 @@
       return snapshot();
     }
     function touch() { if (s.busy) return snapshot(); s.preview = null; changed(); return snapshot(); }
-    function removeKind(kind) {
+    // With a profile key only that profile's edit of the kind goes: a lane edit belongs to one profile.
+    function removeKind(kind, profileKey) {
       if (s.busy) return snapshot();
-      s.pending = s.pending.filter(function (c) { return !obj(c) || c.kind !== kind; });
+      var targetProf = profileKey ? cardKeyOf(str(profileKey)) : '';
+      s.pending = s.pending.filter(function (c) {
+        return !obj(c) || c.kind !== kind || (!!targetProf && cardKeyOf(str(c.profileKey || c.omoProfile)) !== targetProf);
+      });
       s.preview = null; s.result = null;
       if (!s.conflict) { s.error = ''; s.status = ''; }
       s.confirmClear = false;
@@ -1588,10 +1596,11 @@
       removeMemoryRow: removeMemoryRow,
       show: function (profileKey) {
         if (s.busy) return snapshot();
-        // A main or role draft is the shown profile's row in the making. WinForms rebuilds the rows for each shown
-        // profile, so another profile starts from its own saved and pending values, never from that draft.
+        // A main, lane or role draft is the shown profile's row in the making. WinForms rebuilds the rows and the
+        // model_profile combo for each shown profile (PS:6058-6077), so another profile starts from its own saved and
+        // pending values, never from that draft.
         if (str(profileKey) !== s.shown) {
-          Object.keys(s.draft).forEach(function (k) { if (k === 'main' || k.indexOf('route:') === 0) delete s.draft[k]; });
+          Object.keys(s.draft).forEach(function (k) { if (k === 'main' || k === 'lane' || k.indexOf('route:') === 0) delete s.draft[k]; });
         }
         s.shown = str(profileKey);
         changed();
@@ -1849,15 +1858,19 @@
         var lane = str(t.value);
         var literalEl = t.closest('[data-pf-lane]') && t.closest('[data-pf-lane]').querySelector('[data-pf="lane-literal"]');
         var literal = literalEl ? str(literalEl.value) : '';
+        // A lane edit belongs to the shown profile and names it by the card key, as setMain does (WinForms
+        // Set-PendingModelProfile -OmoProfile of the shown profile, PS:6099-6104).
+        var laneProfKey = str(c.snapshot().shown);
         c.setDraft('lane', { selection: lane, literal: literal });
-        if (lane !== 'custom-literal' || literal) c.add({ kind: 'setModelProfile', selection: lane, literal: lane === 'custom-literal' ? literal : '' });
+        if (lane !== 'custom-literal' || literal) c.add({ kind: 'setModelProfile', profileKey: laneProfKey, selection: lane, literal: lane === 'custom-literal' ? literal : '' });
         else c.touch();
       } else if (act === 'lane-literal') {
         var sel = t.closest('[data-pf-lane]') && t.closest('[data-pf-lane]').querySelector('[data-pf="lane-select"]');
         var selection = sel ? str(sel.value) : '';
+        var literalProfKey = str(c.snapshot().shown);
         c.setDraft('lane', { selection: selection, literal: str(t.value) });
-        if (selection === 'custom-literal' && str(t.value)) c.add({ kind: 'setModelProfile', selection: 'custom-literal', literal: str(t.value) });
-        else if (selection === 'custom-literal' && !str(t.value)) c.removeKind('setModelProfile');
+        if (selection === 'custom-literal' && str(t.value)) c.add({ kind: 'setModelProfile', profileKey: literalProfKey, selection: 'custom-literal', literal: str(t.value) });
+        else if (selection === 'custom-literal' && !str(t.value)) c.removeKind('setModelProfile', literalProfKey);
       } else if (act === 'summarizer-provider') {
         var sumProvider = str(t.value);
         c.setDraft('summarizer', { provider: sumProvider, model: '' });

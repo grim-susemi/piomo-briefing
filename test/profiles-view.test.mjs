@@ -1619,6 +1619,121 @@ test("per-profile: switching the shown card keeps each profile's role and main e
   assert.deepEqual(e.errors, []);
 });
 
+// Must have 8: a model lane edit is keyed by omoProfile like main (PendingModelProfile, PS:191), and WinForms fills the
+// lane row of the shown profile from that profile's pending only (PS:2398-2410). The page names it by the card key.
+test("per-profile: the lane row shows only the shown profile's pending lane edit", () => {
+  const P = load();
+  const lane = (html) => ({
+    select: (optionsOf(html, 'data-pf="lane-select"').find((o) => o.selected) || {}).value,
+    literal: /\svalue="([^"]*)"/.exec(/<input[^>]*data-pf="lane-literal"[^>]*>/.exec(html)[0])[1],
+  });
+  const heading = (html) => textOf(/<h1 class="pf-title">([\s\S]*?)<\/h1>/.exec(html)[1]).replace(/\s+/g, ' ').trim();
+  const pending = [
+    { kind: 'setModelProfile', profileKey: 'kimi-deepseek', selection: 'custom-literal', literal: 'openai/gpt-x' },
+    { kind: 'setModelProfile', profileKey: 'experimental-custom', selection: 'geeky-heavy', literal: '' },
+  ];
+  const saved = lane(P.render(STATE, live({ shown: 'gpt-deepseek' })));
+  assert.deepEqual(saved, { select: 'daily-heavy', literal: '' });
+
+  const html = P.render(STATE, live({ pending, shown: 'gpt-deepseek' }));
+  assert.deepEqual(lane(html), saved, 'another profile\'s lane edit leaves the shown lane row alone');
+  assert.equal(heading(html), '프로필·에이전트 · 변경 보류 2건', 'the heading still counts the lane edits of every profile');
+  assert.deepEqual(lane(P.render(STATE, live({ pending, shown: 'experimental-custom' }))), { select: 'geeky-heavy', literal: '' },
+    'its own lane edit, named by the card key');
+  assert.deepEqual(lane(P.render(STATE, live({ pending, shown: 'kimi-deepseek' }))), { select: 'custom-literal', literal: 'openai/gpt-x' },
+    'each profile shows its own lane edit');
+});
+
+// Through the real page wiring: a lane edit, a half-made lane row and a literal stay with the profile shown when they
+// were made (WinForms Set-PendingModelProfile -OmoProfile of the shown profile, PS:6099-6104), and the heading and the
+// tray keep counting the edits of every profile (PS:4529-4535).
+test("per-profile: switching the shown card keeps each profile's lane edit and lane draft in its own lane row; clearing one literal keeps the other's edit", async () => {
+  const e = await openProfilesPage();
+  const q = (sel) => e.byId.main.querySelector(sel);
+  const lane = () => {
+    const literal = q('[data-pf="lane-literal"]');
+    return { select: selectedValueOf(q('[data-pf="lane-select"]')), literal: literal.getAttribute('value'), disabled: literal.hasAttribute('disabled') };
+  };
+  const show = (key) => e.fire(q('[data-flow="card:' + key + '"]'), 'click');
+  const pickLane = (value) => { const el = q('[data-pf="lane-select"]'); el.value = value; e.fire(el, 'change'); };
+  // A browser's select holds its selected option while the literal is typed (input), then committed (change).
+  const typeLiteral = (value) => {
+    const sel = q('[data-pf="lane-select"]');
+    sel.value = selectedValueOf(sel);
+    const el = q('[data-pf="lane-literal"]');
+    assert.equal(el.hasAttribute('disabled'), false, 'the literal field takes typing');
+    el.value = value;
+    e.fire(el, 'input');
+    e.fire(el, 'change');
+  };
+  const lanes = () => plain(e.page.state.ui.profilesState.pending.filter((c) => c.kind === 'setModelProfile').map((c) => [c.profileKey, c.selection, c.literal]));
+  const counts = () => {
+    const n = e.page.state.ui.profilesState.pending.length;
+    assert.equal(q('.pf-title').textContent, '프로필·에이전트 · 변경 보류 ' + n + '건', 'the heading counts every profile');
+    assert.equal(q('#pf-sec-tray .pf-count').textContent, String(n), 'the tray lists every profile');
+    return n;
+  };
+  const saved = { select: 'daily-heavy', literal: '', disabled: true };
+
+  show('kimi-deepseek');
+  assert.deepEqual(lane(), saved);
+  pickLane('custom-literal');
+  assert.deepEqual([lane(), lanes()], [{ select: 'custom-literal', literal: '', disabled: false }, []], 'a literal without a value is a draft only');
+  show('experimental-custom');
+  assert.deepEqual(lane(), saved, 'kimi-deepseek\'s half-made lane row stays out of experimental-custom\'s');
+  pickLane('geeky-heavy');
+  assert.deepEqual(lanes(), [['experimental-custom', 'geeky-heavy', '']], 'the lane edit names the shown card');
+  assert.equal(counts(), 1);
+
+  show('kimi-deepseek');
+  assert.deepEqual(lane(), saved, 'experimental-custom\'s lane edit leaves kimi-deepseek\'s lane row alone');
+  assert.equal(counts(), 1, 'the hidden profile still counts');
+  pickLane('custom-literal');
+  typeLiteral('openai/gpt-x');
+  assert.deepEqual(lanes(), [['experimental-custom', 'geeky-heavy', ''], ['kimi-deepseek', 'custom-literal', 'openai/gpt-x']], 'one lane edit per profile');
+  assert.equal(counts(), 2);
+  typeLiteral('');
+  assert.deepEqual(lanes(), [['experimental-custom', 'geeky-heavy', '']], 'clearing kimi-deepseek\'s literal keeps experimental-custom\'s lane edit');
+  assert.equal(counts(), 1);
+  pickLane('geeky-normal');
+  assert.deepEqual(lanes(), [['experimental-custom', 'geeky-heavy', ''], ['kimi-deepseek', 'geeky-normal', '']],
+    'kimi-deepseek\'s own lane edit does not replace experimental-custom\'s');
+  assert.equal(counts(), 2);
+
+  show('experimental-custom');
+  assert.deepEqual(lane(), { select: 'geeky-heavy', literal: '', disabled: true }, 'experimental-custom shows its own lane edit again');
+  show('kimi-deepseek');
+  assert.deepEqual(lane(), { select: 'geeky-normal', literal: '', disabled: true });
+  assert.equal(counts(), 2);
+  assert.deepEqual(e.errors, []);
+});
+
+// WinForms writes only the applied profile's PendingModelProfile entry and leaves the others pending (PS:4677-4681).
+test("per-profile: applying a profile sends only its own lane edit; another profile's lane edit stays pending", async () => {
+  const e = await openProfilesPage();
+  const q = (sel) => e.byId.main.querySelector(sel);
+  const show = (key) => e.fire(q('[data-flow="card:' + key + '"]'), 'click');
+  const pickLane = (value) => { const el = q('[data-pf="lane-select"]'); el.value = value; e.fire(el, 'change'); };
+  show('experimental-custom');
+  pickLane('geeky-heavy');
+  show('kimi-deepseek');
+  pickLane('geeky-normal');
+  e.fire(q('[data-flow="apply:detail"]'), 'click');
+  const post = e.fetches.find((f) => f.url === '/profiles' && f.opts && f.opts.method === 'POST');
+  assert.ok(post, 'the detail apply posts');
+  assert.deepEqual(JSON.parse(post.opts.body).changes, [
+    { kind: 'setModelProfile', profileKey: 'kimi-deepseek', selection: 'geeky-normal', literal: '' },
+    { kind: 'selectProfile', profileKey: 'kimi-deepseek' },
+  ], 'kimi-deepseek\'s apply carries its own lane edit only');
+  post.resolve({ status: 200, ok: true, json: async () => ({ ok: true, action: 'apply', backups: [], writes: [] }) });
+  await tick();
+  assert.deepEqual(plain(e.page.state.ui.profilesState.pending), [
+    { kind: 'setModelProfile', profileKey: 'experimental-custom', selection: 'geeky-heavy', literal: '' },
+  ], 'experimental-custom\'s lane edit stays pending for its own apply');
+  assert.equal(q('.pf-title').textContent, '프로필·에이전트 · 변경 보류 1건');
+  assert.deepEqual(e.errors, []);
+});
+
 test('order: a category edit plus activation in one apply leaves the active scope equal to the edited layer', async (t) => {
   const { openProfilesStore } = await import('../src/profiles/store.mjs');
   const os = await import('node:os');
