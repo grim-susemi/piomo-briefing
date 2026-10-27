@@ -421,6 +421,44 @@ test('support: a saved unsupported value stays visible with its flag and reason 
   assert.equal(reloadedLayer.agents.ouroboros.model, 'unsupported-legacy');
 });
 
+test('support: the saved main model gets a role row\'s served status, with or without a catalog entry, as its write is refused', async (t) => {
+  const fakeRegistry = {
+    models: [
+      { provider: 'openai', modelId: 'openai/gpt-6-sol', reasoning: true, levels: ['off', 'low', 'medium', 'high'] },
+    ],
+    errors: [],
+  };
+  const { store, primary } = makeFixture(t, {
+    storeOptions: {
+      registries: { primary: fakeRegistry, stable: fakeRegistry },
+    },
+  });
+  // The active gpt-kimi-deepseek is overridden to a model outside the catalog, kimi-deepseek keeps its default
+  // kimi-coding/k3 (a catalog model neither home serves), and gpt-deepseek is overridden to the served openai/gpt-6-sol.
+  fs.mkdirSync(path.join(primary, 'runtime'), { recursive: true });
+  fs.writeFileSync(path.join(primary, 'runtime', 'native-profile-switcher-main.json'), JSON.stringify({
+    'native-gpt-kimi-deepseek': { provider: 'kimi-coding', model: 'k3-legacy', thinking: 'low' },
+    'native-gpt-deepseek': { provider: 'openai', model: 'gpt-6-sol', thinking: 'high' },
+  }));
+
+  const state = store.state();
+  const catalogModels = Object.values(state.catalog).map((entry) => entry.model);
+  assert.equal(catalogModels.includes('kimi-coding/k3-legacy'), false);
+  assert.equal(catalogModels.includes('kimi-coding/k3'), true);
+  const status = (main) => [main.effective.model, main.unsupported, main.unsupportedReason, main.unsupportedHome];
+  assert.deepEqual(status(state.main), ['k3-legacy', true, 'UNSUPPORTED_MODEL', 'primary'], 'no served status for a main model outside the catalog');
+  assert.deepEqual(status(state.details['gpt-kimi-deepseek'].main), status(state.main));
+  assert.deepEqual(status(state.details['kimi-deepseek'].main), ['k3', true, 'UNSUPPORTED_MODEL', 'primary'], 'no served status for an unserved catalog main model');
+  assert.deepEqual(status(state.details['gpt-deepseek'].main), ['gpt-6-sol', undefined, undefined, undefined]);
+
+  // The flag is the write path's verdict: setMain with the same model is refused with that code and home.
+  const preview = store.preview({
+    action: 'preview', expected: state.targets, rosterRevision: 0,
+    changes: [{ kind: 'setMain', profileKey: 'gpt-kimi-deepseek', provider: 'kimi-coding', model: 'k3-legacy', thinking: 'low' }],
+  });
+  assert.deepEqual([preview.ok, preview.code, preview.home], [false, 'UNSUPPORTED_MODEL', 'primary']);
+});
+
 test('support: a newly registered non-catalog model becomes selectable after models.json changes; its alias is created only on apply', async (t) => {
   const fakeRegistry = {
     models: [

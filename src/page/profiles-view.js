@@ -830,8 +830,11 @@
     // the clamped effort; without such an entry the seven-level list stays. The box keeps the saved-or-pending
     // effort the cascade clamps from (WinForms MainComboCommitted), which the shown clamp may differ from.
     // An unserved model (the heading's flag) keeps that list, but disabled on the saved effort: the select cannot
-    // stage that model (IS-6), and a role row offers no other effort for it either.
+    // stage that model (IS-6), and a role row offers no other effort for it either. A saved model outside the catalog
+    // keeps the store's own flag (checkModelServed), as a role row's does.
     var entry = entryOf(entries, '', provider + '/' + model);
+    var off = entry ? entry.off
+      : !pending && !draft && current.unsupported ? { label: UNSERVED, code: str(current.unsupportedReason), home: str(current.unsupportedHome) } : null;
     var levels = entry && !entry.off && Array.isArray(entry.levels) && entry.levels.length ? entry.levels : null;
     var body;
     if (!effective.provider && !override && !pending) {
@@ -844,11 +847,11 @@
         labelled(CAPTIONS[1], 'pf-main-model', mainModelSelect('main-model', withId('pf-main-model', ' data-main="1"'), entries, provider, model, busy)) +
         labelled(CAPTIONS[2], 'pf-main-thinking', select('main-thinking', withId('pf-main-thinking', ' data-main="1"'),
           levels ? thinkingOptions(clampedThinking(entry, thinking), false, levels) : thinkingOptions(thinking, true),
-          busy || !!(entry && entry.off))) +
+          busy || !!off)) +
         '</div>';
     }
     return '<div class="pf-blk" id="pf-sec-main" data-pf-sec="main" data-flow="main" data-flow-sec="main"><h3 class="pf-blk-h">메인 모델 설정 ' +
-      (override ? chip('pf-c-green', '직접 지정') : chip('pf-c-gray', '프로필 기본')) + offChip(entry && entry.off) + '</h3>' + body + '</div>';
+      (override ? chip('pf-c-green', '직접 지정') : chip('pf-c-gray', '프로필 기본')) + offChip(off) + '</h3>' + body + '</div>';
   }
 
   function modelLane(view, edit, ro) {

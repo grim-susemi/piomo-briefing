@@ -1747,9 +1747,10 @@ test('cascade main: service change keeps a model present in the new list and cla
 
 // Main-row clamp: WinForms Update-MainThinkingCombo -> Get-ClampedThinkingLevel on the model item's provider-qualified
 // Tag keeps a supported effort, else takes the nearest higher level, else the nearest lower one.
-async function openMainRow(catalog) {
+async function openMainRow(catalog, mainStatus) {
   const state = clone(STATE);
   state.catalog = catalog;
+  Object.assign(state.main, mainStatus);
   const e = makeController({ modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'profiles-view', 'annotate'] });
   e.page.receive({ seq: 1, generatedAt: 0, sessions: [] });
   e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
@@ -1924,6 +1925,48 @@ test('support: an unserved saved main model keeps the seven-level list, disabled
   assert.equal(mainControl(e, 'main-thinking').hasAttribute('disabled'), false);
   assert.deepEqual(mainEffortValues(e), ['low', 'high']);
   assert.deepEqual(stagedMain(e), ['kimi-coding', 'k3-turbo', 'high']);
+});
+
+// The store's served status for the saved main kimi-coding/k3 when stable does not serve it (store.mjs withMainServed).
+const K3_UNSERVED = { unsupported: true, unsupportedReason: 'UNSUPPORTED_MODEL', unsupportedHome: 'stable' };
+
+test('support: a saved main model outside the catalog keeps the store\'s flag, disabled on the saved effort, and stages nothing', async () => {
+  // the saved main kimi-coding/k3 (max) has no catalog entry; kimi-coding/k3-turbo is served in both homes
+  const e = await openMainRow({
+    'kimi-turbo': { model: 'kimi-coding/k3-turbo', variant: 'high', served: { primary: true, stable: true }, levels: ['low', 'high'] },
+  }, K3_UNSERVED);
+  const heading = () => e.byId['pf-sec-main'].querySelector('.pf-blk-h');
+  const effort = mainControl(e, 'main-thinking');
+  assert.equal(effort.hasAttribute('disabled'), true, 'the effort select can stage the model outside the catalog');
+  assert.deepEqual(mainEffortValues(e), ['', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+  assert.equal(selectedValueOf(effort), 'max');
+  assert.match(heading().textContent, /설치 엔진 미지원 · stable 홈/, 'the model outside the catalog has no flag');
+  assert.equal(heading().querySelector('.pf-c-amber').getAttribute('title'), 'UNSUPPORTED_MODEL');
+  assert.equal(stagedMain(e), null);
+
+  // the way out stays open: a served model clears the flag, enables the effort select on its levels and stages it
+  assert.equal(mainControl(e, 'main-model').hasAttribute('disabled'), false);
+  await changeMain(e, 'main-model', 'k3-turbo');
+  assert.doesNotMatch(heading().textContent, /설치 엔진 미지원/);
+  assert.equal(mainControl(e, 'main-thinking').hasAttribute('disabled'), false);
+  assert.deepEqual(mainEffortValues(e), ['low', 'high']);
+  assert.deepEqual(stagedMain(e), ['kimi-coding', 'k3-turbo', 'high']);
+});
+
+test('support: no model selected keeps the main effort select enabled and stages the override removal, after a flagged saved model too', async () => {
+  // ollama holds no k3, so leaving the flagged kimi-coding/k3 for ollama empties the model
+  const e = await openMainRow({
+    'ollama-flash': { model: 'ollama/glm-5.3-flash', variant: 'max', served: { primary: true, stable: true }, levels: ['low', 'medium', 'high', 'max'] },
+  }, K3_UNSERVED);
+  assert.equal(mainControl(e, 'main-thinking').hasAttribute('disabled'), true, 'the flagged saved model starts disabled');
+  await changeMain(e, 'main-provider', 'ollama');
+  assert.equal(selectedValueOf(mainControl(e, 'main-model')), '');
+  assert.equal(mainControl(e, 'main-thinking').hasAttribute('disabled'), false, 'no model selected disables the effort select');
+  assert.doesNotMatch(e.byId['pf-sec-main'].querySelector('.pf-blk-h').textContent, /설치 엔진 미지원/);
+  assert.deepEqual(stagedMain(e), ['', '', '']);
+  await changeMain(e, 'main-thinking', 'high');
+  assert.equal(mainControl(e, 'main-thinking').hasAttribute('disabled'), false);
+  assert.deepEqual(stagedMain(e), ['', '', '']);
 });
 
 test('reapply: re-applying the active profile with nothing pending equals golden apply-cmd-glm-deepseek (canonicalised)', async (t) => {

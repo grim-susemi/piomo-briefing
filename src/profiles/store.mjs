@@ -37,8 +37,8 @@ import {
 } from './merge.mjs';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE, ENGINE_SURFACED_MODELS, PROFILE_META, ROLE_INVENTORY, buildRoutingRows,
-  expandLayerRoles, getMemoryReasoning, getModelIdWithoutProvider, getProfile, getProviderChoiceForModel,
-  newRouteRow,
+  expandLayerRoles, getFullModelId, getMemoryReasoning, getModelIdWithoutProvider, getProfile,
+  getProviderChoiceForModel, newRouteRow,
 } from './model.mjs';
 import { composeHomeRegistry, getServedModelIds, validateSelection } from './registry.mjs';
 import { chatGptPickerModels, recommendationGuide, refreshRoutingRows } from './refresh-5.1.44.mjs';
@@ -749,6 +749,17 @@ export function openProfilesStore(options = {}) {
       }
       return { unsupported: false };
     };
+    // The main row gets a role row's served status, on the id the main write validates: the model qualified by its
+    // provider (registry.mjs validateSelection). The view flags a saved main model outside the catalog with it.
+    const withMainServed = (main) => {
+      const status = checkModelServed(getFullModelId(main.effective.provider, main.effective.model));
+      if (status.unsupported) {
+        main.unsupported = true;
+        main.unsupportedReason = status.reason;
+        main.unsupportedHome = status.home;
+      }
+      return main;
+    };
 
     const rows = routingRowsFor(inventoryRaw, layer).map((row) => {
       const entry = layer?.[row.section]?.[row.role];
@@ -803,10 +814,10 @@ export function openProfilesStore(options = {}) {
       }
     }
     const mainOverride = profile ? readMainOverride(sidecar, profile.omoProfile) : null;
-    const main = profile ? {
+    const main = profile ? withMainServed({
       effective: resolveMainDefaults(profile, sidecar),
       override: mainOverride,
-    } : { effective: null, override: null };
+    }) : { effective: null, override: null };
     const buildProfileDetail = (pMeta) => {
       const pProfile = getProfile(pMeta.key);
       const pLayer = layerOf(config, pProfile);
@@ -826,10 +837,10 @@ export function openProfilesStore(options = {}) {
       });
       const pRec = attachRecommendations(pRows, catalog, pLayer, manifestRead.manifest);
       const pMainOverride = pProfile ? readMainOverride(sidecar, pProfile.omoProfile) : null;
-      const pMain = pProfile ? {
+      const pMain = pProfile ? withMainServed({
         effective: resolveMainDefaults(pProfile, sidecar),
         override: pMainOverride,
-      } : { effective: null, override: null };
+      }) : { effective: null, override: null };
       const pModelProfile = settings ? getModelProfileSettings(config ?? {}, pProfile?.omoProfile ?? '') : null;
       return {
         routing: { rows: pRows, layer: pLayer, recommendation: pRec },
