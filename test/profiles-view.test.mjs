@@ -1539,6 +1539,86 @@ test("per-profile: edit A, show B, edit B, apply B writes B's edits and the shar
   assert.equal(remainingPending[0].profileKey, 'glm-deepseek');
 });
 
+// Must have 8: a role edit is keyed by omoProfile|section|role and a main edit by omoProfile, and WinForms fills the
+// detail of the shown profile from that profile's pending only. The page names a role edit by its omo layer and a main
+// edit by the card key; the card line and the detail read both through one filter.
+test("per-profile: the detail shows only the shown profile's pending role and main edits, as its card does", () => {
+  const P = load();
+  const chosen = (html, marker) => (optionsOf(html, marker).find((o) => o.selected) || {}).value;
+  const detail = (html) => ({
+    role: ['service', 'model', 'effort'].map((part) => chosen(html, 'data-flow="role:agents/explore:' + part + '"')),
+    main: ['main-provider', 'main-model', 'main-thinking'].map((pf) => chosen(html, 'data-pf="' + pf + '"')),
+    heading: textOf(/<h1 class="pf-title">([\s\S]*?)<\/h1>/.exec(html)[1]).replace(/\s+/g, ' ').trim(),
+  });
+  const pending = [
+    { kind: 'setRoute', profileKey: 'native-kimi-deepseek', section: 'agents', role: 'explore', provider: 'chatgpt-subscription', model: 'chatgpt-subscription/gpt-6.1-sol', thinking: 'high' },
+    { kind: 'setMain', profileKey: 'kimi-deepseek', provider: 'kimi-coding', model: 'k3-turbo', thinking: 'high' },
+  ];
+  const saved = detail(P.render(STATE, live({ shown: 'experimental-custom' })));
+  assert.deepEqual([saved.role, saved.main], [['anthropic', 'anthropic/claude-opus-5-5', 'medium'], ['kimi-coding', 'k3', 'max']]);
+
+  let html = P.render(STATE, live({ pending, shown: 'experimental-custom' }));
+  assert.deepEqual(detail(html).role, saved.role, 'another profile\'s role edit leaves the shown detail alone');
+  assert.deepEqual(detail(html).main, saved.main, 'another profile\'s main edit leaves the shown detail alone');
+  assert.equal(detail(html).heading, '프로필·에이전트 · 변경 보류 2건', 'the heading still counts the edits of every profile');
+
+  html = P.render(STATE, live({ pending, shown: 'kimi-deepseek' }));
+  assert.deepEqual(detail(html).role, ['chatgpt-subscription', 'chatgpt-subscription/gpt-6.1-sol', 'high'], 'its own role edit, named by the omo layer');
+  assert.deepEqual(detail(html).main, ['kimi-coding', 'k3-turbo', 'high'], 'its own main edit, named by the card key');
+  assert.equal(detail(html).heading, '프로필·에이전트 · 변경 보류 2건');
+  assert.match(textOf(/<button[^>]*data-flow="card:kimi-deepseek"[^>]*>([\s\S]*?)<\/button>/.exec(html)[1]), /메인: k3-turbo \/ high/,
+    'the card line agrees with its detail');
+});
+
+// Through the real page wiring: an edit made while one card is shown, its draft included, never reaches another card's
+// detail or that card's next edit, and the heading keeps counting every profile's edits (PS:4529-4535).
+test("per-profile: switching the shown card keeps each profile's role and main edits in its own detail; the heading counts them all", async () => {
+  const e = await openProfilesPage();
+  const q = (sel) => e.byId.main.querySelector(sel);
+  const detail = () => ({
+    role: ['route-provider', 'route-model', 'route-thinking'].map((pf) => selectedValueOf(q('[data-pf-route="agents/explore"] [data-pf="' + pf + '"]'))),
+    main: ['main-provider', 'main-model', 'main-thinking'].map((pf) => selectedValueOf(q('[data-pf="' + pf + '"]'))),
+  });
+  const show = (key) => e.fire(q('[data-flow="card:' + key + '"]'), 'click');
+  const pick = (sel, value) => { const el = q(sel); el.value = value; e.fire(el, 'change'); };
+  const counts = () => {
+    const n = e.page.state.ui.profilesState.pending.length;
+    assert.equal(q('.pf-title').textContent, '프로필·에이전트 · 변경 보류 ' + n + '건', 'the heading counts every profile');
+    assert.equal(q('#pf-sec-tray .pf-count').textContent, String(n), 'the tray lists every profile');
+    return n;
+  };
+
+  show('kimi-deepseek');
+  const savedB = detail();
+  show('experimental-custom');
+  const savedA = detail();
+  pick('[data-pf-route="agents/explore"] [data-pf="route-provider"]', 'chatgpt-subscription');
+  pick('[data-pf-route="agents/explore"] [data-pf="route-model"]', 'chatgpt-subscription/gpt-6.1-sol');
+  pick('[data-pf-route="agents/explore"] [data-pf="route-thinking"]', 'high');
+  pick('[data-pf="main-thinking"]', 'low');
+  const editedA = detail();
+  assert.deepEqual(editedA, { role: ['chatgpt-subscription', 'chatgpt-subscription/gpt-6.1-sol', 'high'], main: [savedA.main[0], savedA.main[1], 'low'] });
+  assert.equal(counts(), 2);
+
+  show('kimi-deepseek');
+  assert.deepEqual(detail(), savedB, 'experimental-custom\'s edits and drafts stay out of kimi-deepseek\'s detail');
+  assert.equal(counts(), 2, 'the hidden profile still counts');
+  pick('[data-pf-route="agents/explore"] [data-pf="route-thinking"]', 'low');
+  assert.deepEqual(plain(e.page.state.ui.profilesState.pending.map((c) => [c.kind, c.profileKey, c.provider, c.model, c.thinking])), [
+    ['setRoute', 'native-experimental-custom', 'chatgpt-subscription', 'chatgpt-subscription/gpt-6.1-sol', 'high'],
+    ['setMain', 'experimental-custom', savedA.main[0], savedA.main[1], 'low'],
+    ['setRoute', 'native-kimi-deepseek', savedB.role[0], savedB.role[1], 'low'],
+  ], 'kimi-deepseek\'s edit starts from its own row, not from the other profile\'s draft');
+  assert.equal(counts(), 3);
+
+  show('experimental-custom');
+  assert.deepEqual(detail(), editedA, 'experimental-custom shows its own edits again');
+  show('kimi-deepseek');
+  assert.deepEqual(detail(), { role: [savedB.role[0], savedB.role[1], 'low'], main: savedB.main });
+  assert.equal(counts(), 3);
+  assert.deepEqual(e.errors, []);
+});
+
 test('order: a category edit plus activation in one apply leaves the active scope equal to the edited layer', async (t) => {
   const { openProfilesStore } = await import('../src/profiles/store.mjs');
   const os = await import('node:os');

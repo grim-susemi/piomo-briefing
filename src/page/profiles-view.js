@@ -448,11 +448,18 @@
   function agentChange(pending, id, kind) {
     return findChange(pending, function (c) { return c && c.kind === kind && c.agentId === id; });
   }
-  function routeChangeOf(pending, section, role) {
-    return findChange(pending, function (c) { return c && c.kind === 'setRoute' && c.section === section && c.role === role; });
+  // A role or main edit belongs to one profile: setMain names it by the card key, setRoute by the omo layer the store
+  // writes (store routeChange), and both mean that card. The card line and the detail pane read edits through this one
+  // filter, so the detail shows only the shown profile's edits (IS-10) and agrees with its card.
+  function ofProfile(c, p) {
+    var key = str(c.profileKey);
+    return !!key && !!p && (key === p.key || key === str(p.omoProfile));
   }
-  function mainChangeOf(pending) {
-    return findChange(pending, function (c) { return c && c.kind === 'setMain'; });
+  function routeChangeOf(pending, p, section, role) {
+    return findChange(pending, function (c) { return c && c.kind === 'setRoute' && c.section === section && c.role === role && ofProfile(c, p); });
+  }
+  function mainChangeOf(pending, p) {
+    return findChange(pending, function (c) { return c && c.kind === 'setMain' && ofProfile(c, p); });
   }
   function firstOf(pending, kind) {
     return findChange(pending, function (c) { return c && c.kind === kind; });
@@ -739,9 +746,7 @@
   function cardMainOf(view, edit, p, entries) {
     var detail = obj(view && view.details) ? obj(view.details[p.key]) : null;
     var saved = obj(detail && detail.main) || {};
-    var pending = findChange(pendingOf(edit), function (c) {
-      return c && c.kind === 'setMain' && (str(c.profileKey) === p.key || str(c.profileKey) === str(p.omoProfile));
-    });
+    var pending = mainChangeOf(pendingOf(edit), p);
     var profileDefault = { provider: p.mainProvider, model: p.mainModel, thinking: p.mainThinking };
     var value = pending ? (str(pending.provider) && str(pending.model) && str(pending.thinking) ? pending : profileDefault)
       : obj(saved.override) || profileDefault;
@@ -789,10 +794,10 @@
 
   // One WinForms New-RoutingRow (PS:5595-5785): the label line keeps the recommendation chip, then the three captions
   // over three equal-width selects. The effort list holds only the chosen model's served levels.
-  function routeRow(r, entries, candidates, edit, ro) {
+  function routeRow(r, profile, entries, candidates, edit, ro) {
     var key = str(r.section) + '/' + str(r.role);
     var busy = !!(edit && edit.busy === true);
-    var change = routeChangeOf(pendingOf(edit), r.section, r.role);
+    var change = routeChangeOf(pendingOf(edit), profile, r.section, r.role);
     var draft = draftOf(edit, 'route:' + key);
     var alias = str(r.model);
     var entry = entryOf(entries, alias);
@@ -822,6 +827,7 @@
   // The role sections of the WinForms routing box (PS:6213-6260) in their fixed order, whatever order the rows arrive in.
   function routingRows(view, edit, ro) {
     var rows = arr(obj(view && view.routing) && view.routing.rows).filter(obj);
+    var profile = profileOf(view, shownKeyOf(view, edit));
     var entries = catalogEntries(view);
     var candidates = memoryCandidates(view);
     var html = '';
@@ -838,13 +844,13 @@
         html += '<section class="pf-group"' + attr('data-flow-sec', sec[0] + ':' + (has(FLOW_GROUP, group) ? FLOW_GROUP[group] : group)) + '>' +
           '<h4 class="pf-group-h">' + esc(group === 'extras' ? '추가 설정' : str(list[0].groupLabel) || group) +
           ' <span class="pf-count">' + list.length + '</span></h4>' +
-          list.map(function (r) { return routeRow(r, entries, candidates, edit, ro); }).join('') + '</section>';
+          list.map(function (r) { return routeRow(r, profile, entries, candidates, edit, ro); }).join('') + '</section>';
       });
     });
     return html || emptyState('배치할 역할이 없습니다. 프로필 설정을 확인한 뒤 상태를 다시 불러와 주십시오.', edit);
   }
   function mainModel(view, edit, ro) {
-    var pending = mainChangeOf(pendingOf(edit));
+    var pending = mainChangeOf(pendingOf(edit), profileOf(view, shownKeyOf(view, edit)));
     var busy = !!(edit && edit.busy === true);
     var draft = draftOf(edit, 'main');
     var current = obj(view && view.main) || {};
@@ -1582,6 +1588,11 @@
       removeMemoryRow: removeMemoryRow,
       show: function (profileKey) {
         if (s.busy) return snapshot();
+        // A main or role draft is the shown profile's row in the making. WinForms rebuilds the rows for each shown
+        // profile, so another profile starts from its own saved and pending values, never from that draft.
+        if (str(profileKey) !== s.shown) {
+          Object.keys(s.draft).forEach(function (k) { if (k === 'main' || k.indexOf('route:') === 0) delete s.draft[k]; });
+        }
         s.shown = str(profileKey);
         changed();
         return snapshot();
