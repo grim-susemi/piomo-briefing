@@ -331,6 +331,20 @@
     });
     return out;
   }
+  // A memory row also offers the served models no catalog alias names: WinForms Get-MemoryCandidates (PS:3246-3285)
+  // lists every model all required homes serve, which the store sends as memory.candidates with their common levels.
+  // Catalog entries come first with their alias, and an unserved one stays listed, disabled with its reason.
+  function memoryRowCandidates(view, withUnserved) {
+    var out = memoryCandidates(view, withUnserved), seen = map();
+    out.forEach(function (c) { seen[c.model] = true; });
+    arr(obj(view && view.memory) && view.memory.candidates).forEach(function (item) {
+      var model = str(item && item.model);
+      if (!providerOf(model) || has(seen, model)) return;
+      seen[model] = true;
+      out.push({ alias: bareModel(model), model: model, provider: providerOf(model), levels: arr(item.levels).slice(), off: null });
+    });
+    return out;
+  }
   function quickTupleOf(view, m, entries) {
     var q = obj(m && m.quick);
     if (q && str(q.model)) {
@@ -917,8 +931,8 @@
     var busy = !!(edit && edit.busy === true);
     var mem = obj(view && view.memory) || {};
     var allEntries = catalogEntries(view);
-    var candidates = memoryCandidates(view);
-    var choices = memoryCandidates(view, true);
+    var candidates = memoryRowCandidates(view);
+    var choices = memoryRowCandidates(view, true);
     var memErrors = obj(edit && edit.memoryErrors) || {};
     var memSaved = obj(edit && edit.memorySaved) || {};
     var rows = ['kibitzer', 'reflection'].map(function (key) {

@@ -163,6 +163,28 @@ export function getServedModelIds(registry) {
   return served;
 }
 
+// The models every listed home serves, each with the thinking levels all of them support (PS Get-MemoryCandidates,
+// PS:3246-3285): the first home's models sorted by id, kept only when no home lacks the model or failed its provider
+// and the common levels are not empty. A home whose registry is unknown serves nothing.
+export function getCommonServedModels(registries, homes) {
+  const lookupHome = (homeKey) => (registries instanceof Map ? registries.get(homeKey) : registries[homeKey]);
+  const homeRegs = homes.map(lookupHome);
+  if (!homeRegs.length || homeRegs.some((reg) => !reg || reg.unknown)) return [];
+  const servedIds = homeRegs.map((reg) => getServedModelIds(reg));
+  const homeModels = homeRegs.map((reg) => new Map(reg.models.map((m) => [m.modelId, m])));
+  const common = new Map();
+  for (const item of homeRegs[0].models) {
+    if (common.has(item.modelId) || !servedIds.every((ids) => ids.has(item.modelId))) continue;
+    let levels = item.levels ?? [];
+    for (const models of homeModels) {
+      const homeLevels = models.get(item.modelId).levels ?? [];
+      levels = levels.filter((level) => homeLevels.includes(level));
+    }
+    if (levels.length) common.set(item.modelId, { model: item.modelId, levels });
+  }
+  return [...common.values()].sort((a, b) => (a.model < b.model ? -1 : a.model > b.model ? 1 : 0));
+}
+
 export function validateSelection({
   kind,
   homes = ['primary', 'stable'],

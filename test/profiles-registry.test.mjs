@@ -296,6 +296,53 @@ test('support: memory needs every home; a primary-only model is refused', async 
   assert.equal(res.home, 'stable');
 });
 
+test('support: memory candidates are the models every home serves with their common levels, outside the catalog too', async (t) => {
+  const primaryRegistry = {
+    models: [
+      { provider: 'openai', modelId: 'openai/gpt-6-sol', reasoning: true, levels: ['off', 'low', 'medium', 'high'] },
+      { provider: 'primary-only', modelId: 'primary-only/special-model', reasoning: true, levels: ['high'] },
+      { provider: 'anthropic', modelId: 'anthropic/claude-opus-5-5', reasoning: true, levels: ['low', 'high'] },
+      { provider: 'no-common', modelId: 'no-common/model', reasoning: true, levels: ['low'] },
+      { provider: 'failing', modelId: 'failing/model', reasoning: true, levels: ['high'] },
+    ],
+    errors: [],
+  };
+  const stableRegistry = {
+    models: [
+      { provider: 'anthropic', modelId: 'anthropic/claude-opus-5-5', reasoning: true, levels: ['high', 'low'] },
+      { provider: 'openai', modelId: 'openai/gpt-6-sol', reasoning: true, levels: ['low', 'high', 'max'] },
+      { provider: 'no-common', modelId: 'no-common/model', reasoning: true, levels: ['high'] },
+      { provider: 'failing', modelId: 'failing/model', reasoning: true, levels: ['high'] },
+    ],
+    errors: [{ provider: 'failing', message: 'refresh failed' }],
+  };
+  const { store } = makeFixture(t, {
+    storeOptions: { registries: { primary: primaryRegistry, stable: stableRegistry } },
+  });
+
+  // PS Get-MemoryCandidates: id order, the first home's level order, no primary-only, empty-level or failed model.
+  const state = store.state();
+  assert.deepEqual(state.memory.candidates, [
+    { model: 'anthropic/claude-opus-5-5', levels: ['low', 'high'] },
+    { model: 'openai/gpt-6-sol', levels: ['low', 'high'] },
+  ]);
+  assert.equal(Object.values(state.catalog).some((entry) => entry.model === 'openai/gpt-6-sol'), false, 'no catalog alias');
+
+  // The write validates the same set: a candidate applies on a common level only.
+  const memory = (model, reasoning) => ({ kind: 'setMemoryRow', row: 'kibitzer', mode: 'custom', model, reasoning });
+  const preview = (change) => store.preview({ action: 'preview', changes: [change], expected: store.state().targets, rosterRevision: 0 });
+  assert.equal(preview(memory('openai/gpt-6-sol', 'high')).ok, true);
+  assert.equal(preview(memory('openai/gpt-6-sol', 'medium')).code, 'UNSUPPORTED_EFFORT');
+  assert.equal(preview(memory('primary-only/special-model', 'high')).code, 'UNSUPPORTED_MODEL');
+  assert.equal(preview(memory('failing/model', 'high')).code, 'UNSUPPORTED_MODEL');
+
+  // A home whose registry could not be read leaves nothing to offer.
+  const unknown = makeFixture(t, {
+    storeOptions: { registries: { primary: primaryRegistry, stable: { unknown: true, models: [], errors: [] } } },
+  });
+  assert.deepEqual(unknown.store.state().memory.candidates, []);
+});
+
 test('support: a lookup failure is unknown - no new assignment, the saved value is displayed', async (t) => {
   const unknownRegistry = {
     unknown: true,

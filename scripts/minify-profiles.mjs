@@ -9,8 +9,8 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SOURCE = join(ROOT, 'src', 'page', 'profiles-view.js');
 const OUTPUT = join(ROOT, 'src', 'page', 'generated', 'profiles-view.min.js');
 // This recipe was reviewed for this source, not for arbitrary JavaScript.
-const REVIEWED_SOURCE = '860c32f92e8e2b297d2a983a99297df221824d72eb2c1e77a46dfb7ccfffd3d9';
-const REVIEWED_PAYLOAD = '8f781023d34ab80b9b28747347b7b94030f4d056367063c7bee944f37e0b05d6';
+const REVIEWED_SOURCE = 'e67f712ad8f1d12fead24d21b0558f0cf809fb4c42cfe77cc5b89f60b1b03dd9';
+const REVIEWED_PAYLOAD = '6ea96965922e6d895bee7c6e23ed7ba8b1dff36307ae76efcfbe4577541f88f6';
 
 try {
   if (typeof Bun === 'undefined' || Bun.version !== '1.4.0') throw new Error('regeneration requires Bun 1.4.0');

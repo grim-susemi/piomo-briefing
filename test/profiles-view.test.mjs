@@ -1408,6 +1408,29 @@ test('support: an unread registry keeps every model listed but disabled as 설�
   }
 });
 
+test('memory rows: a served model without a catalog alias is offered from the store\'s candidates with their levels', () => {
+  const state = supportState();
+  state.memory.candidates = [
+    { model: 'openai/gpt-6-sol', levels: ['low', 'high'] },
+    { model: 'opencode/served-pro', levels: ['low', 'high'] }
+  ];
+  const draft = { 'memory:kibitzer': { mode: 'custom', service: 'openai', model: 'openai/gpt-6-sol', reasoning: '' } };
+  const html = load().render(state, live({ draft }));
+  for (const key of ['kibitzer', 'reflection']) {
+    const services = optionsOf(html, 'data-flow="memory:' + key + ':service"').filter((o) => o.value);
+    assert.deepEqual(services.map((o) => [o.value, o.disabled]), [['openai', false], ['opencode', false]], key);
+  }
+  const models = optionsOf(html, 'data-flow="memory:kibitzer:model"').filter((o) => o.value);
+  assert.deepEqual(models.map((o) => [o.value, o.text, o.disabled, o.selected]), [['openai/gpt-6-sol', 'gpt-6-sol · openai/gpt-6-sol', false, true]]);
+  assert.deepEqual(optionsOf(html, 'data-flow="memory:kibitzer:effort"').map((o) => o.value), ['', 'low', 'high']);
+  // A catalog model keeps its alias label, and the unserved one stays listed but disabled.
+  const opencode = optionsOf(html, 'data-flow="memory:reflection:model"').filter((o) => o.value);
+  assert.deepEqual(opencode.map((o) => [o.value, o.text, o.disabled]), [
+    ['opencode/served-pro', 'oc-pro · opencode/served-pro', false],
+    ['opencode/gemini-4-argon', 'oc-argon · opencode/gemini-4-argon · 설치 엔진 미지원', true]
+  ]);
+});
+
 test('per-profile: a card click shows that profile and adds no pending', async () => {
   const P = load();
   const c = P.createController({ fetch: async () => ({ status: 200, json: async () => STATE }), token: 't' });

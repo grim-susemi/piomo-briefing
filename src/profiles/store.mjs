@@ -40,7 +40,7 @@ import {
   expandLayerRoles, getFullModelId, getMemoryReasoning, getModelIdWithoutProvider, getProfile,
   getProviderChoiceForModel, newRouteRow,
 } from './model.mjs';
-import { composeHomeRegistry, getServedModelIds, validateSelection } from './registry.mjs';
+import { composeHomeRegistry, getCommonServedModels, getServedModelIds, validateSelection } from './registry.mjs';
 import { chatGptPickerModels, recommendationGuide, refreshRoutingRows } from './refresh-5.1.44.mjs';
 import { compareRecommendation, getRecommendationManifestShape } from './recommend.mjs';
 
@@ -909,6 +909,9 @@ export function openProfilesStore(options = {}) {
       memory: config ? {
         kibitzer: getMemorySelectionFromConfig(config, profile?.omoProfile ?? ''),
         reflection: getReflectionMemorySelectionFromConfig(config, profile?.omoProfile ?? ''),
+        // What a custom memory row offers (PS Get-MemoryCandidates): every model all required homes serve, from the
+        // registries its write is validated against, so a served model without a catalog alias is offered too.
+        candidates: getCommonServedModels(homeRegistries, requiredHomes),
       } : null,
       catalog,
       registry: { unknownHomes, surfacedModels },

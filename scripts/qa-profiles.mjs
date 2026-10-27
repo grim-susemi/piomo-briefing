@@ -40,6 +40,8 @@ import {
   stripEngineSectionAlias,
 } from '../src/profiles/merge.mjs';
 import { composeHomeRegistry, getServedModelIds } from '../src/profiles/registry.mjs';
+import { getModelIdWithoutProvider, getProviderFromModelId } from '../src/profiles/model.mjs';
+import { runScenario } from '../src/profiles/parity.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const GOLDEN = path.join(ROOT, 'test/fixtures/profiles/goldens/apply-gpt-kimi-deepseek/files');
@@ -2969,6 +2971,11 @@ const GOLDEN_RUNS = [
   { task: 'memory', seed: 'goldens-r3a/intent-main-dryrun', golden: 'goldens-r3a/intent-memory-custom-apply',
     steps: [['memory:kibitzer:mode', 'custom'], ['memory:kibitzer:service', 'openai'], ['memory:kibitzer:model', 'openai/gpt-6-sol'],
       ['memory:kibitzer:effort', 'high'], ['apply:detail', null]] },
+  // IS-7 names main as well, and no PS main golden is drivable through the page: goldens-r3a/intent-main-apply is
+  // activate:false on gpt-kimi-deepseek while its seed has experimental-custom active (the page applies an edit with the
+  // shown profile activated, IS-10), and its model opencode-go/deepseek-v4-flash is no longer served by the installed
+  // engine, so the page keeps it disabled (IS-6). This run's golden is generated instead (mainOnShownProfile).
+  { task: 'main', seed: 'goldens-r3a/intent-main-dryrun', golden: 'validated layer (runScenario)', shownProfileMain: true },
 ];
 const ROLE_GOLDEN_GAP = 'every routing golden is activate:false on gpt-kimi-deepseek while its seed (dump-state) has cmd-glm-deepseek '
   + 'active, and the page applies a role edit together with activating the shown profile (IS-10), so no golden scenario matches';
@@ -3601,18 +3608,44 @@ async function flowTask(page, tempRoot, size, task) {
   return record;
 }
 
+// A main edit on the profile the page shows: the saved main service's first other served catalog model at its last
+// common level, as the store lists the seed's catalog, applied the way the page applies (the shown profile activated).
+// Its golden is the validated layer's output for that intent on the same seed files: the merge port the parity tests
+// hold to every PS golden (src/profiles/parity.mjs runScenario). No expected file is written by hand.
+function mainOnShownProfile(seedDir, homes) {
+  const state = openFixtureStore(homes).state();
+  const { provider, model: saved } = state.main.effective;
+  const served = (entry) => Object.keys(entry.served ?? {}).length > 0 && Object.values(entry.served).every(Boolean);
+  const entry = Object.values(state.catalog).find((e) => getProviderFromModelId(e.model) === provider
+    && getModelIdWithoutProvider(e.model) !== saved && served(e) && e.levels.length > 0);
+  const effort = entry.levels[entry.levels.length - 1];
+  const intent = { schema: 1, profileKey: state.activeProfile.key, activate: true, routing: [], main: { provider, model: entry.model, reasoning: effort } };
+  const files = {};
+  for (const name of Object.keys(GOLDEN_SEED_FILES)) {
+    const value = goldenFile(seedDir, name);
+    if (value !== null) files[name] = value;
+  }
+  const result = runScenario({ files, scenario: { mode: 'ApplyIntentPath.Apply' }, intent });
+  return {
+    intent,
+    steps: [['[data-pf="main-model"]', getModelIdWithoutProvider(entry.model)], ['[data-pf="main-thinking"]', effort], ['apply:detail', null]],
+    expected: (name) => (Object.hasOwn(result.files, name) ? result.files[name] : null),
+  };
+}
+
 // A golden scenario through the page: seeded from the scenario's own seed, compared the way the parity tests compare,
 // except that the seed is the expectation where the store keeps it (SEED_KEPT).
 async function goldenThroughPage(page, tempRoot, spec) {
   const seedDir = path.join(PROFILE_FIXTURES, spec.seed);
-  const goldenDir = path.join(PROFILE_FIXTURES, spec.golden);
   const homes = seedGoldenHomes(path.join(tempRoot, 'golden-' + spec.task), seedDir);
-  const record = { task: spec.task, seed: spec.seed, golden: spec.golden, steps: [], apply: [], written: [], files: [], replay: null };
+  const run = spec.shownProfileMain ? mainOnShownProfile(seedDir, homes)
+    : { intent: null, steps: spec.steps, expected: (name) => goldenFile(path.join(PROFILE_FIXTURES, spec.golden), name) };
+  const record = { task: spec.task, seed: spec.seed, golden: spec.golden, intent: run.intent, steps: [], apply: [], written: [], files: [], replay: null };
   await withBoard(page, homes, null, async (board) => {
     const before = treeBytes(homes.root);
-    for (const [id, value] of spec.steps) {
+    for (const [id, value] of run.steps) {
       if (value === null) { record.steps.push(await flowStep(page, board, id)); continue; }
-      const sel = `[data-flow="${id}"]`;
+      const sel = id.startsWith('[') ? id : `[data-flow="${id}"]`;
       const offered = (await page.eval(`window.__qa9.options(${JSON.stringify(sel)})`) || []).filter((o) => o.value && !o.disabled).map((o) => o.value);
       if (!offered.includes(value)) {
         record.steps.push({ control: id, wanted: value, offered });
@@ -3626,7 +3659,7 @@ async function goldenThroughPage(page, tempRoot, spec) {
     const applies = board.exchanges.filter((e) => e.request.action === 'apply');
     record.apply = applies.map((e) => ({ status: e.status, code: e.code, changes: e.request.changes }));
     for (const [name, rel] of Object.entries(GOLDEN_SEED_FILES)) {
-      const golden = goldenFile(goldenDir, name);
+      const golden = run.expected(name);
       if (golden === null) continue;
       const seed = goldenFile(seedDir, name);
       const expected = storeContractGolden(name, seed, golden);
@@ -3680,7 +3713,7 @@ function e2eSummary(report) {
   lines.push('', '## golden', '');
   for (const g of report.goldens) {
     if (!g.golden) { lines.push(`- ${g.task}: 해당 시나리오 없음 — ${g.reason}`); continue; }
-    lines.push(`- ${g.task}: ${g.seed} → ${g.golden} · ${g.ok ? 'PASS' : 'FAIL'}${g.blocked ? ' · 막힘: ' + g.blocked : ''} · apply ${g.apply.map((a) => a.status + (a.code ? ' ' + a.code : '')).join(',')} · 스토어 재생 ${g.replay ? (g.replay.ok ? '같음' : '다름 ' + JSON.stringify(g.replay.mismatches || g.replay.reason)) : '-'}`);
+    lines.push(`- ${g.task}: ${g.seed} → ${g.golden}${g.intent ? ` (표시 프로필 ${g.intent.profileKey} 메인 ${g.intent.main.model} / ${g.intent.main.reasoning}, activate)` : ''} · ${g.ok ? 'PASS' : 'FAIL'}${g.blocked ? ' · 막힘: ' + g.blocked : ''} · apply ${g.apply.map((a) => a.status + (a.code ? ' ' + a.code : '')).join(',')} · 스토어 재생 ${g.replay ? (g.replay.ok ? '같음' : '다름 ' + JSON.stringify(g.replay.mismatches || g.replay.reason)) : '-'}`);
     for (const f of g.files) lines.push(`  - ${f.golden}: ${f.equal ? '같음' : '다름'} (보드가 씀 ${f.boardWrote}, golden 이 시드에서 바꿈 ${f.goldenChangedFromSeed}${f.seedKept.length ? ', 스토어 계약상 시드 유지 ' + f.seedKept.join(' ') : ''})${f.equal ? '' : ' ' + JSON.stringify(f.diffs.slice(0, 3))}`);
   }
   const s = report.stale || {};
