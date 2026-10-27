@@ -449,7 +449,27 @@ function validateBody(body, allowedTargets) {
 }
 
 // ── store ──────────────────────────────────────────────────────────────────────
+// Every option openProfilesStore reads. A key outside this list used to be dropped
+// silently: a test that passed `roots:` got the live default homes and applied to them.
+// The three homes are named together or not at all. None named is the extension's call
+// on the live homes; a home left out of a fixture would fall back to a live one.
+const STORE_OPTION_KEYS = new Set(['primaryHome', 'stableHome', 'mirrorHomes', 'pluginPath', 'inventoryPath',
+  'inventory', 'recommendationManifestPath', 'recommendationManifest', 'registry', 'registryModels', 'registries',
+  'composer', 'lib', 'timeoutMs', 'hooks', 'journal', 'now', 'fs']);
+const HOME_OPTION_KEYS = ['primaryHome', 'stableHome', 'mirrorHomes'];
+
 export function openProfilesStore(options = {}) {
+  // Both checks run before any file is read or written.
+  const unknownKeys = Object.keys(options).filter((key) => !STORE_OPTION_KEYS.has(key));
+  if (unknownKeys.length > 0) {
+    throw Object.assign(new Error(`openProfilesStore does not read ${unknownKeys.join(', ')}; `
+      + `its options are ${[...STORE_OPTION_KEYS].join(', ')}`), { code: 'UNKNOWN_OPTION', keys: unknownKeys });
+  }
+  const missingHomes = HOME_OPTION_KEYS.filter((key) => options[key] === undefined || options[key] === null);
+  if (missingHomes.length > 0 && missingHomes.length < HOME_OPTION_KEYS.length) {
+    throw Object.assign(new Error(`openProfilesStore: ${missingHomes.join(', ')} missing; name every home or none `
+      + '(none = the live homes)'), { code: 'PARTIAL_HOMES', missing: missingHomes });
+  }
   const fs = options.fs ?? nodeFs;
   const nowFn = options.now ?? Date.now;
   const roots = {

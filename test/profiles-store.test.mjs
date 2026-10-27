@@ -720,3 +720,27 @@ test('memory: a foreign desktop-kibitzer category is refused before any write', 
   assert.equal(hashFile(mirror1Omo), mirror1HashBefore, 'mirror1 home unchanged');
   assert.equal(hashFile(mirror2Omo), mirror2HashBefore, 'mirror2 home unchanged');
 });
+
+test('options: an option the store does not read is refused before any file is read or written', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piomo-p10-options-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const roots = { primaryHome: path.join(root, 'primary'), stableHome: path.join(root, 'stable'), mirrorHomes: [] };
+  const used = [];
+  const watchedFs = new Proxy(fs, { get: (target, name) => { used.push(name); return target[name]; } });
+
+  // The call shape of the 7f22588 order: test. The store does not read roots:, so it used to open the live homes.
+  assert.throws(() => openProfilesStore({ roots, fs: watchedFs }), { code: 'UNKNOWN_OPTION', keys: ['roots'] });
+  assert.deepEqual(used, [], 'no file call was made');
+  assert.deepEqual(fs.readdirSync(root), [], 'nothing was created');
+});
+
+test('options: naming some homes but not all is refused, so a home left out cannot fall back to a live one', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piomo-p10-options-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const homes = { primaryHome: path.join(root, 'primary'), stableHome: path.join(root, 'stable') };
+
+  assert.throws(() => openProfilesStore(homes), { code: 'PARTIAL_HOMES', missing: ['mirrorHomes'] });
+  assert.throws(() => openProfilesStore({ ...homes, mirrorHomes: null }), { code: 'PARTIAL_HOMES', missing: ['mirrorHomes'] });
+  assert.deepEqual(fs.readdirSync(root), [], 'nothing was created');
+  assert.deepEqual(openProfilesStore({ ...homes, mirrorHomes: [] }).roots, { ...homes, mirrorHomes: [] });
+});
