@@ -182,6 +182,8 @@
   }
 
   // ---- model helpers -----------------------------------------------------------------------------------------------
+  // Every catalog model with `off` = unservedOf (null when served). Model lists show them all; only served ones are
+  // enabled, offered as a service, given effort levels or kept by a cascade.
   function catalogEntries(view) {
     var cat = obj(view && view.catalog) || {}, out = [];
     Object.keys(cat).forEach(function (alias) {
@@ -191,7 +193,7 @@
         alias: alias,
         model: str(entry.model),
         variant: str(entry.variant) || str(entry.reasoning),
-        served: obj(entry.served),
+        off: unservedOf(entry),
         levels: Array.isArray(entry.levels) ? entry.levels.slice() : null
       });
     });
@@ -208,7 +210,7 @@
         alias: str(item && item.alias) || bareModel(model),
         model: model,
         variant: str(item && item.variant),
-        served: obj(item && item.served),
+        off: unservedOf(item),
         levels: item && Array.isArray(item.levels) ? item.levels.slice() : null
       });
     });
@@ -294,35 +296,24 @@
     if (!opts) opts = '<option value="" selected>(모델 없음)</option>';
     return select(name, attrs, opts, disabled);
   }
-  // Why the installed engine refuses a catalog model, decided like the store's checkModelServed: the first required
-  // home whose registry could not be read (REGISTRY_UNKNOWN) or does not serve the model (UNSUPPORTED_MODEL), with
-  // the code a forced pick is refused with. null = served.
-  function unservedOf(entry, view) {
-    var unknown = arr(obj(view && view.registry) && view.registry.unknownHomes);
-    if (unknown.length) return { label: '설치 엔진 미확인', code: 'REGISTRY_UNKNOWN', home: str(unknown[0]) };
-    var served = obj(entry && entry.served);
-    if (!served) return null;
-    var keys = Object.keys(served);
-    for (var i = 0; i < keys.length; i++) {
-      if (served[keys[i]] !== true) return { label: UNSERVED, code: 'UNSUPPORTED_MODEL', home: keys[i] };
-    }
-    return keys.length ? null : { label: UNSERVED, code: 'UNSUPPORTED_MODEL', home: '' };
+  // The store's verdict on a shown model, worded: the store decides it once for every model (registry.mjs
+  // supportStatusFor) and sends the refusal code and the first home that refuses it, which a forced pick is refused
+  // with too. An unread registry (REGISTRY_UNKNOWN) reads 미확인, any other refusal 미지원. null = served.
+  function unservedOf(item) {
+    if (!obj(item) || item.unsupported !== true) return null;
+    var code = str(item.unsupportedReason);
+    return { label: code === 'REGISTRY_UNKNOWN' ? '설치 엔진 미확인' : UNSERVED, code: code, home: str(item.unsupportedHome) };
   }
   function offText(off) { return off.label + (off.home ? ' · ' + off.home + ' 홈' : ''); }
   function offTitle(off) { return offText(off) + ' · ' + off.code; }
   // The flag on a shown value the engine refuses: reason and home, with the refusal code as its title. It is a lasting
   // configuration state, so it takes the warning colour; red stays for failures.
   function offChip(off) { return off ? chip('pf-c-amber', offText(off), off.code) : ''; }
-  // Every catalog model with `off` = unservedOf (null when served). Model lists show them all; only served ones are
-  // enabled, offered as a service, given effort levels or kept by a cascade.
-  function modelEntries(view) {
-    return catalogEntries(view).map(function (e) { e.off = unservedOf(e, view); return e; });
-  }
   function servedEntries(view) {
-    return modelEntries(view).filter(function (e) { return !e.off; });
+    return catalogEntries(view).filter(function (e) { return !e.off; });
   }
   function memoryCandidates(view, withUnserved) {
-    var list = withUnserved ? modelEntries(view) : servedEntries(view), out = [], seen = map();
+    var list = withUnserved ? catalogEntries(view) : servedEntries(view), out = [], seen = map();
     list.forEach(function (e) {
       if (!e.model || has(seen, e.model)) return;
       seen[e.model] = true;
@@ -783,10 +774,9 @@
     var full = change ? str(change.model) : draft ? str(draft.model) : entry ? entry.model : alias;
     var provider = change ? str(change.provider) : draft ? str(draft.provider) : entry ? providerOf(entry.model) : providerOf(alias);
     var thinking = change ? str(change.thinking) : draft ? str(draft.thinking) : str(r.reasoning) || entry && entry.variant || '';
-    // The shown model's reason; a saved value outside the catalog keeps the store's own flag (checkModelServed).
+    // The shown model's reason; a saved value outside the catalog keeps the row's own verdict from the store.
     var shownEntry = entryOf(entries, '', full);
-    var off = shownEntry ? shownEntry.off
-      : !change && !draft && r.unsupported ? { label: UNSERVED, code: str(r.unsupportedReason), home: str(r.unsupportedHome) } : null;
+    var off = shownEntry ? shownEntry.off : !change && !draft ? unservedOf(r) : null;
     var rec = recommendationOf(r);
     var rid = 'pf-route-' + slug(r.section + '-' + r.role);
     var on = function (part) { return attr('data-route', key) + attr('data-flow', 'role:' + key + ':' + part); };
@@ -807,7 +797,7 @@
   // The role sections of the WinForms routing box (PS:6213-6260) in their fixed order, whatever order the rows arrive in.
   function routingRows(view, edit, ro) {
     var rows = arr(obj(view && view.routing) && view.routing.rows).filter(obj);
-    var entries = modelEntries(view);
+    var entries = catalogEntries(view);
     var candidates = memoryCandidates(view);
     var html = '';
     ROLE_SECTIONS.forEach(function (sec) {
@@ -838,17 +828,16 @@
     var provider = pending ? str(pending.provider) : draft ? str(draft.provider) : str(override && override.provider) || str(effective.provider);
     var model = pending ? str(pending.model) : draft ? str(draft.model) : str(override && override.model) || str(effective.model);
     var thinking = pending ? str(pending.thinking) : draft ? str(draft.thinking) : str(override && override.thinking) || str(effective.thinking);
-    var entries = modelEntries(view);
+    var entries = catalogEntries(view);
     var providers = providersOf(entries, provider);
     // WinForms Update-MainThinkingCombo: the effort list holds only the provider-qualified model's levels and shows
     // the clamped effort; without such an entry the seven-level list stays. The box keeps the saved-or-pending
     // effort the cascade clamps from (WinForms MainComboCommitted), which the shown clamp may differ from.
     // An unserved model (the heading's flag) keeps that list, but disabled on the saved effort: the select cannot
     // stage that model (IS-6), and a role row offers no other effort for it either. A saved model outside the catalog
-    // keeps the store's own flag (checkModelServed), as a role row's does.
+    // keeps the main's own verdict from the store, as a role row's does.
     var entry = entryOf(entries, '', provider + '/' + model);
-    var off = entry ? entry.off
-      : !pending && !draft && current.unsupported ? { label: UNSERVED, code: str(current.unsupportedReason), home: str(current.unsupportedHome) } : null;
+    var off = entry ? entry.off : !pending && !draft ? unservedOf(current) : null;
     var levels = entry && !entry.off && Array.isArray(entry.levels) && entry.levels.length ? entry.levels : null;
     var body;
     if (!effective.provider && !override && !pending) {
@@ -914,7 +903,7 @@
     var savedProvider = s && str(s.provider) ? str(s.provider) : providerOf(savedModel);
     var current = pending ? str(pending.modelId) : d && has(d, 'model') ? str(d.model) : savedModel;
     var provider = pending ? providerOf(str(pending.modelId)) : d && has(d, 'provider') ? str(d.provider) : (current ? providerOf(current) : savedProvider);
-    var entries = modelEntries(view);
+    var entries = catalogEntries(view);
     var shownEntry = entryOf(entries, '', current);
     var warnings = summarizerWarnings(current);
     var body = ro

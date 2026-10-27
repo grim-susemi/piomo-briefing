@@ -40,7 +40,7 @@ import {
   expandLayerRoles, getFullModelId, getMemoryReasoning, getModelIdWithoutProvider, getProfile,
   getProviderChoiceForModel, newRouteRow,
 } from './model.mjs';
-import { composeHomeRegistry, getCommonServedModels, getServedModelIds, validateSelection } from './registry.mjs';
+import { composeHomeRegistry, getCommonServedModels, supportStatusFor, validateSelection } from './registry.mjs';
 import { chatGptPickerModels, recommendationGuide, refreshRoutingRows } from './refresh-5.1.44.mjs';
 import { compareRecommendation, getRecommendationManifestShape } from './recommend.mjs';
 
@@ -716,68 +716,45 @@ export function openProfilesStore(options = {}) {
       if (!reg || reg.unknown) unknownHomes.push(h);
     }
 
+    // Every model the state shows gets its verdict from the one support decision (registry.mjs supportStatusFor), the
+    // one its write is validated with, so the view only words the code and home it is given.
+    const supportOf = supportStatusFor(homeRegistries, requiredHomes);
+    const homeSupport = requiredHomes.map((h) => [h, supportStatusFor(homeRegistries, [h])]);
+    // A shown value the engine refuses carries that refusal: its code and the first home that refuses it (IS-6).
+    const withSupport = (target, modelId) => {
+      const status = modelId ? supportOf(modelId) : { ok: true };
+      if (!status.ok) {
+        target.unsupported = true;
+        target.unsupportedReason = status.code;
+        target.unsupportedHome = status.home;
+      }
+      return target;
+    };
+
     if (catalog) {
       for (const [, entry] of Object.entries(catalog)) {
         if (!isPlainObject(entry)) continue;
-        const canonicalModelId = entry.model;
-        const served = {};
-        let levelsIntersection = null;
-        for (const h of requiredHomes) {
-          const reg = homeRegistries[h];
-          const isServed = reg && !reg.unknown && getServedModelIds(reg).has(canonicalModelId);
-          served[h] = Boolean(isServed);
-          const modelDef = reg?.models?.find((m) => m.modelId === canonicalModelId);
-          const homeLevels = modelDef?.levels ?? [];
-          if (levelsIntersection === null) {
-            levelsIntersection = new Set(homeLevels);
-          } else {
-            levelsIntersection = new Set(homeLevels.filter((lvl) => levelsIntersection.has(lvl)));
-          }
-        }
-        entry.served = served;
-        entry.levels = levelsIntersection ? [...levelsIntersection] : [];
+        const status = supportOf(entry.model);
+        entry.served = Object.fromEntries(homeSupport.map(([h, supportIn]) => [h, supportIn(entry.model).ok]));
+        entry.levels = status.ok ? status.levels : [];
+        withSupport(entry, entry.model);
       }
     }
 
-    const checkModelServed = (modelId) => {
-      if (!modelId) return { unsupported: false };
-      for (const h of requiredHomes) {
-        const reg = homeRegistries[h];
-        if (!reg || reg.unknown || !getServedModelIds(reg).has(modelId)) {
-          return { unsupported: true, reason: 'UNSUPPORTED_MODEL', home: h };
-        }
-      }
-      return { unsupported: false };
-    };
-    // The main row gets a role row's served status, on the id the main write validates: the model qualified by its
+    // The main row gets a role row's verdict, on the id the main write validates: the model qualified by its
     // provider (registry.mjs validateSelection). The view flags a saved main model outside the catalog with it.
-    const withMainServed = (main) => {
-      const status = checkModelServed(getFullModelId(main.effective.provider, main.effective.model));
-      if (status.unsupported) {
-        main.unsupported = true;
-        main.unsupportedReason = status.reason;
-        main.unsupportedHome = status.home;
-      }
-      return main;
-    };
+    const withMainServed = (main) => withSupport(main, getFullModelId(main.effective.provider, main.effective.model));
 
     const rows = routingRowsFor(inventoryRaw, layer).map((row) => {
       const entry = layer?.[row.section]?.[row.role];
       const model = isPlainObject(entry) ? entry.model ?? null : null;
       const reasoning = isPlainObject(entry) ? entry.reasoning ?? entry.variant ?? null : null;
       const canonical = model && catalog?.[model]?.model ? catalog[model].model : model;
-      const status = checkModelServed(canonical);
-      const outRow = {
+      return withSupport({
         ...row,
         model,
         reasoning,
-      };
-      if (status.unsupported) {
-        outRow.unsupported = true;
-        outRow.unsupportedReason = status.reason;
-        outRow.unsupportedHome = status.home;
-      }
-      return outRow;
+      }, canonical);
     });
     const manifestRead = readRecommendationManifest();
     if (manifestRead.warning) warnings.push(manifestRead.warning);
@@ -826,14 +803,7 @@ export function openProfilesStore(options = {}) {
         const model = isPlainObject(entry) ? entry.model ?? null : null;
         const reasoning = isPlainObject(entry) ? entry.reasoning ?? entry.variant ?? null : null;
         const canonical = model && catalog?.[model]?.model ? catalog[model].model : model;
-        const status = checkModelServed(canonical);
-        const outRow = { ...row, model, reasoning };
-        if (status.unsupported) {
-          outRow.unsupported = true;
-          outRow.unsupportedReason = status.reason;
-          outRow.unsupportedHome = status.home;
-        }
-        return outRow;
+        return withSupport({ ...row, model, reasoning }, canonical);
       });
       const pRec = attachRecommendations(pRows, catalog, pLayer, manifestRead.manifest);
       const pMainOverride = pProfile ? readMainOverride(sidecar, pProfile.omoProfile) : null;
@@ -867,11 +837,7 @@ export function openProfilesStore(options = {}) {
     for (const [provider, surfacedIds] of Object.entries(ENGINE_SURFACED_MODELS)) {
       for (const surfacedId of surfacedIds) {
         const surfacedModelId = `${provider}/${surfacedId}`;
-        const allServed = requiredHomes.length > 0 && requiredHomes.every((h) => {
-          const reg = homeRegistries[h];
-          return reg && !reg.unknown && getServedModelIds(reg).has(surfacedModelId);
-        });
-        if (allServed) {
+        if (supportOf(surfacedModelId).ok) {
           surfacedModels.push({ provider, model: surfacedModelId });
         }
       }
@@ -915,7 +881,7 @@ export function openProfilesStore(options = {}) {
       } : null,
       catalog,
       registry: { unknownHomes, surfacedModels },
-      registryModels: registryPickerModels(),
+      registryModels: registryPickerModels().map((item) => withSupport(item, item.model)),
       roster: { revision: rosterRead.roster.revision, agents: rosterAgents, warning: rosterRead.warning },
       targets: targetsView,
       applyJournal: journalView(),

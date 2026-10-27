@@ -962,6 +962,7 @@ test('tray: empty is compact and visibly names the next action', () => {
   assert.match(strip, /<span class="pf-tag">\[대기\]<\/span>/, 'nothing is on hold while the count is 0');
   const next = /<span class="pf-tray-next">([^<]+)<\/span>/.exec(html);
   assert.ok(next && textOf(next[1]).trim().length >= 8, 'the compact tray needs a visible next action');
+  assert.doesNotMatch(html, /pf-tray-note/, 'the loaded page names its next action in the strip; the muted note is the loading skeleton\'s');
   const pending = [{ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' }];
   html = P.render(STATE, live({ pending }));
   assert.doesNotMatch(html, /pf-tray-compact/);
@@ -1120,6 +1121,7 @@ test('memory rows: quick shows the effective quick tuple read-only; custom start
       model: 'opencode/gemini-4-argon',
       variant: 'high',
       served: { primary: true, stable: false },
+      unsupported: true, unsupportedReason: 'UNSUPPORTED_MODEL', unsupportedHome: 'stable',
       levels: ['high']
     }
   };
@@ -1316,7 +1318,10 @@ function supportState() {
   const state = clone(STATE);
   state.catalog = {
     'oc-pro': { model: 'opencode/served-pro', variant: 'high', served: { primary: true, stable: true }, levels: ['low', 'high'] },
-    'oc-argon': { model: 'opencode/gemini-4-argon', variant: 'high', served: { primary: true, stable: false }, levels: [] }
+    'oc-argon': {
+      model: 'opencode/gemini-4-argon', variant: 'high', served: { primary: true, stable: false }, levels: [],
+      unsupported: true, unsupportedReason: 'UNSUPPORTED_MODEL', unsupportedHome: 'stable'
+    }
   };
   state.routing.rows.find((r) => r.section === 'agents' && r.role === 'explore').model = 'oc-pro';
   state.main = { effective: { provider: 'opencode', model: 'served-pro', thinking: 'high' }, override: null };
@@ -1397,6 +1402,10 @@ test('support: a saved unsupported value stays selected and flagged with its rea
 test('support: an unread registry keeps every model listed but disabled as 설치 엔진 미확인 (REGISTRY_UNKNOWN)', () => {
   const state = supportState();
   state.registry = { unknownHomes: ['stable'] };
+  // What the store sends then (registry.mjs supportStatusFor): every model refused as REGISTRY_UNKNOWN in that home.
+  for (const entry of Object.values(state.catalog)) {
+    Object.assign(entry, { unsupported: true, unsupportedReason: 'REGISTRY_UNKNOWN', unsupportedHome: 'stable' });
+  }
   const html = load().render(state, live());
   for (const [name, marker] of SUPPORT_EDITORS) {
     const options = optionsOf(html, marker).filter((o) => o.value);
@@ -1932,7 +1941,10 @@ test('cascade main: no model selected falls back to the seven-level list', async
 test('support: an unserved saved main model keeps the seven-level list, disabled on the saved effort, and stages nothing', async () => {
   // the saved main kimi-coding/k3 (max) is not served by stable; kimi-coding/k3-turbo is served in both homes
   const e = await openMainRow({
-    'kimi-k3': { model: 'kimi-coding/k3', variant: 'max', served: { primary: true, stable: false }, levels: [] },
+    'kimi-k3': {
+      model: 'kimi-coding/k3', variant: 'max', served: { primary: true, stable: false }, levels: [],
+      unsupported: true, unsupportedReason: 'UNSUPPORTED_MODEL', unsupportedHome: 'stable',
+    },
     'kimi-turbo': { model: 'kimi-coding/k3-turbo', variant: 'high', served: { primary: true, stable: true }, levels: ['low', 'high'] },
   });
   const effort = mainControl(e, 'main-thinking');

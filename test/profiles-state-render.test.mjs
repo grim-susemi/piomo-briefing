@@ -155,8 +155,13 @@ test('real state(): registry-only ChatGPT models reach the rendered picker, miss
     ],
   });
   const state = withRegistry.store.state();
+  // A registry-only model gets the support verdict its write gets: the installed engine serves gpt-6.1-sol in the
+  // fixture homes, not gpt-7-nova (registry.mjs supportStatusFor).
   assert.deepEqual(state.registryModels, [
-    { provider: 'chatgpt-subscription', model: 'chatgpt-subscription/gpt-7-nova' },
+    {
+      provider: 'chatgpt-subscription', model: 'chatgpt-subscription/gpt-7-nova',
+      unsupported: true, unsupportedReason: 'UNSUPPORTED_MODEL', unsupportedHome: 'primary',
+    },
     { provider: 'chatgpt-subscription', model: 'chatgpt-subscription/gpt-6.1-sol' },
   ]);
   const html = loadView().render(state, liveEdit());

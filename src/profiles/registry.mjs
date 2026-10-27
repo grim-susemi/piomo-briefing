@@ -12,7 +12,7 @@ import {
   getProviderFromModelId,
 } from './model.mjs';
 
-const DEFAULT_LIB = 'C:/Users/USER/.bun/install/global/node_modules/omo-ai/bin/lib';
+export const DEFAULT_LIB = 'C:/Users/USER/.bun/install/global/node_modules/omo-ai/bin/lib';
 const registryCache = new Map();
 
 function sha256(value) {
@@ -36,22 +36,26 @@ function readSafeBytes(filePath) {
   }
 }
 
-let cachedSenpiVersion = null;
-function getSenpiVersion(lib) {
-  if (cachedSenpiVersion) return cachedSenpiVersion;
-  try {
-    const pkgPaths = path.join(lib, 'package-paths.js');
-    if (fs.existsSync(pkgPaths)) {
-      const pathsContent = fs.readFileSync(pkgPaths, 'utf8');
-      const match = pathsContent.match(/resolveSenpi\(\)\s*\{[^}]*packageRoot:\s*['"]([^'"]+)['"]/);
-      if (match && match[1]) {
-        const pkgJson = JSON.parse(fs.readFileSync(path.join(match[1], 'package.json'), 'utf8'));
-        cachedSenpiVersion = pkgJson.version ?? '0.0.0';
-        return cachedSenpiVersion;
+// The installed senpi version, part of the registry cache key so an engine upgrade recomposes every home. It is the
+// package the child imports: package-paths.js resolveSenpi() resolves the bare `@code-yeongyu/senpi` from its own
+// directory (`lib`) and takes the folder above the entry's `dist/` as the package root. Node finds a bare specifier
+// in the first `node_modules/<name>` folder going up from that directory, so the same walk reaches the same
+// package.json. It is read on every call, so an upgrade while the board runs is noticed. '0.0.0' = not found.
+export function getSenpiVersion(lib) {
+  let dir = path.resolve(lib);
+  for (;;) {
+    const packageDir = path.join(dir, 'node_modules', '@code-yeongyu', 'senpi');
+    if (fs.existsSync(packageDir)) {
+      try {
+        return JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8')).version ?? '0.0.0';
+      } catch {
+        return '0.0.0';
       }
     }
-  } catch {}
-  return '0.0.0';
+    const parent = path.dirname(dir);
+    if (parent === dir) return '0.0.0';
+    dir = parent;
+  }
 }
 
 function buildChildScript(lib) {
@@ -163,24 +167,60 @@ export function getServedModelIds(registry) {
   return served;
 }
 
-// The models every listed home serves, each with the thinking levels all of them support (PS Get-MemoryCandidates,
-// PS:3246-3285): the first home's models sorted by id, kept only when no home lacks the model or failed its provider
-// and the common levels are not empty. A home whose registry is unknown serves nothing.
-export function getCommonServedModels(registries, homes) {
-  const lookupHome = (homeKey) => (registries instanceof Map ? registries.get(homeKey) : registries[homeKey]);
-  const homeRegs = homes.map(lookupHome);
-  if (!homeRegs.length || homeRegs.some((reg) => !reg || reg.unknown)) return [];
-  const servedIds = homeRegs.map((reg) => getServedModelIds(reg));
-  const homeModels = homeRegs.map((reg) => new Map(reg.models.map((m) => [m.modelId, m])));
-  const common = new Map();
-  for (const item of homeRegs[0].models) {
-    if (common.has(item.modelId) || !servedIds.every((ids) => ids.has(item.modelId))) continue;
-    let levels = item.levels ?? [];
-    for (const models of homeModels) {
-      const homeLevels = models.get(item.modelId).levels ?? [];
-      levels = levels.filter((level) => homeLevels.includes(level));
+function homeRegistryOf(registries, home) {
+  return registries instanceof Map ? registries.get(home) : registries?.[home];
+}
+
+// The one support decision (plan row 19). Every model check asks it: the write validator, the state's catalog flags
+// and levels, the saved role and main flags, the engine-surfaced models and the memory candidates, so a model gets
+// the same verdict wherever it is shown or written. The homes are checked in order: the first whose registry is
+// missing or unknown gives REGISTRY_UNKNOWN, the first that does not serve the model (getServedModelIds)
+// UNSUPPORTED_MODEL and, when an effort is given, the first after which the common levels lack it
+// UNSUPPORTED_EFFORT. A served model's `levels` follow WinForms Get-MemoryCandidates (PS:3264-3279), which offers and
+// validates (PS:3317, 3418) with the same list: the first home's own entry for the model, kept to the levels every
+// home's index lists, in that first entry's order. An index keeps an id's last entry, which matters only for an id a
+// registry lists twice. Each home's registry is indexed once, so a caller checking many models builds one checker
+// and asks it per model.
+export function supportStatusFor(registries, homes) {
+  const indexed = homes.map((home) => {
+    const reg = homeRegistryOf(registries, home);
+    if (!reg || reg.unknown) return { home, unknown: true };
+    const firstLevels = new Map();
+    const indexLevels = new Map();
+    for (const item of Array.isArray(reg.models) ? reg.models : []) {
+      if (!item) continue;
+      if (!firstLevels.has(item.modelId)) firstLevels.set(item.modelId, item.levels ?? []);
+      indexLevels.set(item.modelId, item.levels ?? []);
     }
-    if (levels.length) common.set(item.modelId, { model: item.modelId, levels });
+    return { home, served: getServedModelIds(reg), firstLevels, indexLevels };
+  });
+  return function supportStatus(modelId, effort = '') {
+    for (const entry of indexed) {
+      if (entry.unknown) return { ok: false, code: 'REGISTRY_UNKNOWN', home: entry.home };
+      if (!entry.served.has(modelId)) return { ok: false, code: 'UNSUPPORTED_MODEL', home: entry.home };
+    }
+    let levels = indexed.length ? indexed[0].firstLevels.get(modelId) : [];
+    for (const entry of indexed) {
+      const homeLevels = entry.indexLevels.get(modelId);
+      levels = levels.filter((level) => homeLevels.includes(level));
+      if (effort && !levels.includes(effort)) return { ok: false, code: 'UNSUPPORTED_EFFORT', home: entry.home };
+    }
+    return { ok: true, levels };
+  };
+}
+
+// The models every listed home serves, each with the thinking levels all of them support (PS Get-MemoryCandidates,
+// PS:3246-3285): the first home's models sorted by id, kept when the support decision serves them and their common
+// levels are not empty. A home whose registry is unknown serves nothing.
+export function getCommonServedModels(registries, homes) {
+  const first = homes.length ? homeRegistryOf(registries, homes[0]) : null;
+  if (!first || first.unknown || !Array.isArray(first.models)) return [];
+  const supportOf = supportStatusFor(registries, homes);
+  const common = new Map();
+  for (const item of first.models) {
+    if (!item || common.has(item.modelId)) continue;
+    const status = supportOf(item.modelId);
+    if (status.ok && status.levels.length) common.set(item.modelId, { model: item.modelId, levels: status.levels });
   }
   return [...common.values()].sort((a, b) => (a.model < b.model ? -1 : a.model > b.model ? 1 : 0));
 }
@@ -222,29 +262,7 @@ export function validateSelection({
     }
   }
 
-  const lookupHome = (homeKey) => (registries instanceof Map ? registries.get(homeKey) : registries[homeKey]);
-
-  for (const home of homes) {
-    const reg = lookupHome(home);
-    if (!reg || reg.unknown) {
-      return { ok: false, code: 'REGISTRY_UNKNOWN', home };
-    }
-    const servedIds = getServedModelIds(reg);
-    if (!servedIds.has(targetModel)) {
-      return { ok: false, code: 'UNSUPPORTED_MODEL', home };
-    }
-  }
-
-  if (kind !== 'summarizer' && targetEffort) {
-    for (const home of homes) {
-      const reg = lookupHome(home);
-      const modelDef = reg?.models?.find((m) => m.modelId === targetModel);
-      const levels = modelDef?.levels ?? [];
-      if (!levels.includes(targetEffort)) {
-        return { ok: false, code: 'UNSUPPORTED_EFFORT', home };
-      }
-    }
-  }
-
-  return { ok: true };
+  // A summarizer names no effort, so only its model is checked.
+  const status = supportStatusFor(registries, homes)(targetModel, kind === 'summarizer' ? '' : targetEffort);
+  return status.ok ? { ok: true } : { ok: false, code: status.code, home: status.home };
 }

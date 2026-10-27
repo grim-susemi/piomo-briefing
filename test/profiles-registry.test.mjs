@@ -6,11 +6,15 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import vm from 'node:vm';
 
 import {
+  DEFAULT_LIB,
   composeHomeRegistry,
+  getSenpiVersion,
   getServedModelIds,
+  supportStatusFor,
   validateSelection,
 } from '../src/profiles/registry.mjs';
 import {
@@ -79,6 +83,17 @@ function makeFixture(t, options = {}) {
   return { root, primary, stable, store, storeOptions };
 }
 
+// The page's profile view over a store state, as the board renders it (live, nothing pending).
+function renderView(state) {
+  const context = vm.createContext({});
+  for (const name of ['icons.js', 'profiles-view.js']) {
+    vm.runInContext(fs.readFileSync(path.join(ROOT, 'src', 'page', name), 'utf8'), context, { filename: name });
+  }
+  return context.BriefProfiles.render(state, {
+    live: true, pending: [], draft: {}, preview: null, conflict: false, error: '', status: '', result: null, busy: false, loading: false,
+  });
+}
+
 // ── Registry child & cache tests ───────────────────────────────────────────────
 
 test('registry: child timeout returns unknown', async (t) => {
@@ -131,6 +146,40 @@ test('registry: cache invalidates when models-store.json changes', async (t) => 
   fs.writeFileSync(path.join(agentDir, 'models-store.json'), '{"rev":2}');
   const reg3 = composeHomeRegistry(agentDir, { spawn: fakeSpawn });
   assert.equal(spawnCount, 2);
+});
+
+test('registry: the cache key carries the senpi version resolveSenpi() finds, so an engine upgrade recomposes', async (t) => {
+  // The installed launcher names the package the registry child imports; that package's version is the key part.
+  const { resolveSenpi } = await import(pathToFileURL(path.join(DEFAULT_LIB, 'package-paths.js')).href);
+  const installed = readJsonFile(path.join(resolveSenpi().packageRoot, 'package.json')).version;
+  assert.notEqual(installed, '0.0.0');
+  assert.equal(getSenpiVersion(DEFAULT_LIB), installed);
+
+  // The bun global layout in a temp root: with the same files, only a senpi upgrade runs the child again.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piomo-p19-senpi-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const lib = path.join(root, 'node_modules', 'omo-ai', 'bin', 'lib');
+  const senpiDir = path.join(root, 'node_modules', '@code-yeongyu', 'senpi');
+  const agentDir = path.join(root, 'agent');
+  for (const dir of [lib, senpiDir, agentDir]) fs.mkdirSync(dir, { recursive: true });
+  // The temp path keeps these bytes, and so the cache key, apart from every other test's.
+  fs.writeFileSync(path.join(agentDir, 'models.json'), JSON.stringify({ providers: {}, root }));
+  const setVersion = (version) => fs.writeFileSync(path.join(senpiDir, 'package.json'), JSON.stringify({ name: '@code-yeongyu/senpi', version }));
+  let spawnCount = 0;
+  const spawn = () => {
+    spawnCount += 1;
+    return { status: 0, stdout: JSON.stringify({ models: [], errors: [] }), stderr: '' };
+  };
+
+  setVersion('2026.10.21-3');
+  assert.equal(getSenpiVersion(lib), '2026.10.21-3');
+  composeHomeRegistry(agentDir, { lib, spawn });
+  composeHomeRegistry(agentDir, { lib, spawn });
+  assert.equal(spawnCount, 1, 'the same files and senpi version are a cache hit');
+  setVersion('2026.10.28-1');
+  assert.equal(getSenpiVersion(lib), '2026.10.28-1');
+  composeHomeRegistry(agentDir, { lib, spawn });
+  assert.equal(spawnCount, 2, 'a senpi upgrade recomposes the registry');
 });
 
 test('registry: real composition against a fixture home', async (t) => {
@@ -376,6 +425,100 @@ test('support: a lookup failure is unknown - no new assignment, the saved value 
   const res = store.apply({ action: 'apply', changes: [change], expected: state.targets, rosterRevision: 0 });
   assert.equal(res.ok, false);
   assert.equal(res.code, 'REGISTRY_UNKNOWN');
+});
+
+test('support: one decision gives the code and the first refusing home, the effort check and the common levels', () => {
+  const registries = {
+    primary: { models: [{ provider: 'a', modelId: 'a/m', reasoning: true, levels: ['low', 'medium', 'high'] }], errors: [] },
+    stable: { models: [{ provider: 'a', modelId: 'a/m', reasoning: true, levels: ['high', 'low'] }], errors: [] },
+    unread: { unknown: true, models: [], errors: [] },
+  };
+  const supportOf = supportStatusFor(registries, ['primary', 'stable']);
+  assert.deepEqual(supportOf('a/m'), { ok: true, levels: ['low', 'high'] });
+  assert.deepEqual(supportOf('a/m', 'medium'), { ok: false, code: 'UNSUPPORTED_EFFORT', home: 'stable' });
+  assert.deepEqual(supportOf('a/other'), { ok: false, code: 'UNSUPPORTED_MODEL', home: 'primary' });
+  assert.deepEqual(supportStatusFor(registries, ['primary', 'unread'])('a/m'), { ok: false, code: 'REGISTRY_UNKNOWN', home: 'unread' });
+  assert.deepEqual(supportStatusFor(registries, ['primary', 'absent'])('a/m'), { ok: false, code: 'REGISTRY_UNKNOWN', home: 'absent' });
+  // An id listed twice (PS Get-MemoryCandidates): the first entry's levels, kept to those of each home's last entry,
+  // so what is offered is what the write accepts.
+  const twice = {
+    primary: {
+      models: [
+        { provider: 'c', modelId: 'c/dup', reasoning: true, levels: ['off', 'low', 'medium', 'high'] },
+        { provider: 'c', modelId: 'c/dup', reasoning: true, levels: ['off', 'high', 'max'] },
+      ],
+      errors: [],
+    },
+  };
+  const dupOf = supportStatusFor(twice, ['primary']);
+  assert.deepEqual(dupOf('c/dup'), { ok: true, levels: ['off', 'high'] });
+  assert.deepEqual(dupOf('c/dup', 'medium'), { ok: false, code: 'UNSUPPORTED_EFFORT', home: 'primary' });
+  assert.deepEqual(dupOf('c/dup', 'max'), { ok: false, code: 'UNSUPPORTED_EFFORT', home: 'primary' });
+  // The write validator is the same decision after its service check.
+  assert.deepEqual(validateSelection({
+    kind: 'role', homes: ['primary', 'unread'], provider: 'a', model: 'a/m', effort: 'high', registries,
+  }), { ok: false, code: 'REGISTRY_UNKNOWN', home: 'unread' });
+});
+
+test('support: an unread registry gives REGISTRY_UNKNOWN in the write refusal, the catalog, saved role and main values and the page', async (t) => {
+  // Primary serves every catalog model and openai/gpt-6-sol, the saved role value and main override outside the
+  // catalog; stable's registry is unread, so stable is the one home that refuses each of them.
+  const omo = JSON.parse(fs.readFileSync(path.join(GOLDEN, 'primary', 'omo.jsonc.json'), 'utf8'));
+  const layer = omo.profiles['native-gpt-kimi-deepseek']['[senpi]'] ?? omo.profiles['native-gpt-kimi-deepseek']['[native]'];
+  layer.agents.ouroboros = { model: 'openai/gpt-6-sol' };
+  const catalog = omo['[senpi]']?.models ?? omo['[native]']?.models;
+  const servedIds = new Set([...Object.values(catalog).map((entry) => entry.model), 'openai/gpt-6-sol']);
+  const servedRegistry = {
+    models: [...servedIds].map((modelId) => ({ provider: modelId.split('/')[0], modelId, reasoning: true, levels: ['low', 'high'] })),
+    errors: [],
+  };
+  const { store, primary } = makeFixture(t, {
+    omo,
+    storeOptions: { registries: { primary: servedRegistry, stable: { unknown: true, models: [], errors: [] } } },
+  });
+  fs.mkdirSync(path.join(primary, 'runtime'), { recursive: true });
+  fs.writeFileSync(path.join(primary, 'runtime', 'native-profile-switcher-main.json'), JSON.stringify({
+    'native-gpt-kimi-deepseek': { provider: 'openai', model: 'gpt-6-sol', thinking: 'high' },
+  }));
+
+  const unread = ['REGISTRY_UNKNOWN', 'stable'];
+  const verdict = (item) => [item.unsupportedReason, item.unsupportedHome];
+  const state = store.state();
+  assert.deepEqual(state.registry.unknownHomes, ['stable']);
+  const entries = Object.values(state.catalog);
+  assert.ok(entries.length > 0);
+  for (const entry of entries) assert.deepEqual(verdict(entry), unread, entry.model);
+  assert.equal(entries.some((entry) => entry.model === 'openai/gpt-6-sol'), false, 'the saved values are outside the catalog');
+  const row = state.routing.rows.find((r) => r.section === 'agents' && r.role === 'ouroboros');
+  assert.deepEqual([row.model, ...verdict(row)], ['openai/gpt-6-sol', ...unread]);
+  assert.deepEqual([state.main.effective.model, ...verdict(state.main)], ['gpt-6-sol', ...unread]);
+  assert.deepEqual(state.registry.surfacedModels, []);
+  assert.deepEqual(state.memory.candidates, []);
+
+  // Every write of that model is refused with the same code and home.
+  const refusal = (change) => {
+    const res = store.preview({ action: 'preview', changes: [change], expected: state.targets, rosterRevision: 0 });
+    return [res.code, res.home];
+  };
+  assert.deepEqual(refusal({ kind: 'setRoute', section: 'agents', role: 'ouroboros', provider: 'openai', model: 'openai/gpt-6-sol', thinking: 'high' }), unread);
+  assert.deepEqual(refusal({ kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' }), unread);
+  assert.deepEqual(refusal({ kind: 'setSummarizer', modelId: 'openai/gpt-6-sol' }), unread);
+  assert.deepEqual(refusal({ kind: 'setMemoryRow', row: 'kibitzer', mode: 'custom', model: 'openai/gpt-6-sol', reasoning: 'high' }), unread);
+
+  // The page words that one verdict alike: on the saved role row, on the main heading and on every catalog option.
+  const html = renderView(state);
+  const flag = '<span class="pf-chip pf-c-amber" title="REGISTRY_UNKNOWN">설치 엔진 미확인 · stable 홈</span>';
+  const region = (start, end) => {
+    const at = html.indexOf(start);
+    assert.ok(at >= 0, 'missing ' + start);
+    return html.slice(at, html.indexOf(end, at + start.length));
+  };
+  assert.ok(region('data-pf-route="agents/ouroboros"', 'data-pf-route="').includes(flag), 'the saved role value reads 미확인');
+  assert.ok(region('id="pf-sec-main"', 'id="pf-sec-summarizer"').includes(flag), 'the saved main model reads 미확인');
+  const options = [...html.matchAll(/<option\b[^>]*\btitle="([^"]*)"/g)].map((m) => m[1]);
+  assert.ok(options.length > 0);
+  for (const title of options) assert.equal(title, '설치 엔진 미확인 · stable 홈 · REGISTRY_UNKNOWN');
+  assert.doesNotMatch(html, /설치 엔진 미지원/, 'no shown value reads 미지원 while a registry is unread');
 });
 
 test('support: an existing alias cannot bypass the check', async (t) => {
