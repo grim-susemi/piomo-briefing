@@ -1905,6 +1905,27 @@ test('cascade main: no model selected falls back to the seven-level list', async
   assert.equal(selectedValueOf(mainControl(e, 'main-thinking')), 'max');
 });
 
+test('support: an unserved saved main model keeps the seven-level list, disabled on the saved effort, and stages nothing', async () => {
+  // the saved main kimi-coding/k3 (max) is not served by stable; kimi-coding/k3-turbo is served in both homes
+  const e = await openMainRow({
+    'kimi-k3': { model: 'kimi-coding/k3', variant: 'max', served: { primary: true, stable: false }, levels: [] },
+    'kimi-turbo': { model: 'kimi-coding/k3-turbo', variant: 'high', served: { primary: true, stable: true }, levels: ['low', 'high'] },
+  });
+  const effort = mainControl(e, 'main-thinking');
+  assert.equal(effort.hasAttribute('disabled'), true, 'the effort select can stage the unserved model');
+  assert.deepEqual(mainEffortValues(e), ['', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+  assert.equal(selectedValueOf(effort), 'max');
+  assert.match(e.byId['pf-sec-main'].querySelector('.pf-blk-h').textContent, /설치 엔진 미지원 · stable 홈/);
+  assert.equal(stagedMain(e), null);
+
+  // the way out stays open: a served model enables the effort select on its own levels and stages the clamped effort
+  assert.equal(mainControl(e, 'main-model').hasAttribute('disabled'), false);
+  await changeMain(e, 'main-model', 'k3-turbo');
+  assert.equal(mainControl(e, 'main-thinking').hasAttribute('disabled'), false);
+  assert.deepEqual(mainEffortValues(e), ['low', 'high']);
+  assert.deepEqual(stagedMain(e), ['kimi-coding', 'k3-turbo', 'high']);
+});
+
 test('reapply: re-applying the active profile with nothing pending equals golden apply-cmd-glm-deepseek (canonicalised)', async (t) => {
   const { openProfilesStore } = await import('../src/profiles/store.mjs');
   const os = await import('node:os');

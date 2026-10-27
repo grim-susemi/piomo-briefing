@@ -829,6 +829,8 @@
     // WinForms Update-MainThinkingCombo: the effort list holds only the provider-qualified model's levels and shows
     // the clamped effort; without such an entry the seven-level list stays. The box keeps the saved-or-pending
     // effort the cascade clamps from (WinForms MainComboCommitted), which the shown clamp may differ from.
+    // An unserved model (the heading's flag) keeps that list, but disabled on the saved effort: the select cannot
+    // stage that model (IS-6), and a role row offers no other effort for it either.
     var entry = entryOf(entries, '', provider + '/' + model);
     var levels = entry && !entry.off && Array.isArray(entry.levels) && entry.levels.length ? entry.levels : null;
     var body;
@@ -841,7 +843,8 @@
         labelled(CAPTIONS[0], 'pf-main-provider', providerSelect('main-provider', withId('pf-main-provider', ' data-main="1"'), providers, provider, busy)) +
         labelled(CAPTIONS[1], 'pf-main-model', mainModelSelect('main-model', withId('pf-main-model', ' data-main="1"'), entries, provider, model, busy)) +
         labelled(CAPTIONS[2], 'pf-main-thinking', select('main-thinking', withId('pf-main-thinking', ' data-main="1"'),
-          levels ? thinkingOptions(clampedThinking(entry, thinking), false, levels) : thinkingOptions(thinking, true), busy)) +
+          levels ? thinkingOptions(clampedThinking(entry, thinking), false, levels) : thinkingOptions(thinking, true),
+          busy || !!(entry && entry.off))) +
         '</div>';
     }
     return '<div class="pf-blk" id="pf-sec-main" data-pf-sec="main" data-flow="main" data-flow-sec="main"><h3 class="pf-blk-h">메인 모델 설정 ' +
