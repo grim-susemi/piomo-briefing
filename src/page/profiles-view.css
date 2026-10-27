@@ -314,7 +314,19 @@
 .pf-status-v { font-size: var(--fs-lg); line-height: 1.3; }
 .pf-title-n { color: var(--c-amber); }
 .pf-panes { display: grid; grid-template-columns: clamp(300px, 36%, 620px) minmax(0, 1fr); gap: var(--sp-3); align-items: start; min-width: 0; }
-.pf-detail { display: grid; gap: var(--sp-2); min-width: 0; padding: var(--sp-3) var(--sp-4) var(--sp-4); }
+/* the WinForms detail pane (PS:7283): it stays in view while the cards scroll and scrolls on its own; the max height is
+ * the viewport under the shell tabs (44 px), this page's head and the status strip (217 px) */
+.pf-detail {
+  position: sticky;
+  top: var(--sp-2);
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+  max-height: calc(100vh - 261px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+}
 .pf-dt { margin: 0; font-size: var(--fs-lg); line-height: 1.35; }
 .pf-du { margin: 0; color: var(--c-fg-2); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: break-word; }
 .pf-cap { margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); color: var(--c-fg-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
@@ -323,7 +335,7 @@
   display: grid;
   align-content: start;
   gap: var(--sp-2);
-  height: clamp(240px, calc(100vh - 470px), 560px);
+  height: clamp(280px, calc(100vh - 400px), 560px);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--sp-2);
@@ -371,7 +383,7 @@
   gap: 2px;
   width: 100%;
   min-width: 0;
-  padding: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
   border: 0;
   border-radius: inherit;
   background: none;
@@ -383,16 +395,30 @@ button.pf-card-b:hover:not(:disabled) { background: var(--fill-hover); }
 button.pf-card-b:active:not(:disabled) { background: var(--fill-press); }
 button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-card.on { border-color: var(--c-green); background: var(--c-green-tint); box-shadow: inset 0 0 0 1px var(--c-green); }
-.pf-card-top, .pf-card-main, .pf-card-svc { padding-right: 72px; }
-.pf-card > .pf-current { position: absolute; top: var(--sp-3); right: var(--sp-3); }
-.pf-card-apply { position: absolute; right: var(--sp-3); bottom: var(--sp-3); }
+/* the right gutters keep text clear of 적용 중 (top) and 적용 (bottom); the cards header stays on one line so two cards
+ * and their 적용 sit above the fold at 1180x700 */
+.pf-card-top { padding-right: 64px; }
+.pf-card-main, .pf-card-svc { padding-right: 48px; }
+.pf-card > .pf-current { position: absolute; top: var(--sp-2); right: var(--sp-3); }
+.pf-card-apply { position: absolute; right: var(--sp-3); bottom: var(--sp-2); padding: 2px var(--sp-2); }
+#pf-sec-profiles .pf-sec-t { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); }
 .pf-current .ic { width: 12px; height: 12px; }
 .pf-card-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); }
 .pf-card-num { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); }
 .pf-card-name { font-weight: var(--fw-semibold); }
 .pf-card-en { color: var(--c-fg-3); font-size: var(--fs-xs); }
 .pf-card-tag { margin-top: 2px; }
-.pf-card-sum { margin-top: 2px; color: var(--c-fg-2); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: break-word; }
+.pf-card-sum {
+  display: -webkit-box;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--c-fg-2);
+  font-size: var(--fs-sm);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
 .pf-card-main, .pf-card-svc { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
 .pf-card-main { margin-top: var(--sp-1); }
 
@@ -423,6 +449,7 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-mem-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); }
 .pf-mem-cat { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); }
 .pf-mem-sels { display: grid; gap: var(--sp-1); }
+.pf-mem-row > .pf-note { margin: 0; }
 
 /* guide */
 .pf-guide { display: grid; gap: var(--sp-2); }
@@ -513,6 +540,7 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 }
 @media (max-width: 899px) {
   .pf-panes { grid-template-columns: minmax(0, 1fr); }
+  .pf-detail { position: static; max-height: none; overflow: visible; }
   .pf-roles { height: auto; overflow: visible; }
 }
 @media (max-width: 760px) {

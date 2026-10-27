@@ -1221,12 +1221,19 @@
     function isGlobalKind(kind) {
       return kind === 'setSummarizer' || kind === 'setMemoryRow' || kind === 'setAgentLane' || kind === 'setAgentPin' || kind === 'resetAgentMemory' || kind === 'migrateReviewerKeys';
     }
+    // setRoute names its profile by the omo layer key (store routeChange), setMain by the card key (getProfile);
+    // both mean the same card here.
+    function cardKeyOf(key) {
+      var list = arr(s.view && s.view.profiles);
+      for (var i = 0; i < list.length; i++) if (obj(list[i]) && (list[i].key === key || list[i].omoProfile === key)) return list[i].key;
+      return key;
+    }
     function sameTarget(a, b) {
       if (!obj(a) || !obj(b) || a.kind !== b.kind) return false;
       if (a.kind === 'setSummarizer') return true;
       if (!isGlobalKind(a.kind)) {
-        var aProf = str(a.profileKey || a.omoProfile);
-        var bProf = str(b.profileKey || b.omoProfile);
+        var aProf = cardKeyOf(str(a.profileKey || a.omoProfile));
+        var bProf = cardKeyOf(str(b.profileKey || b.omoProfile));
         if (aProf !== bProf) return false;
       }
       if (a.kind === 'setRoute') return a.section === b.section && a.role === b.role;
@@ -1334,9 +1341,9 @@
     }
     function removeRoute(section, role, profileKey) {
       if (s.busy) return snapshot();
-      var targetProf = str(profileKey || s.shown);
+      var targetProf = cardKeyOf(str(profileKey || s.shown));
       s.pending = s.pending.filter(function (c) {
-        return !obj(c) || c.kind !== 'setRoute' || c.section !== section || c.role !== role || str(c.profileKey || c.omoProfile) !== targetProf;
+        return !obj(c) || c.kind !== 'setRoute' || c.section !== section || c.role !== role || cardKeyOf(str(c.profileKey || c.omoProfile)) !== targetProf;
       });
       s.preview = null; s.result = null;
       if (!s.conflict) { s.error = ''; s.status = ''; }
@@ -1362,11 +1369,11 @@
     }
     function changesForProfile(targetProfileKey) {
       var activeKey = str(obj(s.view && s.view.activeProfile) && s.view.activeProfile.key);
-      var profKey = str(targetProfileKey || s.shown || activeKey);
+      var profKey = cardKeyOf(str(targetProfileKey || s.shown || activeKey));
       var list = [];
       s.pending.forEach(function (c) {
         if (!obj(c)) return;
-        var cProf = str(c.profileKey || c.omoProfile);
+        var cProf = cardKeyOf(str(c.profileKey || c.omoProfile));
         if (isGlobalKind(c.kind) || !cProf || cProf === profKey) {
           list.push(c);
         }
@@ -1687,7 +1694,9 @@
         c.setDraft('route:' + route, { provider: provider, model: model, thinking: thinking });
         var slash = route.indexOf('/');
         if (slash > 0 && provider && model && thinking) {
-          c.add({ kind: 'setRoute', profileKey: profKey, section: route.slice(0, slash), role: route.slice(slash + 1), provider: provider, model: model, thinking: thinking });
+          // The store writes a role into the omo layer named by profileKey (store.mjs routeChange), not the card key.
+          var layer = profileOf(c.snapshot().view, profKey);
+          c.add({ kind: 'setRoute', profileKey: layer && str(layer.omoProfile) ? str(layer.omoProfile) : profKey, section: route.slice(0, slash), role: route.slice(slash + 1), provider: provider, model: model, thinking: thinking });
         } else {
           // Incomplete row stages removal of pending route edit
           if (slash > 0) {
@@ -1810,16 +1819,21 @@
         else { c.removeMemoryRow(key); c.touch(); }
       }
     }
-    // A render replaces the role box. An edit inside it keeps its scroll like the WinForms routing box; showing
-    // another profile starts that profile's box at the top (PS:6168 AutoScrollPosition = Empty).
-    function keepRoles(fn) {
+    // A render replaces the detail pane and its role box. An edit inside them keeps both scrolls like the WinForms
+    // panes; showing another profile starts at the top (PS:6168 AutoScrollPosition = Empty).
+    var KEEP = ['detail', 'roles'];
+    function keepScroll(fn) {
       return function (ev) {
-        var box = root.querySelector('[data-flow="roles"]');
-        if (!box || !box.scrollTop) return fn(ev);
-        var c = controller(), top = box.scrollTop, shown = c ? c.snapshot().shown : '';
+        var boxes = KEEP.map(function (id) { return root.querySelector('[data-flow="' + id + '"]'); });
+        var tops = boxes.map(function (b) { return b ? b.scrollTop : 0; });
+        if (!tops[0] && !tops[1]) return fn(ev);
+        var c = controller(), shown = c ? c.snapshot().shown : '';
         fn(ev);
-        var now = root.querySelector('[data-flow="roles"]');
-        if (now && now !== box && c && c.snapshot().shown === shown) now.scrollTop = top;
+        if (!c || c.snapshot().shown !== shown) return;
+        KEEP.forEach(function (id, i) {
+          var now = root.querySelector('[data-flow="' + id + '"]');
+          if (now && now !== boxes[i] && tops[i]) now.scrollTop = tops[i];
+        });
       };
     }
     function onToggle(ev) {
@@ -1847,7 +1861,7 @@
       }
     }
     var doc = root.ownerDocument;
-    var click = keepRoles(onClick), change = keepRoles(onChange), input = keepRoles(onInput);
+    var click = keepScroll(onClick), change = keepScroll(onChange), input = keepScroll(onInput);
     root.addEventListener('click', click);
     root.addEventListener('change', change);
     root.addEventListener('input', input);

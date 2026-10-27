@@ -1855,9 +1855,14 @@ test('pending: the heading suffix counts pending edits over every profile and le
   lane.value = 'daily-heavy';
   e.fire(lane, 'change');
   const staged = e.page.state.ui.profilesState.pending;
-  assert.deepEqual(plain(staged.map((c) => c.kind + ':' + (c.profileKey || ''))), ['setRoute:gpt-kimi-deepseek', 'setAgentLane:']);
+  // A role edit names the omo layer the store writes (store.mjs routeChange); the card key would be refused.
+  assert.deepEqual(plain(staged.map((c) => c.kind + ':' + (c.profileKey || ''))), ['setRoute:native-gpt-kimi-deepseek', 'setAgentLane:']);
   assert.equal(e.byId.main.querySelector('.pf-title').textContent, '프로필·에이전트 · 변경 보류 2건', 'the hidden profile still counts');
   assert.equal(e.document.title, 'board');
+  e.fire(e.byId.main.querySelector('[data-flow="apply:detail"]'), 'click');
+  const body = JSON.parse(e.fetches[e.fetches.length - 1].opts.body);
+  assert.deepEqual(body.changes.map((c) => c.kind + ':' + (c.profileKey || '')), ['setAgentLane:', 'selectProfile:experimental-custom'],
+    'applying the shown card leaves the other card\'s role edit pending');
   assert.deepEqual(e.errors, []);
 });
 
@@ -1881,17 +1886,20 @@ test('page wiring: 권장 배치 가이드 opens the in-page dialog over the gui
   assert.deepEqual(e.errors, []);
 });
 
-test('page wiring: an edit inside the role box keeps its scroll; another profile starts at the top', async () => {
+test('page wiring: an edit inside the detail keeps both scrolls; another profile starts at the top', async () => {
   const e = await openProfilesPage();
   const before = e.byId.main.querySelector('[data-flow="roles"]');
   before.scrollTop = 180;
+  e.byId.main.querySelector('[data-flow="detail"]').scrollTop = 60;
   const think = e.byId.main.querySelector('[data-pf-route="agents/explore"] [data-pf="route-thinking"]');
   think.value = 'high';
   e.fire(think, 'change');
   const after = e.byId.main.querySelector('[data-flow="roles"]');
   assert.notEqual(after, before, 'the edit re-rendered the role box');
   assert.equal(after.scrollTop, 180);
+  assert.equal(e.byId.main.querySelector('[data-flow="detail"]').scrollTop, 60);
   e.fire(e.byId.main.querySelector('[data-flow="card:experimental-custom"]'), 'click');
   assert.equal(e.byId.main.querySelector('[data-flow="roles"]').scrollTop, 0);
+  assert.equal(e.byId.main.querySelector('[data-flow="detail"]').scrollTop, 0);
   assert.deepEqual(e.errors, []);
 });
