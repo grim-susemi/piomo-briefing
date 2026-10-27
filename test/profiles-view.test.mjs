@@ -1601,6 +1601,94 @@ test('cascade main: service change keeps a model present in the new list and cla
   assert.deepEqual([stagedKeep.provider, stagedKeep.model, stagedKeep.thinking], ['commandcode', 'gpt-5.6-sol', 'xhigh']);
 });
 
+// Main-row clamp: WinForms Update-MainThinkingCombo -> Get-ClampedThinkingLevel on the model item's provider-qualified
+// Tag keeps a supported effort, else takes the nearest higher level, else the nearest lower one.
+async function openMainRow(catalog) {
+  const state = clone(STATE);
+  state.catalog = catalog;
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'profiles-view', 'annotate'] });
+  e.page.receive({ seq: 1, generatedAt: 0, sessions: [] });
+  e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
+  e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => state });
+  await tick();
+  return e;
+}
+const mainControl = (e, pf) => e.byId.main.querySelector('[data-pf-main]').querySelector('[data-pf="' + pf + '"]');
+async function changeMain(e, pf, value) {
+  const el = mainControl(e, pf);
+  el.value = value;
+  e.fire(el, 'change');
+  await tick();
+}
+function stagedMain(e) {
+  const c = e.page.state.ui.profilesState.pending.find((x) => x.kind === 'setMain');
+  return c ? [c.provider, c.model, c.thinking] : null;
+}
+
+test('cascade main: service change clamps an unsupported effort to the nearest higher level', async () => {
+  const e = await openMainRow({
+    'openai-sol': { model: 'openai-opencodex/gpt-5.6-sol', variant: 'xhigh', served: { primary: true, stable: true }, levels: ['low', 'medium', 'high', 'xhigh'] },
+    'commandcode-sol': { model: 'commandcode/gpt-5.6-sol', variant: 'max', served: { primary: true, stable: true }, levels: ['low', 'high', 'xhigh', 'max'] },
+  });
+  await changeMain(e, 'main-provider', 'openai-opencodex');
+  await changeMain(e, 'main-model', 'gpt-5.6-sol');
+  await changeMain(e, 'main-thinking', 'medium');
+  assert.deepEqual(stagedMain(e), ['openai-opencodex', 'gpt-5.6-sol', 'medium']);
+
+  // commandcode/gpt-5.6-sol has no medium: high is the nearest higher level (not the first, low, nor the last, max)
+  await changeMain(e, 'main-provider', 'commandcode');
+  assert.equal(selectedValueOf(mainControl(e, 'main-model')), 'gpt-5.6-sol');
+  assert.equal(selectedValueOf(mainControl(e, 'main-thinking')), 'high');
+  assert.deepEqual(stagedMain(e), ['commandcode', 'gpt-5.6-sol', 'high']);
+});
+
+test('cascade main: model change clamps an unsupported effort to the nearest higher level, else the nearest lower one', async () => {
+  const e = await openMainRow({
+    'ollama-flash': { model: 'ollama/glm-5.3-flash', variant: 'max', served: { primary: true, stable: true }, levels: ['low', 'medium', 'high', 'max'] },
+    'ollama-glm': { model: 'ollama/glm-5.3', variant: 'xhigh', served: { primary: true, stable: true }, levels: ['medium', 'high', 'xhigh'] },
+    'ollama-mini': { model: 'ollama/glm-5.3-mini', variant: 'medium', served: { primary: true, stable: true }, levels: ['minimal', 'low', 'medium'] },
+  });
+  await changeMain(e, 'main-provider', 'ollama');
+  await changeMain(e, 'main-model', 'glm-5.3-flash');
+  await changeMain(e, 'main-thinking', 'low');
+  assert.deepEqual(stagedMain(e), ['ollama', 'glm-5.3-flash', 'low']);
+
+  // low is below every glm-5.3 level: medium is the nearest higher one (not the last, xhigh)
+  await changeMain(e, 'main-model', 'glm-5.3');
+  assert.equal(selectedValueOf(mainControl(e, 'main-thinking')), 'medium');
+  assert.deepEqual(stagedMain(e), ['ollama', 'glm-5.3', 'medium']);
+
+  // glm-5.3-mini has nothing at or above xhigh: medium is the nearest lower one (not the first, minimal)
+  await changeMain(e, 'main-thinking', 'xhigh');
+  await changeMain(e, 'main-model', 'glm-5.3-mini');
+  assert.equal(selectedValueOf(mainControl(e, 'main-thinking')), 'medium');
+  assert.deepEqual(stagedMain(e), ['ollama', 'glm-5.3-mini', 'medium']);
+});
+
+test('cascade main: effort levels follow the provider-qualified model id, not the bare one', async () => {
+  // gpt-5.6-sol is listed under two providers with different levels; openai-opencodex comes first in the catalog
+  const e = await openMainRow({
+    'openai-sol': { model: 'openai-opencodex/gpt-5.6-sol', variant: 'xhigh', served: { primary: true, stable: true }, levels: ['low', 'medium', 'high', 'xhigh'] },
+    'commandcode-sol': { model: 'commandcode/gpt-5.6-sol', variant: 'max', served: { primary: true, stable: true }, levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    'commandcode-55': { model: 'commandcode/gpt-5.5', variant: 'max', served: { primary: true, stable: true }, levels: ['low', 'medium', 'high', 'max'] },
+  });
+  await changeMain(e, 'main-provider', 'commandcode');
+  await changeMain(e, 'main-model', 'gpt-5.5');
+  await changeMain(e, 'main-thinking', 'max');
+  assert.deepEqual(stagedMain(e), ['commandcode', 'gpt-5.5', 'max']);
+
+  // model change: commandcode/gpt-5.6-sol supports max, so max is kept
+  await changeMain(e, 'main-model', 'gpt-5.6-sol');
+  assert.equal(selectedValueOf(mainControl(e, 'main-thinking')), 'max');
+  assert.deepEqual(stagedMain(e), ['commandcode', 'gpt-5.6-sol', 'max']);
+
+  // service change: openai-opencodex/gpt-5.6-sol has no max, so the nearest lower level is xhigh
+  await changeMain(e, 'main-provider', 'openai-opencodex');
+  assert.equal(selectedValueOf(mainControl(e, 'main-model')), 'gpt-5.6-sol');
+  assert.equal(selectedValueOf(mainControl(e, 'main-thinking')), 'xhigh');
+  assert.deepEqual(stagedMain(e), ['openai-opencodex', 'gpt-5.6-sol', 'xhigh']);
+});
+
 test('reapply: re-applying the active profile with nothing pending equals golden apply-cmd-glm-deepseek (canonicalised)', async (t) => {
   const { openProfilesStore } = await import('../src/profiles/store.mjs');
   const os = await import('node:os');

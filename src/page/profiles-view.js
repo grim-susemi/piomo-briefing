@@ -208,6 +208,21 @@
     }
     return null;
   }
+  // WinForms Get-ClampedThinkingLevel (board: model.mjs getClampedThinkingLevel) over one catalog entry's levels:
+  // keep a supported level, else the nearest higher one, else the nearest lower one.
+  function clampedThinking(entry, level) {
+    var available = entry && Array.isArray(entry.levels) && entry.levels.length ? entry.levels : THINKING;
+    if (available.indexOf(level) >= 0) return level;
+    var requested = THINKING.indexOf(level);
+    if (requested < 0) return available[0] || 'off';
+    for (var i = requested; i < THINKING.length; i++) {
+      if (available.indexOf(THINKING[i]) >= 0) return THINKING[i];
+    }
+    for (var j = requested - 1; j >= 0; j--) {
+      if (available.indexOf(THINKING[j]) >= 0) return THINKING[j];
+    }
+    return available[0] || 'off';
+  }
   function providersOf(entries, current) {
     var out = [];
     entries.forEach(function (e) {
@@ -1612,19 +1627,15 @@
           });
           if (surviving) {
             mm = surviving;
-            var matchModel = entryOf(entries, mm, mm);
-            var mLevels = matchModel && Array.isArray(matchModel.levels) && matchModel.levels.length ? matchModel.levels : THINKING;
-            if (mLevels.indexOf(oldThinking) < 0) mt = mLevels[0] || 'medium';
+            // Levels come from the provider-qualified id, as WinForms passes the model item's Tag
+            mt = clampedThinking(entryOf(entries, '', mp + '/' + mm), oldThinking);
           } else {
             mm = '';
           }
         } else if (act === 'main-model') {
           // WinForms: model change clamps current effort to the new model
           mm = str(t.value);
-          var newModelEntry = entryOf(entries, mm, mm);
-          if (!newModelEntry) newModelEntry = entries.filter(function (e) { return bareModel(e.model) === mm; })[0] || null;
-          var newLevels = newModelEntry && Array.isArray(newModelEntry.levels) && newModelEntry.levels.length ? newModelEntry.levels : THINKING;
-          if (newLevels.indexOf(mt) < 0) mt = newLevels[newLevels.length - 1] || 'medium';
+          mt = clampedThinking(entryOf(entries, '', mp + '/' + mm), mt);
         } else if (act === 'main-thinking') {
           mt = str(t.value);
         }
