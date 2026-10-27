@@ -398,9 +398,7 @@ function diff(board, ref, rules, size) {
     const inside = Object.fromEntries(board.regions.map((r) => [r.id, r.inDetail]));
     rule(box.apply.y >= bottom(box.roles) && inside.apply && inside.roles && box.apply.x >= box.detail.x &&
       right(box.apply) <= right(box.detail), 'apply below the role box inside detail');
-    // The tray is docked to the bottom of the screen (sticky), so it sits over the cards column's tail: it must
-    // clear the detail pane and be fully inside the viewport (1 px for box rounding).
-    rule(box.message.y >= bottom(box.detail) && bottom(box.message) <= board.frame.inner.h + 1, 'message below detail and inside the viewport');
+    rule(box.message.y >= bottom(box.cards) && box.message.y >= bottom(box.detail), 'message below cards and detail');
   }
   const differences = Object.entries(out).flatMap(([id, r]) => r.differences.map((d) => ({ rule: id, ...d })));
   return { schema: 'flow-diff/1', size, reference: path.relative(ROOT, REFERENCE).replace(/\\/g, '/'), rules: out, differences };

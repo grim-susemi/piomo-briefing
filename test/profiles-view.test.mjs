@@ -1974,3 +1974,18 @@ test('page wiring: an edit inside the detail keeps both scrolls; another profile
   assert.equal(e.byId.main.querySelector('[data-flow="detail"]').scrollTop, 0);
   assert.deepEqual(e.errors, []);
 });
+
+test('page wiring: the cards panel keeps its scroll when a card is shown by click or by key', async () => {
+  const e = await openProfilesPage();
+  const before = e.byId.main.querySelector('[data-flow="cards"]');
+  before.scrollTop = 240;
+  e.fire(e.byId.main.querySelector('[data-flow="card:experimental-custom"]'), 'click');
+  const after = e.byId.main.querySelector('[data-flow="cards"]');
+  assert.notEqual(after, before, 'showing another profile re-rendered the cards panel');
+  assert.equal(after.scrollTop, 240);
+  e.fire(e.document.body, 'keydown', { key: '2' });
+  assert.equal(e.page.state.ui.profilesState.shown, 'gpt-deepseek');
+  assert.notEqual(e.byId.main.querySelector('[data-flow="cards"]'), after, 'the key re-rendered the cards panel');
+  assert.equal(e.byId.main.querySelector('[data-flow="cards"]').scrollTop, 240);
+  assert.deepEqual(e.errors, []);
+});

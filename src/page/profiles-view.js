@@ -1825,15 +1825,19 @@
       }
     }
     // A render replaces the detail pane and its role box. An edit inside them keeps both scrolls like the WinForms
-    // panes; showing another profile starts at the top (PS:6168 AutoScrollPosition = Empty).
+    // panes; showing another profile starts at the top (PS:6168 AutoScrollPosition = Empty). The cards panel keeps its
+    // scroll either way: a WinForms selection never rebuilds that panel (PS:7006-7014).
     var KEEP = ['detail', 'roles'];
     function keepScroll(fn) {
       return function (ev) {
+        var list = root.querySelector('[data-flow="cards"]'), listTop = list ? list.scrollTop : 0;
         var boxes = KEEP.map(function (id) { return root.querySelector('[data-flow="' + id + '"]'); });
         var tops = boxes.map(function (b) { return b ? b.scrollTop : 0; });
-        if (!tops[0] && !tops[1]) return fn(ev);
+        if (!tops[0] && !tops[1] && !listTop) return fn(ev);
         var c = controller(), shown = c ? c.snapshot().shown : '';
         fn(ev);
+        var nowList = root.querySelector('[data-flow="cards"]');
+        if (nowList && nowList !== list && listTop) nowList.scrollTop = listTop;
         if (!c || c.snapshot().shown !== shown) return;
         KEEP.forEach(function (id, i) {
           var now = root.querySelector('[data-flow="' + id + '"]');
@@ -1866,18 +1870,18 @@
       }
     }
     var doc = root.ownerDocument;
-    var click = keepScroll(onClick), change = keepScroll(onChange), input = keepScroll(onInput);
+    var click = keepScroll(onClick), change = keepScroll(onChange), input = keepScroll(onInput), keydown = keepScroll(onKey);
     root.addEventListener('click', click);
     root.addEventListener('change', change);
     root.addEventListener('input', input);
     root.addEventListener('toggle', onToggle, true);
-    if (doc && typeof doc.addEventListener === 'function') doc.addEventListener('keydown', onKey);
+    if (doc && typeof doc.addEventListener === 'function') doc.addEventListener('keydown', keydown);
     return function unbind() {
       root.removeEventListener('click', click);
       root.removeEventListener('change', change);
       root.removeEventListener('input', input);
       root.removeEventListener('toggle', onToggle, true);
-      if (doc && typeof doc.removeEventListener === 'function') doc.removeEventListener('keydown', onKey);
+      if (doc && typeof doc.removeEventListener === 'function') doc.removeEventListener('keydown', keydown);
     };
   }
 
