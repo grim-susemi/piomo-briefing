@@ -1082,6 +1082,49 @@ test('selected card: a green wash marks the shown card; a check glyph joins 적�
   assert.match(css, /\.pf-card\.on \{[^}]*box-shadow: inset 0 0 0 1px var\(--c-green\)/);
 });
 
+// WinForms Get-MainComboCurrentValues for every card (PS:2489-2518, PS:6086-6094): default, then the saved override,
+// then that profile's pending main; a pending removal shows the default again.
+test('cards: the main line shows the saved override, then that profile\'s pending main, else the default, flagged when refused', () => {
+  const P = load();
+  const state = clone(STATE);
+  state.catalog['k3-turbo'] = { model: 'kimi-coding/k3-turbo', variant: 'high', levels: ['low', 'high'] };
+  const saved = (main, verdict = {}) => ({ main: { effective: main, override: main, ...verdict } });
+  state.details = {
+    'gpt-deepseek': saved({ provider: 'openai', model: 'gpt-6-sol', thinking: 'high' }),
+    // the store's verdict on a saved main outside the catalog (store.mjs withMainServed)
+    'kimi-deepseek': saved({ provider: 'kimi-coding', model: 'k3-legacy', thinking: 'max' },
+      { unsupported: true, unsupportedReason: 'UNSUPPORTED_MODEL', unsupportedHome: 'primary' }),
+  };
+  // [main line text, service line text, flag] where the flag is the line's title and the glyph's name must match it.
+  const card = (html, key) => {
+    const body = new RegExp('<button[^>]*data-flow="card:' + key + '"[^>]*>([\\s\\S]*?)</button>').exec(html)[1];
+    const main = /<span class="pf-card-main( pf-card-off)?"(?: title="([^"]*)")?>([\s\S]*?)<\/span><span class="pf-card-svc">([^<]*)<\/span>/.exec(body);
+    const glyph = /<span class="pf-card-flag" role="img" aria-label="([^"]*)">/.exec(main[3]);
+    assert.equal(Boolean(main[1]), Boolean(glyph), key + ': the flag colour and glyph go together');
+    if (glyph) assert.equal(main[2], glyph[1] + ' · ' + main[2].split(' · ').pop(), key + ': the glyph is named by the reason');
+    return [textOf(main[3]).replace(/\s+/g, ' ').trim(), textOf(main[4]), main[1] ? main[2] : null];
+  };
+
+  let html = P.render(state, live());
+  assert.deepEqual(card(html, 'gpt-kimi-deepseek'), ['메인: k3 / max', '서비스: kimi-coding', null], 'no override: the profile default');
+  assert.deepEqual(card(html, 'gpt-deepseek'), ['메인: gpt-6-sol / high', '서비스: openai', null], 'the saved override, not the default');
+  assert.deepEqual(card(html, 'kimi-deepseek'), ['메인: k3-legacy / max', '서비스: kimi-coding', '설치 엔진 미지원 · primary 홈 · UNSUPPORTED_MODEL'],
+    'a saved unsupported main stays on the card with the store\'s flag');
+
+  const pending = [{ kind: 'setMain', profileKey: 'kimi-deepseek', provider: 'kimi-coding', model: 'k3-turbo', thinking: 'high' }];
+  html = P.render(state, live({ pending }));
+  assert.deepEqual(card(html, 'kimi-deepseek'), ['메인: k3-turbo / high', '서비스: kimi-coding', null], 'that profile\'s pending main wins');
+  assert.deepEqual(card(html, 'gpt-deepseek'), ['메인: gpt-6-sol / high', '서비스: openai', null], 'another profile\'s pending main leaves the card alone');
+  html = P.render(state, live({ pending: [{ kind: 'setMain', profileKey: 'gpt-deepseek', provider: '', model: '', thinking: '' }] }));
+  assert.deepEqual(card(html, 'gpt-deepseek'), ['메인: deepseek-v4-flash / max', '서비스: opencode-go', null], 'a pending removal shows the default');
+
+  // A refused catalog model carries the catalog verdict, so the flag follows the shown value, pending included.
+  Object.assign(state.catalog['k3-turbo'], { unsupported: true, unsupportedReason: 'REGISTRY_UNKNOWN', unsupportedHome: 'stable' });
+  html = P.render(state, live({ pending }));
+  assert.equal(card(html, 'kimi-deepseek')[2], '설치 엔진 미확인 · stable 홈 · REGISTRY_UNKNOWN');
+  assert.equal((html.match(/pf-card-off/g) || []).length, 1, 'only the refused value is flagged');
+});
+
 test('compact title: the profiles page keeps its sticky title and section nav', () => {
   const P = load();
   const css = read('src/page/profiles-view.css');

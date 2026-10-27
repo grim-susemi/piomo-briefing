@@ -447,6 +447,8 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 }
 .pf-card-main, .pf-card-svc { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
 .pf-card-main { margin-top: var(--sp-1); }
+.pf-card-main.pf-card-off { color: var(--c-amber); }
+.pf-card-flag .ic { width: 1em; height: 1em; vertical-align: -.1em; }
 
 /* routing: one WinForms row = the label line (recommendation chip kept) over three equal-width selects */
 .pf-group { display: grid; gap: var(--sp-1); min-width: 0; }

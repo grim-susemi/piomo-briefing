@@ -732,6 +732,25 @@
       '<div class="pf-sec-b"><div class="pf-agents">' + rows + '</div></div></details>';
   }
 
+  // A card's main model as WinForms builds it for every card (Get-MainComboCurrentValues, PS:2489-2518, PS:6086-6094):
+  // the profile default, replaced by the saved override, replaced by that profile's pending main change, and a pending
+  // removal (the store's empty setMain) shows the default again. A value the engine refuses keeps the store's verdict
+  // as a flag, decided as the detail's main heading decides it (IS-6).
+  function cardMainOf(view, edit, p, entries) {
+    var detail = obj(view && view.details) ? obj(view.details[p.key]) : null;
+    var saved = obj(detail && detail.main) || {};
+    var pending = findChange(pendingOf(edit), function (c) {
+      return c && c.kind === 'setMain' && (str(c.profileKey) === p.key || str(c.profileKey) === str(p.omoProfile));
+    });
+    var profileDefault = { provider: p.mainProvider, model: p.mainModel, thinking: p.mainThinking };
+    var value = pending ? (str(pending.provider) && str(pending.model) && str(pending.thinking) ? pending : profileDefault)
+      : obj(saved.override) || profileDefault;
+    var shown = { provider: str(value.provider), model: str(value.model), thinking: str(value.thinking) };
+    var entry = entryOf(entries, '', shown.provider + '/' + shown.model);
+    shown.off = entry ? entry.off : !pending ? unservedOf(saved) : null;
+    return shown;
+  }
+
   // WinForms New-ProfileCard (PS:7067-7205), one card per row: the main button only shows the profile (aria-pressed =
   // shown), 적용 is a separate button beside it (never nested) and 적용 중 marks the globally active profile.
   function profileCards(view, edit, ro) {
@@ -740,16 +759,22 @@
     var activeKey = str(obj(view && view.activeProfile) && view.activeProfile.key);
     var shown = shownKeyOf(view, edit);
     var list = arr(view && view.profiles);
+    var entries = catalogEntries(view);
     var cards = list.map(function (p) {
       if (!obj(p)) return '';
       var on = p.key === shown;
+      var cardMain = cardMainOf(view, edit, p, entries);
       var body = '<span class="pf-card-top"><span class="pf-card-num">' + esc(num(p.num) === null ? '' : p.num) + '</span>' +
         '<span class="pf-card-name">' + esc(p.nameKr || p.name || p.key) + '</span></span>' +
         '<span class="pf-card-en">' + esc(p.name || '') + '</span>' +
         '<span class="pf-card-tag">' + tag(p.tag || 'profile') + '</span>' +
         '<span class="pf-card-sum">' + summaryText(p.summary || '') + '</span>' +
-        '<span class="pf-card-main">' + esc('메인: ' + str(p.mainModel) + ' / ' + str(p.mainThinking)) + '</span>' +
-        '<span class="pf-card-svc">' + esc('서비스: ' + str(p.mainProvider)) + '</span>';
+        // A refused value is flagged inside its own line (warning glyph and colour, the reason as title and name): the
+        // detail's chip does not fit a card line at 1180x700, and an extra line would push the cards below it down.
+        '<span class="pf-card-main' + (cardMain.off ? ' pf-card-off"' + attr('title', offTitle(cardMain.off)) : '"') + '>' +
+        (cardMain.off ? '<span class="pf-card-flag" role="img"' + attr('aria-label', offText(cardMain.off)) + '>' + ic('info', 'ic-sm') + '</span> ' : '') +
+        esc('메인: ' + cardMain.model + ' / ' + cardMain.thinking) + '</span>' +
+        '<span class="pf-card-svc">' + esc('서비스: ' + cardMain.provider) + '</span>';
       var main = ro ? '<div class="pf-card-b">' + body + '</div>'
         : '<button type="button" class="pf-card-b"' + attr('data-pf', 'select-profile') + attr('data-profile', p.key) +
           attr('data-flow', 'card:' + p.key) + ' aria-pressed="' + on + '"' + boolAttr('disabled', busy) + '>' + body + '</button>';
