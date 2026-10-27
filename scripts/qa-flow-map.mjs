@@ -9,7 +9,8 @@
 // Each task starts from freshly seeded homes and a fresh page; apply really writes, but only the fixture homes.
 // usage: node scripts/qa-flow-map.mjs --out <dir> [--sizes 1180x700,1600x900] [--reference <flow-map.json>] [--keep] [--shots <dir>]
 // --shots <dir>: after every step's control was activated and the page settled, write <dir>/<task>-<n>-<control>-<size>.png and <dir>/index.json.
-// Exit 1 when a diff is not empty, a step is missing, a CSP violation happened or an unnamed control appeared.
+// Exit 1 when a diff is not empty (F1..F7, or a step control that is not the topmost element where it is clicked), a step
+// is missing, a CSP violation happened or an unnamed control appeared.
 // Every wait is an event or a bounded deadline; no fixed sleep and no polling loop.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -200,6 +201,22 @@ const FLOW_LIB = `(() => {
       const r = el.getBoundingClientRect();
       return r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth;
     },
+    // The owner clicks the centre of the control he sees, so a step works only when the control (or a node inside it)
+    // is the topmost element there: a docked tray or any other layer over it fails the step.
+    hit(id) {
+      const el = q(id);
+      const r = el.getBoundingClientRect();
+      const x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2);
+      const top = document.elementFromPoint(x, y);
+      const flow = top && top.closest('[data-flow]');
+      const name = top ? top.tagName.toLowerCase() + (top.getAttribute('class') ? '.' + top.getAttribute('class').trim().split(/\\s+/).join('.') : '') : null;
+      return { x, y, onTop: !!top && el.contains(top), top: name && flow ? name + ' in flow:' + flow.getAttribute('data-flow') : name };
+    },
+    // The live viewport boxes of both panes and the message strip at this step (a staged change or a result grows the strip).
+    live() {
+      const b = (id) => { const el = q(id); return el ? box(el.getBoundingClientRect(), 0, 0) : null; };
+      return { cards: b('cards'), detail: b('detail'), message: b('message') };
+    },
     options(id) { const el = q(id); return el ? options(el) : []; },
     choose(id, value) {
       const el = q(id);
@@ -291,6 +308,11 @@ async function perform(page, id, posts, log) {
   const step = await page.eval(`window.__flow.reach(${JSON.stringify(id)})`);
   if (step.missing) return { control: id, missing: true };
   await settle(page);
+  // Checked where the click lands, after the scrolls: a covered control fails the step (an occlusion difference). The
+  // step is still performed so the rest of the task keeps being measured.
+  const hit = await page.eval(`window.__flow.hit(${JSON.stringify(id)})`);
+  const live = await page.eval(`window.__flow.live()`);
+  if (!hit.onTop) console.error(`step ${id}: covered at ${hit.x},${hit.y} by ${hit.top}`);
   const value = async (pick) => {
     const opts = (await page.eval(`window.__flow.options(${JSON.stringify(id)})`)).filter((o) => o.value);
     return pick(opts);
@@ -328,7 +350,7 @@ async function perform(page, id, posts, log) {
       levels: model ? await page.eval(`window.__flow.levels(${JSON.stringify(model)})`) : null };
   }
   log.push({ control: id, ...done });
-  return { control: id, region: step.region, box: step.box, scrolls: step.scrolls, view: step.view, moved: step.moved, disabled: step.disabled, result: done };
+  return { control: id, region: step.region, box: step.box, scrolls: step.scrolls, view: step.view, moved: step.moved, disabled: step.disabled, hit, live, result: done };
 }
 
 const rel = (a, b, tol) => {
@@ -356,6 +378,11 @@ function diff(board, ref, rules, size) {
       if (!g || g.missing) return;
       if (g.region !== w.region) add('F3', { task, control: w.control, expected: w.region, actual: g.region });
       if (g.scrolls > w.scrolls) add('F5', { task, control: w.control, expected: '<= ' + w.scrolls, actual: g.scrolls, moved: g.moved });
+      // F7's message relation holds at every step, with the strip as large as that step made it, not only when idle.
+      const live = g.live || {};
+      if (live.message && live.cards && live.detail && (live.message.y < bottom(live.cards) || live.message.y < bottom(live.detail))) {
+        add('F7', { relation: 'message below cards and detail', size, task, control: w.control, boxes: live });
+      }
     });
     // F4 compares step pairs that share one region (one container) on both sides: the reference boxes are container
     // coordinates, so only same-container pairs have comparable relations; cross-region order is F7's.
@@ -405,7 +432,10 @@ function diff(board, ref, rules, size) {
     rule(box.message.y >= bottom(box.cards) && box.message.y >= bottom(box.detail), 'message below cards and detail');
   }
   const differences = Object.entries(out).flatMap(([id, r]) => r.differences.map((d) => ({ rule: id, ...d })));
-  return { schema: 'flow-diff/1', size, reference: path.relative(ROOT, REFERENCE).replace(/\\/g, '/'), rules: out, differences };
+  // Not a flow rule: every step control must be on top where it is clicked.
+  const occlusion = Object.entries(board.tasks).flatMap(([task, steps]) => steps.filter((s) => s.hit).map((s) => ({ task, control: s.control, onTop: s.hit.onTop, at: [s.hit.x, s.hit.y], top: s.hit.top })));
+  for (const o of occlusion) if (!o.onTop) differences.push({ rule: 'occlusion', ...o });
+  return { schema: 'flow-diff/1', size, reference: path.relative(ROOT, REFERENCE).replace(/\\/g, '/'), rules: out, occlusion, differences };
 }
 
 async function main() {
@@ -479,7 +509,8 @@ async function main() {
       if (map.fixtureHash !== reference.fixtureHash) result.differences.push({ rule: 'fixture', expected: reference.fixtureHash, actual: map.fixtureHash });
       fs.writeFileSync(path.join(OUT, `flow-map.board-${size.name}.json`), JSON.stringify(map, null, 2) + '\n');
       fs.writeFileSync(path.join(OUT, `flow-diff-${size.name}.json`), JSON.stringify(result, null, 2) + '\n');
-      report.sizes[size.name] = { differences: result.differences.length, rules: Object.fromEntries(Object.entries(result.rules).map(([k, v]) => [k, v.differences.length ? 'FAIL' : 'PASS'])) };
+      report.sizes[size.name] = { differences: result.differences.length, rules: Object.fromEntries(Object.entries(result.rules).map(([k, v]) => [k, v.differences.length ? 'FAIL' : 'PASS'])),
+        occlusion: result.occlusion.every((o) => o.onTop) ? 'PASS' : 'FAIL' };
       if (result.differences.length) failed = true;
     }
   } catch (error) {

@@ -1131,7 +1131,8 @@
       (state === 'view' ? loaded(v, e, ro, stale) : '') +
       '</div>';
   }
-  // The WinForms screen in the board look: status strip, cards | detail, the message strip, then the board extras.
+  // The WinForms screen in the board look: status strip, cards | detail over the message strip (one client area, so the
+  // strip is a bottom row under both panes, PS:4438), then the board extras.
   function loaded(v, e, ro, stale) {
     var detail = obj(v.details && v.details[shownKeyOf(v, e)]);
     var dv = Object.assign({}, v, {
@@ -1140,8 +1141,8 @@
       modelProfile: obj(detail && detail.modelProfile) || obj(v.modelProfile)
     });
     return statusStrip(v, e, ro, stale) + guideDialog(dv) +
-      '<div class="pf-panes">' + profileCards(v, e, ro) + detailPane(v, dv, e, ro) + '</div>' +
-      tray(v, e, ro) + agentRows(v, e, ro) + homes(v);
+      '<div class="pf-panes">' + profileCards(v, e, ro) + detailPane(v, dv, e, ro) + tray(v, e, ro) + '</div>' +
+      agentRows(v, e, ro) + homes(v);
   }
 
   function side(view, edit) {

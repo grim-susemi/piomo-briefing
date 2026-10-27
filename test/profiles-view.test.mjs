@@ -7,6 +7,9 @@ import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeController } from './fixtures/controller-dom.mjs';
+import { launch, listProfilePids } from '../scripts/cdp.mjs';
+import { createBoardServer } from '../src/server.mjs';
+import { pageHtml } from '../src/render.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
@@ -2085,4 +2088,65 @@ test('page wiring: the cards panel keeps its scroll when a card is shown by clic
   assert.notEqual(e.byId.main.querySelector('[data-flow="cards"]'), after, 'the key re-rendered the cards panel');
   assert.equal(e.byId.main.querySelector('[data-flow="cards"]').scrollTop, 240);
   assert.deepEqual(e.errors, []);
+});
+
+// Review A round 2, D3: a staged change grows the message strip. The strip is a bottom row under both panes, so after
+// the owner's scroll the detail's 이 프로필 적용하기, the role effort select and the row's drop are each the topmost
+// element where they are clicked. Real Chrome over the fixture state; the board has no profiles write route.
+test('layout: with one pending change the message strip covers neither 이 프로필 적용하기, the effort select nor the drop (Chrome, 1180x700 and 1600x900)', { timeout: 90000 }, async () => {
+  const vm = JSON.parse(read('test/fixtures/view-model-board.json'));
+  const token = 'profiles-view-geometry';
+  const server = createBoardServer({ portBase: 49880 + (process.pid % 25) * 8, portCount: 8, generation: 7, token,
+    getPage: ({ nonce } = {}) => pageHtml(vm, 7, { mode: 'server', token, nonce }), getViewModel: () => vm, profilesState: () => STATE });
+  const { port } = await server.start();
+  let page, profileDir;
+  // An event-driven wait with a page-side deadline; no polling.
+  const until = (predicate, what) => page.eval(`new Promise((resolve, reject) => {
+    const check = () => { try { return !!(${predicate}); } catch (e) { return false; } };
+    if (check()) return resolve(true);
+    const observer = new MutationObserver(() => { if (check()) { done(); resolve(true); } });
+    const timer = setTimeout(() => { done(); reject(new Error(${JSON.stringify('timeout waiting for ' + what)})); }, 10000);
+    function done() { observer.disconnect(); clearTimeout(timer); }
+    observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
+  })`);
+  const painted = () => page.eval('document.fonts.ready.then(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))))');
+  const seen = [];
+  try {
+    page = await launch({ width: 1180, height: 700 });
+    profileDir = page.profileDir;
+    for (const [width, height] of [[1180, 700], [1600, 900]]) {
+      await page.client.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      await page.goto(`http://127.0.0.1:${port}/`);
+      await until(`document.querySelector('[data-sh="view"][data-key="profiles"]')`, 'board shell');
+      if (await page.eval(`document.querySelector('.sh-shell').getAttribute('data-side') !== 'open'`)) {
+        await page.eval(`(document.querySelector('.sh-topen').click(), true)`);
+        await until(`document.querySelector('.sh-shell').getAttribute('data-side') === 'open'`, 'docked sidebar');
+      }
+      await page.eval(`(document.querySelector('[data-sh="view"][data-key="profiles"]').click(), true)`);
+      await until(`document.querySelector('[data-pf-root][data-pf-state="view"] [data-flow="apply:detail"]')`, 'profiles view');
+      await page.eval(`(() => {
+        const s = document.querySelector('[data-flow="role:agents/explore:effort"]');
+        s.value = [...s.options].map((o) => o.value).filter((v) => v && v !== s.value).pop();
+        s.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      })()`);
+      await until(`document.querySelectorAll('[data-pf="drop"]').length === 1`, 'one pending change');
+      for (const target of ['[data-flow="role:agents/explore:effort"]', '[data-flow="apply:detail"]', '[data-pf="drop"]']) {
+        await page.eval(`(document.querySelector(${JSON.stringify(target)}).scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' }), true)`);
+        await painted();
+        seen.push(await page.eval(`(() => {
+          const el = document.querySelector(${JSON.stringify(target)}), r = el.getBoundingClientRect();
+          const x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2), top = document.elementFromPoint(x, y);
+          return { size: '${width}x${height}', target: ${JSON.stringify(target)}, at: [x, y], onTop: !!top && el.contains(top),
+            top: top ? top.tagName.toLowerCase() + (top.getAttribute('class') ? '.' + top.getAttribute('class') : '') : null };
+        })()`));
+      }
+    }
+  } finally {
+    if (page) await page.close();
+    await server.close();
+  }
+  assert.equal(seen.length, 6);
+  assert.deepEqual(seen.filter((s) => !s.onTop), [], 'each control is the topmost element at its centre');
+  assert.deepEqual(listProfilePids(profileDir), []);
 });

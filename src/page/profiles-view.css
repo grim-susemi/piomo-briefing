@@ -314,25 +314,30 @@
 .pf-status-v { font-size: var(--fs-lg); line-height: 1.3; }
 .pf-title-n { color: var(--c-amber); }
 .pf-panes { display: grid; grid-template-columns: clamp(300px, 36%, 620px) minmax(0, 1fr); gap: var(--sp-3); align-items: start; min-width: 0; }
-/* the WinForms detail pane (PS:7283): it stays in view while the cards scroll and scrolls on its own; the max height is
- * the viewport under the shell tabs (44 px), this page's head and the status strip (217 px) and the docked compact message tray (28 px) */
+/* the WinForms detail pane (PS:7283) scrolls on its own; in the two-pane layout it fills the panes' row (below) */
 .pf-detail {
-  position: sticky;
-  top: var(--sp-2);
   display: grid;
   gap: var(--sp-2);
   min-width: 0;
-  max-height: calc(100vh - 287px);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--sp-3) var(--sp-4) var(--sp-4);
 }
-/* the WinForms cards panel (PS:4154, 7067-7130): in the two-pane layout the list scrolls on its own in the detail pane's
- * height, so the docked message tray is a real bottom row under both panes. Like WinForms the panel shows no header (it
- * stays for screen readers) and a card has no English-name line and one line each for main and service, so at 1180x700
- * two cards and their 적용 sit above the fold and the fifth card is one scroll away */
+/* the WinForms client area (PS:4154, 4438, 7283): cards | detail over the message strip, as tall as the viewport under
+ * the shell tabs, this page's head and the status strip (252 px). The strip is a real bottom row under both panes, so a
+ * staged change, a preview or a result takes its height from the panes and never covers them. Like the WinForms message
+ * box it stays short (one header line over the pending rows) and scrolls inside, so 이 프로필 적용하기 stays one scroll away.
+ * The cards list scrolls on its own; like WinForms it shows no header (it stays for screen readers) and a card has no
+ * English-name line and one line each for main and service, so at 1180x700 two cards and their 적용 sit above the fold
+ * and the fifth card is one scroll away */
 @media (min-width: 900px) {
-  #pf-sec-profiles { max-height: calc(100vh - 287px); overflow-y: auto; overscroll-behavior: contain; }
+  .pf-panes:has(> .pf-tray) { height: calc(100vh - 252px); grid-template-rows: minmax(0, 1fr) auto; row-gap: 1px; }
+  .pf-panes:has(> .pf-tray) > .pf-detail { height: 100%; container-type: size; }
+  .pf-panes > .pf-tray { grid-column: 1 / -1; position: static; max-height: 14vh; }
+  .pf-panes > .pf-tray .pf-sec-h { padding: var(--sp-1) var(--sp-3); }
+  .pf-panes > .pf-tray .pf-sec-t { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); }
+  .pf-panes > .pf-tray .pf-sec-b { padding: var(--sp-1) var(--sp-3) var(--sp-2); }
+  #pf-sec-profiles { max-height: 100%; overflow-y: auto; overscroll-behavior: contain; }
   #pf-sec-profiles > .pf-sec-h { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
   .pf-card-en { display: none; }
   .pf-card-main, .pf-card-svc { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -340,12 +345,14 @@
 .pf-dt { margin: 0; font-size: var(--fs-lg); line-height: 1.35; }
 .pf-du { margin: 0; color: var(--c-fg-2); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: break-word; }
 .pf-cap { margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); color: var(--c-fg-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
-/* the WinForms routing box scrolls on its own, so lane, main, summarizer and apply stay one short scroll away */
+/* the WinForms routing box scrolls on its own and ends where the detail pane's view ends (the pane less its title, usage
+ * and caption: 84 px at 1180x700, plus 4 px to spare), whatever the message strip below takes, so a role row is never
+ * pushed out of the pane's view and lane, main, summarizer and apply stay one short scroll away */
 .pf-roles {
   display: grid;
   align-content: start;
   gap: var(--sp-2);
-  height: clamp(280px, calc(100vh - 400px), 560px);
+  height: clamp(200px, calc(100cqh - 88px), 560px);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--sp-2);
@@ -471,7 +478,8 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 
 /* pending tray, preview, conflict and success */
 .pf-tray { border: var(--hair) solid var(--c-amber-line); border-radius: var(--r-xl); background: var(--c-elev); box-shadow: var(--shadow-card); }
-/* docked: the message tray sticks to the bottom edge of the scroll area so results, warnings and the preview diff are always in view; a long pending/preview list scrolls inside it */
+/* docked: below 900 px the message tray sticks to the bottom edge of the scroll area so results, warnings and the preview
+ * diff are always in view (from 900 px it is the panes' bottom row, above); a long pending/preview list scrolls inside it */
 .pf-tray { position: sticky; bottom: 0; z-index: 3; max-height: 45vh; overflow-y: auto; overscroll-behavior: contain; }
 .pf-tray .pf-sec-h { border-bottom-color: var(--c-amber-line); }
 /* empty tray: one quiet status line, so the editor leads at 390 without hiding any live state */
