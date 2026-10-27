@@ -326,9 +326,9 @@ try {
         cite = 'PS:7479-7495 (Update-MainThinkingCombo updates reasoning choices on main model change)'
     }
 
-    # Main Case A: switch to service whose list holds current model (e.g. opencode)
+    # Main Case A: switch to service whose list holds current model (commandcode-subscription; opencode's list holds no gpt-5.6-sol here)
     $beforeMainA = $afterMainM
-    $provHold = ($script:MainProviderCombo.Items | Where-Object { $_.Tag -eq 'opencode' })[0]
+    $provHold = ($script:MainProviderCombo.Items | Where-Object { $_.Tag -eq 'commandcode-subscription' })[0]
     $script:MainProviderCombo.SelectedItem = $provHold
     [Windows.Forms.Application]::DoEvents()
     $afterMainA = [ordered]@{ service = Get-ComboVal $script:MainProviderCombo; model = Get-ComboVal $script:MainModelCombo; effort = Get-ComboVal $script:MainThinkingCombo }

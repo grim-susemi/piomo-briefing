@@ -1526,8 +1526,8 @@ test('cascade main: service change keeps a model present in the new list and cla
       served: { primary: true, stable: true },
       levels: ['low', 'medium', 'high', 'xhigh'],
     },
-    'opencode-sol': {
-      model: 'opencode/gpt-5.6-sol',
+    'commandcode-sol': {
+      model: 'commandcode/gpt-5.6-sol',
       variant: 'xhigh',
       served: { primary: true, stable: true },
       levels: ['low', 'medium', 'high', 'xhigh'],
@@ -1586,8 +1586,9 @@ test('cascade main: service change keeps a model present in the new list and cla
   assert.equal(selectedValueOf(thinkCur), 'xhigh');
 
   // Case 3: Service change whose list holds current model (by suffix gpt-5.6-sol) keeps model and clamps effort
+  // (measured WinForms committed tuple: openai-opencodex -> commandcode keeps gpt-5.6-sol at xhigh)
   provCur = mainBoxCur.querySelector('[data-pf="main-provider"]');
-  provCur.value = 'opencode';
+  provCur.value = 'commandcode';
   e.fire(provCur, 'change');
   await tick();
 
@@ -1596,6 +1597,8 @@ test('cascade main: service change keeps a model present in the new list and cla
   thinkCur = mainBoxCur.querySelector('[data-pf="main-thinking"]');
   assert.equal(selectedValueOf(mdlCur), 'gpt-5.6-sol');
   assert.equal(selectedValueOf(thinkCur), 'xhigh');
+  const stagedKeep = e.page.state.ui.profilesState.pending.find((c) => c.kind === 'setMain');
+  assert.deepEqual([stagedKeep.provider, stagedKeep.model, stagedKeep.thinking], ['commandcode', 'gpt-5.6-sol', 'xhigh']);
 });
 
 test('reapply: re-applying the active profile with nothing pending equals golden apply-cmd-glm-deepseek (canonicalised)', async (t) => {
