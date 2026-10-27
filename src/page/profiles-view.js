@@ -39,6 +39,8 @@
   // WinForms copy (Must have 4) and the purpose groups of PS RoutingGroups (PS:346-358) in their order. A board
   // group id maps to the WinForms section id of the flow map; unknown groups follow and 추가 설정 closes a section.
   var CAPTIONS = ['1. 구독 서비스', '2. AI 모델', '3. 추론 강도'];
+  // WinForms Format-ModelChoice (PS:566, 1569) labels a model the installed engine does not serve.
+  var UNSERVED = '설치 엔진 미지원';
   var ROLE_SECTIONS = [
     ['agents', '전담 에이전트 · Agents', ['discovery', 'planning', 'review']],
     ['categories', '작업 카테고리 · Categories', ['general', 'reasoning', 'specialism']]
@@ -232,11 +234,12 @@
     }
     return available[0] || 'off';
   }
+  // A service is offered when it has a served model; the current one always stays.
   function providersOf(entries, current) {
     var out = [];
     entries.forEach(function (e) {
       var p = providerOf(e.model);
-      if (p && out.indexOf(p) < 0) out.push(p);
+      if (p && !e.off && out.indexOf(p) < 0) out.push(p);
     });
     if (current && out.indexOf(current) < 0) out.push(current);
     return out.sort();
@@ -248,6 +251,12 @@
     if (!opts) opts = '<option value="" selected>(서비스 없음)</option>';
     return select(name, attrs, opts, disabled);
   }
+  // One model choice. A model the engine does not serve stays listed but disabled, its reason in the label and the
+  // title (IS-6); a forced pick of it is still the server's to refuse.
+  function modelOption(value, label, model, selected, off) {
+    return '<option value="' + esc(value) + '"' + attr('data-provider', providerOf(model)) + (selected ? ' selected' : '') +
+      (off ? ' disabled' + attr('title', offTitle(off)) : '') + '>' + esc(off ? label + ' · ' + off.label : label) + '</option>';
+  }
   function modelSelect(name, attrs, entries, provider, fullId, disabled) {
     var opts = '<option value=""' + (fullId ? '' : ' selected') + '>(선택)</option>', found = false, seen = map();
     entries.forEach(function (e) {
@@ -255,8 +264,7 @@
       if (e.model === fullId) found = true;
       if (has(seen, e.model)) return;
       seen[e.model] = true;
-      opts += '<option value="' + esc(e.model) + '"' + attr('data-provider', providerOf(e.model)) + (e.model === fullId ? ' selected' : '') + '>' +
-        esc(e.alias + ' · ' + e.model) + '</option>';
+      opts += modelOption(e.model, e.alias + ' · ' + e.model, e.model, e.model === fullId, e.off);
     });
     if (fullId && !found) opts += '<option value="' + esc(fullId) + '"' + attr('data-provider', providerOf(fullId)) + ' selected>' + esc(fullId) + '</option>';
     if (!opts) opts = '<option value="" selected>(모델 없음)</option>';
@@ -270,32 +278,45 @@
       if (id === bare) found = true;
       if (has(seen, id)) return;
       seen[id] = true;
-      opts += '<option value="' + esc(id) + '"' + attr('data-provider', providerOf(e.model)) + (id === bare ? ' selected' : '') + '>' +
-        esc(e.alias + ' · ' + id) + '</option>';
+      opts += modelOption(id, e.alias + ' · ' + id, e.model, id === bare, e.off);
     });
     if (bare && !found) opts += '<option value="' + esc(bare) + '" selected>' + esc(bare) + '</option>';
     if (!opts) opts = '<option value="" selected>(모델 없음)</option>';
     return select(name, attrs, opts, disabled);
   }
-  function isEntryServed(entry, view) {
-    if (view && obj(view.registry) && arr(view.registry.unknownHomes).length > 0) return false;
+  // Why the installed engine refuses a catalog model, decided like the store's checkModelServed: the first required
+  // home whose registry could not be read (REGISTRY_UNKNOWN) or does not serve the model (UNSUPPORTED_MODEL), with
+  // the code a forced pick is refused with. null = served.
+  function unservedOf(entry, view) {
+    var unknown = arr(obj(view && view.registry) && view.registry.unknownHomes);
+    if (unknown.length) return { label: '설치 엔진 미확인', code: 'REGISTRY_UNKNOWN', home: str(unknown[0]) };
     var served = obj(entry && entry.served);
-    if (!served) return true;
+    if (!served) return null;
     var keys = Object.keys(served);
-    if (!keys.length) return false;
-    for (var i = 0; i < keys.length; i++) if (served[keys[i]] !== true) return false;
-    return true;
+    for (var i = 0; i < keys.length; i++) {
+      if (served[keys[i]] !== true) return { label: UNSERVED, code: 'UNSUPPORTED_MODEL', home: keys[i] };
+    }
+    return keys.length ? null : { label: UNSERVED, code: 'UNSUPPORTED_MODEL', home: '' };
+  }
+  function offText(off) { return off.label + (off.home ? ' · ' + off.home : ''); }
+  function offTitle(off) { return offText(off) + ' · ' + off.code; }
+  // The flag on a shown value the engine refuses: reason and home, with the refusal code as its title.
+  function offChip(off) { return off ? chip('pf-c-red', offText(off), off.code) : ''; }
+  // Every catalog model with `off` = unservedOf (null when served). Model lists show them all; only served ones are
+  // enabled, offered as a service, given effort levels or kept by a cascade.
+  function modelEntries(view) {
+    return catalogEntries(view).map(function (e) { e.off = unservedOf(e, view); return e; });
   }
   function servedEntries(view) {
-    return catalogEntries(view).filter(function (e) { return isEntryServed(e, view); });
+    return modelEntries(view).filter(function (e) { return !e.off; });
   }
-  function memoryCandidates(view) {
-    var list = servedEntries(view), out = [], seen = map();
+  function memoryCandidates(view, withUnserved) {
+    var list = withUnserved ? modelEntries(view) : servedEntries(view), out = [], seen = map();
     list.forEach(function (e) {
       if (!e.model || has(seen, e.model)) return;
       seen[e.model] = true;
       var levels = Array.isArray(e.levels) ? e.levels.slice() : THINKING.slice();
-      out.push({ alias: e.alias, model: e.model, provider: providerOf(e.model), levels: levels });
+      out.push({ alias: e.alias, model: e.model, provider: providerOf(e.model), levels: levels, off: e.off });
     });
     return out;
   }
@@ -334,8 +355,7 @@
       if (e.model === currentModel) found = true;
       if (has(seen, e.model)) return;
       seen[e.model] = true;
-      opts += '<option value="' + esc(e.model) + '"' + attr('data-provider', providerOf(e.model)) + (e.model === currentModel ? ' selected' : '') + '>' +
-        esc(e.alias + ' · ' + e.model) + '</option>';
+      opts += modelOption(e.model, e.alias + ' · ' + e.model, e.model, e.model === currentModel, e.off);
     });
     if (currentModel && !found) {
       opts += '<option value="' + esc(currentModel) + '"' + attr('data-provider', providerOf(currentModel)) + ' selected>' + esc(currentModel) + '</option>';
@@ -359,8 +379,7 @@
     candidates.forEach(function (c) {
       if (!provider || c.provider !== provider) return;
       if (c.model === model) found = true;
-      opts += '<option value="' + esc(c.model) + '"' + attr('data-provider', c.provider) + (c.model === model ? ' selected' : '') + '>' +
-        esc(c.alias + ' · ' + c.model) + '</option>';
+      opts += modelOption(c.model, c.alias + ' · ' + c.model, c.model, c.model === model, c.off);
     });
     if (model && !found) {
       opts += '<option value="' + esc(model) + '"' + attr('data-provider', providerOf(model)) + ' selected>' + esc('미해결: ' + model) + '</option>';
@@ -733,6 +752,10 @@
     var full = change ? str(change.model) : draft ? str(draft.model) : entry ? entry.model : alias;
     var provider = change ? str(change.provider) : draft ? str(draft.provider) : entry ? providerOf(entry.model) : providerOf(alias);
     var thinking = change ? str(change.thinking) : draft ? str(draft.thinking) : str(r.reasoning) || entry && entry.variant || '';
+    // The shown model's reason; a saved value outside the catalog keeps the store's own flag (checkModelServed).
+    var shownEntry = entryOf(entries, '', full);
+    var off = shownEntry ? shownEntry.off
+      : !change && !draft && r.unsupported ? { label: UNSERVED, code: str(r.unsupportedReason), home: str(r.unsupportedHome) } : null;
     var rec = recommendationOf(r);
     var rid = 'pf-route-' + slug(r.section + '-' + r.role);
     var on = function (part) { return attr('data-route', key) + attr('data-flow', 'role:' + key + ':' + part); };
@@ -747,13 +770,13 @@
       '<div class="pf-route-id">' + tag(r.section === 'agents' ? 'agent' : 'category') +
       '<span class="pf-route-ko">' + esc(r.labelKo || r.role) + '</span>' +
       '<span class="pf-route-en">' + esc(r.labelEn || r.role) + '</span>' +
-      (r.stateLabel ? chip('pf-c-amber', r.stateLabel) : '') + chip('pf-st-' + rec.status, rec.label, rec.official) +
+      (r.stateLabel ? chip('pf-c-amber', r.stateLabel) : '') + offChip(off) + chip('pf-st-' + rec.status, rec.label, rec.official) +
       (rec.official ? '<span class="pf-rec-off">' + esc(rec.official) + '</span>' : '') + '</div>' + fields + '</div>';
   }
   // The role sections of the WinForms routing box (PS:6213-6260) in their fixed order, whatever order the rows arrive in.
   function routingRows(view, edit, ro) {
     var rows = arr(obj(view && view.routing) && view.routing.rows).filter(obj);
-    var entries = servedEntries(view);
+    var entries = modelEntries(view);
     var candidates = memoryCandidates(view);
     var html = '';
     ROLE_SECTIONS.forEach(function (sec) {
@@ -784,13 +807,13 @@
     var provider = pending ? str(pending.provider) : draft ? str(draft.provider) : str(override && override.provider) || str(effective.provider);
     var model = pending ? str(pending.model) : draft ? str(draft.model) : str(override && override.model) || str(effective.model);
     var thinking = pending ? str(pending.thinking) : draft ? str(draft.thinking) : str(override && override.thinking) || str(effective.thinking);
-    var entries = servedEntries(view);
+    var entries = modelEntries(view);
     var providers = providersOf(entries, provider);
     // WinForms Update-MainThinkingCombo: the effort list holds only the provider-qualified model's levels and shows
     // the clamped effort; without such an entry the seven-level list stays. The box keeps the saved-or-pending
     // effort the cascade clamps from (WinForms MainComboCommitted), which the shown clamp may differ from.
     var entry = entryOf(entries, '', provider + '/' + model);
-    var levels = entry && Array.isArray(entry.levels) && entry.levels.length ? entry.levels : null;
+    var levels = entry && !entry.off && Array.isArray(entry.levels) && entry.levels.length ? entry.levels : null;
     var body;
     if (!effective.provider && !override && !pending) {
       body = emptyNote('현재 프로필의 메인 모델 정보가 없습니다.');
@@ -805,7 +828,7 @@
         '</div>';
     }
     return '<div class="pf-blk" id="pf-sec-main" data-pf-sec="main" data-flow="main" data-flow-sec="main"><h3 class="pf-blk-h">메인 모델 설정 ' +
-      (override ? chip('pf-c-green', '직접 지정') : chip('pf-c-gray', '프로필 기본')) + '</h3>' + body + '</div>';
+      (override ? chip('pf-c-green', '직접 지정') : chip('pf-c-gray', '프로필 기본')) + offChip(entry && entry.off) + '</h3>' + body + '</div>';
   }
 
   function modelLane(view, edit, ro) {
@@ -854,7 +877,8 @@
     var savedProvider = s && str(s.provider) ? str(s.provider) : providerOf(savedModel);
     var current = pending ? str(pending.modelId) : d && has(d, 'model') ? str(d.model) : savedModel;
     var provider = pending ? providerOf(str(pending.modelId)) : d && has(d, 'provider') ? str(d.provider) : (current ? providerOf(current) : savedProvider);
-    var entries = servedEntries(view);
+    var entries = modelEntries(view);
+    var shownEntry = entryOf(entries, '', current);
     var warnings = summarizerWarnings(current);
     var body = ro
       ? '<span class="pf-ro-val">' + valueOrDash(current || '원본 기본 컴팩션') + '</span>'
@@ -863,7 +887,7 @@
         labelled('2. AI 모델', 'pf-summarizer-model', select('summarizer-model', withId('pf-summarizer-model', ' data-sum="1"'), summarizerModelOptions(entries, provider, current), busy || !provider), 'pf-field-grow') + '</div>' +
         warnings.map(function (w) { return '<p class="pf-warn pf-warn-' + esc(w.level) + '">' + ic('info', 'ic-sm') + ' ' + esc(w.text) + '</p>'; }).join('');
     return '<div class="pf-blk" id="pf-sec-summarizer" data-pf-sec="summarizer" data-flow="summarizer" data-flow-sec="summarizer">' +
-      '<h3 class="pf-blk-h">요약 담당 모델 ' + chip('pf-c-gray', 'compaction.model') + '</h3>' + body + '</div>';
+      '<h3 class="pf-blk-h">요약 담당 모델 ' + chip('pf-c-gray', 'compaction.model') + offChip(shownEntry && shownEntry.off) + '</h3>' + body + '</div>';
   }
 
   function memoryRows(view, edit, ro) {
@@ -871,6 +895,7 @@
     var mem = obj(view && view.memory) || {};
     var allEntries = catalogEntries(view);
     var candidates = memoryCandidates(view);
+    var choices = memoryCandidates(view, true);
     var memErrors = obj(edit && edit.memoryErrors) || {};
     var memSaved = obj(edit && edit.memorySaved) || {};
     var rows = ['kibitzer', 'reflection'].map(function (key) {
@@ -937,7 +962,7 @@
           labelled(CAPTIONS[0], memId + '-service', select('memory-service', withId(memId + '-service', on('service')),
             memoryServiceOptions(candidates, provider), dis)) +
           labelled(CAPTIONS[1], memId + '-model', select('memory-model', withId(memId + '-model', on('model')),
-            memoryModelOptions(candidates, provider, model), dis)) +
+            memoryModelOptions(choices, provider, model), dis)) +
           labelled(CAPTIONS[2], memId + '-thinking', select('memory-thinking', withId(memId + '-thinking', on('effort')),
             memoryThinkingOptions(candidates, model, reasoning), dis)) +
           '</div></div>';
@@ -946,6 +971,8 @@
       if (m.owned) chips.push(chip('pf-c-green', '소유 행'));
       if (m.external) chips.push(chip('pf-c-amber', '외부 행'));
       if (m.unresolved) chips.push(chip('pf-c-red', '미해결'));
+      var shownChoice = entryOf(choices, '', model);
+      if (shownChoice && shownChoice.off) chips.push(offChip(shownChoice.off));
       if (m.hasDedicated) chips.push(chip('pf-c-gray', '전용 행'));
       return '<section class="pf-group"' + attr('data-flow-sec', key) + '><h3 class="pf-rh">' + esc(secTitle) + '</h3>' +
         '<article class="pf-mem-row" data-pf-memory-row="' + esc(key) + '">' +

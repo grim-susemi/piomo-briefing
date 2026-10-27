@@ -443,7 +443,7 @@ test('the profile controller reapply reaches the real route and completes the jo
   await controller.load();
   assert.equal(controller.snapshot().view.applyJournal.status, 'interrupted');
   const result = await controller.reapply();
-  assert.equal(result.status, '다시 적용했어요', JSON.stringify(result));
+  assert.equal(result.status, '다시 적용했습니다', JSON.stringify(result));
   assert.equal(result.result.ok, true);
   assert.equal(result.result.action, 'apply');
   assert.equal(JSON.parse(fs.readFileSync(journalPath, 'utf8')).status, 'completed');

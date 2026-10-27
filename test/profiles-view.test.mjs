@@ -1108,7 +1108,7 @@ test('memory rows: quick shows the effective quick tuple read-only; custom start
     assert.match(pendText, /^보류: /);
   }
   assert.doesNotMatch(e.byId.main.innerHTML, /<input[^>]*data-pf="memory-model"/, 'free-text memory input is replaced');
-  assert.doesNotMatch(e.byId.main.innerHTML, /opencode\/gemini-4-argon/, 'unserved model is excluded from custom options');
+  assert.doesNotMatch(e.byId.main.innerHTML, /<option(?![^>]*\bdisabled\b)[^>]*value="opencode\/gemini-4-argon"/, 'unserved model is never an enabled option');
 
   const kMode = e.byId.main.querySelector('[data-pf="memory-mode"][data-memory="kibitzer"]');
   kMode.value = 'custom';
@@ -1270,6 +1270,103 @@ test('summarizer: provider then model; 원본 기본 컴팩션 clears compaction
     plain(e.page.state.ui.profilesState.pending.find((c) => c.kind === 'setSummarizer')),
     { kind: 'setSummarizer', modelId: 'anthropic/claude-opus-5-5' }
   );
+});
+
+// IS-6 fixture: opencode serves one model in both homes while stable refuses its Argon; every editor shows opencode.
+function supportState() {
+  const state = clone(STATE);
+  state.catalog = {
+    'oc-pro': { model: 'opencode/served-pro', variant: 'high', served: { primary: true, stable: true }, levels: ['low', 'high'] },
+    'oc-argon': { model: 'opencode/gemini-4-argon', variant: 'high', served: { primary: true, stable: false }, levels: [] }
+  };
+  state.routing.rows.find((r) => r.section === 'agents' && r.role === 'explore').model = 'oc-pro';
+  state.main = { effective: { provider: 'opencode', model: 'served-pro', thinking: 'high' }, override: null };
+  state.summarizer = { provider: 'opencode', model: 'served-pro' };
+  for (const key of ['kibitzer', 'reflection']) {
+    state.memory[key] = { ...state.memory[key], mode: 'custom', category: 'desktop-' + key, alias: '', model: 'opencode/served-pro', reasoning: 'high' };
+  }
+  return state;
+}
+// Each editor's model select and the value its opencode Argon option carries (main keeps the provider-less id).
+const SUPPORT_EDITORS = [
+  ['role', 'data-flow="role:agents/explore:model"', 'opencode/gemini-4-argon'],
+  ['main', 'data-pf="main-model"', 'gemini-4-argon'],
+  ['summarizer', 'data-pf="summarizer-model"', 'opencode/gemini-4-argon'],
+  ['kibitzer', 'data-flow="memory:kibitzer:model"', 'opencode/gemini-4-argon'],
+  ['reflection', 'data-flow="memory:reflection:model"', 'opencode/gemini-4-argon']
+];
+function optionsOf(html, marker) {
+  const pick = [...html.matchAll(/<select\b([^>]*)>([\s\S]*?)<\/select>/g)].find((m) => m[1].includes(marker));
+  assert.ok(pick, 'no select ' + marker);
+  return [...pick[2].matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/g)].map((m) => ({
+    value: /\bvalue="([^"]*)"/.exec(m[1])[1], text: textOf(m[2]), disabled: /\sdisabled\b/.test(m[1]),
+    selected: /\sselected\b/.test(m[1]), title: (/\btitle="([^"]*)"/.exec(m[1]) || [])[1] || ''
+  }));
+}
+function sliceFrom(html, start, end) {
+  const at = html.indexOf(start);
+  assert.ok(at >= 0, 'missing ' + start);
+  const to = html.indexOf(end, at + start.length);
+  return html.slice(at, to < 0 ? html.length : to);
+}
+
+test('support: an unserved model stays listed in role, main, summarizer, Kibitzer and Reflection, disabled with its reason', () => {
+  const html = load().render(supportState(), live());
+  for (const [name, marker, argon] of SUPPORT_EDITORS) {
+    const options = optionsOf(html, marker);
+    const off = options.find((o) => o.value === argon);
+    assert.ok(off, name + ': the unserved model is filtered out of the list');
+    assert.equal(off.disabled, true, name + ': the unserved model is selectable');
+    assert.equal(off.title, '설치 엔진 미지원 · stable · UNSUPPORTED_MODEL', name);
+    assert.match(off.text, /gemini-4-argon · 설치 엔진 미지원$/, name);
+    const served = options.find((o) => o.value.endsWith('served-pro'));
+    assert.equal(served.disabled, false, name + ': a served model stays selectable');
+    assert.equal(served.selected, true, name);
+  }
+  assert.doesNotMatch(html, /pf-c-red" title="UNSUPPORTED_MODEL"/, 'a served saved value carries no flag');
+});
+
+test('support: a saved unsupported value stays selected and flagged with its reason and home in every editor', () => {
+  const state = supportState();
+  Object.assign(state.routing.rows.find((r) => r.section === 'agents' && r.role === 'explore'),
+    { model: 'oc-argon', reasoning: null, unsupported: true, unsupportedReason: 'UNSUPPORTED_MODEL', unsupportedHome: 'stable' });
+  state.main.effective.model = 'gemini-4-argon';
+  state.summarizer.model = 'gemini-4-argon';
+  for (const key of ['kibitzer', 'reflection']) state.memory[key].model = 'opencode/gemini-4-argon';
+  const html = load().render(state, live());
+  const flag = '<span class="pf-chip pf-c-red" title="UNSUPPORTED_MODEL">설치 엔진 미지원 · stable</span>';
+  const regions = {
+    role: sliceFrom(html, 'data-pf-route="agents/explore"', 'data-pf-route="'),
+    main: sliceFrom(html, 'id="pf-sec-main"', 'id="pf-sec-summarizer"'),
+    summarizer: sliceFrom(html, 'id="pf-sec-summarizer"', 'data-pf-sec="tray"'),
+    kibitzer: sliceFrom(html, 'data-pf-memory-row="kibitzer"', 'data-pf-memory-row="reflection"'),
+    reflection: sliceFrom(html, 'data-pf-memory-row="reflection"', 'id="pf-sec-lanes"')
+  };
+  for (const [name, marker, argon] of SUPPORT_EDITORS) {
+    const shown = optionsOf(html, marker).filter((o) => o.selected);
+    assert.equal(shown.length, 1, name);
+    assert.equal(shown[0].value, argon, name + ': the saved value is replaced');
+    assert.equal(shown[0].disabled, true, name);
+    assert.match(shown[0].text, /gemini-4-argon · 설치 엔진 미지원$/, name);
+    assert.ok(regions[name].includes(flag), name + ': no flag with reason and home');
+  }
+  // The role row shows the saved tuple itself: its service and the alias's effort, not the first served choice.
+  assert.equal(optionsOf(html, 'data-flow="role:agents/explore:service"').find((o) => o.selected)?.value, 'opencode');
+  assert.equal(optionsOf(html, 'data-flow="role:agents/explore:effort"').find((o) => o.selected)?.value, 'high');
+});
+
+test('support: an unread registry keeps every model listed but disabled as 설치 엔진 미확인 (REGISTRY_UNKNOWN)', () => {
+  const state = supportState();
+  state.registry = { unknownHomes: ['stable'] };
+  const html = load().render(state, live());
+  for (const [name, marker] of SUPPORT_EDITORS) {
+    const options = optionsOf(html, marker).filter((o) => o.value);
+    assert.equal(options.length, 2, name);
+    for (const o of options) {
+      assert.equal(o.disabled, true, name + ' ' + o.value);
+      assert.equal(o.title, '설치 엔진 미확인 · stable · REGISTRY_UNKNOWN', name + ' ' + o.value);
+    }
+  }
 });
 
 test('per-profile: a card click shows that profile and adds no pending', async () => {
