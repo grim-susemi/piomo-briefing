@@ -7,7 +7,8 @@
 //   <out>/flow-diff-<w>x<h>.json        F1..F7 of test/fixtures/profiles/flow-map.rules.json against the reference
 //   <out>/csp.json, <out>/ax.txt        CSP violations (listener armed before the first navigation), unnamed AX controls
 // Each task starts from freshly seeded homes and a fresh page; apply really writes, but only the fixture homes.
-// usage: node scripts/qa-flow-map.mjs --out <dir> [--sizes 1180x700,1600x900] [--reference <flow-map.json>] [--keep]
+// usage: node scripts/qa-flow-map.mjs --out <dir> [--sizes 1180x700,1600x900] [--reference <flow-map.json>] [--keep] [--shots <dir>]
+// --shots <dir>: after every step's control was activated and the page settled, write <dir>/<task>-<n>-<control>-<size>.png and <dir>/index.json.
 // Exit 1 when a diff is not empty, a step is missing, a CSP violation happened or an unnamed control appeared.
 // Every wait is an event or a bounded deadline; no fixed sleep and no polling loop.
 import crypto from 'node:crypto';
@@ -64,6 +65,8 @@ const SIZES = arg('--sizes', '1180x700,1600x900').split(',').map((s) => {
   return { width: Number(m[1]), height: Number(m[2]), name: m[1] + 'x' + m[2] };
 });
 const KEEP = argv.includes('--keep');
+const SHOTS = arg('--shots') ? path.resolve(arg('--shots')) : '';
+const shotIndex = [];
 const PORT_BASE = Number(process.env.OMO_BRIEFING_PORT_BASE || 47540);
 if (!OUT) {
   console.error('usage: node scripts/qa-flow-map.mjs --out <dir> [--sizes 1180x700,1600x900] [--reference <flow-map.json>] [--keep]');
@@ -74,6 +77,7 @@ if (!Number.isInteger(PORT_BASE) || PORT_BASE < 1024 || PORT_BASE + 4 > 65535 ||
   process.exit(2);
 }
 fs.mkdirSync(OUT, { recursive: true });
+if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const slash = (p) => path.resolve(p).replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
@@ -450,6 +454,12 @@ async function main() {
             const step = await perform(page, id, board.posts, map.log);
             steps.push(step);
             if (step.missing) break;
+            if (SHOTS) {
+              await settle(page);
+              const file = `${task}-${steps.length}-${id.replace(/[^A-Za-z0-9._-]+/g, "-")}-${size.name}.png`;
+              await page.screenshot(path.join(SHOTS, file));
+              shotIndex.push({ file, size: size.name, task, step: steps.length, control: id, scrolls: step.scrolls, shown: await page.eval(`window.__flow.shown()`) });
+            }
             if (task === 'role' && id.endsWith(':effort')) {
               const heading = await page.eval(`window.__flow.heading()`);
               if (!/ · 변경 보류 \d+건$/.test(heading)) map.copy.missing.push(' · 변경 보류 N건');
@@ -484,6 +494,7 @@ async function main() {
     if (!KEEP) fs.rmSync(tempRoot, { recursive: true, force: true });
     report.tempRemoved = !fs.existsSync(tempRoot);
   }
+  if (SHOTS) fs.writeFileSync(path.join(SHOTS, 'index.json'), JSON.stringify({ schema: 'flow-shots/1', count: shotIndex.length, images: shotIndex }, null, 2) + '\n');
   const violations = csp ? csp.violations : [];
   fs.writeFileSync(path.join(OUT, 'csp.json'), JSON.stringify({ violations, count: violations.length, notes: csp ? csp.notes.length : 0 }, null, 2) + '\n');
   const unnamed = report.ax.reduce((n, a) => n + a.unnamed.length, 0);
