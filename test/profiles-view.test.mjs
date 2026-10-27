@@ -386,6 +386,21 @@ test('inventory stale: the banner is shown and the view is read-only even with a
   assert.doesNotMatch(html, /data-pf="apply"/);
 });
 
+test('read-only on the live board: the note names the store reason instead of the live-only hint', () => {
+  const P = load();
+  const note = (html) => textOf(/<p class="pf-empty pf-ro-note">([\s\S]*?)<\/p>/.exec(html)[1]).trim();
+  const commented = clone(STATE);
+  commented.readOnly = true;
+  commented.readOnlyReason = 'COMMENTS_PRESENT';
+  const html = P.render(commented, live());
+  assert.match(html, /data-readonly="true"/);
+  assert.equal(note(html), 'omo.jsonc에 주석이 있어 수정할 수 없습니다.');
+  assert.doesNotMatch(html, /실시간 상황판에서만/);
+  const unnamed = clone(STATE);
+  unnamed.readOnly = true;
+  assert.equal(note(P.render(unnamed, live())), '실시간 상황판에서만 바꿀 수 있습니다.', 'a reason the store did not name keeps the live-only note');
+});
+
 test('rendered HTML has no style attribute and no on* event attribute', () => {
   const P = load();
   const html = P.render(STATE, live({
@@ -553,6 +568,25 @@ test('controller: a non-200 preview is shown, never reported as success, and pen
   assert.equal(snap.pending.length, 1, 'edits survive a refusal');
 });
 
+test('controller: a refused apply (UNSUPPORTED_MODEL) reads as one Korean sentence with the code beside it, in the tray and the nav', async () => {
+  const P = load();
+  const c = P.createController({
+    fetch: (url) => Promise.resolve(url === '/profiles/state'
+      ? { status: 200, json: async () => STATE }
+      : { status: 400, json: async () => ({ ok: false, code: 'UNSUPPORTED_MODEL' }) }),
+    token: 't'
+  });
+  await c.load();
+  c.add({ kind: 'setRoute', section: 'agents', role: 'explore', provider: 'opencode', model: 'opencode/gemini-4-argon', thinking: 'high' });
+  const snap = await c.apply();
+  assert.equal(snap.status, '실패');
+  assert.equal(snap.pending.length, 1, 'the refused edit stays pending');
+  const edit = { ...snap, live: true };
+  const shown = '설치 엔진이 이 모델을 지원하지 않아 적용하지 않았으니 다른 모델을 고르십시오. <code class="pf-err-code">UNSUPPORTED_MODEL</code>';
+  assert.equal(/<p class="pf-err" role="alert">([\s\S]*?)<\/p>/.exec(P.render(snap.view, edit))[1], shown, 'tray');
+  assert.equal(/<p class="pf-nav-warn">([\s\S]*?)<\/p>/.exec(P.side(snap.view, edit))[1], shown, 'nav');
+});
+
 test('controller: expected state-read failure is plain, contained, and retry recovers', async () => {
   const P = load();
   let rejectNext = true;
@@ -701,7 +735,7 @@ test('page wiring: the profiles rail click loads GET /profiles/state and a previ
   lane.value = 'daily-heavy';
   e.fire(lane, 'change');
   assert.match(e.byId.main.querySelector('.pf-pending').textContent, /atlas 레인 → daily-heavy/);
-  assert.match(e.byId.side.textContent, /1개 대기/, 'the sidebar tray chip follows the pending edits');
+  assert.match(e.byId.side.textContent, /변경 보류 1건/, 'the sidebar tray chip follows the pending edits');
   e.fire(e.byId.main.querySelector('[data-pf="preview"]'), 'click');
   const post = e.fetches[e.fetches.length - 1];
   assert.equal(post.url, '/profiles');
@@ -1320,13 +1354,13 @@ test('support: an unserved model stays listed in role, main, summarizer, Kibitze
     const off = options.find((o) => o.value === argon);
     assert.ok(off, name + ': the unserved model is filtered out of the list');
     assert.equal(off.disabled, true, name + ': the unserved model is selectable');
-    assert.equal(off.title, '설치 엔진 미지원 · stable · UNSUPPORTED_MODEL', name);
+    assert.equal(off.title, '설치 엔진 미지원 · stable 홈 · UNSUPPORTED_MODEL', name);
     assert.match(off.text, /gemini-4-argon · 설치 엔진 미지원$/, name);
     const served = options.find((o) => o.value.endsWith('served-pro'));
     assert.equal(served.disabled, false, name + ': a served model stays selectable');
     assert.equal(served.selected, true, name);
   }
-  assert.doesNotMatch(html, /pf-c-red" title="UNSUPPORTED_MODEL"/, 'a served saved value carries no flag');
+  assert.doesNotMatch(html, /pf-c-amber" title="UNSUPPORTED_MODEL"/, 'a served saved value carries no flag');
 });
 
 test('support: a saved unsupported value stays selected and flagged with its reason and home in every editor', () => {
@@ -1337,7 +1371,7 @@ test('support: a saved unsupported value stays selected and flagged with its rea
   state.summarizer.model = 'gemini-4-argon';
   for (const key of ['kibitzer', 'reflection']) state.memory[key].model = 'opencode/gemini-4-argon';
   const html = load().render(state, live());
-  const flag = '<span class="pf-chip pf-c-red" title="UNSUPPORTED_MODEL">설치 엔진 미지원 · stable</span>';
+  const flag = '<span class="pf-chip pf-c-amber" title="UNSUPPORTED_MODEL">설치 엔진 미지원 · stable 홈</span>';
   const regions = {
     role: sliceFrom(html, 'data-pf-route="agents/explore"', 'data-pf-route="'),
     main: sliceFrom(html, 'id="pf-sec-main"', 'id="pf-sec-summarizer"'),
@@ -1367,7 +1401,7 @@ test('support: an unread registry keeps every model listed but disabled as 설�
     assert.equal(options.length, 2, name);
     for (const o of options) {
       assert.equal(o.disabled, true, name + ' ' + o.value);
-      assert.equal(o.title, '설치 엔진 미확인 · stable · REGISTRY_UNKNOWN', name + ' ' + o.value);
+      assert.equal(o.title, '설치 엔진 미확인 · stable 홈 · REGISTRY_UNKNOWN', name + ' ' + o.value);
     }
   }
 });

@@ -17,6 +17,16 @@
   var REAPPLY_LABEL = '다시 적용';
   var READONLY_LIVE = '실시간 상황판에서만 바꿀 수 있습니다.';
   var READONLY_FILE = '이 페이지는 보기 전용입니다. 실시간 상황판에서 열어 주십시오.';
+  // Why the store refuses writes on the live board (state().readOnlyReason), in the owner's words.
+  var READONLY_REASON = {
+    COMMENTS_PRESENT: 'omo.jsonc에 주석이 있어 수정할 수 없습니다.',
+    MISSING_CONFIG: 'omo.jsonc나 settings.json이 없어 수정할 수 없습니다.',
+    INVALID_CONFIG: 'omo.jsonc나 settings.json을 읽지 못해 수정할 수 없습니다.'
+  };
+  // store.handle answers a refusal with its bare code; the ones the owner can act on read as one sentence.
+  var REFUSAL_TEXT = {
+    UNSUPPORTED_MODEL: '설치 엔진이 이 모델을 지원하지 않아 적용하지 않았으니 다른 모델을 고르십시오.'
+  };
   var AGENTS = [
     ['sisyphus', 'Sisyphus'],
     ['hephaestus', 'Hephaestus'],
@@ -298,10 +308,11 @@
     }
     return keys.length ? null : { label: UNSERVED, code: 'UNSUPPORTED_MODEL', home: '' };
   }
-  function offText(off) { return off.label + (off.home ? ' · ' + off.home : ''); }
+  function offText(off) { return off.label + (off.home ? ' · ' + off.home + ' 홈' : ''); }
   function offTitle(off) { return offText(off) + ' · ' + off.code; }
-  // The flag on a shown value the engine refuses: reason and home, with the refusal code as its title.
-  function offChip(off) { return off ? chip('pf-c-red', offText(off), off.code) : ''; }
+  // The flag on a shown value the engine refuses: reason and home, with the refusal code as its title. It is a lasting
+  // configuration state, so it takes the warning colour; red stays for failures.
+  function offChip(off) { return off ? chip('pf-c-amber', offText(off), off.code) : ''; }
   // Every catalog model with `off` = unservedOf (null when served). Model lists show them all; only served ones are
   // enabled, offered as a service, given effort levels or kept by a cascade.
   function modelEntries(view) {
@@ -470,7 +481,12 @@
   function readOnlyNote(edit, view) {
     if (edit && edit.live !== true) return emptyNote(READONLY_FILE, 'pf-ro-note');
     if (view && view.banner === STALE_BANNER) return emptyNote('인벤토리를 갱신할 때까지 수정할 수 없습니다.', 'pf-ro-note');
-    return emptyNote(READONLY_LIVE, 'pf-ro-note');
+    var reason = str(view && view.readOnlyReason);
+    return emptyNote(has(READONLY_REASON, reason) ? READONLY_REASON[reason] : READONLY_LIVE, 'pf-ro-note');
+  }
+  // A refusal code the owner can act on reads as its sentence, with the code beside it as the detail.
+  function errorHtml(err) {
+    return has(REFUSAL_TEXT, err) ? esc(REFUSAL_TEXT[err]) + ' <code class="pf-err-code">' + esc(err) + '</code>' : esc(err);
   }
   function banner(text, cls, role) {
     return '<div class="pf-banner ' + (cls || '') + '"' + (role ? attr('role', role) : '') + '>' + ic('info', 'ic-sm') + ' <b>' + esc(text) + '</b></div>';
@@ -530,14 +546,14 @@
         '<span class="pf-skel-field pf-skel-route-sels"><span class="pf-skel-line pf-skel-line-c"></span><span class="pf-skel-line pf-skel-line-c"></span><span class="pf-skel-line pf-skel-line-c"></span></span>' +
         '<span class="pf-skel-field pf-skel-rec"><span class="pf-skel-line pf-skel-line-s"></span></span></div>';
     }
-    var loadingSection = function (key, body, count) {
+    var loadingSection = function (key, body, count, extra) {
       var meta = null;
       SECTIONS.forEach(function (s) { if (s[0] === key) meta = s; });
       var title = meta ? meta[1] : key, sub = meta ? meta[2] : '';
       return '<section class="pf-skel-sec" data-pf-skel="' + key + '" aria-hidden="true">' +
         '<header class="pf-sec-h"><div class="pf-sec-t">' + tag(title) + '<h2>' + esc(title) + '</h2>' +
         '<p class="pf-sec-s">' + esc(sub) + '</p></div><div class="pf-sec-r">' +
-        (count === null ? '' : '<span class="pf-count">' + count + '</span>') + '</div></header>' +
+        (count === null ? '' : '<span class="pf-count">' + count + '</span>') + (extra || '') + '</div></header>' +
         '<div class="pf-sec-b">' + body + '</div></section>';
     };
     var home = function (label) {
@@ -547,13 +563,13 @@
     return '<div class="pf-loading" data-pf-loading role="status">' +
       '<div class="pf-skeleton">' +
       '<section class="pf-tray pf-tray-compact" data-pf-skel="tray" aria-label="바꿀 값"><div class="pf-tray-c">' +
-      tag('대기') + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
+      tag('보류') + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
       '<span class="pf-muted pf-tray-note">바꾼 값 없음</span>' +
       '<span class="pf-tray-next" id="pf-focus-status" tabindex="-1"><span class="pf-pulse" aria-hidden="true">' +
       ic('refresh-cw', 'ic-sm') + '</span> 프로필 상태를 불러오는 중…</span></div></section>' +
       '<div class="pf-panes">' + loadingSection('profiles', '<div class="pf-cards">' + cards + '</div>', null) +
       loadingSection('routing', '<div class="pf-routes">' + routes + '</div>', null) + '</div>' +
-      loadingSection('agents', '<div class="pf-agents">' + agents + '</div>', AGENTS.length) +
+      loadingSection('agents', '<div class="pf-agents">' + agents + '</div>', AGENTS.length, ic('chevron-down', 'ic-sm pf-chev')) +
       '<div class="pf-homes pf-skel-homes" data-pf-skel="homes" aria-hidden="true">' +
       home('primary') + home('mirror') + home('stable-500') + '</div>' +
       '</div></div>';
@@ -706,7 +722,8 @@
     }).join('');
     // The board-only roster is a collapsed card below both panes; its open state survives re-renders.
     return '<details class="pf-sec pf-agents-card" id="pf-sec-agents" data-pf-sec="agents"' + boolAttr('open', !!(edit && edit.agentsOpen === true)) + '>' +
-      secHead('agents', AGENTS.length, roster.warning ? chip('pf-c-amber', 'roster 경고', str(roster.warning)) : '', null, 'summary') +
+      secHead('agents', AGENTS.length, (roster.warning ? chip('pf-c-amber', 'roster 경고', str(roster.warning)) : '') +
+        ic('chevron-down', 'ic-sm pf-chev'), null, 'summary') +
       '<div class="pf-sec-b"><div class="pf-agents">' + rows + '</div></div></details>';
   }
 
@@ -1053,13 +1070,15 @@
     var conflict = !!(edit && edit.conflict);
     var preview = obj(edit && edit.preview);
     var result = obj(edit && edit.result);
+    // The strip's label follows its state: pending, applied or failed.
+    var label = result ? '적용됨' : err || conflict ? '실패' : '보류';
     var head = ' id="pf-sec-tray" data-pf-sec="tray" data-flow="message" aria-label="메시지">';
     var tail = journalBanner(view, edit, ro) + arr(view && view.warnings).map(function (w) {
       return '<p class="pf-warn">' + ic('info', 'ic-sm') + ' ' + esc(w) + '</p>';
     }).join('');
     if (ro || (!pending.length && !busy && !status && !err && !conflict && !preview && !result)) {
       return '<section class="pf-tray pf-tray-compact"' + head + (ro ? '' :
-        '<div class="pf-tray-c">' + tag('대기') + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
+        '<div class="pf-tray-c">' + tag('보류') + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
         '<span class="pf-tray-next">위에서 값을 고르면 여기에 모입니다.</span></div>') + tail + '</section>';
     }
     var list = pending.length
@@ -1067,9 +1086,9 @@
         return '<li><span class="pf-pending-t">' + esc(changeLabel(c)) + '</span>' +
           button('drop', ' data-index="' + i + '" aria-label="이 변경 지우기" title="이 변경 지우기"', ic('x', 'ic-sm'), busy, 'pf-btn pf-btn-icon') + '</li>';
       }).join('') + '</ol>'
-      : emptyNote('위에서 값을 고르면 여기에 모입니다.');
+      : result || err ? '' : emptyNote('위에서 값을 고르면 여기에 모입니다.');
     return '<section class="pf-tray"' + head +
-      '<header class="pf-sec-h"><div class="pf-sec-t">' + tag('대기') + '<h2>바꿀 값</h2><p class="pf-sec-s">미리보기는 쓰지 않고, 적용만 파일을 씁니다.</p></div>' +
+      '<header class="pf-sec-h"><div class="pf-sec-t">' + tag(label) + '<h2>바꿀 값</h2><p class="pf-sec-s">미리보기는 쓰지 않고, 적용만 파일을 씁니다.</p></div>' +
       '<div class="pf-sec-r"><span class="pf-count">' + pending.length + '</span>' +
       (status ? '<span class="pf-chip ' + (conflict ? 'pf-c-red' : result ? 'pf-c-green' : 'pf-c-gray') +
         '" id="pf-focus-status" tabindex="-1" role="status">' + esc(status) + '</span>' : '') + '</div></header>' +
@@ -1077,12 +1096,11 @@
       (busy ? '<p class="pf-note" role="status">처리 중…</p>' : '') +
       (conflict ? '<div class="pf-conflict" role="alert"><b>' + esc(CONFLICT_TEXT) + '</b> ' +
         button('reload', ' aria-label="새로고침"', ic('refresh-cw', 'ic-sm') + ' 새로고침', false, 'pf-btn pf-btn-primary') + '</div>' : '') +
-      (err && !conflict ? '<p class="pf-err" role="alert">' + esc(err) + '</p>' : '') +
+      (err && !conflict ? '<p class="pf-err" role="alert">' + errorHtml(err) + '</p>' : '') +
       (preview ? '<div class="pf-preview" data-pf-preview><p class="pf-preview-h">' + ic('file-text', 'ic-sm') + ' 파일별 차이 <span class="pf-count">' +
         arr(preview.diffs).length + '</span></p>' + diffRows(preview) +
         arr(preview.warnings).map(function (w) { return '<p class="pf-warn">' + ic('info', 'ic-sm') + ' ' + esc(w) + '</p>'; }).join('') + '</div>' : '') +
-      (result ? '<div class="pf-done" data-pf-result="apply"><p class="pf-done-h">' + ic('circle-check', 'ic-sm') + ' 적용했습니다.</p>' +
-        '<p class="pf-done-s">백업</p><ul class="pf-backups">' + (arr(result.backups).length ? arr(result.backups).map(function (b) {
+      (result ? '<div class="pf-done" data-pf-result="apply"><p class="pf-done-s">백업</p><ul class="pf-backups">' + (arr(result.backups).length ? arr(result.backups).map(function (b) {
           return '<li><code>' + esc(b) + '</code></li>';
         }).join('') : '<li class="pf-muted">없음 (바뀐 파일 없음)</li>') + '</ul>' +
         (arr(result.writes).length ? '<p class="pf-done-s">쓴 파일</p><ul class="pf-writes">' + arr(result.writes).map(function (w) {
@@ -1163,10 +1181,10 @@
       : loadState === 'error' ? chip('pf-c-red', '불러오기 실패')
       : ro ? chip('pf-c-amber', '읽기 전용') : chip('pf-c-green', '편집 가능');
     return '<div class="pf-nav" data-pf-side>' + emptyNote('섹션 이동', 'pf-nav-h') +
-      '<div class="pf-nav-state">' + state + (pending ? chip('pf-c-amber', pending + '개 대기') : '') + '</div>' +
+      '<div class="pf-nav-state">' + state + (pending ? chip('pf-c-amber', '변경 보류 ' + pending + '건') : '') + '</div>' +
       nav +
       (e.conflict ? '<p class="pf-nav-warn">' + esc(CONFLICT_TEXT) + '</p>' : '') +
-      (e.error && !e.conflict ? '<p class="pf-nav-warn">' + esc(e.error) + '</p>' : '') +
+      (e.error && !e.conflict ? '<p class="pf-nav-warn">' + errorHtml(e.error) + '</p>' : '') +
       '</div>';
   }
 
