@@ -63,6 +63,7 @@
 // Fixture: used as committed plus two additions the checks need (result.json fixture.additions): vm.waiting = the 2 items of
 //   its open decisions #97/#98 as src/waiting.mjs computes them (the committed fixture has none, check (i) needs 2), and one
 //   finished conversation whose title is 300 characters without a space (it must wrap or carry a title-attribute ellipsis).
+//   Every document's clock starts at the fixture's own generatedAt (PAGE_CLOCK, result.json fixture.pageClock).
 // Exit 0 only when every check passes, every self-test flips and recovers, every mockup was captured, and Chrome (every pid
 // of its profile), its profile and the temp folder are gone.
 import fs from 'node:fs';
@@ -231,6 +232,13 @@ function compareAx(captures, entries) {
 
 const fixtureText = fs.readFileSync(FIXTURE_FILE, 'utf8');
 const FIXTURE = JSON.parse(fixtureText);
+// The page reads the wall clock (page.js state.now and the 1 s worker ticker are Date.now()) while the fixture's times are
+// fixed, so unpinned shots drift with the day of the run: from 10 days 10 hours after the running worker's start, its
+// 390x844 row clock '10일 10시간' left span.w-name 126 px for 128 px of text (check b), on any commit. Every document of
+// the run therefore starts its clock at the fixture's own generatedAt and lets it run on from there; a frozen clock would
+// stall page.js's apply throttle (consider() waits for APPLY_MIN_MS to pass).
+if (!Number.isFinite(FIXTURE.generatedAt)) throw new Error('test/fixtures/view-model-board.json: generatedAt must be epoch ms');
+const PAGE_CLOCK = `(() => { const offset = ${FIXTURE.generatedAt} - Date.now(); const wall = Date.now.bind(Date); Date.now = () => wall() + offset; })();`;
 const LONG_ID = '01a14f00-0300-7c00-8d00-000000000300';
 const ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 const LONG_TITLE = Array.from({ length: 300 }, (_, i) => ALNUM[i % ALNUM.length]).join(''); // no space, no break opportunity
@@ -1031,8 +1039,10 @@ async function runViewport(vp, A, B, D) {
   await page.goto('about:blank');
   await page.goto(indexUrl);
   drainCsp();
-  const info = await ev('({ seq: BriefPage.state.seq, transport: BriefPage.transport(), live: BriefPage.state.ui.live, innerWidth, innerHeight, title: document.title })');
-  if (info.seq !== model.seq || info.transport !== 'file' || info.innerWidth !== vp.width || info.innerHeight !== vp.height) throw new Error('unexpected first paint: ' + J(info));
+  const info = await ev('({ seq: BriefPage.state.seq, transport: BriefPage.transport(), live: BriefPage.state.ui.live, innerWidth, innerHeight, title: document.title, now: Date.now() })');
+  // the page clock runs from the fixture's generatedAt (PAGE_CLOCK), not from the wall clock
+  const pinned = info.now >= FIXTURE.generatedAt && info.now < FIXTURE.generatedAt + 3600000;
+  if (info.seq !== model.seq || info.transport !== 'file' || info.innerWidth !== vp.width || info.innerHeight !== vp.height || !pinned) throw new Error('unexpected first paint: ' + J(info));
   await park();
   const axFile = await captureAx({ view: 'matrix-file', name: 'file', viewport: vp.name });
   results.axFile = results.axFile || {};
@@ -1333,7 +1343,8 @@ const chromeTempNames = () => fs.readdirSync(TMP_ROOT).filter((x) => x.startsWit
 try {
   const built = matrixModel();
   model = built.vm;
-  fixtureInfo = { file: path.relative(ROOT, FIXTURE_FILE).replace(/\\/g, '/'), sha256: crypto.createHash('sha256').update(fixtureText).digest('hex'), sessions: FIXTURE.sessions.length, additions: built.additions };
+  fixtureInfo = { file: path.relative(ROOT, FIXTURE_FILE).replace(/\\/g, '/'), sha256: crypto.createHash('sha256').update(fixtureText).digest('hex'), sessions: FIXTURE.sessions.length, additions: built.additions,
+    pageClock: { startsAt: new Date(FIXTURE.generatedAt).toISOString(), why: 'the fixture\'s own generatedAt; the page clock runs on from there in every document' } };
   fs.mkdirSync(path.join(STATE, 'assets'), { recursive: true });
   for (const f of fs.readdirSync(ASSET_DIR)) fs.copyFileSync(path.join(ASSET_DIR, f), path.join(STATE, 'assets', f));
   for (const s of model.sessions) {
@@ -1366,6 +1377,7 @@ try {
   listen('Runtime.consoleAPICalled', (p) => { if (p.type === 'error') noteError(`console.error ${(p.args || []).map((a) => a.value ?? a.description).join(' ')}`); });
   listen('Runtime.exceptionThrown', (p) => noteError(`exception ${p.exceptionDetails?.exception?.description || p.exceptionDetails?.text}`));
   listen('Log.entryAdded', (p) => { if (p.entry?.level === 'error') noteError(`log ${p.entry.text} ${p.entry.url || ''}`.trim()); });
+  await page.addInitScript(PAGE_CLOCK);
   await page.addInitScript(`(${pageLib.toString()})();`);
   const [A, B] = model.sessions;
   const D = model.sessions.find((s) => s.id === LONG_ID);
