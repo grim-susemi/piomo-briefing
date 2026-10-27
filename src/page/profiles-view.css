@@ -129,17 +129,8 @@
 .pf-skel-field { display: grid; gap: 2px; min-width: 0; }
 .pf-skel-pin { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .8fr); gap: var(--sp-1); }
 .pf-skel-card { display: grid; gap: var(--sp-1); min-height: calc(var(--sp-12) * 4); padding: var(--sp-3); background: var(--c-main); }
-.pf-skel-route {
-  display: grid;
-  grid-template-columns: minmax(170px, 1.1fr) minmax(240px, 1.7fr) minmax(130px, .9fr);
-  align-items: center;
-  gap: var(--sp-2);
-  min-height: calc(var(--sp-12) + var(--sp-8));
-  padding: var(--sp-1) var(--sp-2);
-  border-radius: var(--r-md);
-  background: var(--c-main);
-}
-.pf-skel-route-sels { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.8fr) minmax(0, .7fr); gap: var(--sp-1); }
+.pf-skel-route { display: grid; gap: 2px; padding: var(--sp-1) var(--sp-2); border-radius: var(--r-md); background: var(--c-main); }
+.pf-skel-route-sels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-1); }
 @media (min-width: 600px) {
   .pf-skel-homes { grid-template-columns: minmax(0, 1fr) auto; }
   .pf-skel-home:nth-child(3) { grid-column: 1 / -1; }
@@ -162,7 +153,6 @@
 .pf-empty-state .pf-empty { flex: 1 1 24ch; }
 .pf-dash { color: var(--c-fg-4); }
 .pf-ro-val { min-width: 0; overflow-wrap: anywhere; color: var(--c-fg); font-size: var(--fs-sm); }
-.pf-warnings { display: grid; gap: var(--sp-1); }
 .pf-warn { margin: 2px 0 0; display: flex; align-items: baseline; gap: var(--sp-1); color: var(--c-amber); font-size: var(--fs-sm); }
 .pf-warn-info { color: var(--c-fg-2); }
 .pf-err { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--c-red); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
@@ -207,7 +197,6 @@
 .pf-sel-t { color: var(--c-fg-3); font-size: var(--fs-2xs); font-weight: var(--fw-medium); }
 .pf-lbl { color: var(--c-fg-3); font-size: var(--fs-2xs); font-weight: var(--fw-medium); }
 .pf-field-grow { grid-column: span 2; }
-.pf-field-act { justify-content: end; align-content: end; }
 .pf select, .pf input[type="text"] {
   width: 100%;
   min-width: 0;
@@ -304,26 +293,99 @@
 .pf-dot-atlas { background: var(--agent-atlas); }
 .pf-mem { color: var(--c-fg-2); }
 
-/* profiles */
-.pf-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
-.pf-cards > .pf-empty { grid-column: 1 / -1; }
-.pf-card {
-  display: grid;
-  gap: 2px;
+/* WinForms layout: status strip, cards | detail (stacked only under the shell's 899 px), message strip, extras */
+.pf-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-4);
   min-width: 0;
-  padding: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  border: var(--hair) solid var(--c-line);
+  border-left: 4px solid var(--c-green);
+  border-radius: var(--r-xl);
+  background: var(--c-elev);
+  box-shadow: var(--shadow-card);
+}
+.pf-status-l, .pf-status-r { display: grid; gap: 2px; min-width: 0; }
+.pf-status-m { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
+.pf-status-r { margin-left: auto; justify-items: end; }
+.pf-status-c { color: var(--c-fg-3); font-size: var(--fs-2xs); font-weight: var(--fw-semibold); }
+.pf-status-v { font-size: var(--fs-lg); line-height: 1.3; }
+.pf-title-n { color: var(--c-amber); }
+.pf-panes { display: grid; grid-template-columns: clamp(300px, 36%, 620px) minmax(0, 1fr); gap: var(--sp-3); align-items: start; min-width: 0; }
+.pf-detail { display: grid; gap: var(--sp-2); min-width: 0; padding: var(--sp-3) var(--sp-4) var(--sp-4); }
+.pf-dt { margin: 0; font-size: var(--fs-lg); line-height: 1.35; }
+.pf-du { margin: 0; color: var(--c-fg-2); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: break-word; }
+.pf-cap { margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); color: var(--c-fg-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+/* the WinForms routing box scrolls on its own, so lane, main, summarizer and apply stay one short scroll away */
+.pf-roles {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-2);
+  height: clamp(240px, calc(100vh - 470px), 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--sp-2);
+  border: var(--hair) solid var(--c-line);
+  border-radius: var(--r-lg);
+  background: var(--c-sunk);
+}
+.pf-rh { margin: var(--sp-1) 0 0; font-size: var(--fs-sm); line-height: 1.4; }
+.pf-tri { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-1); }
+.pf-blk { display: grid; gap: var(--sp-1); min-width: 0; }
+.pf-blk-h { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
+.pf-lane-rec { margin: 0; overflow-wrap: anywhere; }
+.pf-apply { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding-top: var(--sp-2); border-top: var(--hair) solid var(--c-line-soft); }
+.pf-apply .pf-clear { flex: 1 1 100%; margin-top: 0; }
+.pf-tray-compact:empty { display: none; }
+.pf-agents-card > summary { cursor: pointer; list-style: none; }
+.pf-agents-card > summary::-webkit-details-marker { display: none; }
+.pf-agents-card:not([open]) > summary { border-bottom: 0; }
+.pf-dlg {
+  width: min(860px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  padding: var(--sp-4);
+  border: var(--hair) solid var(--c-line);
+  border-radius: var(--r-xl);
+  background: var(--c-elev);
+  color: var(--c-fg);
+  box-shadow: var(--shadow-pop);
+}
+.pf-dlg::backdrop { background: var(--c-shadow-strong); }
+.pf-dlg-h { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.pf-rec { width: 100%; margin-top: var(--sp-3); border-collapse: collapse; font-size: var(--fs-xs); }
+.pf-rec th, .pf-rec td { padding: var(--sp-1) var(--sp-2); border-bottom: var(--hair) solid var(--c-line-soft); text-align: left; overflow-wrap: anywhere; }
+
+/* profiles: one card per row; the main button fills the card, 적용 sits beside it at the bottom right */
+.pf-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
+.pf-card {
+  position: relative;
+  min-width: 0;
   border: var(--hair) solid var(--c-line);
   border-radius: var(--r-lg);
   background: var(--c-main);
+}
+.pf-card-b {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: var(--sp-3);
+  border: 0;
+  border-radius: inherit;
+  background: none;
   color: var(--c-fg);
   font: inherit;
   text-align: left;
 }
-button.pf-card:hover:not(:disabled) { background: var(--fill-hover); border-color: var(--c-line-strong); }
-button.pf-card:active:not(:disabled) { background: var(--fill-press); border-color: var(--c-line-strong); }
+button.pf-card-b:hover:not(:disabled) { background: var(--fill-hover); }
+button.pf-card-b:active:not(:disabled) { background: var(--fill-press); }
+button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-card.on { border-color: var(--c-green); background: var(--c-green-tint); box-shadow: inset 0 0 0 1px var(--c-green); }
-button.pf-card:disabled { cursor: not-allowed; border-color: var(--ctl-edge); background: var(--c-sunk); color: var(--c-fg-3); box-shadow: none; }
-button.pf-card:disabled.on { background: var(--c-green-tint); }
+.pf-card-top, .pf-card-main, .pf-card-svc { padding-right: 72px; }
+.pf-card > .pf-current { position: absolute; top: var(--sp-3); right: var(--sp-3); }
+.pf-card-apply { position: absolute; right: var(--sp-3); bottom: var(--sp-3); }
 .pf-current .ic { width: 12px; height: 12px; }
 .pf-card-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); }
 .pf-card-num { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); }
@@ -331,35 +393,24 @@ button.pf-card:disabled.on { background: var(--c-green-tint); }
 .pf-card-en { color: var(--c-fg-3); font-size: var(--fs-xs); }
 .pf-card-tag { margin-top: 2px; }
 .pf-card-sum { margin-top: 2px; color: var(--c-fg-2); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: break-word; }
-.pf-card-main { margin-top: var(--sp-1); color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.pf-card-main, .pf-card-svc { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.pf-card-main { margin-top: var(--sp-1); }
 
-/* routing */
-.pf-group + .pf-group { margin-top: var(--sp-3); }
-.pf-group-h { display: flex; align-items: baseline; gap: var(--sp-2); margin: 0 0 var(--sp-1); color: var(--c-fg-2); font-size: var(--fs-sm); }
+/* routing: one WinForms row = the label line (recommendation chip kept) over three equal-width selects */
+.pf-group { display: grid; gap: var(--sp-1); min-width: 0; }
+.pf-group-h { display: flex; align-items: baseline; gap: var(--sp-2); margin: 0; color: var(--c-fg-2); font-size: var(--fs-sm); }
 .pf-routes { display: grid; gap: var(--sp-1); }
-.pf-route {
-  display: grid;
-  grid-template-columns: minmax(170px, 1.1fr) minmax(240px, 1.7fr) minmax(130px, .9fr);
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-1) var(--sp-2);
-  border-radius: var(--r-md);
-  background: var(--c-main);
-}
-.pf-route + .pf-route { border-top: var(--hair) solid var(--c-line-soft); }
+.pf-route { display: grid; gap: 2px; min-width: 0; padding: var(--sp-1) var(--sp-2); border-radius: var(--r-md); background: var(--c-main); }
 .pf-route-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1); min-width: 0; }
 .pf-route-ko { font-weight: var(--fw-medium); }
 .pf-route-en { color: var(--c-fg-3); font-size: var(--fs-xs); overflow-wrap: anywhere; }
-.pf-route-sels { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.8fr) minmax(0, .7fr); gap: var(--sp-1); }
-.pf-route-val { min-width: 0; }
-.pf-route-rec { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1); min-width: 0; }
 .pf-rec-off { color: var(--c-fg-3); font-size: var(--fs-2xs); overflow-wrap: anywhere; }
 
 /* main, lane, summarizer, memory */
-.pf-main, .pf-lane, .pf-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: var(--sp-2); align-items: end; }
-.pf-main-ro, .pf-lane-ro, .pf-sum-ro { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.pf-lane, .pf-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-1); align-items: end; }
+.pf-lane-ro { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .pf-main-v { font-family: var(--font-mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
-.pf-mems { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); }
+.pf-mems { display: grid; gap: var(--sp-2); }
 .pf-mem-row {
   display: grid;
   gap: var(--sp-1);
@@ -371,7 +422,7 @@ button.pf-card:disabled.on { background: var(--c-green-tint); }
 }
 .pf-mem-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); }
 .pf-mem-cat { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); }
-.pf-mem-sels { display: grid; grid-template-columns: minmax(80px, .6fr) minmax(140px, 1.4fr) minmax(90px, .7fr); gap: var(--sp-1); }
+.pf-mem-sels { display: grid; gap: var(--sp-1); }
 
 /* guide */
 .pf-guide { display: grid; gap: var(--sp-2); }
@@ -452,39 +503,29 @@ button.pf-card:disabled.on { background: var(--c-green-tint); }
 /* The rail keeps the shared shell treatment on every route; the profiles page owns no override. */
 
 @media (max-width: 1040px) {
-  .pf-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pf-agent { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr); }
   .pf-agent .pf-mem-field { grid-column: 1 / -1; }
   .pf-pin-sels { grid-template-columns: minmax(0, 1fr); }
-  .pf-mem-sels { grid-template-columns: minmax(80px, .6fr) minmax(0, 1.4fr) minmax(92px, .7fr); }
   .pf-skel-agent { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr); min-height: calc(var(--sp-12) * 3 + var(--sp-8) - 2px); }
   .pf-skel-card { min-height: calc(var(--sp-12) * 4 + var(--sp-2) + 2px); }
   .pf-skel-agent .pf-skel-mem { grid-column: 1 / -1; }
   .pf-skel-pin { grid-template-columns: minmax(0, 1fr); }
-  .pf-skel-route { grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.6fr); min-height: calc(var(--sp-12) * 4); }
-  .pf-skel-route-sels { grid-template-columns: minmax(0, 1fr); }
-  .pf-skel-rec { grid-column: 1 / -1; }
-  .pf-route { grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.6fr); }
-  .pf-route-sels { grid-template-columns: minmax(0, 1fr); }
-  .pf-route-rec { grid-column: 1 / -1; }
+}
+@media (max-width: 899px) {
+  .pf-panes { grid-template-columns: minmax(0, 1fr); }
+  .pf-roles { height: auto; overflow: visible; }
 }
 @media (max-width: 760px) {
   .pf { padding: var(--sp-3) var(--sp-2) var(--sp-8); }
-  .pf-cards, .pf-mems { grid-template-columns: minmax(0, 1fr); }
   .pf-agent { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .pf-agent-id { grid-column: 1 / -1; }
   .pf-agent .pf-mem-field { grid-column: 1 / -1; }
-  .pf-route { grid-template-columns: minmax(0, 1fr); }
-  .pf-route-sels, .pf-main, .pf-lane, .pf-sum { grid-template-columns: minmax(0, 1fr); }
+  .pf-lane, .pf-sum { grid-template-columns: minmax(0, 1fr); }
   .pf-field-grow { grid-column: auto; }
-  .pf-mem-sels { grid-template-columns: minmax(0, 1fr); }
   .pf-guide-row { grid-template-columns: minmax(0, 1fr); }
   .pf-skel-agent { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: calc(var(--sp-12) * 5); }
   .pf-skel-id { grid-column: 1 / -1; }
   .pf-skel-agent .pf-skel-mem { grid-column: 1 / -1; }
-  .pf-skel-route { grid-template-columns: minmax(0, 1fr); min-height: calc(var(--sp-12) * 5); }
-  .pf-skel-route-sels { grid-template-columns: minmax(0, 1fr); }
-  .pf-skel-rec { grid-column: auto; }
   .pf-sec-b { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
 }
 @media (max-width: 599px) {
@@ -492,7 +533,7 @@ button.pf-card:disabled.on { background: var(--c-green-tint); }
    * Desktop keeps the 28 px board density in --ctl-h; only the phone raises the local token. */
   .pf { --ctl-h: var(--hit); }
   .pf-agent { grid-template-columns: minmax(0, 1fr); align-items: start; }
-  .pf-pin-sels { grid-template-columns: minmax(0, 1fr); }
+  .pf-pin-sels, .pf-tri { grid-template-columns: minmax(0, 1fr); }
   .pf-nav-b, .pf-diff summary { min-height: var(--hit); }
   .pf-nav-b { align-items: center; }
   /* The compact page keeps a plain, always-visible title strip; the editor leads below it. */
@@ -513,7 +554,6 @@ button.pf-card:disabled.on { background: var(--c-green-tint); }
   .pf-skel-agent { grid-template-columns: minmax(0, 1fr); min-height: calc(var(--sp-12) * 7 + var(--sp-6) - 2px); }
   .pf-skel-card { min-height: calc(var(--sp-12) * 4 + var(--sp-8) + var(--sp-3) - var(--hair)); }
   .pf-skel-id, .pf-skel-agent .pf-skel-mem { grid-column: auto; }
-  .pf-skel-route { min-height: calc(var(--sp-12) * 7); }
 }
 /* C1 desktop floor: the shared --fs-sm token is 12px at wide widths, but these are prose lines.
  * Keep the repair on this page so the denser shared board typography is unchanged. */

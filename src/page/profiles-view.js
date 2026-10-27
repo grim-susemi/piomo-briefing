@@ -25,16 +25,25 @@
   ];
   var LANES = ['daily-normal', 'daily-heavy', 'geeky-normal', 'geeky-heavy'];
   var THINKING = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+  // The sidebar jumps follow the screen: the cards, the detail from top to bottom, then the board-only extras.
   var SECTIONS = [
-    ['agents', '메인 에이전트', '에이전트별 레인·핀·기억'],
     ['profiles', '프로필', '프로필과 현재 선택'],
-    ['routing', '역할 배치', '에이전트·카테고리별 서비스/모델/추론'],
-    ['main', '메인 모델', '세션을 여는 기본 모델'],
-    ['lanes', '모델 레인', 'model_profile 선택'],
-    ['summarizer', '요약 모델', '압축 요약 모델과 경고'],
+    ['routing', '모델 라우팅', '전담 에이전트 / 작업 카테고리'],
     ['memory', '메모리 행', 'Kibitzer·Reflection 공통 행'],
-    ['guide', '권장 가이드', '경로와 sha256']
+    ['lanes', '모델 레인', 'model_profile 선택'],
+    ['main', '메인 모델', '세션을 여는 기본 모델'],
+    ['summarizer', '요약 모델', '압축 요약 모델과 경고'],
+    ['guide', '권장 가이드', '경로와 sha256'],
+    ['agents', '메인 에이전트', '에이전트별 레인·핀·기억']
   ];
+  // WinForms copy (Must have 4) and the purpose groups of PS RoutingGroups (PS:346-358) in their order. A board
+  // group id maps to the WinForms section id of the flow map; unknown groups follow and 추가 설정 closes a section.
+  var CAPTIONS = ['1. 구독 서비스', '2. AI 모델', '3. 추론 강도'];
+  var ROLE_SECTIONS = [
+    ['agents', '전담 에이전트 · Agents', ['discovery', 'planning', 'review']],
+    ['categories', '작업 카테고리 · Categories', ['general', 'reasoning', 'specialism']]
+  ];
+  var FLOW_GROUP = { discovery: 'explore-research', planning: 'plan-advice', review: 'review-qa', general: 'quick-general', reasoning: 'deep', specialism: 'specialist' };
   // Identity marks are shapes as well as colours, so the fixed roster palette is never the only cue.
   var SHAPES = { sisyphus: 'circle', hephaestus: 'square', prometheus: 'triangle', atlas: 'diamond' };
   var SHAPE_KO = { circle: '원형', square: '사각형', triangle: '삼각형', diamond: '마름모' };
@@ -157,7 +166,7 @@
     return esc(v).replace(KEEP_PHRASES, function (m) { return '<span class="pf-keep">' + m + '</span>'; });
   }
   function currentChip() {
-    return '<span class="pf-chip pf-c-green pf-current">' + ic('check', 'ic-sm') + ' ' + esc('현재') + '</span>';
+    return '<span class="pf-chip pf-c-green pf-current">' + ic('check', 'ic-sm') + ' ' + esc('적용 중') + '</span>';
   }
 
   // ---- model helpers -----------------------------------------------------------------------------------------------
@@ -518,16 +527,16 @@
     };
     return '<div class="pf-loading" data-pf-loading role="status">' +
       '<div class="pf-skeleton">' +
-      '<div class="pf-homes pf-skel-homes" data-pf-skel="homes" aria-hidden="true">' +
-      home('primary') + home('mirror') + home('stable-500') + '</div>' +
       '<section class="pf-tray pf-tray-compact" data-pf-skel="tray" aria-label="바꿀 값"><div class="pf-tray-c">' +
       tag('대기') + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
       '<span class="pf-muted pf-tray-note">바꾼 값 없음</span>' +
       '<span class="pf-tray-next" id="pf-focus-status" tabindex="-1"><span class="pf-pulse" aria-hidden="true">' +
       ic('refresh-cw', 'ic-sm') + '</span> 프로필 상태를 불러오는 중…</span></div></section>' +
+      '<div class="pf-panes">' + loadingSection('profiles', '<div class="pf-cards">' + cards + '</div>', null) +
+      loadingSection('routing', '<div class="pf-routes">' + routes + '</div>', null) + '</div>' +
       loadingSection('agents', '<div class="pf-agents">' + agents + '</div>', AGENTS.length) +
-      loadingSection('profiles', '<div class="pf-cards">' + cards + '</div>', null) +
-      loadingSection('routing', '<div class="pf-routes">' + routes + '</div>', null) +
+      '<div class="pf-homes pf-skel-homes" data-pf-skel="homes" aria-hidden="true">' +
+      home('primary') + home('mirror') + home('stable-500') + '</div>' +
       '</div></div>';
   }
   function errorBlock(edit) {
@@ -542,19 +551,37 @@
     var badge = state === 'loading' ? chip('pf-c-gray', '불러오는 중')
       : state === 'error' ? chip('pf-c-red', '불러오지 못함')
       : !live ? chip('pf-c-gray', '파일 보기') : ro ? chip('pf-c-amber', '읽기 전용') : chip('pf-c-green', '편집 가능');
-    var active = obj(view && view.activeProfile);
-    var activeCard = null;
-    if (active) {
-      arr(view.profiles).forEach(function (p) { if (obj(p) && p.key === active.key) activeCard = p; });
-    }
-    var activeLine = activeCard
-      ? '<span class="pf-active">현재 ' + esc(activeCard.nameKr || activeCard.name || activeCard.key) + '</span>'
-      : state === 'loading' ? '<span class="pf-active pf-skel-active" aria-hidden="true"><span class="pf-skel-line"></span></span>' : '';
+    // WinForms Update-PendingIndicator (PS:4529-4535): the heading carries the pending count over every profile;
+    // document.title stays the board's own.
+    var n = state === 'view' ? pendingOf(edit).length : 0;
     return '<header class="pf-head">' +
-      '<div class="pf-head-l"><p class="pf-kicker">[프로필·에이전트]</p><h1 class="pf-title">프로필·에이전트</h1>' +
-      '<p class="pf-sub">WinForms 스위처의 역할 배치와 모델 레인, <span class="pf-keep">메모리 행을 상황판에서 확인하고</span>, <span class="pf-keep">실시간 상황판</span>에서 미리보기 후 적용합니다.</p></div>' +
-      '<div class="pf-head-r">' + badge + activeLine + '</div></header>';
+      '<div class="pf-head-l"><p class="pf-kicker">[프로필·에이전트]</p><h1 class="pf-title">프로필·에이전트' +
+      (n ? '<span class="pf-title-n">' + esc(' · 변경 보류 ' + n + '건') + '</span>' : '') + '</h1>' +
+      '<p class="pf-sub">WinForms 스위처의 역할 배치와 모델 레인, <span class="pf-keep">메모리 행을 상황판에서 확인하고</span>, <span class="pf-keep">실시간 상황판</span>에서 바로 적용합니다.</p></div>' +
+      '<div class="pf-head-r">' + badge + '</div></header>';
   }
+
+  // WinForms status panel (PS:4069-4140): 현재 전역 적용 and the active profile, 전역 적용 중, the read-only banner when
+  // writes are refused, and 권장 배치 가이드 at the right end.
+  function statusStrip(view, edit, ro, stale) {
+    var p = profileOf(view, str(obj(view.activeProfile) && view.activeProfile.key));
+    return '<section class="pf-status" data-flow="status" aria-label="현재 전역 적용">' +
+      '<div class="pf-status-l"><span class="pf-status-c">현재 전역 적용</span><b class="pf-status-v">' + esc(p ? cardTitle(p) : '선택 없음') + '</b></div>' +
+      '<div class="pf-status-m">' + (p ? chip('pf-c-green', '전역 적용 중') : '') +
+      (stale ? banner(STALE_BANNER, 'pf-banner-warn', 'alert') : ro ? readOnlyNote(edit, view) : '') + '</div>' +
+      '<div class="pf-status-r"><span class="pf-status-c">공식 권장 기준</span>' +
+      button('guide-open', attr('data-flow', 'guide') + ' aria-haspopup="dialog" aria-label="OMO 공식 권장 배치 가이드 열기"', '권장 배치 가이드', false, 'pf-btn') +
+      '</div></section>';
+  }
+  function shownKeyOf(view, edit) {
+    return str(edit && edit.shown) || str(obj(view && view.activeProfile) && view.activeProfile.key);
+  }
+  function profileOf(view, key) {
+    var found = null;
+    arr(view && view.profiles).forEach(function (p) { if (obj(p) && p.key === key) found = p; });
+    return found;
+  }
+  function cardTitle(p) { return (num(p.num) === null ? '' : p.num + '. ') + str(p.nameKr || p.name || p.key); }
 
   function homes(view) {
     var h = obj(view && view.homes) || {};
@@ -580,15 +607,18 @@
   }
 
   // ---- sections ----------------------------------------------------------------------------------------------------
-  function section(key, body, count, extra, subOverride) {
+  function secHead(key, count, extra, subOverride, tagName) {
     var meta = null;
     SECTIONS.forEach(function (s) { if (s[0] === key) meta = s; });
     var title = meta ? meta[1] : key, sub = typeof subOverride === 'string' ? subOverride : meta ? meta[2] : '';
-    return '<section class="pf-sec" id="pf-sec-' + esc(key) + '"' + attr('data-pf-sec', key) + '>' +
-      '<header class="pf-sec-h"><div class="pf-sec-t">' + tag(title) + '<h2>' + esc(title) + '</h2>' +
+    var t = tagName || 'header';
+    return '<' + t + ' class="pf-sec-h"><div class="pf-sec-t">' + tag(title) + '<h2>' + esc(title) + '</h2>' +
       (sub ? '<p class="pf-sec-s">' + esc(sub) + '</p>' : '') + '</div>' +
-      '<div class="pf-sec-r">' + (count === null ? '' : '<span class="pf-count">' + count + '</span>') + (extra || '') + '</div></header>' +
-      '<div class="pf-sec-b">' + body + '</div></section>';
+      '<div class="pf-sec-r">' + (count === null ? '' : '<span class="pf-count">' + count + '</span>') + (extra || '') + '</div></' + t + '>';
+  }
+  function section(key, body, count, extra, subOverride, attrs) {
+    return '<section class="pf-sec" id="pf-sec-' + esc(key) + '"' + attr('data-pf-sec', key) + (attrs || '') + '>' +
+      secHead(key, count, extra, subOverride) + '<div class="pf-sec-b">' + body + '</div></section>';
   }
 
   function memoryChangeOf(pending, row) {
@@ -655,87 +685,95 @@
         '<div class="pf-field pf-mem-field"><span class="pf-lbl">기억</span><div class="pf-mem-line">' +
         '<span class="pf-ro-val pf-mem">' + (mem ? esc(mem) : '<span class="pf-dash">—</span>') + '</span>' + resetBtn + '</div></div></article>';
     }).join('');
-    return section('agents', '<div class="pf-agents">' + rows + '</div>', AGENTS.length,
-      roster.warning ? chip('pf-c-amber', 'roster 경고', str(roster.warning)) : '');
+    // The board-only roster is a collapsed card below both panes; its open state survives re-renders.
+    return '<details class="pf-sec pf-agents-card" id="pf-sec-agents" data-pf-sec="agents"' + boolAttr('open', !!(edit && edit.agentsOpen === true)) + '>' +
+      secHead('agents', AGENTS.length, roster.warning ? chip('pf-c-amber', 'roster 경고', str(roster.warning)) : '', null, 'summary') +
+      '<div class="pf-sec-b"><div class="pf-agents">' + rows + '</div></div></details>';
   }
 
+  // WinForms New-ProfileCard (PS:7067-7205), one card per row: the main button only shows the profile (aria-pressed =
+  // shown), 적용 is a separate button beside it (never nested) and 적용 중 marks the globally active profile.
   function profileCards(view, edit, ro) {
-    var pending = pendingOf(edit);
     var busy = !!(edit && edit.busy === true);
-    var selected = firstOf(pending, 'selectProfile');
+    var conflict = !!(edit && edit.conflict === true);
     var activeKey = str(obj(view && view.activeProfile) && view.activeProfile.key);
-    var current = selected ? str(selected.profileKey) : activeKey;
+    var shown = shownKeyOf(view, edit);
     var list = arr(view && view.profiles);
-    var cards = arr(view && view.profiles).map(function (p) {
+    var cards = list.map(function (p) {
       if (!obj(p)) return '';
-      var on = p.key === current || p.current === true;
+      var on = p.key === shown;
       var body = '<span class="pf-card-top"><span class="pf-card-num">' + esc(num(p.num) === null ? '' : p.num) + '</span>' +
-        '<span class="pf-card-name">' + esc(p.nameKr || p.name || p.key) + '</span>' + (on ? currentChip() : '') + '</span>' +
+        '<span class="pf-card-name">' + esc(p.nameKr || p.name || p.key) + '</span></span>' +
         '<span class="pf-card-en">' + esc(p.name || '') + '</span>' +
         '<span class="pf-card-tag">' + tag(p.tag || 'profile') + '</span>' +
         '<span class="pf-card-sum">' + summaryText(p.summary || '') + '</span>' +
-        '<span class="pf-card-main">' + esc(str(p.mainProvider) + ' · ' + str(p.mainModel) + ' / ' + str(p.mainThinking)) + '</span>';
-      if (ro) return '<article class="pf-card' + (on ? ' on' : '') + '">' + body + '</article>';
-      return '<button type="button" class="pf-card' + (on ? ' on' : '') + '"' + attr('data-pf', 'select-profile') +
-        attr('data-profile', p.key) + ' aria-pressed="' + on + '"' + boolAttr('disabled', busy) + '>' + body + '</button>';
+        '<span class="pf-card-main">' + esc('메인: ' + str(p.mainModel) + ' / ' + str(p.mainThinking)) + '</span>' +
+        '<span class="pf-card-svc">' + esc('서비스: ' + str(p.mainProvider)) + '</span>';
+      var main = ro ? '<div class="pf-card-b">' + body + '</div>'
+        : '<button type="button" class="pf-card-b"' + attr('data-pf', 'select-profile') + attr('data-profile', p.key) +
+          attr('data-flow', 'card:' + p.key) + ' aria-pressed="' + on + '"' + boolAttr('disabled', busy) + '>' + body + '</button>';
+      return '<article class="pf-card' + (on ? ' on' : '') + '">' + main + (p.key === activeKey ? currentChip() : '') +
+        (ro ? '' : button('apply-card', attr('data-profile', p.key) + attr('data-flow', 'apply:card:' + p.key) +
+          attr('aria-label', cardTitle(p) + ' 적용'), '적용', busy || conflict, 'pf-btn pf-btn-primary pf-card-apply')) + '</article>';
     }).join('');
     return section('profiles', '<div class="pf-cards">' +
       (cards || emptyState('프로필이 없어요. omo.jsonc의 프로필을 확인한 뒤 상태를 다시 불러와 주세요.', edit)) + '</div>', list.length, '',
-    list.length + '개 프로필 · ' + (current ? '현재 선택' : '선택 없음'));
+    list.length + '개 프로필 · ' + (shown ? '현재 선택' : '선택 없음'), attr('data-flow', 'cards'));
   }
 
-  function routingRows(view, edit, ro) {
-    var rows = arr(obj(view && view.routing) && view.routing.rows);
-    var entries = servedEntries(view);
+  // One WinForms New-RoutingRow (PS:5595-5785): the label line keeps the recommendation chip, then the three captions
+  // over three equal-width selects. The effort list holds only the chosen model's served levels.
+  function routeRow(r, entries, candidates, edit, ro) {
+    var key = str(r.section) + '/' + str(r.role);
     var busy = !!(edit && edit.busy === true);
-    var groups = [], index = map();
-    rows.forEach(function (r) {
-      if (!obj(r)) return;
-      var key = str(r.section) + '/' + str(r.group);
-      if (!has(index, key)) {
-        index[key] = { key: key, section: str(r.section), group: str(r.group), label: str(r.groupLabel) || str(r.group), rows: [] };
-        groups.push(index[key]);
-      }
-      index[key].rows.push(r);
-    });
-    var html = groups.map(function (group) {
-      var body = group.rows.map(function (r) {
-        var change = routeChangeOf(pendingOf(edit), r.section, r.role);
-        var draft = draftOf(edit, 'route:' + str(r.section) + '/' + str(r.role));
-        var alias = str(r.model);
-        var entry = entryOf(entries, alias);
-        var full = change ? str(change.model) : draft ? str(draft.model) : entry ? entry.model : alias;
-        var provider = change ? str(change.provider) : draft ? str(draft.provider) : entry ? providerOf(entry.model) : providerOf(alias);
-        var thinking = change ? str(change.thinking) : draft ? str(draft.thinking) : str(r.reasoning) || entry && entry.variant || '';
-        var providers = providersOf(entries, provider);
-        var rec = recommendationOf(r);
-        var readonlyRow = ro || r.readOnly === true || !!r.absentIn;
-        var rid = 'pf-route-' + slug(r.section + '-' + r.role);
-        var fields = readonlyRow
-          ? '<span class="pf-ro-val">' + valueOrDash(provider) + ' · ' + valueOrDash(bareModel(full)) + ' / ' + valueOrDash(thinking) + '</span>'
-          : '<div class="pf-route-sels">' +
-            labelled('서비스', rid + '-provider', providerSelect('route-provider',
-              withId(rid + '-provider', ' data-route="' + esc(r.section + '/' + r.role) + '"'), providers, provider, busy)) +
-            labelled('모델', rid + '-model', modelSelect('route-model',
-              withId(rid + '-model', ' data-route="' + esc(r.section + '/' + r.role) + '"'), entries, provider, full, busy)) +
-            labelled('추론', rid + '-thinking', select('route-thinking',
-              withId(rid + '-thinking', ' data-route="' + esc(r.section + '/' + r.role) + '"'), thinkingOptions(thinking, true), busy)) +
-            '</div>';
-        return '<div class="pf-route" data-pf-route="' + esc(r.section + '/' + r.role) + '">' +
-          '<div class="pf-route-id">' + tag(r.section === 'agents' ? 'agent' : 'category') +
-          '<span class="pf-route-ko">' + esc(r.labelKo || r.role) + '</span>' +
-          '<span class="pf-route-en">' + esc(r.labelEn || r.role) + '</span>' +
-          (r.stateLabel ? chip('pf-c-amber', r.stateLabel) : '') + '</div>' +
-          '<div class="pf-route-val">' + fields + '</div>' +
-          '<div class="pf-route-rec">' + chip('pf-st-' + rec.status, rec.label, rec.official) +
-          (rec.official ? '<span class="pf-rec-off">' + esc(rec.official) + '</span>' : '') + '</div></div>';
-      }).join('');
-      return '<div class="pf-group"><h3 class="pf-group-h">' + tag(group.section === 'agents' ? 'agents' : 'categories') +
-        esc(group.label) + ' <span class="pf-count">' + group.rows.length + '</span></h3><div class="pf-routes">' + body + '</div></div>';
-    }).join('');
-    return section('routing', html || emptyState('배치할 역할이 없어요. 프로필 설정을 확인한 뒤 상태를 다시 불러와 주세요.', edit), rows.length);
+    var change = routeChangeOf(pendingOf(edit), r.section, r.role);
+    var draft = draftOf(edit, 'route:' + key);
+    var alias = str(r.model);
+    var entry = entryOf(entries, alias);
+    var full = change ? str(change.model) : draft ? str(draft.model) : entry ? entry.model : alias;
+    var provider = change ? str(change.provider) : draft ? str(draft.provider) : entry ? providerOf(entry.model) : providerOf(alias);
+    var thinking = change ? str(change.thinking) : draft ? str(draft.thinking) : str(r.reasoning) || entry && entry.variant || '';
+    var rec = recommendationOf(r);
+    var rid = 'pf-route-' + slug(r.section + '-' + r.role);
+    var on = function (part) { return attr('data-route', key) + attr('data-flow', 'role:' + key + ':' + part); };
+    var fields = ro || r.readOnly === true || !!r.absentIn
+      ? '<span class="pf-ro-val">' + valueOrDash(provider) + ' · ' + valueOrDash(bareModel(full)) + ' / ' + valueOrDash(thinking) + '</span>'
+      : '<div class="pf-tri">' +
+        labelled(CAPTIONS[0], rid + '-provider', providerSelect('route-provider', withId(rid + '-provider', on('service')), providersOf(entries, provider), provider, busy)) +
+        labelled(CAPTIONS[1], rid + '-model', modelSelect('route-model', withId(rid + '-model', on('model')), entries, provider, full, busy)) +
+        labelled(CAPTIONS[2], rid + '-thinking', select('route-thinking', withId(rid + '-thinking', on('effort')), memoryThinkingOptions(candidates, full, thinking), busy)) +
+        '</div>';
+    return '<div class="pf-route" data-pf-route="' + esc(key) + '">' +
+      '<div class="pf-route-id">' + tag(r.section === 'agents' ? 'agent' : 'category') +
+      '<span class="pf-route-ko">' + esc(r.labelKo || r.role) + '</span>' +
+      '<span class="pf-route-en">' + esc(r.labelEn || r.role) + '</span>' +
+      (r.stateLabel ? chip('pf-c-amber', r.stateLabel) : '') + chip('pf-st-' + rec.status, rec.label, rec.official) +
+      (rec.official ? '<span class="pf-rec-off">' + esc(rec.official) + '</span>' : '') + '</div>' + fields + '</div>';
   }
-
+  // The role sections of the WinForms routing box (PS:6213-6260) in their fixed order, whatever order the rows arrive in.
+  function routingRows(view, edit, ro) {
+    var rows = arr(obj(view && view.routing) && view.routing.rows).filter(obj);
+    var entries = servedEntries(view);
+    var candidates = memoryCandidates(view);
+    var html = '';
+    ROLE_SECTIONS.forEach(function (sec) {
+      var mine = rows.filter(function (r) { return r.section === sec[0]; });
+      if (!mine.length) return;
+      var order = sec[2].slice();
+      mine.forEach(function (r) { if (str(r.group) !== 'extras' && order.indexOf(str(r.group)) < 0) order.push(str(r.group)); });
+      order.push('extras');
+      html += '<h3 class="pf-rh">' + esc(sec[1]) + '</h3>';
+      order.forEach(function (group) {
+        var list = mine.filter(function (r) { return str(r.group) === group; });
+        if (!list.length) return;
+        html += '<section class="pf-group"' + attr('data-flow-sec', sec[0] + ':' + (has(FLOW_GROUP, group) ? FLOW_GROUP[group] : group)) + '>' +
+          '<h4 class="pf-group-h">' + esc(group === 'extras' ? '추가 설정' : str(list[0].groupLabel) || group) +
+          ' <span class="pf-count">' + list.length + '</span></h4>' +
+          list.map(function (r) { return routeRow(r, entries, candidates, edit, ro); }).join('') + '</section>';
+      });
+    });
+    return html || emptyState('배치할 역할이 없어요. 프로필 설정을 확인한 뒤 상태를 다시 불러와 주세요.', edit);
+  }
   function mainModel(view, edit, ro) {
     var pending = mainChangeOf(pendingOf(edit));
     var busy = !!(edit && edit.busy === true);
@@ -752,16 +790,16 @@
     if (!effective.provider && !override && !pending) {
       body = emptyNote('현재 프로필의 메인 모델 정보가 없어요');
     } else if (ro) {
-      body = '<div class="pf-main-ro"><span class="pf-main-v">' + valueOrDash(provider) + ' · ' + valueOrDash(model) + ' / ' + valueOrDash(thinking) + '</span>' +
-        (override ? chip('pf-c-green', '직접 지정') : chip('pf-c-gray', '프로필 기본')) + '</div>';
+      body = '<span class="pf-main-v">' + valueOrDash(provider) + ' · ' + valueOrDash(model) + ' / ' + valueOrDash(thinking) + '</span>';
     } else {
-      body = '<div class="pf-main" data-pf-main>' +
-        '<div class="pf-field">' + labelled('서비스', 'pf-main-provider', providerSelect('main-provider', withId('pf-main-provider', ' data-main="1"'), providers, provider, busy)) + '</div>' +
-        '<div class="pf-field">' + labelled('모델', 'pf-main-model', mainModelSelect('main-model', withId('pf-main-model', ' data-main="1"'), entries, provider, model, busy)) + '</div>' +
-        '<div class="pf-field">' + labelled('추론', 'pf-main-thinking', select('main-thinking', withId('pf-main-thinking', ' data-main="1"'), thinkingOptions(thinking, true), busy)) + '</div>' +
-        '<div class="pf-field pf-field-act">' + (override ? chip('pf-c-green', '직접 지정') : chip('pf-c-gray', '프로필 기본')) + '</div></div>';
+      body = '<div class="pf-tri" data-pf-main>' +
+        labelled(CAPTIONS[0], 'pf-main-provider', providerSelect('main-provider', withId('pf-main-provider', ' data-main="1"'), providers, provider, busy)) +
+        labelled(CAPTIONS[1], 'pf-main-model', mainModelSelect('main-model', withId('pf-main-model', ' data-main="1"'), entries, provider, model, busy)) +
+        labelled(CAPTIONS[2], 'pf-main-thinking', select('main-thinking', withId('pf-main-thinking', ' data-main="1"'), thinkingOptions(thinking, true), busy)) +
+        '</div>';
     }
-    return section('main', body, null);
+    return '<div class="pf-blk" id="pf-sec-main" data-pf-sec="main" data-flow="main" data-flow-sec="main"><h3 class="pf-blk-h">메인 모델 설정 ' +
+      (override ? chip('pf-c-green', '직접 지정') : chip('pf-c-gray', '프로필 기본')) + '</h3>' + body + '</div>';
   }
 
   function modelLane(view, edit, ro) {
@@ -785,11 +823,20 @@
       ? '<div class="pf-lane-ro"><span class="pf-ro-val">' + valueOrDash(selection === 'custom-literal' ? literal : selection) + '</span>' +
         (selection === 'custom-literal' ? chip('pf-c-amber', '직접 입력') : '') + '</div>'
       : '<div class="pf-lane" data-pf-lane>' +
-        '<div class="pf-field">' + labelled('model_profile', 'pf-lane-select', select('lane-select', withId('pf-lane-select', ' data-lane="1"'), options, busy)) + '</div>' +
-        '<div class="pf-field pf-field-grow">' +
-        labelled('직접 입력 값', 'pf-lane-literal', textInput('lane-literal', withId('pf-lane-literal', ' data-lane="1"'), literal, busy || selection !== 'custom-literal', '예: custom-literal-id')) + '</div>' +
-        '<div class="pf-field pf-field-act">' + chip('pf-c-gray', 'preview에서 검증') + '</div></div>';
-    return section('lanes', body, null);
+        labelled('model_profile', 'pf-lane-select', select('lane-select', withId('pf-lane-select', ' data-lane="1"'), options, busy)) +
+        labelled('직접 입력 값', 'pf-lane-literal', textInput('lane-literal', withId('pf-lane-literal', ' data-lane="1"'), literal, busy || selection !== 'custom-literal', '예: custom-literal-id'), 'pf-field-grow') + '</div>';
+    var rec = laneRecommendation(view, selection === 'custom-literal' ? literal : selection);
+    return '<div class="pf-blk" id="pf-sec-lanes" data-pf-sec="lanes" data-flow="lane" data-flow-sec="lane">' + body +
+      (rec ? '<p class="pf-note pf-lane-rec">' + esc(rec) + '</p>' : '') + '</div>';
+  }
+  // WinForms Get-ModelProfileRecommendation (PS:2466-2487) from the model_profile data the state already carries.
+  function laneRecommendation(view, active) {
+    var mp = obj(view && view.modelProfile) || {};
+    var custom = obj(mp.model_profiles) && has(mp.model_profiles, active) ? obj(mp.model_profiles[active]) : null;
+    var main = obj(obj(view && view.main) && view.main.effective);
+    if (!active || active === 'off') return main ? 'off: ' + str(main.provider) + '/' + str(main.model) + ' / ' + str(main.thinking) : '';
+    if (active.indexOf('/') >= 0) return active;
+    return custom ? active + ' : ' + jsonText(custom) : active;
   }
 
   function summarizer(view, edit, ro) {
@@ -804,15 +851,13 @@
     var entries = servedEntries(view);
     var warnings = summarizerWarnings(current);
     var body = ro
-      ? '<div class="pf-sum-ro"><span class="pf-ro-val">' + valueOrDash(current || '원본 기본 컴팩션') + '</span></div>'
+      ? '<span class="pf-ro-val">' + valueOrDash(current || '원본 기본 컴팩션') + '</span>'
       : '<div class="pf-sum" data-pf-sum>' +
-        '<div class="pf-field">' +
-        labelled('1. 제공사', 'pf-summarizer-provider', select('summarizer-provider', withId('pf-summarizer-provider', ' data-sum="1"'), summarizerProviderOptions(entries, provider), busy)) + '</div>' +
-        '<div class="pf-field pf-field-grow">' +
-        labelled('2. AI 모델', 'pf-summarizer-model', select('summarizer-model', withId('pf-summarizer-model', ' data-sum="1"'), summarizerModelOptions(entries, provider, current), busy || !provider)) + '</div>' +
-        '<div class="pf-field pf-field-act">' + chip('pf-c-gray', 'compaction.model') + '</div></div>' +
+        labelled('1. 제공사', 'pf-summarizer-provider', select('summarizer-provider', withId('pf-summarizer-provider', ' data-sum="1"'), summarizerProviderOptions(entries, provider), busy)) +
+        labelled('2. AI 모델', 'pf-summarizer-model', select('summarizer-model', withId('pf-summarizer-model', ' data-sum="1"'), summarizerModelOptions(entries, provider, current), busy || !provider), 'pf-field-grow') + '</div>' +
         warnings.map(function (w) { return '<p class="pf-warn pf-warn-' + esc(w.level) + '">' + ic('info', 'ic-sm') + ' ' + esc(w.text) + '</p>'; }).join('');
-    return section('summarizer', body, null);
+    return '<div class="pf-blk" id="pf-sec-summarizer" data-pf-sec="summarizer" data-flow="summarizer" data-flow-sec="summarizer">' +
+      '<h3 class="pf-blk-h">요약 담당 모델 ' + chip('pf-c-gray', 'compaction.model') + '</h3>' + body + '</div>';
   }
 
   function memoryRows(view, edit, ro) {
@@ -876,32 +921,35 @@
       } else {
         var memId = 'pf-memory-' + slug(key);
         var dis = busy || mode !== 'custom';
+        var on = function (part) { return ' data-memory="' + esc(key) + '"' + attr('data-flow', 'memory:' + key + ':' + part); };
+        // WinForms memory row: the mode spans the row, then the three captions over three equal-width selects.
         controls = '<div class="pf-mem-sels" data-pf-memory="' + esc(key) + '">' +
-          labelled('모드', memId + '-mode', select('memory-mode', withId(memId + '-mode', ' data-memory="' + esc(key) + '"'),
+          labelled('모드', memId + '-mode', select('memory-mode', withId(memId + '-mode', on('mode')),
             '<option value="quick"' + (mode === 'quick' ? ' selected' : '') + '>quick 공유 (기본)</option>' +
             '<option value="custom"' + (mode === 'custom' ? ' selected' : '') + '>직접 선택</option>', busy)) +
-          labelled('1. 구독 서비스', memId + '-service', select('memory-service', withId(memId + '-service', ' data-memory="' + esc(key) + '"'),
+          '<div class="pf-tri">' +
+          labelled(CAPTIONS[0], memId + '-service', select('memory-service', withId(memId + '-service', on('service')),
             memoryServiceOptions(candidates, provider), dis)) +
-          labelled('2. AI 모델', memId + '-model', select('memory-model', withId(memId + '-model', ' data-memory="' + esc(key) + '"'),
+          labelled(CAPTIONS[1], memId + '-model', select('memory-model', withId(memId + '-model', on('model')),
             memoryModelOptions(candidates, provider, model), dis)) +
-          labelled('3. 추론 강도', memId + '-thinking', select('memory-thinking', withId(memId + '-thinking', ' data-memory="' + esc(key) + '"'),
+          labelled(CAPTIONS[2], memId + '-thinking', select('memory-thinking', withId(memId + '-thinking', on('effort')),
             memoryThinkingOptions(candidates, model, reasoning), dis)) +
-          '</div>';
+          '</div></div>';
       }
       var chips = [];
       if (m.owned) chips.push(chip('pf-c-green', '소유 행'));
       if (m.external) chips.push(chip('pf-c-amber', '외부 행'));
       if (m.unresolved) chips.push(chip('pf-c-red', '미해결'));
       if (m.hasDedicated) chips.push(chip('pf-c-gray', '전용 행'));
-      return '<article class="pf-mem-row" data-pf-memory-row="' + esc(key) + '">' +
-        '<div class="pf-mem-id">' + tag(secTitle) + '<b>' + esc(rowTitle) + '</b>' +
-        '<span class="pf-mem-cat">' + esc(curCat) + '</span>' + chips.join('') + '</div>' +
-        '<div class="pf-mem-val">' + controls + '</div>' +
+      return '<section class="pf-group"' + attr('data-flow-sec', key) + '><h3 class="pf-rh">' + esc(secTitle) + '</h3>' +
+        '<article class="pf-mem-row" data-pf-memory-row="' + esc(key) + '">' +
+        '<div class="pf-mem-id"><b>' + esc(rowTitle) + '</b>' +
+        '<span class="pf-mem-cat">' + esc(curCat) + '</span>' + chips.join('') + '</div>' + controls +
         '<p class="pf-note pf-mem-cur" data-pf-memory-current="' + esc(key) + '">' + esc(curLine) + '</p>' +
         '<p class="pf-note pf-mem-pend' + (rowErr ? ' pf-err' : '') + '" data-pf-memory-pending="' + esc(key) + '"' +
-        attr('data-state', stateTag) + '>' + esc(pendLine) + '</p></article>';
+        attr('data-state', stateTag) + '>' + esc(pendLine) + '</p></article></section>';
     }).join('');
-    return section('memory', '<div class="pf-mems">' + rows + '</div>', 2);
+    return '<div class="pf-mems" id="pf-sec-memory" data-pf-sec="memory">' + rows + '</div>';
   }
 
   function guideTitle(title, version) {
@@ -934,6 +982,20 @@
       version ? version + ' 기준 경로와 sha256' : '경로와 sha256');
   }
 
+  // 권장 배치 가이드 (PS Show-RecommendationGuide :6380) as an in-page dialog over data the state already carries: the
+  // guide sources and each shown role's official recommendation. Nothing is fetched.
+  function guideDialog(view) {
+    var rows = arr(obj(view && view.routing) && view.routing.rows).filter(obj).map(function (r) {
+      var rec = recommendationOf(r);
+      return '<tr><td>' + esc(r.labelKo || r.role) + '</td><td>' + valueOrDash(str(r.model) && str(r.model) + (str(r.reasoning) ? ' / ' + str(r.reasoning) : '')) +
+        '</td><td>' + valueOrDash(rec.official) + '</td><td>' + chip('pf-st-' + rec.status, rec.label) + '</td></tr>';
+    }).join('');
+    return '<dialog class="pf-dlg" id="pf-guide-dlg" aria-labelledby="pf-guide-t"><div class="pf-dlg-h"><b id="pf-guide-t">권장 배치 가이드</b>' +
+      button('guide-close', '', ic('x', 'ic-sm') + ' 닫기', false, 'pf-btn') + '</div>' + guide(view) +
+      (rows ? '<table class="pf-rec"><thead><tr><th>역할</th><th>현재</th><th>공식 권장</th><th>상태</th></tr></thead><tbody>' + rows + '</tbody></table>' : '') +
+      '</dialog>';
+  }
+
   // ---- pending tray, preview diff and apply result -----------------------------------------------------------------
   function diffRows(preview) {
     var diffs = arr(preview && preview.diffs);
@@ -948,8 +1010,9 @@
     }).join('');
   }
 
-  function tray(view, edit) {
-    if (readonly(view, edit)) return emptyNote(edit && edit.live === true ? '지금은 읽기 전용이라 바꿀 수 없어요' : READONLY_FILE, 'pf-ro-note');
+  // The WinForms message box (PS:4438) at the bottom: results, warnings, the preview diff, backup paths, the pending list
+  // with per-row drop, the 409 block and the interrupted-apply banner. Apply and preview live at the end of the detail.
+  function tray(view, edit, ro) {
     var pending = pendingOf(edit);
     var busy = edit && edit.busy === true;
     var status = str(edit && edit.status);
@@ -957,35 +1020,28 @@
     var conflict = !!(edit && edit.conflict);
     var preview = obj(edit && edit.preview);
     var result = obj(edit && edit.result);
-    var confirmClear = !!(edit && edit.confirmClear);
-    // The empty tray is one quiet line: the editor is what the page exists for. Every state that
-    // carries a change, receipt, error, preview or pending recovery keeps the full tray.
-    if (!pending.length && !busy && !status && !err && !conflict && !preview && !result && !confirmClear) {
-      return '<section class="pf-tray pf-tray-compact" id="pf-sec-tray" data-pf-sec="tray" aria-label="바꿀 값">' +
+    var head = ' id="pf-sec-tray" data-pf-sec="tray" data-flow="message" aria-label="메시지">';
+    var tail = journalBanner(view, edit, ro) + arr(view && view.warnings).map(function (w) {
+      return '<p class="pf-warn">' + ic('info', 'ic-sm') + ' ' + esc(w) + '</p>';
+    }).join('');
+    if (ro || (!pending.length && !busy && !status && !err && !conflict && !preview && !result)) {
+      return '<section class="pf-tray pf-tray-compact"' + head + (ro ? '' :
         '<div class="pf-tray-c" title="바꾼 값이 없어요. 값을 고르면 여기에 모입니다.">' + tag('대기') + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
         '<span class="pf-muted pf-tray-note">바꾼 값 없음</span>' +
-        '<span class="pf-tray-next">아래에서 값을 고르면 여기에 모입니다</span></div></section>';
+        '<span class="pf-tray-next">위에서 값을 고르면 여기에 모입니다</span></div>') + tail + '</section>';
     }
     var list = pending.length
       ? '<ol class="pf-pending">' + pending.map(function (c, i) {
         return '<li><span class="pf-pending-t">' + esc(changeLabel(c)) + '</span>' +
           button('drop', ' data-index="' + i + '" aria-label="이 변경 지우기" title="이 변경 지우기"', ic('x', 'ic-sm'), busy, 'pf-btn pf-btn-icon') + '</li>';
       }).join('') + '</ol>'
-      : emptyNote('바꾼 값이 없어요. 아래에서 값을 고르면 여기에 모입니다.');
-    return '<section class="pf-tray" id="pf-sec-tray" data-pf-sec="tray">' +
+      : emptyNote('바꾼 값이 없어요. 위에서 값을 고르면 여기에 모입니다.');
+    return '<section class="pf-tray"' + head +
       '<header class="pf-sec-h"><div class="pf-sec-t">' + tag('대기') + '<h2>바꿀 값</h2><p class="pf-sec-s">미리보기는 쓰지 않고, 적용만 파일을 씁니다.</p></div>' +
       '<div class="pf-sec-r"><span class="pf-count">' + pending.length + '</span>' +
       (status ? '<span class="pf-chip ' + (conflict ? 'pf-c-red' : result ? 'pf-c-green' : 'pf-c-gray') +
         '" id="pf-focus-status" tabindex="-1" role="status">' + esc(status) + '</span>' : '') + '</div></header>' +
       '<div class="pf-sec-b">' + list +
-      '<div class="pf-tray-acts">' +
-      button('preview', ' aria-label="미리보기"', ic('search', 'ic-sm') + ' 미리보기', busy || !pending.length || conflict, 'pf-btn') +
-      button('apply', ' aria-label="적용"', ic('check', 'ic-sm') + ' 적용', busy || !pending.length || conflict, 'pf-btn pf-btn-primary') +
-      button('clear', ' aria-label="모두 버리기"', '모두 버리기', busy || !pending.length, 'pf-btn pf-btn-danger') +
-      '</div>' +
-      (confirmClear ? '<div class="pf-clear" role="group" aria-label="대기 변경 버리기 확인"><p>대기 중인 변경을 모두 버릴까요?</p>' +
-        button('clear-cancel', ' aria-label="계속 보관"', '계속 보관', busy, 'pf-btn') + ' ' +
-        button('clear-confirm', ' aria-label="모두 버리기 확인"', '모두 버리기', busy, 'pf-btn pf-btn-danger') + '</div>' : '') +
       (busy ? '<p class="pf-note" role="status">처리 중…</p>' : '') +
       (conflict ? '<div class="pf-conflict" role="alert"><b>' + esc(CONFLICT_TEXT) + '</b> ' +
         button('reload', ' aria-label="새로고침"', ic('refresh-cw', 'ic-sm') + ' 새로고침', false, 'pf-btn pf-btn-primary') + '</div>' : '') +
@@ -1000,36 +1056,60 @@
         (arr(result.writes).length ? '<p class="pf-done-s">쓴 파일</p><ul class="pf-writes">' + arr(result.writes).map(function (w) {
           return '<li><code>' + esc(w) + '</code></li>';
         }).join('') + '</ul>' : '') + '</div>' : '') +
-      '</div></section>';
+      '</div>' + tail + '</section>';
   }
 
+  // WinForms 이 프로필 적용하기 (PS:4200-4211, 7517-7545): the shown profile's edits plus the shared ones, then activation.
+  // 미리보기 is optional and never a step; 모두 버리기 asks first.
+  function applyBar(edit, ro) {
+    if (ro) return '';
+    var n = pendingOf(edit).length;
+    var busy = !!(edit && edit.busy === true);
+    var conflict = !!(edit && edit.conflict);
+    return '<div class="pf-apply" data-flow="apply" data-flow-sec="apply">' +
+      button('apply', attr('data-flow', 'apply:detail'), ic('check', 'ic-sm') + ' 이 프로필 적용하기', busy || conflict, 'pf-btn pf-btn-primary') +
+      button('preview', '', ic('search', 'ic-sm') + ' 미리보기', busy || conflict, 'pf-btn') +
+      chip(n ? 'pf-c-amber' : 'pf-c-gray', '변경 보류 ' + n + '건') +
+      button('clear', '', '모두 버리기', busy || !n, 'pf-btn pf-btn-danger') +
+      (edit && edit.confirmClear ? '<div class="pf-clear" role="group" aria-label="대기 변경 버리기 확인"><p>대기 중인 변경을 모두 버릴까요?</p>' +
+        button('clear-cancel', ' aria-label="계속 보관"', '계속 보관', busy, 'pf-btn') + ' ' +
+        button('clear-confirm', ' aria-label="모두 버리기 확인"', '모두 버리기', busy, 'pf-btn pf-btn-danger') + '</div>' : '') + '</div>';
+  }
+
+  // WinForms detail pane (PS:7211-7290) for the shown profile: title, usage, the caption, the role box (its own scroll,
+  // like the routing box PS:6172, 7251), then the lane, main, summarizer and apply rows.
+  function detailPane(v, dv, edit, ro) {
+    var key = shownKeyOf(v, edit), p = profileOf(v, key);
+    var title = p ? cardTitle(p) + (p.name && p.name !== p.nameKr ? ' (' + p.name + ')' : '') : key;
+    return '<section class="pf-sec pf-detail" data-flow="detail"><h2 class="pf-dt">' + esc(title) + '</h2>' +
+      (p && p.summary ? '<p class="pf-du">' + summaryText(p.summary) + '</p>' : '') +
+      '<p class="pf-cap">모델 라우팅 · 전담 에이전트 / 작업 카테고리 <span class="pf-count">' + arr(obj(dv.routing) && dv.routing.rows).length + '</span></p>' +
+      '<div class="pf-roles" id="pf-sec-routing" data-pf-sec="routing" data-flow="roles">' + memoryRows(v, edit, ro) + routingRows(dv, edit, ro) + '</div>' +
+      modelLane(dv, edit, ro) + mainModel(dv, edit, ro) + summarizer(v, edit, ro) + applyBar(edit, ro) + '</section>';
+  }
   // ---- public renderers --------------------------------------------------------------------------------------------
   function render(view, edit) {
     var v = obj(view), e = obj(edit) || {};
     var state = viewState(v, e);
     var ro = state === 'view' ? readonly(v, e) : true;
     var stale = !!(v && (v.banner === STALE_BANNER || (obj(v.inventory) && v.inventory.stale === true) || v.readOnlyReason === 'INVENTORY_STALE'));
-    var shownKey = str(edit && edit.shown || (obj(view && view.activeProfile) && view.activeProfile.key));
-    var detail = obj(view && view.details && view.details[shownKey]);
-    var routingData = obj(detail && detail.routing) || obj(view && view.routing);
-    var mainData = obj(detail && detail.main) || obj(view && view.main);
-    var modelProfileData = obj(detail && detail.modelProfile) || obj(view && view.modelProfile);
-
-    var html = '<div class="pf" data-pf-root data-pf-state="' + state + '" data-pf-busy="' + (e.busy === true) + '" data-pf-conflict="' + (e.conflict === true) + '" data-readonly="' + ro + '">' + header(v, e) + (v ? homes(v) : '') +
-      (stale ? banner(STALE_BANNER, 'pf-banner-warn', 'alert') : '') +
+    return '<div class="pf" data-pf-root data-pf-state="' + state + '" data-pf-busy="' + (e.busy === true) + '" data-pf-conflict="' + (e.conflict === true) + '" data-readonly="' + ro + '">' + header(v, e) +
       (state === 'loading' ? loadingBlock() : '') +
       (state === 'error' ? errorBlock(e) : '') +
-      (v && arr(v.warnings).length ? '<div class="pf-warnings">' + arr(v.warnings).map(function (w) {
-        return '<p class="pf-warn">' + ic('info', 'ic-sm') + ' ' + esc(w) + '</p>';
-      }).join('') + '</div>' : '') +
-      journalBanner(v, e, ro) +
-      (state === 'view' ? tray(v, e) + agentRows(v, e, ro) + profileCards(v, e, ro) +
-        routingRows(Object.assign({}, v, { routing: routingData }), e, ro) +
-        mainModel(Object.assign({}, v, { main: mainData }), e, ro) +
-        modelLane(Object.assign({}, v, { modelProfile: modelProfileData }), e, ro) +
-        summarizer(v, e, ro) + memoryRows(v, e, ro) + guide(v) : '') +
+      (state === 'view' ? loaded(v, e, ro, stale) : '') +
       '</div>';
-    return html;
+  }
+  // The WinForms screen in the board look: status strip, cards | detail, the message strip, then the board extras.
+  function loaded(v, e, ro, stale) {
+    var detail = obj(v.details && v.details[shownKeyOf(v, e)]);
+    var dv = Object.assign({}, v, {
+      routing: obj(detail && detail.routing) || obj(v.routing),
+      main: obj(detail && detail.main) || obj(v.main),
+      modelProfile: obj(detail && detail.modelProfile) || obj(v.modelProfile)
+    });
+    return statusStrip(v, e, ro, stale) + guideDialog(dv) +
+      '<div class="pf-panes">' + profileCards(v, e, ro) + detailPane(v, dv, e, ro) + '</div>' +
+      tray(v, e, ro) + agentRows(v, e, ro) + homes(v);
   }
 
   function side(view, edit) {
@@ -1063,7 +1143,7 @@
     var fetchFn = opt.fetch;
     var tokenFn = opt.token;
     var notify = typeof opt.onChange === 'function' ? opt.onChange : function () {};
-    var s = { view: null, shown: '', pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false };
+    var s = { view: null, shown: '', pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false, agentsOpen: false };
     var seq = 0;
 
     function snapshot() {
@@ -1072,7 +1152,8 @@
         pending: s.pending.slice(), draft: copyMap(s.draft),
         memoryErrors: copyMap(s.memoryErrors), memorySaved: copyMap(s.memorySaved),
         preview: s.preview, conflict: s.conflict, error: s.error, errorKind: s.errorKind,
-        status: s.status, result: s.result, loading: s.loading, busy: s.busy, confirmClear: s.confirmClear
+        status: s.status, result: s.result, loading: s.loading, busy: s.busy, confirmClear: s.confirmClear,
+        agentsOpen: s.agentsOpen
       };
     }
     function changed() { notify(snapshot()); }
@@ -1413,6 +1494,8 @@
         changed();
         return snapshot();
       },
+      // The DOM already shows the toggle; the next render keeps it, so no notification is needed.
+      agentsOpen: function (on) { s.agentsOpen = on === true; return snapshot(); },
       preview: function (profileKey) { return send('preview', null, { profileKey: profileKey }); },
       apply: function (profileKey) { return send('apply', null, { profileKey: profileKey }); },
       reapply: function () {
@@ -1466,9 +1549,15 @@
       // A held apply/preview owns the state until its response settles. Disabled controls also
       // reject synthetic change/input events here, so a newer edit cannot be discarded by the
       // older response's pending/draft reset.
-      if (c.snapshot().busy && ['select-profile', 'reset-memory', 'preview', 'apply', 'reapply',
+      if (c.snapshot().busy && ['select-profile', 'apply-card', 'reset-memory', 'preview', 'apply', 'reapply',
         'clear', 'clear-cancel', 'clear-confirm', 'drop', 'reload-state'].indexOf(act) >= 0) return;
-      if (act === 'jump') {
+      if (act === 'guide-open' || (act === 'jump' && t.getAttribute('data-target') === 'guide')) {
+        var guideBox = root.querySelector('#pf-guide-dlg');
+        if (guideBox && typeof guideBox.showModal === 'function' && !guideBox.open) guideBox.showModal();
+      } else if (act === 'guide-close') {
+        var openBox = root.querySelector('#pf-guide-dlg');
+        if (openBox && typeof openBox.close === 'function') openBox.close();
+      } else if (act === 'jump') {
         var id = 'pf-sec-' + str(t.getAttribute('data-target'));
         var doc = root.ownerDocument;
         var el = doc && typeof doc.getElementById === 'function' ? doc.getElementById(id) : null;
@@ -1476,6 +1565,11 @@
         if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'start' });
       } else if (act === 'select-profile') {
         c.show(t.getAttribute('data-profile'));
+      } else if (act === 'apply-card') {
+        // WinForms card 적용 (PS:7167-7182): show that profile, then write its edits and the shared ones and activate it.
+        c.show(t.getAttribute('data-profile'));
+        c.apply(t.getAttribute('data-profile'));
+        restoreStatusFocus();
       } else if (act === 'reset-memory') {
         c.add({ kind: 'resetAgentMemory', agentId: t.getAttribute('data-agent') });
       } else if (act === 'preview') {
@@ -1716,13 +1810,55 @@
         else { c.removeMemoryRow(key); c.touch(); }
       }
     }
-    root.addEventListener('click', onClick);
-    root.addEventListener('change', onChange);
-    root.addEventListener('input', onInput);
+    // A render replaces the role box. An edit inside it keeps its scroll like the WinForms routing box; showing
+    // another profile starts that profile's box at the top (PS:6168 AutoScrollPosition = Empty).
+    function keepRoles(fn) {
+      return function (ev) {
+        var box = root.querySelector('[data-flow="roles"]');
+        if (!box || !box.scrollTop) return fn(ev);
+        var c = controller(), top = box.scrollTop, shown = c ? c.snapshot().shown : '';
+        fn(ev);
+        var now = root.querySelector('[data-flow="roles"]');
+        if (now && now !== box && c && c.snapshot().shown === shown) now.scrollTop = top;
+      };
+    }
+    function onToggle(ev) {
+      var t = ev && ev.target;
+      var c = t && t.id === 'pf-sec-agents' ? controller() : null;
+      if (c) c.agentsOpen(t.open === true);
+    }
+    // Keys 1-6 show cards 1-6 like WinForms (PS:7382-7395, Must have 9): only while the card buttons are on screen and
+    // enabled, never from a text or select control, with a modifier, during an IME composition or behind the guide.
+    function onKey(ev) {
+      if (!ev || ev.defaultPrevented || ev.isComposing || ev.keyCode === 229) return;
+      if (ev.ctrlKey || ev.altKey || ev.metaKey || ev.shiftKey || !/^[1-6]$/.test(str(ev.key))) return;
+      var t = ev.target;
+      if (t && (t.isContentEditable || (typeof t.closest === 'function' && t.closest('input,select,textarea,[contenteditable]')))) return;
+      if (root.querySelector('#pf-guide-dlg[open]')) return;
+      var buttons = root.querySelectorAll('[data-pf="select-profile"]');
+      var c = buttons.length ? controller() : null;
+      var view = c ? obj(c.snapshot().view) : null;
+      var p = arr(view && view.profiles).filter(function (x) { return obj(x) && x.num === Number(ev.key); })[0];
+      for (var i = 0; p && i < buttons.length; i++) {
+        if (buttons[i].getAttribute('data-profile') !== p.key || buttons[i].hasAttribute('disabled')) continue;
+        if (typeof ev.preventDefault === 'function') ev.preventDefault();
+        c.show(p.key);
+        return;
+      }
+    }
+    var doc = root.ownerDocument;
+    var click = keepRoles(onClick), change = keepRoles(onChange), input = keepRoles(onInput);
+    root.addEventListener('click', click);
+    root.addEventListener('change', change);
+    root.addEventListener('input', input);
+    root.addEventListener('toggle', onToggle, true);
+    if (doc && typeof doc.addEventListener === 'function') doc.addEventListener('keydown', onKey);
     return function unbind() {
-      root.removeEventListener('click', onClick);
-      root.removeEventListener('change', onChange);
-      root.removeEventListener('input', onInput);
+      root.removeEventListener('click', click);
+      root.removeEventListener('change', change);
+      root.removeEventListener('input', input);
+      root.removeEventListener('toggle', onToggle, true);
+      if (doc && typeof doc.removeEventListener === 'function') doc.removeEventListener('keydown', onKey);
     };
   }
 

@@ -145,12 +145,13 @@ test('no pictographic emoji left in the rail, the sidebar or the tab bar, in tex
 // Scope exception (switcher-flow-restore, todo 2): merging board main 0683a8e4415daa8684776f475a56d47fabfd43ea
 // (S1, R1b window-tabs, folded history and memento) with the primary-agents profiles view (84f55c9) produces
 // Buffer.byteLength(pageHtml(test/fixtures/view-model-board.json, 7, { mode: 'file' })) = 563709 B
-// (branch 84f55c9 baseline was 473662 B; main baseline was 463375 B). Re-baseline once to 563709 B;
-// the 16384 B growth budget is unchanged.
+// (branch 84f55c9 baseline was 473662 B; main baseline was 463375 B). Re-baseline once to 563709 B.
+// The growth budget was raised from 16384 B to 32768 B by owner decision on 2026-10-23 (plan Must have 11)
+// for the todo-8 WinForms layout work; the baseline itself is not moved again.
 const BASELINE_TREE = '0683a8e4415daa8684776f475a56d47fabfd43ea';
 const BASELINE_PAGE_BYTES = 563709;
 
-test('fixture page growth over the accepted tree stays within 16 KB (whole page; icon payload printed too)', (t) => {
+test('fixture page growth over the accepted tree stays within 32 KB (whole page; icon payload printed too)', (t) => {
   const notice = /<!--\nIcons: Lucide[\s\S]*?-->\n/.exec(PAGE)[0];
   const bytes = { sprite: Buffer.byteLength(SPRITE[0]), notice: Buffer.byteLength(notice), script: Buffer.byteLength(read('src/page/icons.js')) };
   bytes.payload = bytes.sprite + bytes.notice + bytes.script;
@@ -159,5 +160,5 @@ test('fixture page growth over the accepted tree stays within 16 KB (whole page;
   bytes.baseline = BASELINE_PAGE_BYTES;
   bytes.growth = bytes.page - BASELINE_PAGE_BYTES;
   t.diagnostic('page growth vs ' + BASELINE_TREE + ': ' + bytes.growth + ' B');
-  assert.ok(bytes.growth <= 16 * 1024, JSON.stringify(bytes));
+  assert.ok(bytes.growth <= 32 * 1024, JSON.stringify(bytes));
 });
