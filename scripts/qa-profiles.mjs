@@ -2959,6 +2959,11 @@ const GOLDEN_SEED_FILES = {
   'stable/omo.jsonc': 'stable/omo.jsonc',
   'stable/settings.json': 'stable/agent/settings.json',
 };
+// PS also writes these on apply, but the store does not own them, so the board must leave the seed there:
+// settings.defaultThinkingLevel (PS:3540; plan D13, the main effort stays in the sidecar, store.mjs
+// SETTINGS_ALLOWED_PATHS) and all of stable-500 agent/settings.json (PS:3773; never a store target,
+// piomo-primary-agents plan). test/profiles-store.test.mjs pins both. null = the whole file.
+const SEED_KEPT = { 'primary/settings.json': ['defaultThinkingLevel'], 'stable/settings.json': null };
 const GOLDEN_RUNS = [
   { task: 'profile', seed: 'goldens/dump-state', golden: 'goldens/apply-gpt-deepseek', steps: [['apply:card:gpt-deepseek', null]] },
   { task: 'memory', seed: 'goldens-r3a/intent-main-dryrun', golden: 'goldens-r3a/intent-memory-custom-apply',
@@ -3075,6 +3080,18 @@ function addArgonAliases(homes) {
 function goldenFile(scenarioDir, name) {
   const file = path.join(scenarioDir, 'files', name + '.json');
   return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
+}
+
+// The golden as the store's write contract expects it: a seed-kept file is the seed, a seed-kept key keeps the seed's value.
+function storeContractGolden(name, seed, golden) {
+  if (!Object.hasOwn(SEED_KEPT, name)) return golden;
+  if (SEED_KEPT[name] === null) return seed;
+  const expected = { ...golden };
+  for (const key of SEED_KEPT[name]) {
+    if (seed && Object.hasOwn(seed, key)) expected[key] = seed[key];
+    else delete expected[key];
+  }
+  return expected;
 }
 
 function seedGoldenHomes(root, scenarioDir) {
@@ -3327,11 +3344,11 @@ const VOLATILE_KEYS = new Set(['appliedAt']);
 const canonicalJson = (v) => (Array.isArray(v) ? v.map(canonicalJson) : v && typeof v === 'object'
   ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, VOLATILE_KEYS.has(k) ? '<volatile>' : canonicalJson(v[k])])) : v);
 
-function canonicalDiffs(actual, golden, at = '$', out = []) {
-  if (JSON.stringify(canonicalJson(actual)) === JSON.stringify(canonicalJson(golden))) return out;
-  if (actual && golden && typeof actual === 'object' && typeof golden === 'object' && !Array.isArray(actual) && !Array.isArray(golden)) {
-    for (const key of new Set([...Object.keys(actual), ...Object.keys(golden)])) canonicalDiffs(actual[key], golden[key], at + '.' + key, out);
-  } else out.push({ path: at, actual: actual === undefined ? '(absent)' : actual, golden: golden === undefined ? '(absent)' : golden });
+function canonicalDiffs(actual, expected, at = '$', out = []) {
+  if (JSON.stringify(canonicalJson(actual)) === JSON.stringify(canonicalJson(expected))) return out;
+  if (actual && expected && typeof actual === 'object' && typeof expected === 'object' && !Array.isArray(actual) && !Array.isArray(expected)) {
+    for (const key of new Set([...Object.keys(actual), ...Object.keys(expected)])) canonicalDiffs(actual[key], expected[key], at + '.' + key, out);
+  } else out.push({ path: at, actual: actual === undefined ? '(absent)' : actual, expected: expected === undefined ? '(absent)' : expected });
   return out;
 }
 
@@ -3584,7 +3601,8 @@ async function flowTask(page, tempRoot, size, task) {
   return record;
 }
 
-// A golden scenario through the page: seeded from the scenario's own seed, compared the way the parity tests compare.
+// A golden scenario through the page: seeded from the scenario's own seed, compared the way the parity tests compare,
+// except that the seed is the expectation where the store keeps it (SEED_KEPT).
 async function goldenThroughPage(page, tempRoot, spec) {
   const seedDir = path.join(PROFILE_FIXTURES, spec.seed);
   const goldenDir = path.join(PROFILE_FIXTURES, spec.golden);
@@ -3611,10 +3629,12 @@ async function goldenThroughPage(page, tempRoot, spec) {
       const golden = goldenFile(goldenDir, name);
       if (golden === null) continue;
       const seed = goldenFile(seedDir, name);
+      const expected = storeContractGolden(name, seed, golden);
       const actual = after[rel] ? JSON.parse(after[rel].toString('utf8').replace(/^\uFEFF/, '')) : null;
-      const diffs = canonicalDiffs(actual, golden);
+      const diffs = canonicalDiffs(actual, expected);
       record.files.push({ golden: name, file: rel, boardWrote: record.written.includes(rel),
-        goldenChangedFromSeed: JSON.stringify(canonicalJson(seed)) !== JSON.stringify(canonicalJson(golden)), equal: diffs.length === 0, diffs: diffs.slice(0, 8) });
+        goldenChangedFromSeed: JSON.stringify(canonicalJson(seed)) !== JSON.stringify(canonicalJson(golden)),
+        seedKept: canonicalDiffs(expected, golden).map((d) => d.path), equal: diffs.length === 0, diffs: diffs.slice(0, 8) });
     }
     record.replay = replayThroughStore(seedGoldenHomes(path.join(tempRoot, 'golden-' + spec.task + '-replay'), seedDir), applies[0]?.request, { root: homes.root, tree: after });
   });
@@ -3661,7 +3681,7 @@ function e2eSummary(report) {
   for (const g of report.goldens) {
     if (!g.golden) { lines.push(`- ${g.task}: 해당 시나리오 없음 — ${g.reason}`); continue; }
     lines.push(`- ${g.task}: ${g.seed} → ${g.golden} · ${g.ok ? 'PASS' : 'FAIL'}${g.blocked ? ' · 막힘: ' + g.blocked : ''} · apply ${g.apply.map((a) => a.status + (a.code ? ' ' + a.code : '')).join(',')} · 스토어 재생 ${g.replay ? (g.replay.ok ? '같음' : '다름 ' + JSON.stringify(g.replay.mismatches || g.replay.reason)) : '-'}`);
-    for (const f of g.files) lines.push(`  - ${f.golden}: ${f.equal ? '같음' : '다름'} (보드가 씀 ${f.boardWrote}, golden 이 시드에서 바꿈 ${f.goldenChangedFromSeed})${f.equal ? '' : ' ' + JSON.stringify(f.diffs.slice(0, 3))}`);
+    for (const f of g.files) lines.push(`  - ${f.golden}: ${f.equal ? '같음' : '다름'} (보드가 씀 ${f.boardWrote}, golden 이 시드에서 바꿈 ${f.goldenChangedFromSeed}${f.seedKept.length ? ', 스토어 계약상 시드 유지 ' + f.seedKept.join(' ') : ''})${f.equal ? '' : ' ' + JSON.stringify(f.diffs.slice(0, 3))}`);
   }
   const s = report.stale || {};
   lines.push('', '## 페이지 뒤 편집 (409)', '', `- apply 응답 ${s.exchange?.status} ${s.exchange?.code} · 쓴 파일 ${JSON.stringify(s.written)} · 보류 유지 ${s.pendingAfter?.length}/${s.pending?.length} · ${s.ok ? 'PASS' : 'FAIL'}`);

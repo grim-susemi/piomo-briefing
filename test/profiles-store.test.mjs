@@ -535,6 +535,40 @@ test('auth.json and stable-500 agent/settings.json are never targets and never c
   assert.equal(hashFile(stableSettings), stableHash);
 });
 
+test('goldens: apply-gpt-deepseek through the store equals the golden; defaultThinkingLevel and stable settings stay at the seed', (t) => {
+  // PS also writes settings.defaultThinkingLevel (PS:3540) and stable-500 agent/settings.json (PS:3773); the store owns
+  // neither (plan D13: the main effort stays in the sidecar; stable-500 settings are never a target), so both keep the seed.
+  const scenarioFile = (scenario, name) => JSON.parse(fs.readFileSync(
+    path.join(here, 'fixtures', 'profiles', 'goldens', scenario, 'files', `${name}.json`), 'utf8'));
+  const seedSettings = scenarioFile('dump-state', 'primary/settings.json');
+  const fx = makeFixture(t, {
+    omo: scenarioFile('dump-state', 'primary/omo.jsonc'),
+    settings: seedSettings,
+    stableOmo: scenarioFile('dump-state', 'stable/omo.jsonc'),
+    mainOverride: scenarioFile('dump-state', 'primary/main-override.json'),
+  });
+  const stableSettings = path.join(fx.stable, 'agent', 'settings.json');
+  const stableHash = hashFile(stableSettings);
+  const result = fx.store.apply(body('apply', [{ kind: 'selectProfile', profileKey: 'gpt-deepseek' }], fx.store));
+  assert.equal(result.ok, true);
+  const folded = (value) => JSON.parse(JSON.stringify(value, (key, item) => (key === 'appliedAt' ? '<APPLIED_AT>' : item)));
+  const written = {
+    'primary/omo.jsonc': path.join(fx.primary, 'omo.jsonc'),
+    'primary/selection.json': path.join(fx.primary, 'native-profile-selection.json'),
+    'primary/agent-selection.json': path.join(fx.primary, 'agent', 'native-profile-selection.json'),
+    'primary/main-override.json': path.join(fx.primary, 'runtime', 'native-profile-switcher-main.json'),
+    'stable/omo.jsonc': path.join(fx.stable, 'omo.jsonc'),
+  };
+  for (const [name, file] of Object.entries(written)) {
+    assert.deepEqual(folded(readJsonFile(file)), folded(scenarioFile('apply-gpt-deepseek', name)), name);
+  }
+  const golden = scenarioFile('apply-gpt-deepseek', 'primary/settings.json');
+  assert.notEqual(golden.defaultThinkingLevel, seedSettings.defaultThinkingLevel, 'the golden moves the level, so keeping it is observable');
+  assert.deepEqual(readJsonFile(path.join(fx.primary, 'agent', 'settings.json')),
+    { ...golden, defaultThinkingLevel: seedSettings.defaultThinkingLevel });
+  assert.equal(hashFile(stableSettings), stableHash);
+});
+
 test('setRoute, setModelProfile and setMemoryRow are applied through the same pipeline', (t) => {
   const fx = makeFixture(t);
   const route = fx.store.apply(body('apply', [{
