@@ -1698,6 +1698,78 @@ test('cascade main: effort levels follow the provider-qualified model id, not th
   assert.deepEqual(stagedMain(e), ['openai-opencodex', 'gpt-5.6-sol', 'xhigh']);
 });
 
+// Main-row effort list: WinForms Update-MainThinkingCombo rebuilds the combo from the provider-qualified model's
+// supported levels and selects the clamped effort; with no model entry or no levels the seven-level list stays.
+const mainEffortValues = (e) => [...mainControl(e, 'main-thinking').querySelectorAll('option')].map((o) => o.getAttribute('value'));
+
+test("cascade main: the effort select lists only the chosen model's levels", async () => {
+  // gpt-5.6-sol is listed under two providers with different levels; openai-opencodex comes first in the catalog
+  const e = await openMainRow({
+    'openai-sol': { model: 'openai-opencodex/gpt-5.6-sol', variant: 'xhigh', served: { primary: true, stable: true }, levels: ['low', 'medium', 'high', 'xhigh'] },
+    'commandcode-sol': { model: 'commandcode/gpt-5.6-sol', variant: 'max', served: { primary: true, stable: true }, levels: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] },
+    'commandcode-55': { model: 'commandcode/gpt-5.5', variant: 'max', served: { primary: true, stable: true }, levels: ['low', 'high', 'max'] },
+  });
+  await changeMain(e, 'main-provider', 'commandcode');
+  await changeMain(e, 'main-model', 'gpt-5.5');
+  assert.deepEqual(mainEffortValues(e), ['low', 'high', 'max']);
+
+  // commandcode/gpt-5.6-sol lists its own six levels, not those of the first catalog entry with that bare id
+  await changeMain(e, 'main-model', 'gpt-5.6-sol');
+  assert.deepEqual(mainEffortValues(e), ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+
+  await changeMain(e, 'main-provider', 'openai-opencodex');
+  assert.equal(selectedValueOf(mainControl(e, 'main-model')), 'gpt-5.6-sol');
+  assert.deepEqual(mainEffortValues(e), ['low', 'medium', 'high', 'xhigh']);
+});
+
+test('cascade main: a model with three levels shows exactly those three and clamps an unsupported current effort', async () => {
+  const state = clone(STATE);
+  state.catalog = {
+    'ollama-mini': { model: 'ollama/glm-5.3-mini', variant: 'medium', served: { primary: true, stable: true }, levels: ['minimal', 'low', 'medium'] },
+    'ollama-glm': { model: 'ollama/glm-5.3', variant: 'xhigh', served: { primary: true, stable: true }, levels: ['medium', 'high', 'xhigh'] },
+  };
+  // the saved main effort max is not one of ollama/glm-5.3-mini's three levels
+  state.main = { effective: { provider: 'ollama', model: 'glm-5.3-mini', thinking: 'max' }, override: null };
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'profiles-view', 'annotate'] });
+  e.page.receive({ seq: 1, generatedAt: 0, sessions: [] });
+  e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
+  e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => state });
+  await tick();
+
+  // nothing at or above max: exactly the three levels, showing medium (the nearest lower one); showing it stages nothing
+  assert.deepEqual(mainEffortValues(e), ['minimal', 'low', 'medium']);
+  assert.equal(selectedValueOf(mainControl(e, 'main-thinking')), 'medium');
+  assert.equal(stagedMain(e), null);
+
+  // a model change clamps the saved max (WinForms MainComboCommitted), not the shown medium: xhigh is the nearest lower level
+  await changeMain(e, 'main-model', 'glm-5.3');
+  assert.deepEqual(mainEffortValues(e), ['medium', 'high', 'xhigh']);
+  assert.equal(selectedValueOf(mainControl(e, 'main-thinking')), 'xhigh');
+  assert.deepEqual(stagedMain(e), ['ollama', 'glm-5.3', 'xhigh']);
+
+  // back on the three-level model the shown clamp is the staged effort
+  await changeMain(e, 'main-model', 'glm-5.3-mini');
+  assert.deepEqual(mainEffortValues(e), ['minimal', 'low', 'medium']);
+  assert.equal(selectedValueOf(mainControl(e, 'main-thinking')), 'medium');
+  assert.deepEqual(stagedMain(e), ['ollama', 'glm-5.3-mini', 'medium']);
+});
+
+test('cascade main: no model selected falls back to the seven-level list', async () => {
+  const e = await openMainRow({
+    'openai-sol': { model: 'openai-opencodex/gpt-5.6-sol', variant: 'xhigh', served: { primary: true, stable: true }, levels: ['low', 'medium', 'high', 'xhigh'] },
+    'openai-mini': { model: 'openai-opencodex/gpt-5.6-mini', variant: 'low', served: { primary: true, stable: true } },
+  });
+  // kimi-coding k3 is not in the openai-opencodex list, so the model empties
+  await changeMain(e, 'main-provider', 'openai-opencodex');
+  assert.equal(selectedValueOf(mainControl(e, 'main-model')), '');
+  assert.deepEqual(mainEffortValues(e), ['', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+
+  // a model entry without levels keeps the seven-level list too
+  await changeMain(e, 'main-model', 'gpt-5.6-mini');
+  assert.deepEqual(mainEffortValues(e), ['', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+  assert.equal(selectedValueOf(mainControl(e, 'main-thinking')), 'max');
+});
+
 test('reapply: re-applying the active profile with nothing pending equals golden apply-cmd-glm-deepseek (canonicalised)', async (t) => {
   const { openProfilesStore } = await import('../src/profiles/store.mjs');
   const os = await import('node:os');
