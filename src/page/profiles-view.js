@@ -13,10 +13,10 @@
   'use strict';
 
   var STALE_BANNER = '인벤토리 갱신 필요';
-  var CONFLICT_TEXT = '다른 곳에서 바뀌었어요 — 새로고침 후 다시 적용';
+  var CONFLICT_TEXT = '다른 곳에서 바뀌었습니다. 새로고침 후 다시 적용하십시오.';
   var REAPPLY_LABEL = '다시 적용';
-  var READONLY_LIVE = '실시간 상황판에서만 바꿀 수 있어요';
-  var READONLY_FILE = '이 페이지는 보기 전용입니다 - 실시간 상황판에서 열어 주세요';
+  var READONLY_LIVE = '실시간 상황판에서만 바꿀 수 있습니다.';
+  var READONLY_FILE = '이 페이지는 보기 전용입니다. 실시간 상황판에서 열어 주십시오.';
   var AGENTS = [
     ['sisyphus', 'Sisyphus'],
     ['hephaestus', 'Hephaestus'],
@@ -450,7 +450,7 @@
   }
   function readOnlyNote(edit, view) {
     if (edit && edit.live !== true) return emptyNote(READONLY_FILE, 'pf-ro-note');
-    if (view && view.banner === STALE_BANNER) return emptyNote('인벤토리를 갱신할 때까지 수정할 수 없어요', 'pf-ro-note');
+    if (view && view.banner === STALE_BANNER) return emptyNote('인벤토리를 갱신할 때까지 수정할 수 없습니다.', 'pf-ro-note');
     return emptyNote(READONLY_LIVE, 'pf-ro-note');
   }
   function banner(text, cls, role) {
@@ -469,10 +469,10 @@
     var head = '<div class="pf-banner pf-banner-warn" data-pf-journal="interrupted" role="status">' +
       ic('info', 'ic-sm') + ' <b>' + esc('중단된 적용') + '</b>';
     if (ro) return head + ' <span class="pf-muted">' + esc('읽기 전용') + '</span></div>';
-    if (!changes.length) return head + ' <span class="pf-muted">' + esc('다시 적용할 변경 기록이 없어요') + '</span></div>';
+    if (!changes.length) return head + ' <span class="pf-muted">' + esc('다시 적용할 변경 기록이 없습니다.') + '</span></div>';
     // The reapply button is a real apply: it must mirror apply's disabled state. A latched 409
     // needs the reload hand-off first; an in-flight request must settle before another write.
-    var why = conflict ? '새로고침 후 다시 적용할 수 있어요' : busy ? '처리 중…' : '';
+    var why = conflict ? '새로고침 후 다시 적용할 수 있습니다.' : busy ? '처리 중…' : '';
     return head + ' ' + button('reapply', ' aria-label="' + esc(REAPPLY_LABEL) + '"' + (why ? attr('title', why) : ''),
       ic('refresh-cw', 'ic-sm') + ' ' + esc(REAPPLY_LABEL), busy || conflict, 'pf-btn') +
       (why ? ' <span class="pf-muted">' + esc(why) + '</span>' : '') + '</div>';
@@ -557,7 +557,7 @@
     return '<header class="pf-head">' +
       '<div class="pf-head-l"><p class="pf-kicker">[프로필·에이전트]</p><h1 class="pf-title">프로필·에이전트' +
       (n ? '<span class="pf-title-n">' + esc(' · 변경 보류 ' + n + '건') + '</span>' : '') + '</h1>' +
-      '<p class="pf-sub">WinForms 스위처의 역할 배치와 모델 레인, <span class="pf-keep">메모리 행을 상황판에서 확인하고</span>, <span class="pf-keep">실시간 상황판</span>에서 바로 적용합니다.</p></div>' +
+      '<p class="pf-sub">WinForms 스위처의 역할 배치와 모델 레인, <span class="pf-keep">메모리 행을 확인하고</span>, <span class="pf-keep">실시간 상황판</span>에서 바로 적용합니다.</p></div>' +
       '<div class="pf-head-r">' + badge + '</div></header>';
   }
 
@@ -717,7 +717,7 @@
           attr('aria-label', cardTitle(p) + ' 적용'), '적용', busy || conflict, 'pf-btn pf-btn-primary pf-card-apply')) + '</article>';
     }).join('');
     return section('profiles', '<div class="pf-cards">' +
-      (cards || emptyState('프로필이 없어요. omo.jsonc의 프로필을 확인한 뒤 상태를 다시 불러와 주세요.', edit)) + '</div>', list.length, '',
+      (cards || emptyState('프로필이 없습니다. omo.jsonc의 프로필을 확인한 뒤 상태를 다시 불러와 주십시오.', edit)) + '</div>', list.length, '',
     list.length + '개 프로필 · ' + (shown ? '현재 선택' : '선택 없음'), attr('data-flow', 'cards'));
   }
 
@@ -772,7 +772,7 @@
           list.map(function (r) { return routeRow(r, entries, candidates, edit, ro); }).join('') + '</section>';
       });
     });
-    return html || emptyState('배치할 역할이 없어요. 프로필 설정을 확인한 뒤 상태를 다시 불러와 주세요.', edit);
+    return html || emptyState('배치할 역할이 없습니다. 프로필 설정을 확인한 뒤 상태를 다시 불러와 주십시오.', edit);
   }
   function mainModel(view, edit, ro) {
     var pending = mainChangeOf(pendingOf(edit));
@@ -793,7 +793,7 @@
     var levels = entry && Array.isArray(entry.levels) && entry.levels.length ? entry.levels : null;
     var body;
     if (!effective.provider && !override && !pending) {
-      body = emptyNote('현재 프로필의 메인 모델 정보가 없어요');
+      body = emptyNote('현재 프로필의 메인 모델 정보가 없습니다.');
     } else if (ro) {
       body = '<span class="pf-main-v">' + valueOrDash(provider) + ' · ' + valueOrDash(model) + ' / ' + valueOrDash(thinking) + '</span>';
     } else {
@@ -912,7 +912,7 @@
       if (rowErr) {
         pendLine = '실패 · 보류 유지: ' + rowErr;
       } else if (pending || hasDraft) {
-        pendLine = '보류: ' + (mode === 'quick' ? 'quick 공유' : (model && reasoning ? model + ' / ' + reasoning : '서비스 / 모델 / 추론 강도를 직접 선택하세요'));
+        pendLine = '보류: ' + (mode === 'quick' ? 'quick 공유' : (model && reasoning ? model + ' / ' + reasoning : '서비스 / 모델 / 추론 강도를 직접 선택하십시오'));
       } else if (rowSaved) {
         pendLine = '보류: 없음 · 저장됨 · 다음 대화부터 반영 (실행 중 대화는 그대로)';
       } else {
@@ -1005,7 +1005,7 @@
   // ---- pending tray, preview diff and apply result -----------------------------------------------------------------
   function diffRows(preview) {
     var diffs = arr(preview && preview.diffs);
-    if (!diffs.length) return emptyNote('바뀌는 파일이 없어요');
+    if (!diffs.length) return emptyNote('바뀌는 파일이 없습니다.');
     return diffs.map(function (d) {
       var changes = arr(d.changes);
       return '<details class="pf-diff" open><summary><code>' + esc(d.file) + '</code> <span class="pf-count">' + changes.length + '</span></summary><ul>' +
@@ -1032,16 +1032,15 @@
     }).join('');
     if (ro || (!pending.length && !busy && !status && !err && !conflict && !preview && !result)) {
       return '<section class="pf-tray pf-tray-compact"' + head + (ro ? '' :
-        '<div class="pf-tray-c" title="바꾼 값이 없어요. 값을 고르면 여기에 모입니다.">' + tag('대기') + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
-        '<span class="pf-muted pf-tray-note">바꾼 값 없음</span>' +
-        '<span class="pf-tray-next">위에서 값을 고르면 여기에 모입니다</span></div>') + tail + '</section>';
+        '<div class="pf-tray-c">' + tag('대기') + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
+        '<span class="pf-tray-next">위에서 값을 고르면 여기에 모입니다.</span></div>') + tail + '</section>';
     }
     var list = pending.length
       ? '<ol class="pf-pending">' + pending.map(function (c, i) {
         return '<li><span class="pf-pending-t">' + esc(changeLabel(c)) + '</span>' +
           button('drop', ' data-index="' + i + '" aria-label="이 변경 지우기" title="이 변경 지우기"', ic('x', 'ic-sm'), busy, 'pf-btn pf-btn-icon') + '</li>';
       }).join('') + '</ol>'
-      : emptyNote('바꾼 값이 없어요. 위에서 값을 고르면 여기에 모입니다.');
+      : emptyNote('위에서 값을 고르면 여기에 모입니다.');
     return '<section class="pf-tray"' + head +
       '<header class="pf-sec-h"><div class="pf-sec-t">' + tag('대기') + '<h2>바꿀 값</h2><p class="pf-sec-s">미리보기는 쓰지 않고, 적용만 파일을 씁니다.</p></div>' +
       '<div class="pf-sec-r"><span class="pf-count">' + pending.length + '</span>' +
@@ -1055,7 +1054,7 @@
       (preview ? '<div class="pf-preview" data-pf-preview><p class="pf-preview-h">' + ic('file-text', 'ic-sm') + ' 파일별 차이 <span class="pf-count">' +
         arr(preview.diffs).length + '</span></p>' + diffRows(preview) +
         arr(preview.warnings).map(function (w) { return '<p class="pf-warn">' + ic('info', 'ic-sm') + ' ' + esc(w) + '</p>'; }).join('') + '</div>' : '') +
-      (result ? '<div class="pf-done" data-pf-result="apply"><p class="pf-done-h">' + ic('circle-check', 'ic-sm') + ' 적용했어요</p>' +
+      (result ? '<div class="pf-done" data-pf-result="apply"><p class="pf-done-h">' + ic('circle-check', 'ic-sm') + ' 적용했습니다.</p>' +
         '<p class="pf-done-s">백업</p><ul class="pf-backups">' + (arr(result.backups).length ? arr(result.backups).map(function (b) {
           return '<li><code>' + esc(b) + '</code></li>';
         }).join('') : '<li class="pf-muted">없음 (바뀐 파일 없음)</li>') + '</ul>' +
@@ -1178,14 +1177,14 @@
     }
     function failureCopy(err) {
       var message = str(err && err.message);
-      if (/^HTTP \d{3}$/.test(message)) return '프로필 상태를 불러오지 못했어요. 서버가 응답하지 않았어요. 다시 시도해 주세요.';
-      if (/abort|failed to fetch|network|offline|fetch/i.test(message)) return '프로필 상태를 불러오지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.';
-      return '프로필 상태를 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.';
+      if (/^HTTP \d{3}$/.test(message)) return '프로필 상태를 불러오지 못했습니다. 서버가 응답하지 않았습니다. 다시 시도해 주십시오.';
+      if (/abort|failed to fetch|network|offline|fetch/i.test(message)) return '프로필 상태를 불러오지 못했습니다. 네트워크 연결을 확인한 뒤 다시 시도해 주십시오.';
+      return '프로필 상태를 불러오지 못했습니다. 잠시 뒤 다시 시도해 주십시오.';
     }
 
     function load() {
       if (typeof fetchFn !== 'function') {
-        s.error = '상태를 불러올 수 없어요'; s.errorKind = 'unavailable'; s.loading = false; changed(); return Promise.resolve(snapshot());
+        s.error = '상태를 불러올 수 없습니다.'; s.errorKind = 'unavailable'; s.loading = false; changed(); return Promise.resolve(snapshot());
       }
       s.loading = true; s.error = ''; s.errorKind = ''; changed();
       var mine = ++seq;
@@ -1403,10 +1402,10 @@
       // until a successful state read. The latch survives add/drop/removeKind/clear; only load() lifts it.
       if (s.conflict) return Promise.resolve(snapshot());
       if (typeof fetchFn !== 'function') {
-        s.error = '실시간 상황판에서만 보낼 수 있어요'; s.errorKind = 'unavailable'; changed(); return Promise.resolve(snapshot());
+        s.error = '실시간 상황판에서만 보낼 수 있습니다.'; s.errorKind = 'unavailable'; changed(); return Promise.resolve(snapshot());
       }
       if (!list.length) {
-        s.error = reapply ? '다시 적용할 변경 기록이 없어요' : '바꾼 값을 먼저 골라 주세요';
+        s.error = reapply ? '다시 적용할 변경 기록이 없습니다.' : '바꾼 값을 먼저 골라 주십시오.';
         s.errorKind = 'input';
         changed(); return Promise.resolve(snapshot());
       }
@@ -1453,7 +1452,7 @@
             s.pending = s.pending.filter(function (c) { return !sentSet.has(c); });
             s.draft = map();
           }
-          s.status = reapply ? '다시 적용했어요' : '적용했어요';
+          s.status = reapply ? '다시 적용했습니다' : '적용했습니다';
           changed();
           return load().then(function () { return snapshot(); });
         }
@@ -1464,7 +1463,7 @@
         }
         s.status = '실패';
         s.errorKind = 'server';
-        s.error = (json && (str(json.message) || str(json.code))) || ('HTTP ' + res.status + ' - 다시 시도해 주세요');
+        s.error = (json && (str(json.message) || str(json.code))) || ('HTTP ' + res.status + ' - 다시 시도해 주십시오.');
         var memInList = list.filter(function (c) { return c && c.kind === 'setMemoryRow'; });
         if (json && (json.row === 'kibitzer' || json.row === 'reflection')) {
           s.memoryErrors[json.row] = s.error;
@@ -1482,7 +1481,7 @@
         s.status = '실패';
         if (g.console && g.console.warn) g.console.warn('[profiles] send failed', err);
         s.errorKind = 'network';
-        s.error = '보내지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.';
+        s.error = '보내지 못했습니다. 네트워크 연결을 확인한 뒤 다시 시도해 주십시오.';
         changed();
         return snapshot();
       });
@@ -1517,7 +1516,7 @@
         var payload = obj(journal && journal.reapply);
         var changes = arr(payload && payload.changes);
         if (!changes.length) {
-          s.status = '실패'; s.error = '다시 적용할 변경 기록이 없어요'; changed();
+          s.status = '실패'; s.error = '다시 적용할 변경 기록이 없습니다.'; changed();
           return Promise.resolve(snapshot());
         }
         return send('apply', changes, { reapply: true });

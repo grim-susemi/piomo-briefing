@@ -315,14 +315,14 @@
 .pf-title-n { color: var(--c-amber); }
 .pf-panes { display: grid; grid-template-columns: clamp(300px, 36%, 620px) minmax(0, 1fr); gap: var(--sp-3); align-items: start; min-width: 0; }
 /* the WinForms detail pane (PS:7283): it stays in view while the cards scroll and scrolls on its own; the max height is
- * the viewport under the shell tabs (44 px), this page's head and the status strip (217 px) */
+ * the viewport under the shell tabs (44 px), this page's head and the status strip (217 px) and the docked compact message tray (28 px) */
 .pf-detail {
   position: sticky;
   top: var(--sp-2);
   display: grid;
   gap: var(--sp-2);
   min-width: 0;
-  max-height: calc(100vh - 261px);
+  max-height: calc(100vh - 287px);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--sp-3) var(--sp-4) var(--sp-4);
@@ -461,9 +461,11 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 
 /* pending tray, preview, conflict and success */
 .pf-tray { border: var(--hair) solid var(--c-amber-line); border-radius: var(--r-xl); background: var(--c-elev); box-shadow: var(--shadow-card); }
+/* docked: the message tray sticks to the bottom edge of the scroll area so results, warnings and the preview diff are always in view; a long pending/preview list scrolls inside it */
+.pf-tray { position: sticky; bottom: 0; z-index: 3; max-height: 45vh; overflow-y: auto; overscroll-behavior: contain; }
 .pf-tray .pf-sec-h { border-bottom-color: var(--c-amber-line); }
 /* empty tray: one quiet status line, so the editor leads at 390 without hiding any live state */
-.pf-tray-compact { padding: var(--sp-2) var(--sp-3); }
+.pf-tray-compact { padding: var(--sp-1) var(--sp-3); }
 .pf-tray-c { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); }
 .pf-tray-note { flex: 1 1 auto; }
 .pf-tray-next { flex: 1 1 auto; min-width: 0; margin-top: 2px; color: var(--c-fg-3); font-size: var(--fs-sm); }

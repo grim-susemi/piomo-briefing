@@ -35,7 +35,7 @@
     },
     "F7": {
       "name": "Region relations at both sizes",
-      "description": "Region relations at both sizes: status above cards and detail; cards left of detail (with the sidebar docked at 1180x700); guide at the right end of status; apply below the role box inside detail; message below cards and detail",
+      "description": "Region relations at both sizes: status above cards and detail; cards left of detail (with the sidebar docked at 1180x700); guide at the right end of status; apply below the role box inside detail; message below detail and inside the viewport (docked)",
       "check": "region_relations"
     }
   }

@@ -167,7 +167,7 @@ test('header: the memory-row phrase stays together with its predicate', () => {
   const html = P.render(STATE, live());
   const keep = /<span class="pf-keep">([\s\S]*?)<\/span>/.exec(html);
   assert.ok(keep, 'the keep-together span is rendered');
-  assert.equal(textOf(keep[1]).trim(), '메모리 행을 상황판에서 확인하고');
+  assert.equal(textOf(keep[1]).trim(), '메모리 행을 확인하고');
   assert.match(html, /<span class="pf-keep">실시간 상황판<\/span>/);
   assert.doesNotMatch(/<p class="pf-sub">([\s\S]*?)<\/p>/.exec(html)[1], /·/, 'no dangling middle dot in the header');
   assert.match(read('src/page/profiles-view.css'), /\.pf-keep\s*\{\s*white-space:\s*nowrap;\s*\}/);
@@ -921,7 +921,6 @@ test('tray: empty is compact and visibly names the next action', () => {
   assert.match(html, /class="pf-tray pf-tray-compact"/);
   const strip = /<section class="pf-tray pf-tray-compact"[\s\S]*?<\/section>/.exec(html)[0];
   assert.doesNotMatch(strip, /data-pf="(?:preview|apply)"/, 'the empty message strip carries no action; apply lives in the detail');
-  assert.match(html, /class="pf-muted pf-tray-note"/);
   assert.match(html, /class="pf-count">0</);
   const next = /<span class="pf-tray-next">([^<]+)<\/span>/.exec(html);
   assert.ok(next && textOf(next[1]).trim().length >= 8, 'the compact tray needs a visible next action');

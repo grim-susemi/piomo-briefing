@@ -143,3 +143,22 @@ test('flow-map.rules.json conforms to rules schema and covers F1-F7', () => {
     assert.equal(typeof rulesObj.rules[key].description, 'string');
   }
 });
+
+
+test('board: the docked message tray is inside the viewport at both fixture sizes', { timeout: 280000 }, async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const out = mkdtempSync(join(tmpdir(), 'omo-flow-tray-'));
+  try {
+    execFileSync(process.execPath, ['scripts/qa-flow-map.mjs', '--out', out], { cwd: process.cwd(), stdio: 'pipe', timeout: 270000 });
+    for (const size of ['1180x700', '1600x900']) {
+      const map = JSON.parse(readFileSync(join(out, `flow-map.board-${size}.json`), 'utf8'));
+      const box = map.regions.find((r) => r.id === 'message').box;
+      assert.ok(box.y >= 0, `${size}: message top ${box.y} is on screen`);
+      assert.ok(box.y + box.h <= map.frame.inner.h + 1, `${size}: message bottom ${box.y + box.h} is inside ${map.frame.inner.h}`);
+    }
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
