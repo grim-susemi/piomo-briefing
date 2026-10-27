@@ -563,7 +563,7 @@
     return '<div class="pf-loading" data-pf-loading role="status">' +
       '<div class="pf-skeleton">' +
       '<section class="pf-tray pf-tray-compact" data-pf-skel="tray" aria-label="바꿀 값"><div class="pf-tray-c">' +
-      tag('보류') + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
+      tag('대기') + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
       '<span class="pf-muted pf-tray-note">바꾼 값 없음</span>' +
       '<span class="pf-tray-next" id="pf-focus-status" tabindex="-1"><span class="pf-pulse" aria-hidden="true">' +
       ic('refresh-cw', 'ic-sm') + '</span> 프로필 상태를 불러오는 중…</span></div></section>' +
@@ -1070,15 +1070,15 @@
     var conflict = !!(edit && edit.conflict);
     var preview = obj(edit && edit.preview);
     var result = obj(edit && edit.result);
-    // The strip's label follows its state: pending, applied or failed.
-    var label = result ? '적용됨' : err || conflict ? '실패' : '보류';
+    // The strip's label follows its state: pending, applied or failed, and a neutral 대기 while nothing is pending.
+    var label = result ? '적용됨' : err || conflict ? '실패' : pending.length ? '보류' : '대기';
     var head = ' id="pf-sec-tray" data-pf-sec="tray" data-flow="message" aria-label="메시지">';
     var tail = journalBanner(view, edit, ro) + arr(view && view.warnings).map(function (w) {
       return '<p class="pf-warn">' + ic('info', 'ic-sm') + ' ' + esc(w) + '</p>';
     }).join('');
     if (ro || (!pending.length && !busy && !status && !err && !conflict && !preview && !result)) {
       return '<section class="pf-tray pf-tray-compact"' + head + (ro ? '' :
-        '<div class="pf-tray-c">' + tag('보류') + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
+        '<div class="pf-tray-c">' + tag(label) + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
         '<span class="pf-tray-next">위에서 값을 고르면 여기에 모입니다.</span></div>') + tail + '</section>';
     }
     var list = pending.length

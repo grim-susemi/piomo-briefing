@@ -959,11 +959,13 @@ test('tray: empty is compact and visibly names the next action', () => {
   const strip = /<section class="pf-tray pf-tray-compact"[\s\S]*?<\/section>/.exec(html)[0];
   assert.doesNotMatch(strip, /data-pf="(?:preview|apply)"/, 'the empty message strip carries no action; apply lives in the detail');
   assert.match(html, /class="pf-count">0</);
+  assert.match(strip, /<span class="pf-tag">\[대기\]<\/span>/, 'nothing is on hold while the count is 0');
   const next = /<span class="pf-tray-next">([^<]+)<\/span>/.exec(html);
   assert.ok(next && textOf(next[1]).trim().length >= 8, 'the compact tray needs a visible next action');
   const pending = [{ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' }];
   html = P.render(STATE, live({ pending }));
   assert.doesNotMatch(html, /pf-tray-compact/);
+  assert.match(/<section class="pf-tray"[\s\S]*?<\/header>/.exec(html)[0], /<span class="pf-tag">\[보류\]<\/span>/, 'a staged change is on hold');
   assert.match(html, /data-pf="preview"/);
   const clear = /<button[^>]*data-pf="clear"[^>]*>/.exec(html)[0];
   assert.match(clear, /pf-btn-danger/);

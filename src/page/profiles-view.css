@@ -330,6 +330,8 @@
  * the shell tabs, this page's head and the status strip (252 px). The strip is a real bottom row under both panes, so a
  * staged change, a preview or a result takes its height from the panes and never covers them. Like the WinForms message
  * box it stays short (one header line over the pending rows) and scrolls inside, so 이 프로필 적용하기 stays one scroll away.
+ * A preview or an apply result takes up to a third of the view, but the detail keeps 336 px (589 = 252 + 1 + 336) so its
+ * routing box stays 220 px, the effort select two scrolls away and 이 프로필 적용하기 one: 111 px at 1180x700.
  * The cards list scrolls on its own; like WinForms it shows no header (it stays for screen readers) and a card has no
  * English-name line and one line each for main and service, so at 1180x700 two cards and their 적용 sit above the fold
  * and the fifth card is one scroll away */
@@ -337,6 +339,7 @@
   .pf-panes:has(> .pf-tray) { height: calc(100vh - 252px); grid-template-rows: minmax(0, 1fr) auto; row-gap: 1px; }
   .pf-panes:has(> .pf-tray) > .pf-detail { height: 100%; container-type: size; }
   .pf-panes > .pf-tray { grid-column: 1 / -1; position: static; max-height: 14vh; }
+  .pf-panes > .pf-tray:has([data-pf-preview], [data-pf-result]) { max-height: clamp(14vh, calc(100vh - 589px), 33vh); }
   .pf-panes > .pf-tray .pf-sec-h { padding: var(--sp-1) var(--sp-3); }
   .pf-panes > .pf-tray .pf-sec-t { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); }
   .pf-panes > .pf-tray .pf-sec-b { padding: var(--sp-1) var(--sp-3) var(--sp-2); }
@@ -527,7 +530,7 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-done { margin-top: var(--sp-3); display: grid; gap: 2px; }
 .pf-done-s { margin: var(--sp-1) 0 0; color: var(--c-fg-3); font-size: var(--fs-xs); }
 .pf-backups, .pf-writes { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
-.pf-backups code, .pf-writes code { overflow-wrap: anywhere; font-size: var(--fs-xs); }
+.pf-backups code, .pf-writes code { overflow-wrap: anywhere; word-break: break-all; font-size: var(--fs-xs); }
 
 /* sidebar nav */
 .pf-nav { display: grid; gap: 2px; padding: var(--sp-2) var(--sp-2) var(--sp-4); }
