@@ -12,6 +12,7 @@
 // Exit 1 when a diff is not empty (F1..F7, or a step control that is not the topmost element where it is clicked), a step
 // is missing, a CSP violation happened or an unnamed control appeared.
 // Every wait is an event or a bounded deadline; no fixed sleep and no polling loop.
+import '../test/helpers/refuse-live-writes.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';

@@ -6,8 +6,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "test": "node --test --test-isolation=none test/*.test.mjs",
-    "check:timing": "node --test --test-isolation=none test/timing/*.test.mjs",
+    "test": "node --import ./test/helpers/refuse-live-writes.mjs --test --test-isolation=none test/*.test.mjs",
+    "check:timing": "node --import ./test/helpers/refuse-live-writes.mjs --test --test-isolation=none test/timing/*.test.mjs",
     "build": "node scripts/build.mjs",
     "check": "npm test && npm run build"
   }

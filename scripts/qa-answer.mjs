@@ -11,6 +11,7 @@
 // conversation's last open decision is answered and its card + delivery line must stay on the tab the owner is looking at.
 // Every wait is an event with a bound (MutationObserver in the page, fs.watch, IPC reply). The focus button is never clicked:
 // it would run the real herdr on this machine.
+import '../test/helpers/refuse-live-writes.mjs';
 import { fork } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, statSync, copyFileSync, watch } from 'node:fs';
 import http from 'node:http';

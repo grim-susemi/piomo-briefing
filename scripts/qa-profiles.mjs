@@ -19,6 +19,7 @@
 //
 // usage: node scripts/qa-profiles.mjs --out <captures-dir> [--evidence <dir>] [--keep]
 // Every wait is an event or a bounded deadline; no polling loop, no fixed sleep.
+import '../test/helpers/refuse-live-writes.mjs';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';

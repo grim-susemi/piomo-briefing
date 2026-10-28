@@ -66,6 +66,7 @@
 //   Every document's clock starts at the fixture's own generatedAt (PAGE_CLOCK, result.json fixture.pageClock).
 // Exit 0 only when every check passes, every self-test flips and recovers, every mockup was captured, and Chrome (every pid
 // of its profile), its profile and the temp folder are gone.
+import '../test/helpers/refuse-live-writes.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

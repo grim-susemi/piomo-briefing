@@ -25,6 +25,7 @@
 // Every wait is subscribed before its trigger and bounded; there are no fixed
 // sleeps or polling loops. A failed check is recorded as a failed scenario,
 // never swallowed.
+import '../test/helpers/refuse-live-writes.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -1,6 +1,7 @@
 // Task-owned real-browser acceptance for one board tab per Herdr window.
 // usage: node scripts/qa-tabs.mjs --out <dir> [--legacy-open]
 // No live state/profile; one Chrome per pass, disposed before the next pass.
+import '../test/helpers/refuse-live-writes.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

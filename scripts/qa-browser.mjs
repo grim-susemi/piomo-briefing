@@ -51,6 +51,7 @@
 //   m-fit, f-mobile, plan-fold-mobile, c-mobile, d-mobile, e-blocked, e-mobile, g-mobile (captures mobile-<scenario>-*.png)
 // Waits are events with a bound: in-page promises (MutationObserver, apply hook, toggle), IPC replies, fs.watch.
 // Cleanup also audits Chrome's own chrome_* folders in the temp root that were created by the QA browser pids.
+import '../test/helpers/refuse-live-writes.mjs';
 import { fork } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, statSync, readdirSync, copyFileSync, watch } from 'node:fs';
 import http from 'node:http';

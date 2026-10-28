@@ -88,8 +88,10 @@ test('Chrome cleanup waits for exit, not inherited stderr close, and removes the
 
 test('Chrome cleanup rejects with the profile path when an unlisted process holds its cwd', async (t) => {
   const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-cdp-test-'));
+  // execArgv: [] drops npm test's relative --import of the live-write guard, which does not resolve from the profile
+  // folder; the guard still reaches this child through NODE_OPTIONS (test/helpers/refuse-live-writes.mjs).
   const holder = fork(fixture, ['hold', profileDir], {
-    cwd: profileDir, stdio: ['ignore', 'ignore', 'pipe', 'ipc'], windowsHide: true,
+    cwd: profileDir, execArgv: [], stdio: ['ignore', 'ignore', 'pipe', 'ipc'], windowsHide: true,
   });
   t.after(async () => {
     await stop(holder);
