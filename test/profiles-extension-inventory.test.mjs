@@ -7,7 +7,8 @@ import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { createBriefingExtension } from '../extension.mjs';
-import { openProfilesStore, PLUGIN_DEFAULT } from '../src/profiles/store.mjs';
+import { openProfilesStore } from '../src/profiles/store.mjs';
+import { pinnedOmoPath, pinnedPackageVersion } from './helpers/pinned-plugin.mjs';
 import { makeFakePi } from './helpers/fake-pi.mjs';
 import { tempDir } from './helpers/temp.mjs';
 
@@ -28,7 +29,7 @@ test('inventory: the extension passes the stable lane plugin from OMO_STABLE_PLU
   assert.equal(captured.pluginPath, join(fakePluginRoot, 'extensions', 'omo.js'));
 });
 
-test('inventory: without OMO_STABLE_PLUGIN the store default is used', (t) => {
+test('inventory: without OMO_STABLE_PLUGIN the store reports plugin_unknown and stays read-only', (t) => {
   const { dir } = tempDir(t, 'omo-ext-inv-');
   let captured = null;
   const fakeStore = { handle: () => ({ status: 200, json: {} }), state: () => ({}) };
@@ -43,7 +44,10 @@ test('inventory: without OMO_STABLE_PLUGIN the store default is used', (t) => {
   assert.ok(captured, 'createProfilesStore was invoked');
   assert.equal(captured.pluginPath, undefined, 'no pluginPath override was passed');
   const store = openProfilesStore({ ...captured, primaryHome: dir, stableHome: dir, mirrorHomes: [] });
-  assert.equal(store.inventory().path, PLUGIN_DEFAULT, 'store default is used');
+  const inv = store.inventory();
+  assert.equal(inv.stale, true);
+  assert.equal(inv.reason, 'plugin_unknown');
+  assert.equal(inv.readOnly, true);
 });
 
 test('inventory: through extension resolution, installed plugin fixture reports stale: false and readOnly: false', (t) => {
@@ -61,8 +65,8 @@ test('inventory: through extension resolution, installed plugin fixture reports 
   writeFileSync(join(stable, 'omo.jsonc'), '{}');
   writeFileSync(join(stable, 'agent', 'settings.json'), '{}');
 
-  // Copy installed 5.1.44 plugin bundle to fixture
-  copyFileSync(PLUGIN_DEFAULT, join(extDir, 'omo.js'));
+  // Copy the pinned plugin bundle to the fixture
+  copyFileSync(pinnedOmoPath(), join(extDir, 'omo.js'));
 
   let store = null;
   const host = makeFakePi({ sessionKind: 'interactive' });
@@ -84,7 +88,7 @@ test('inventory: through extension resolution, installed plugin fixture reports 
   assert.ok(store, 'store was constructed');
   const inv = store.inventory();
   assert.equal(inv.stale, false, 'inventory is not stale');
-  assert.equal(inv.version, '5.1.44');
+  assert.equal(inv.version, pinnedPackageVersion());
   assert.equal(inv.readOnly, false);
 
   const state = store.state();
@@ -100,8 +104,8 @@ test('inventory: through extension resolution, single-byte mismatch reports stal
   const extDir = join(fakePluginRoot, 'extensions');
   mkdirSync(extDir, { recursive: true });
 
-  // Copy installed 5.1.44 plugin bundle and mutate 1 byte
-  const bytes = readFileSync(PLUGIN_DEFAULT);
+  // Copy the pinned plugin bundle and mutate 1 byte
+  const bytes = readFileSync(pinnedOmoPath());
   bytes[0] = bytes[0] ^ 1;
   writeFileSync(join(extDir, 'omo.js'), bytes);
 
@@ -125,7 +129,7 @@ test('inventory: through extension resolution, single-byte mismatch reports stal
   assert.ok(store, 'store was constructed');
   const inv = store.inventory();
   assert.equal(inv.stale, true, 'inventory is stale');
-  assert.equal(inv.version, '5.1.44');
+  assert.equal(inv.version, pinnedPackageVersion());
   assert.equal(inv.readOnly, true);
   assert.equal(inv.label, '인벤토리 갱신 필요');
 

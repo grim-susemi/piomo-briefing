@@ -9,9 +9,11 @@ import {
   BUILTIN_MODEL_PROFILES, CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE, ROLE_DISPLAY_NAMES,
   ROLE_INVENTORY, ROUTING_GROUPS, buildRoutingRows,
 } from './model.mjs';
+import inventory from './inventory.json' with { type: 'json' };
 
-export const INVENTORY_VERSION = '5.1.44';
-export const ABSENT_LABEL = '5.1.44에 없음';
+// The pinned omo-ai version comes from inventory.json (generated from the running plugin).
+export const INVENTORY_VERSION = inventory.version;
+export const ABSENT_LABEL = `${INVENTORY_VERSION}에 없음`;
 export const AGENT_IDS = ['sisyphus', 'hephaestus', 'prometheus', 'atlas'];
 export const AGENT_DISPLAY = { sisyphus: 'Sisyphus', hephaestus: 'Hephaestus', prometheus: 'Prometheus', atlas: 'Atlas' };
 export const AGENT_COLORS = { sisyphus: '#00CED1', hephaestus: '#D97706', prometheus: '#A78BFA', atlas: '#10B981' };

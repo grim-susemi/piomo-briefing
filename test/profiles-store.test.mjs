@@ -11,10 +11,11 @@ import { fileURLToPath } from 'node:url';
 import {
   atomicWriteText, detectStyle, formatJsonText, hasComments, openProfilesStore, redact,
 } from '../src/profiles/store.mjs';
+import { pinnedOmoPath } from './helpers/pinned-plugin.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const GOLDEN = path.join(here, 'fixtures', 'profiles', 'goldens', 'apply-gpt-kimi-deepseek', 'files');
-const REAL_INVENTORY = JSON.parse(fs.readFileSync(path.join(here, '..', 'src', 'profiles', 'inventory-5.1.44.json'), 'utf8'));
+const REAL_INVENTORY = JSON.parse(fs.readFileSync(path.join(here, '..', 'src', 'profiles', 'inventory.json'), 'utf8'));
 const PS_STYLE = { bom: true, eol: '\r\n', indent: '    ', keySep: ':  ', trailingNewline: true };
 const LF_STYLE = { bom: false, eol: '\n', indent: '  ', keySep: ': ', trailingNewline: true };
 
@@ -253,6 +254,42 @@ test('a rollback restores the lane main sidecars too', (t) => {
   assert.deepEqual(fs.readFileSync(mirror1Main), mirror1Before);
   assert.equal(fs.existsSync(mirror2Main), false);
   assert.equal(fx.store.journal().status, 'rolled-back');
+});
+
+test('inventory: no pluginPath reports plugin_unknown, stale and read-only', (t) => {
+  const fx = makeFixture(t);
+  const store = openProfilesStore({
+    primaryHome: fx.primary, stableHome: fx.stable, mirrorHomes: [], inventory: REAL_INVENTORY,
+  });
+  const inv = store.inventory();
+  assert.equal(inv.stale, true);
+  assert.equal(inv.reason, 'plugin_unknown');
+  assert.equal(inv.readOnly, true);
+  assert.equal(inv.path, null);
+});
+
+test('inventory: a plugin copy with one byte changed is stale, the pinned copy is not', (t) => {
+  const fx = makeFixture(t);
+  const copy = path.join(fx.root, 'omo-copy.js');
+  fs.copyFileSync(pinnedOmoPath(), copy);
+  const open = () => openProfilesStore({
+    primaryHome: fx.primary, stableHome: fx.stable, mirrorHomes: [], pluginPath: copy, inventory: REAL_INVENTORY,
+  });
+  assert.equal(open().inventory().stale, false);
+  const bytes = fs.readFileSync(copy);
+  bytes[0] ^= 1;
+  fs.writeFileSync(copy, bytes);
+  const changed = open().inventory();
+  assert.equal(changed.stale, true);
+  assert.equal(changed.readOnly, true);
+});
+
+test('inventory: inventoryStatus returns the inventory version', (t) => {
+  const fx = makeFixture(t);
+  const store = openProfilesStore({
+    primaryHome: fx.primary, stableHome: fx.stable, mirrorHomes: [], pluginPath: fx.plugin, inventory: REAL_INVENTORY,
+  });
+  assert.equal(store.inventory().version, REAL_INVENTORY.version);
 });
 
 test('the 5.1.44 key allowlist rejects an unknown root key without writing', (t) => {

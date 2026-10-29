@@ -29,8 +29,9 @@ const GOLDEN = path.join(ROOT, 'test/fixtures/profiles/goldens/apply-gpt-kimi-de
 const REGISTRY = path.join(ROOT, 'test/fixtures/profiles/registry');
 const RULES = path.join(ROOT, 'test/fixtures/profiles/flow-map.rules.json');
 const AX_ALLOWLIST = path.join(ROOT, 'scripts/qa-ax-allowlist.json');
-const INVENTORY = path.join(ROOT, 'src/profiles/inventory-5.1.44.json');
-const PLUGIN = 'C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.44-r1/package/plugin/extensions/omo.js';
+const INVENTORY = path.join(ROOT, 'src/profiles/inventory.json');
+if (!process.env.OMO_STABLE_PLUGIN) throw new Error('set OMO_STABLE_PLUGIN to the pinned plugin dir');
+const PLUGIN = path.join(process.env.OMO_STABLE_PLUGIN, 'extensions', 'omo.js');
 const VM_FILE = path.join(ROOT, 'test/fixtures/view-model-board.json');
 const LIVE_HOMES = ['C:/Users/USER/.omo', 'C:/Users/USER/.omo-stable-500/home/.omo', 'C:/Users/USER/.omo-original/home/.omo', 'C:/Users/USER/.somo/home/.omo'];
 const LIVE_BOARD = [47317, 47326];

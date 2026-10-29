@@ -41,7 +41,7 @@ import {
   getProviderChoiceForModel, newRouteRow,
 } from './model.mjs';
 import { composeHomeRegistry, getCommonServedModels, supportStatusFor, validateSelection } from './registry.mjs';
-import { chatGptPickerModels, recommendationGuide, refreshRoutingRows } from './refresh-5.1.44.mjs';
+import { chatGptPickerModels, recommendationGuide, refreshRoutingRows } from './refresh.mjs';
 import { compareRecommendation, getRecommendationManifestShape } from './recommend.mjs';
 
 export const PRIMARY_HOME_DEFAULT = 'C:/Users/USER/.omo';
@@ -50,11 +50,10 @@ export const MIRROR_HOME_DEFAULTS = [
   'C:/Users/USER/.somo/home/.omo',
 ];
 export const STABLE_HOME_DEFAULT = 'C:/Users/USER/.omo-stable-500/home/.omo';
-export const PLUGIN_DEFAULT = 'C:/Users/USER/.omo-stable-500/staging/memory-rollback-5.1.44-r1/package/plugin/extensions/omo.js';
 // The switcher's recommendation table is read-only reference data; the board never
 // writes it and tests inject their own object instead of touching the desktop app.
 export const RECOMMENDATION_MANIFEST_DEFAULT = 'C:/Users/USER/Desktop/OpenCode_Modes/OMO_Native_Recommendation.json';
-export const INVENTORY_PATH = fileURLToPath(new URL('./inventory-5.1.44.json', import.meta.url));
+export const INVENTORY_PATH = fileURLToPath(new URL('./inventory.json', import.meta.url));
 export const BACKUP_DIR = ['runtime', 'native-profile-switcher-backups'];
 export const REDACTED = '<redacted>';
 export const INVENTORY_STALE_LABEL = '인벤토리 갱신 필요';
@@ -289,7 +288,7 @@ function readTarget(spec, file, fs, kind) {
 // ── validation ────────────────────────────────────────────────────────────────
 function checkKeys(object, allowed, at, errors) {
   for (const key of Object.keys(object)) {
-    if (!allowed.has(key)) errors.push(`${at}.${key}: not allowed by inventory-5.1.44.json`);
+    if (!allowed.has(key)) errors.push(`${at}.${key}: not allowed by inventory.json`);
   }
 }
 
@@ -477,7 +476,8 @@ export function openProfilesStore(options = {}) {
     mirrorHomes: options.mirrorHomes ?? MIRROR_HOME_DEFAULTS,
     stableHome: options.stableHome ?? STABLE_HOME_DEFAULT,
   };
-  const pluginPath = options.pluginPath ?? PLUGIN_DEFAULT;
+  // No plugin given: the inventory cannot be checked, so it is stale and read-only (fail closed).
+  const pluginPath = options.pluginPath ?? null;
   const inventoryPath = options.inventoryPath ?? INVENTORY_PATH;
   const hooks = options.hooks ?? {};
   const journalEnabled = options.journal !== false;
@@ -637,6 +637,12 @@ export function openProfilesStore(options = {}) {
   function inventoryStatus() {
     const inventory = loadInventory();
     const pinned = inventory?.sources?.omo?.sha256 ?? null;
+    if (!pluginPath) {
+      return {
+        version: inventory?.version ?? null, path: null, manifestPath: inventoryPath, pinnedSha256: pinned,
+        loadedSha256: null, stale: true, reason: 'plugin_unknown', label: INVENTORY_STALE_LABEL, readOnly: true,
+      };
+    }
     let loaded = null;
     try { loaded = sha256(fs.readFileSync(pluginPath)); } catch { loaded = null; }
     const stale = !pinned || !loaded || pinned !== loaded;

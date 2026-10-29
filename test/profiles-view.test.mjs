@@ -2,6 +2,7 @@
 // preview/apply/409 controller against a fake fetch. No timers, no browser and no real network.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { pinnedOmoPath } from './helpers/pinned-plugin.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
@@ -1758,6 +1759,7 @@ test('order: a category edit plus activation in one apply leaves the active scop
     primaryHome: primary,
     stableHome: stable,
     mirrorHomes: [],
+    pluginPath: pinnedOmoPath(),
     now: () => 1700000000000,
   });
   const st = store.state();
@@ -2262,6 +2264,7 @@ test('reapply: re-applying the active profile with nothing pending equals golden
     primaryHome: primary,
     stableHome: stable,
     mirrorHomes: [],
+    pluginPath: pinnedOmoPath(),
     now: () => 1700000000000,
   });
   const st = store.state();

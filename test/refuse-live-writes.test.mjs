@@ -11,7 +11,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { atomicWriteText, openProfilesStore, PLUGIN_DEFAULT } from '../src/profiles/store.mjs';
+import { atomicWriteText, openProfilesStore } from '../src/profiles/store.mjs';
 
 const REFUSED = { code: 'LIVE_HOME_WRITE_REFUSED' };
 const callbackError = (start) => new Promise((resolve) => start((error) => resolve(error ?? null)));
@@ -81,12 +81,13 @@ test('npm test refuses every write under a live home before the disk is touched;
   assert.equal(child.stdout, REFUSED.code, child.stderr);
 
   // Reads of a live file go through every open path.
-  assert.ok(fs.readFileSync(PLUGIN_DEFAULT).length > 0);
-  assert.ok((await fsp.readFile(PLUGIN_DEFAULT)).length > 0);
-  fs.closeSync(fs.openSync(PLUGIN_DEFAULT, 'r'));
-  fs.closeSync(await new Promise((resolve, reject) => fs.open(PLUGIN_DEFAULT, (error, fd) => (error ? reject(error) : resolve(fd)))));
-  await (await fsp.open(PLUGIN_DEFAULT)).close();
-  const reader = fs.createReadStream(PLUGIN_DEFAULT);
+  const LIVE_READABLE = 'C:/Users/USER/.omo-stable-500/omo.cmd';
+  assert.ok(fs.readFileSync(LIVE_READABLE).length > 0);
+  assert.ok((await fsp.readFile(LIVE_READABLE)).length > 0);
+  fs.closeSync(fs.openSync(LIVE_READABLE, 'r'));
+  fs.closeSync(await new Promise((resolve, reject) => fs.open(LIVE_READABLE, (error, fd) => (error ? reject(error) : resolve(fd)))));
+  await (await fsp.open(LIVE_READABLE)).close();
+  const reader = fs.createReadStream(LIVE_READABLE);
   await once(reader, 'open');
   reader.destroy();
 
