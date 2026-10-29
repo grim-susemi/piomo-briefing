@@ -75,5 +75,5 @@
     html += '<p class="plan-legend">초록 ' + mark('done') + ' 끝 · 청록 ' + mark('doing') + ' 진행 · 회색 ' + mark('todo') + ' 할 일 · 회색 점선 멈춤 · 빨강 막힘</p>'; return html + '</section>';
   }
   function renderLink(plan, ui) { var esc = ui && ui.esc || escapeHtml; function e(value) { return esc(flat(value)); } var text = summary(plan, e); return plan.target ? '<a class="plan-link" href="#' + e(plan.target) + '" data-goto="' + e(plan.target) + '"' + (plan.tab ? ' data-tab="' + e(plan.tab) + '"' : '') + '>' + text + '</a>' : '<span class="plan-link">' + text + '</span>'; }
-  g.BriefPlanView = { render: render, renderLink: renderLink };
+  g.BriefPlanView = { render: render, renderLink: renderLink, lanesOf: lanesOf, currentOf: currentOf };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

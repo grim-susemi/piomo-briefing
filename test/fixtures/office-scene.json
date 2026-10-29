@@ -1,0 +1,625 @@
+{
+  "floors": [
+    {
+      "sid": "s-b2",
+      "label": "Herdr 대시보드",
+      "live": true,
+      "dark": false,
+      "rooms": {
+        "ceo": [],
+        "plan": [],
+        "research": [],
+        "work": [
+          "lead",
+          "st_01a14080",
+          "st_01a14095",
+          "st_01a14082",
+          "st_01a14096",
+          "st_01a14097"
+        ],
+        "review": [],
+        "lounge": [
+          "st_01a14081"
+        ]
+      },
+      "desks": [
+        {
+          "id": "lead",
+          "room": "work",
+          "kind": "lead",
+          "state": "in_progress",
+          "pose": "typing",
+          "bubble": "",
+          "lamp": "alert"
+        },
+        {
+          "id": "st_01a14081",
+          "room": "lounge",
+          "kind": "worker",
+          "agent": "quick",
+          "state": "cancelled",
+          "pose": "rest",
+          "bubble": "",
+          "lamp": "off"
+        },
+        {
+          "id": "st_01a14080",
+          "room": "work",
+          "kind": "worker",
+          "agent": "deep-low",
+          "state": "working",
+          "pose": "typing",
+          "bubble": "응답 없음 10분",
+          "lamp": "on"
+        },
+        {
+          "id": "st_01a14095",
+          "room": "work",
+          "kind": "worker",
+          "agent": "",
+          "state": "waiting",
+          "pose": "idle",
+          "bubble": "정보 대기",
+          "lamp": "off"
+        },
+        {
+          "id": "st_01a14082",
+          "room": "work",
+          "kind": "worker",
+          "agent": "deep-low",
+          "state": "lost",
+          "pose": "alert",
+          "bubble": "",
+          "lamp": "alert"
+        },
+        {
+          "id": "st_01a14096",
+          "room": "work",
+          "kind": "worker",
+          "agent": "deep-low",
+          "state": "working",
+          "pose": "typing",
+          "bubble": "bash · node --test test/render.test.mjs",
+          "lamp": "on"
+        },
+        {
+          "id": "st_01a14097",
+          "room": "work",
+          "kind": "worker",
+          "agent": "quick",
+          "state": "waiting",
+          "pose": "idle",
+          "bubble": "",
+          "lamp": "off"
+        }
+      ],
+      "walk": {
+        "w": 0,
+        "h": 0,
+        "blocked": []
+      },
+      "spawn": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "sid": "s-a1",
+      "label": "결정 </script><script>globalThis.pwned=1</script>",
+      "live": true,
+      "dark": false,
+      "rooms": {
+        "ceo": [],
+        "plan": [],
+        "research": [],
+        "work": [
+          "lead"
+        ],
+        "review": [],
+        "lounge": []
+      },
+      "desks": [
+        {
+          "id": "lead",
+          "room": "work",
+          "kind": "lead",
+          "state": "needs_decision",
+          "pose": "typing",
+          "bubble": "",
+          "lamp": "alert"
+        }
+      ],
+      "walk": {
+        "w": 0,
+        "h": 0,
+        "blocked": []
+      },
+      "spawn": {
+        "x": 0,
+        "y": 0
+      },
+      "conveyor": {
+        "waves": [
+          {
+            "n": 1,
+            "label": "하나",
+            "done": 1,
+            "total": 1
+          },
+          {
+            "n": 2,
+            "label": "둘",
+            "done": 0,
+            "total": 1
+          }
+        ],
+        "current": 1
+      }
+    },
+    {
+      "sid": "s-a2",
+      "label": "설치 도구",
+      "live": true,
+      "dark": false,
+      "rooms": {
+        "ceo": [],
+        "plan": [],
+        "research": [],
+        "work": [
+          "lead",
+          "st_01a14092",
+          "st_01a14094"
+        ],
+        "review": [],
+        "lounge": [
+          "st_01a14091"
+        ]
+      },
+      "desks": [
+        {
+          "id": "lead",
+          "room": "work",
+          "kind": "lead",
+          "state": "in_progress",
+          "pose": "typing",
+          "bubble": "",
+          "lamp": "off"
+        },
+        {
+          "id": "st_01a14091",
+          "room": "lounge",
+          "kind": "worker",
+          "agent": "deep-low",
+          "state": "done",
+          "pose": "rest",
+          "bubble": "",
+          "lamp": "off"
+        },
+        {
+          "id": "st_01a14092",
+          "room": "work",
+          "kind": "worker",
+          "agent": "quick",
+          "state": "error",
+          "pose": "alert",
+          "bubble": "",
+          "lamp": "alert"
+        },
+        {
+          "id": "st_01a14094",
+          "room": "work",
+          "kind": "worker",
+          "agent": "visual-engineering",
+          "state": "working",
+          "pose": "typing",
+          "bubble": "보고서 \"><img src=x onerror=globalThis.pwned=2>",
+          "lamp": "on"
+        }
+      ],
+      "walk": {
+        "w": 0,
+        "h": 0,
+        "blocked": []
+      },
+      "spawn": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "sid": "s-b1",
+      "label": "하네스 점검",
+      "live": false,
+      "dark": false,
+      "rooms": {
+        "ceo": [],
+        "plan": [],
+        "research": [],
+        "work": [
+          "lead"
+        ],
+        "review": [],
+        "lounge": []
+      },
+      "desks": [
+        {
+          "id": "lead",
+          "room": "work",
+          "kind": "lead",
+          "state": "blocked",
+          "pose": "rest",
+          "bubble": "",
+          "lamp": "alert"
+        }
+      ],
+      "walk": {
+        "w": 0,
+        "h": 0,
+        "blocked": []
+      },
+      "spawn": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "sid": "s-c2",
+      "label": "문서 번역",
+      "live": false,
+      "dark": false,
+      "rooms": {
+        "ceo": [],
+        "plan": [],
+        "research": [],
+        "work": [
+          "lead"
+        ],
+        "review": [],
+        "lounge": []
+      },
+      "desks": [
+        {
+          "id": "lead",
+          "room": "work",
+          "kind": "lead",
+          "state": "done",
+          "pose": "rest",
+          "bubble": "",
+          "lamp": "off"
+        }
+      ],
+      "walk": {
+        "w": 0,
+        "h": 0,
+        "blocked": []
+      },
+      "spawn": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "sid": "s-c1",
+      "label": "로그 정리",
+      "live": false,
+      "dark": false,
+      "rooms": {
+        "ceo": [],
+        "plan": [],
+        "research": [],
+        "work": [
+          "lead"
+        ],
+        "review": [],
+        "lounge": []
+      },
+      "desks": [
+        {
+          "id": "lead",
+          "room": "work",
+          "kind": "lead",
+          "state": "in_progress",
+          "pose": "rest",
+          "bubble": "",
+          "lamp": "off"
+        }
+      ],
+      "walk": {
+        "w": 0,
+        "h": 0,
+        "blocked": []
+      },
+      "spawn": {
+        "x": 0,
+        "y": 0
+      }
+    }
+  ],
+  "ceo": {
+    "items": [
+      {
+        "sid": "s-b2",
+        "sub": "dec",
+        "kind": "#16 결정 기다림",
+        "text": "작업자 카드를 접어 둘까요?",
+        "at": 1791946680000
+      },
+      {
+        "sid": "s-b2",
+        "sub": "ov",
+        "kind": "질문 열림 · 그 창에서 답하기",
+        "text": "작업자 목록을 몇 줄까지 보일까요?",
+        "at": 1791946680000
+      },
+      {
+        "sid": "s-a1",
+        "sub": "dec",
+        "kind": "#14 결정 기다림",
+        "text": "결정 번호를 화면에 크게 보일까요?",
+        "at": 1791946620000
+      },
+      {
+        "sid": "s-a1",
+        "sub": "dec",
+        "kind": "#13 결정 기다림",
+        "text": "오래된 답 기록을 지울까요?",
+        "at": 1791946500000
+      },
+      {
+        "sid": "s-a1",
+        "sub": "dec",
+        "kind": "#12 결정 기다림 · 작업 멈춤",
+        "text": "답을 다른 창에 어떻게 넘길까요?",
+        "at": 1791946440000
+      },
+      {
+        "sid": "s-b1",
+        "sub": "dec",
+        "kind": "#15 결정 기다림 · 작업 멈춤",
+        "text": "백신 예외에 상태 폴더를 넣을까요?",
+        "at": 1791943920000
+      },
+      {
+        "sid": "s-b1",
+        "sub": "ov",
+        "kind": "막힘",
+        "text": "저장 경로가 EPERM으로 막혀 소유자 확인이 필요함",
+        "at": 1791943800000
+      },
+      {
+        "sid": "s-c2",
+        "sub": "ov",
+        "kind": "끝남 — 결과 확인",
+        "text": "설명서 한국어판을 다 옮겼고 링크 확인까지 끝남",
+        "at": 1791939600000
+      }
+    ],
+    "count": 8
+  },
+  "alerts": [
+    {
+      "sid": "s-a2",
+      "worker": "st_01a14092",
+      "state": "error",
+      "text": "알람 소리 시험"
+    },
+    {
+      "sid": "s-b2",
+      "worker": "st_01a14082",
+      "state": "lost",
+      "text": "통합 시험 준비"
+    }
+  ],
+  "people": [
+    {
+      "sid": "s-a2",
+      "id": "st_01a14091",
+      "name": "서버 본체 만들기",
+      "kind": "deep-low",
+      "room": "lounge",
+      "state": "done"
+    },
+    {
+      "sid": "s-a2",
+      "id": "st_01a14092",
+      "name": "알람 소리 시험",
+      "kind": "quick",
+      "room": "work",
+      "state": "error"
+    },
+    {
+      "sid": "s-a2",
+      "id": "st_01a14094",
+      "name": "작업자 줄·움직임",
+      "kind": "visual-engineering",
+      "room": "work",
+      "state": "running"
+    },
+    {
+      "sid": "s-b2",
+      "id": "st_01a14081",
+      "name": "옛 설치기 정리",
+      "kind": "quick",
+      "room": "lounge",
+      "state": "cancelled"
+    },
+    {
+      "sid": "s-b2",
+      "id": "st_01a14080",
+      "name": "계획 상태 읽기",
+      "kind": "deep-low",
+      "room": "work",
+      "state": "running"
+    },
+    {
+      "sid": "s-b2",
+      "id": "st_01a14095",
+      "name": "알람 화면",
+      "kind": "",
+      "room": "work",
+      "state": "waiting"
+    },
+    {
+      "sid": "s-b2",
+      "id": "st_01a14082",
+      "name": "통합 시험 준비",
+      "kind": "deep-low",
+      "room": "work",
+      "state": "lost"
+    },
+    {
+      "sid": "s-b2",
+      "id": "st_01a14096",
+      "name": "확장 연결",
+      "kind": "deep-low",
+      "room": "work",
+      "state": "running"
+    },
+    {
+      "sid": "s-b2",
+      "id": "st_01a14097",
+      "name": "설치 안내서",
+      "kind": "quick",
+      "room": "work",
+      "state": "waiting"
+    }
+  ],
+  "log": [
+    {
+      "sid": "s-a1",
+      "kind": "change",
+      "text": "결정 번호를 전역으로 하나씩 늘리게 바꿈",
+      "at": 1791946560000
+    },
+    {
+      "sid": "s-a1",
+      "kind": "change",
+      "text": "두 창 동시 답 시험 추가",
+      "at": 1791946560000
+    },
+    {
+      "sid": "s-a1",
+      "kind": "done",
+      "text": "결정 파일 저장 시험 통과",
+      "at": 1791946560000
+    },
+    {
+      "sid": "s-a1",
+      "kind": "done",
+      "text": "잠금 회수 규칙 문서화",
+      "at": 1791946560000
+    },
+    {
+      "sid": "s-a2",
+      "kind": "worker",
+      "state": "done",
+      "text": "서버 본체 만들기",
+      "at": "2026-10-14T02:38:30.345Z"
+    },
+    {
+      "sid": "s-a2",
+      "kind": "worker",
+      "state": "error",
+      "text": "알람 소리 시험",
+      "at": "2026-10-14T02:54:00.345Z"
+    },
+    {
+      "sid": "s-a2",
+      "kind": "change",
+      "text": "shim 파일 하나만 만들도록 바꿈",
+      "at": 1791945600000
+    },
+    {
+      "sid": "s-a2",
+      "kind": "change",
+      "text": "--uninstall 옵션 추가",
+      "at": 1791945600000
+    },
+    {
+      "sid": "s-a2",
+      "kind": "change",
+      "text": "설치 전 원본 해시 기록",
+      "at": 1791945600000
+    },
+    {
+      "sid": "s-a2",
+      "kind": "change",
+      "text": "README에 끄는 법 적음",
+      "at": 1791945600000
+    },
+    {
+      "sid": "s-a2",
+      "kind": "change",
+      "text": "임시 폴더 정리 코드 추가",
+      "at": 1791945600000
+    },
+    {
+      "sid": "s-a2",
+      "kind": "done",
+      "text": "설치 시험 12개 통과",
+      "at": 1791945600000
+    },
+    {
+      "sid": "s-b1",
+      "kind": "change",
+      "text": "재시도 없는 저장 경로 3곳 찾음",
+      "at": 1791943800000
+    },
+    {
+      "sid": "s-b2",
+      "kind": "worker",
+      "state": "cancelled",
+      "text": "옛 설치기 정리",
+      "at": "2026-10-14T02:41:00.345Z"
+    },
+    {
+      "sid": "s-b2",
+      "kind": "worker",
+      "state": "lost",
+      "text": "통합 시험 준비",
+      "at": "2026-10-14T02:30:00.345Z"
+    },
+    {
+      "sid": "s-b2",
+      "kind": "change",
+      "text": "목록 높이를 창에 맞춤",
+      "at": 1791946680000
+    },
+    {
+      "sid": "s-b2",
+      "kind": "change",
+      "text": "글자 크기 한 단계 줄임",
+      "at": 1791946680000
+    },
+    {
+      "sid": "s-b2",
+      "kind": "done",
+      "text": "잘림 재현 캡처",
+      "at": 1791946680000
+    },
+    {
+      "sid": "s-c1",
+      "kind": "change",
+      "text": "7일 지난 로그 압축",
+      "at": 1791918000000
+    },
+    {
+      "sid": "s-c2",
+      "kind": "change",
+      "text": "설명서 12쪽 번역",
+      "at": 1791939600000
+    },
+    {
+      "sid": "s-c2",
+      "kind": "done",
+      "text": "설명서 12쪽 번역",
+      "at": 1791939600000
+    },
+    {
+      "sid": "s-c2",
+      "kind": "done",
+      "text": "용어표 정리",
+      "at": 1791939600000
+    }
+  ]
+}
