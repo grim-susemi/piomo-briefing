@@ -993,26 +993,26 @@ test('rail: home first, then every destination, a spacer and settings; sidebar c
   const st = base(S);
   const html = S.rail(fixture(), st);
   assert.equal(all(marks(html), /class="sh-ri"[^>]*>([^<]*)</g).join(' '),
-    '[house] [message-square] [inbox] [list-todo] [lightbulb] [archive] [users] [settings]');
-  assert.equal((html.match(/class="ic ic-rail"/g) || []).length, 7, 'rail-sized icons');
+    '[house] [message-square] [inbox] [list-todo] [layout-grid] [lightbulb] [archive] [users] [settings]');
+  assert.equal((html.match(/class="ic ic-rail"/g) || []).length, 8, 'rail-sized icons');
   assert.match(html, /data-key="conv"[^>]*><span class="sh-ri" aria-hidden="true"><svg class="ic ic-rail ic-sel"/, 'the selected view: a heavier stroke');
   assert.equal((html.match(/ic-sel/g) || []).length, 1);
   assert.doesNotMatch(html, /data-sh="toggleSide"/);
   assert.match(marks(S.sideFrame(st)), /data-sh="toggleSide"[^>]*>\[panel-left-close\]/, 'the header control closes');
   assert.match(marks(S.tabs(fixture(), S.reduce(st, { type: 'toggleSide' }))), /^<button[^>]*class="sh-topen"[^>]*>\[panel-left-open\]/, 'the tab-bar control opens');
-  assert.deepEqual(all(html, /class="sh-tip"[^>]*>([^<]*)</g), ['홈', '대화', '수신함', '계획', '메멘토', '닫힌 창', '프로필·에이전트', '설정']);
+  assert.deepEqual(all(html, /class="sh-tip"[^>]*>([^<]*)</g), ['홈', '대화', '수신함', '계획', '사무실', '메멘토', '닫힌 창', '프로필·에이전트', '설정']);
   assert.match(html, /data-key="inbox" aria-label="수신함 6개"/, 'the count is spoken, not shown in the tooltip');
   assert.match(marks(html), /\[archive\]<\/span><span class="sh-tip"[^>]*>닫힌 창<\/span><\/button><button[^>]*data-key="profiles"[\s\S]*?\[users\]<\/span><span class="sh-tip"[^>]*>프로필·에이전트<\/span><\/button><span class="sh-rsp" aria-hidden="true"><\/span><button[^>]*data-key="settings"/);
   assert.match(html, /<span class="sh-n" aria-hidden="true">6<\/span>/);
   assert.match(html, /class="sh-rb on" data-sh="view" data-key="conv"/);
-  assert.equal((html.match(/<button /g) || []).length, 8, 'every destination, no rail toggle or second panel');
+  assert.equal((html.match(/<button /g) || []).length, 9, 'every destination, no rail toggle or second panel');
 });
 
 test('regression R4: the inbox tooltip is exactly 수신함 while its badge carries the count', () => {
   const S = load().BriefShell;
   const vm = { sessions: [{ id: 'one', decisions: [{ id: 1, answered: false, closed: false }] }] };
   const html = S.rail(vm, S.defaults());
-  assert.deepEqual(all(html, /class="sh-tip"[^>]*>([^<]*)</g), ['홈', '대화', '수신함', '계획', '메멘토', '닫힌 창', '프로필·에이전트', '설정']);
+  assert.deepEqual(all(html, /class="sh-tip"[^>]*>([^<]*)</g), ['홈', '대화', '수신함', '계획', '사무실', '메멘토', '닫힌 창', '프로필·에이전트', '설정']);
   assert.match(marks(html), /\[inbox\]<\/span><span class="sh-n" aria-hidden="true">1<\/span><span class="sh-tip" aria-hidden="true">수신함<\/span>/);
   assert.doesNotMatch(S.rail({ sessions: [] }, S.defaults()), /sh-n|수신함 0/, 'nothing waiting: no badge, plain label');
 });

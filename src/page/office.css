@@ -1,0 +1,70 @@
+/* omo-briefing office view (office-view.js). The chrome around the scene (title, floor picker, floor card, rail) uses
+ * tokens.css only, in both themes. The scene inside the SVG keeps the mockup's own night palette in both themes: those
+ * colours are art and live in office-view.js / office-assets.js. Wide: scene | rail; narrow: the scene, the rail under it. */
+.of { container-type: inline-size; box-sizing: border-box; height: 100%; color: var(--c-fg); }
+.of-body { display: grid; gap: var(--sp-3); box-sizing: border-box; padding: var(--sp-3); }
+.of-stage { position: relative; overflow: hidden; aspect-ratio: 10 / 7; min-height: 240px; max-height: calc(100dvh - 96px);
+  border-radius: var(--r-xl); background: var(--c-sunk); box-shadow: 0 0 0 var(--hair) var(--c-line-strong); }
+.of-scene { display: block; width: 100%; height: 100%; user-select: none; }
+.of-scene text { font-family: var(--font-ui); }
+.of-desk, .of-tag, .of-bub[data-sh] { cursor: pointer; }
+.of-desk:focus { outline: none; }
+.of-desk:focus-visible .of-hit { stroke: var(--c-accent); stroke-width: 3; }
+
+.of-head, .of-floors, .of-card { position: absolute; box-sizing: border-box; border-radius: var(--r-xl); background: var(--c-pop); box-shadow: var(--shadow-pop); }
+.of-head { left: var(--sp-3); top: var(--sp-3); margin: 0; padding: var(--sp-1) var(--sp-3); border-radius: var(--r-md); font-size: var(--fs-base); font-weight: var(--fw-semibold); }
+.of-floors { right: var(--sp-3); top: var(--sp-3); width: 224px; max-height: 46%; overflow: auto; padding: var(--sp-2); }
+.of-floors h3 { margin: 0 0 var(--sp-1); padding: 0 var(--sp-2); color: var(--c-fg-3); font-size: var(--fs-sm); font-weight: var(--fw-medium); }
+.of-fl { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--ctl-h); padding: 0 var(--sp-2); border: 0;
+  border-radius: var(--r-md); background: none; color: var(--c-fg); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; }
+.of-no { flex: none; min-width: 30px; padding: 0 var(--sp-1); border-radius: var(--r-xs); background: var(--fill-soft); color: var(--c-fg-2);
+  font-size: var(--fs-xs); font-weight: var(--fw-semibold); text-align: center; font-variant-numeric: tabular-nums; }
+.of-ft { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.of-fs { flex: none; color: var(--c-fg-3); font-size: var(--fs-xs); }
+.of-n { flex: none; min-width: 18px; padding: 0 var(--sp-1); box-sizing: border-box; border-radius: var(--r-full); background: var(--c-amber-tint);
+  color: var(--c-amber-text); font-size: var(--fs-xs); font-weight: var(--fw-semibold); text-align: center; }
+.of-card { left: var(--sp-3); bottom: var(--sp-3); display: flex; align-items: center; gap: var(--sp-3); max-width: min(440px, calc(100% - 2 * var(--sp-3))); padding: var(--sp-2) var(--sp-3); }
+.of-cn { flex: none; font-size: var(--fs-2xl); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.of-ct { display: grid; min-width: 0; }
+.of-ct b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.of-ct small { color: var(--c-fg-3); font-size: var(--fs-sm); }
+.of-open { flex: none; min-height: var(--ctl-h); padding: 0 var(--sp-3); border: 0; border-radius: var(--r-md); background: var(--c-primary);
+  color: var(--c-on-primary); font: inherit; font-size: var(--fs-sm); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
+
+.of-rail { display: grid; align-content: start; gap: var(--sp-3); }
+.of-box { margin: 0; padding: var(--sp-3); border-radius: var(--r-xl); background: var(--c-elev); box-shadow: var(--shadow-card), 0 0 0 var(--hair) var(--c-line); }
+.of-box h3 { display: flex; align-items: baseline; gap: var(--sp-2); margin: 0 0 var(--sp-2); font-size: var(--fs-base); }
+.of-box h3 small { margin-left: auto; color: var(--c-fg-3); font-size: var(--fs-sm); font-weight: var(--fw-regular); }
+.of-list, .of-log { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.of-it { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--sp-2); width: 100%; padding: var(--sp-1) var(--sp-2); border: 0;
+  border-radius: var(--r-md); background: none; color: var(--c-fg); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; }
+.of-it-t { min-width: 0; font-weight: var(--fw-medium); word-break: keep-all; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.of-it-m { grid-column: 1 / -1; color: var(--c-fg-3); font-size: var(--fs-xs); word-break: keep-all; overflow-wrap: anywhere; }
+.of-st { align-self: start; padding: 0 var(--sp-2); border-radius: var(--r-full); font-size: var(--fs-xs); white-space: nowrap; }
+.of-st.is-run { background: var(--c-green-tint); color: var(--c-green); }
+.of-st.is-wait { background: var(--c-amber-tint); color: var(--c-amber); }
+.of-st.is-err { background: var(--c-red-tint); color: var(--c-red); }
+.of-st.is-rest { background: var(--c-gray-tint); color: var(--c-gray); }
+.of-log li { display: flex; gap: var(--sp-2); padding: 2px var(--sp-2); color: var(--c-fg-2); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: anywhere; }
+.of-log b { flex: none; color: var(--c-fg); font-variant-numeric: tabular-nums; }
+.of-empty { margin: 0; padding: 0 var(--sp-2); color: var(--c-fg-3); font-size: var(--fs-sm); }
+
+.of-fl:hover, .of-it:hover { background: var(--fill-hover); }
+.of-fl[aria-pressed="true"] { background: var(--fill-sel); }
+.of-fl:active, .of-it:active { background: var(--fill-press); }
+.of-open:hover { background: var(--c-fg-2); }
+.of-open:active { background: color-mix(in srgb, var(--c-primary) 80%, var(--c-main)); }
+.of-fl:focus-visible, .of-it:focus-visible, .of-open:focus-visible { outline: 2px solid var(--c-accent); outline-offset: -2px; }
+
+@container (min-width: 1040px) {
+  .of-body { height: 100%; grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: minmax(0, 1fr); }
+  .of-stage { aspect-ratio: auto; min-height: 0; max-height: none; }
+  .of-rail { min-height: 0; overflow: auto; }
+}
+@container (max-width: 1039px) {
+  .of-rail { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+}
+@media (max-width: 599px) {
+  .of-fl, .of-it, .of-open { min-height: var(--hit); }
+  .of-floors { top: calc(2 * var(--sp-3) + 28px); left: var(--sp-3); width: auto; max-height: 40%; }
+}

@@ -105,7 +105,7 @@ test('the extension hands the server host its answer and focus hooks, and the pa
   const nonce = 'AbCdEfGhIjKlMnOpQrStUv==';
   const nonced = s.hooks().getPage(vm, 'tok-123_ABC', nonce);
   assert.equal(nonced.match(new RegExp(`<style nonce="${nonce}">`, 'g')).length, 1, 'the combined style carries the nonce');
-  assert.equal(nonced.match(new RegExp(`<script nonce="${nonce}">`, 'g')).length, 13, 'every script carries the nonce');
+  assert.equal(nonced.match(new RegExp(`<script nonce="${nonce}">`, 'g')).length, 16, 'every script carries the nonce');
   assert.equal((nonced.match(/<script>/g) ?? []).length, 0, 'no script is left un-nonced');
   for (const file of ['index.html', 'data.js']) {
     assert.ok(!readFileSync(join(s.stateDir, file), 'utf8').includes('omo-board-token'), `${file} (what the file page and data.js carry) has no token`);

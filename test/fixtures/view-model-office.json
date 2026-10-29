@@ -1,0 +1,596 @@
+{
+  "schema": 1,
+  "seq": 7,
+  "generatedAt": 1791946800000,
+  "sessions": [
+    {
+      "id": "o-r3",
+      "project": "piomo-briefing",
+      "cwd": "C:/Users/USER/orca/projects/piomo-briefing",
+      "title": "R3 계획 ① 실행",
+      "paneId": "w5-p1",
+      "tabId": "w5:to-r3",
+      "answerKinds": [
+        "option",
+        "text",
+        "annotation"
+      ],
+      "tabLabel": "작업 창",
+      "tabNumber": 190,
+      "workName": "r3-advisor-seams",
+      "status": "in_progress",
+      "statusKey": "in_progress",
+      "tab": "진행 중",
+      "chips": [],
+      "headline": "2단계: 설치기 시험과 되돌리기 키트를 나눠 만드는 중",
+      "lastActivityAt": 1791946740000,
+      "lastBriefAt": 1791946740000,
+      "changes": [
+        {
+          "text": "2단계 시작: 상자 3개 이동",
+          "truth": "reported",
+          "applied": "none",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "설치기 시험 3개 추가",
+          "truth": "reported",
+          "applied": "candidate",
+          "evidenceState": "ok"
+        }
+      ],
+      "done": [
+        {
+          "text": "1단계 끝: 설치 경로 정리",
+          "truth": "reported",
+          "applied": "none",
+          "evidenceState": "ok"
+        }
+      ],
+      "next": "",
+      "decisions": [
+        {
+          "id": 516,
+          "sessionId": "o-r3",
+          "question": "계획 ③: 지금 실사용 폴더에 설치할까요?",
+          "options": {
+            "A": {
+              "text": "지금 설치",
+              "consequence": "바로 진행"
+            },
+            "B": {
+              "text": "나중에",
+              "consequence": "나중에 다시 묻기"
+            }
+          },
+          "recommend": "B",
+          "reason": "설치 전 마지막 확인이 남음",
+          "blocks": false,
+          "createdAt": 1791946500000,
+          "answered": false,
+          "closed": false
+        }
+      ],
+      "alive": true,
+      "plan": {
+        "planId": "r3-advisor-seams",
+        "rev": 3,
+        "goal": "R3 묶음을 실사용에 안전하게 올리기",
+        "stage": "running",
+        "source": {
+          "slug": "r3-advisor-seams"
+        },
+        "waves": [
+          {
+            "n": 1,
+            "label": "설치 경로 정리"
+          },
+          {
+            "n": 2,
+            "label": "설치기와 되돌리기"
+          },
+          {
+            "n": 3,
+            "label": "실사용 확인"
+          },
+          {
+            "n": 4,
+            "label": "보고"
+          },
+          {
+            "n": 5,
+            "label": "정리"
+          }
+        ],
+        "tasks": [
+          {
+            "id": "1.1",
+            "wave": 1,
+            "label": "1단계 할 일 1",
+            "what": "할 일 1",
+            "done": "확인 1",
+            "state": "done",
+            "deps": []
+          },
+          {
+            "id": "1.2",
+            "wave": 1,
+            "label": "1단계 할 일 2",
+            "what": "할 일 2",
+            "done": "확인 2",
+            "state": "done",
+            "deps": []
+          },
+          {
+            "id": "2.1",
+            "wave": 2,
+            "label": "2단계 할 일 1",
+            "what": "할 일 1",
+            "done": "확인 1",
+            "state": "done",
+            "deps": []
+          },
+          {
+            "id": "2.2",
+            "wave": 2,
+            "label": "2단계 할 일 2",
+            "what": "할 일 2",
+            "done": "확인 2",
+            "state": "done",
+            "deps": []
+          },
+          {
+            "id": "2.3",
+            "wave": 2,
+            "label": "2단계 할 일 3",
+            "what": "할 일 3",
+            "done": "확인 3",
+            "state": "done",
+            "deps": []
+          },
+          {
+            "id": "2.4",
+            "wave": 2,
+            "label": "2단계 할 일 4",
+            "what": "할 일 4",
+            "done": "확인 4",
+            "state": "doing",
+            "deps": []
+          },
+          {
+            "id": "2.5",
+            "wave": 2,
+            "label": "2단계 할 일 5",
+            "what": "할 일 5",
+            "done": "확인 5",
+            "state": "doing",
+            "deps": []
+          },
+          {
+            "id": "2.6",
+            "wave": 2,
+            "label": "2단계 할 일 6",
+            "what": "할 일 6",
+            "done": "확인 6",
+            "state": "doing",
+            "deps": []
+          },
+          {
+            "id": "2.7",
+            "wave": 2,
+            "label": "2단계 할 일 7",
+            "what": "할 일 7",
+            "done": "확인 7",
+            "state": "doing",
+            "deps": []
+          },
+          {
+            "id": "3.1",
+            "wave": 3,
+            "label": "3단계 할 일 1",
+            "what": "할 일 1",
+            "done": "확인 1",
+            "state": "todo",
+            "deps": []
+          },
+          {
+            "id": "3.2",
+            "wave": 3,
+            "label": "3단계 할 일 2",
+            "what": "할 일 2",
+            "done": "확인 2",
+            "state": "todo",
+            "deps": []
+          },
+          {
+            "id": "4.1",
+            "wave": 4,
+            "label": "4단계 할 일 1",
+            "what": "할 일 1",
+            "done": "확인 1",
+            "state": "todo",
+            "deps": []
+          },
+          {
+            "id": "5.1",
+            "wave": 5,
+            "label": "5단계 할 일 1",
+            "what": "할 일 1",
+            "done": "확인 1",
+            "state": "todo",
+            "deps": []
+          }
+        ],
+        "questions": []
+      },
+      "live": {
+        "workers": [
+          {
+            "id": "st_r3_01",
+            "name": "계획 다시 보기",
+            "kind": "plan-reviewer",
+            "model": "Opus 5.5",
+            "state": "running",
+            "step": "계획 검토 2회째",
+            "startedAt": "2026-10-14T02:30:00.000Z",
+            "updatedAt": "2026-10-14T02:59:00.000Z",
+            "childSessionId": "01r3_01-0000-7000-8000-000000000001",
+            "stale": false
+          },
+          {
+            "id": "st_r3_02",
+            "name": "구조 비교",
+            "kind": "architect",
+            "model": "Opus 5.5",
+            "state": "running",
+            "step": "구조 비교 메모 작성",
+            "startedAt": "2026-10-14T02:35:00.000Z",
+            "updatedAt": "2026-10-14T02:59:00.000Z",
+            "childSessionId": "01r3_02-0000-7000-8000-000000000001",
+            "stale": false
+          },
+          {
+            "id": "st_r3_03",
+            "name": "상황판 구조 탐색",
+            "kind": "explore",
+            "model": "Opus 5.5",
+            "state": "running",
+            "step": "grep · src/page",
+            "startedAt": "2026-10-14T02:48:00.000Z",
+            "updatedAt": "2026-10-14T02:59:00.000Z",
+            "childSessionId": "01r3_03-0000-7000-8000-000000000001",
+            "stale": false
+          },
+          {
+            "id": "st_r3_04",
+            "name": "라이선스 확인",
+            "kind": "librarian",
+            "model": "Opus 5.5",
+            "state": "running",
+            "step": "Lucide 라이선스 확인",
+            "startedAt": "2026-10-14T02:51:00.000Z",
+            "updatedAt": "2026-10-14T02:59:00.000Z",
+            "childSessionId": "01r3_04-0000-7000-8000-000000000001",
+            "stale": false
+          },
+          {
+            "id": "st_r3_05",
+            "name": "#7 설치기 시험 작성",
+            "kind": "deep-low",
+            "model": "Opus 5.5",
+            "state": "running",
+            "step": "bash · node --test test/install.test.mjs",
+            "startedAt": "2026-10-14T02:42:00.000Z",
+            "updatedAt": "2026-10-14T02:59:00.000Z",
+            "childSessionId": "01r3_05-0000-7000-8000-000000000001",
+            "stale": false
+          },
+          {
+            "id": "st_r3_06",
+            "name": "#8 되돌리기 키트",
+            "kind": "deep-low",
+            "model": "Opus 5.5",
+            "state": "running",
+            "step": "edit · scripts/install.mjs",
+            "startedAt": "2026-10-14T02:46:00.000Z",
+            "updatedAt": "2026-10-14T02:59:00.000Z",
+            "childSessionId": "01r3_06-0000-7000-8000-000000000001",
+            "stale": false
+          },
+          {
+            "id": "st_r3_07",
+            "name": "작업 자문",
+            "kind": "oracle",
+            "model": "Sol 6.1",
+            "state": "running",
+            "step": "작업 자문 답하는 중",
+            "startedAt": "2026-10-14T02:54:00.000Z",
+            "updatedAt": "2026-10-14T02:59:00.000Z",
+            "childSessionId": "01r3_07-0000-7000-8000-000000000001",
+            "stale": false
+          },
+          {
+            "id": "st_r3_08",
+            "name": "코드 검토",
+            "kind": "omo-native-code-reviewer",
+            "model": "Opus 5.5",
+            "state": "running",
+            "step": "diff 읽는 중",
+            "startedAt": "2026-10-14T02:56:00.000Z",
+            "updatedAt": "2026-10-14T02:59:00.000Z",
+            "childSessionId": "01r3_08-0000-7000-8000-000000000001",
+            "stale": false
+          },
+          {
+            "id": "st_r3_09",
+            "name": "브라우저 시험",
+            "kind": "omo-native-qa-executor",
+            "model": "Opus 5.5",
+            "state": "error",
+            "step": "",
+            "startedAt": "2026-10-14T02:40:00.000Z",
+            "updatedAt": "2026-10-14T02:57:00.000Z",
+            "childSessionId": "01r3_09-0000-7000-8000-000000000001",
+            "stale": false,
+            "endedAt": "2026-10-14T02:57:00.000Z"
+          },
+          {
+            "id": "st_r3_10",
+            "name": "요구 조건 점검",
+            "kind": "plan-consultant",
+            "model": "Opus 5.5",
+            "state": "done",
+            "step": "",
+            "startedAt": "2026-10-14T02:10:00.000Z",
+            "updatedAt": "2026-10-14T02:20:00.000Z",
+            "childSessionId": "01r3_10-0000-7000-8000-000000000001",
+            "stale": false,
+            "endedAt": "2026-10-14T02:20:00.000Z"
+          },
+          {
+            "id": "st_r3_11",
+            "name": "#5 문구 고치기",
+            "kind": "quick",
+            "model": "Opus 5.5",
+            "state": "done",
+            "step": "",
+            "startedAt": "2026-10-14T02:38:00.000Z",
+            "updatedAt": "2026-10-14T02:52:00.000Z",
+            "childSessionId": "01r3_11-0000-7000-8000-000000000001",
+            "stale": false,
+            "endedAt": "2026-10-14T02:52:00.000Z"
+          },
+          {
+            "id": "st_r3_12",
+            "name": "설치 전 검문",
+            "kind": "omo-native-gate-reviewer",
+            "model": "Opus 5.5",
+            "state": "waiting",
+            "step": "사장님 결정 기다림",
+            "startedAt": "2026-10-14T02:53:00.000Z",
+            "updatedAt": "2026-10-14T02:59:00.000Z",
+            "childSessionId": "01r3_12-0000-7000-8000-000000000001",
+            "stale": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "o-adv",
+      "project": "piomo-briefing",
+      "cwd": "C:/Users/USER/orca/projects/piomo-briefing",
+      "title": "자문 2세대 구현",
+      "paneId": "w5-p1",
+      "tabId": "w5:to-adv",
+      "answerKinds": [
+        "option",
+        "text",
+        "annotation"
+      ],
+      "tabLabel": "작업 창",
+      "tabNumber": 190,
+      "workName": "advisor-v2",
+      "status": "in_progress",
+      "statusKey": "in_progress",
+      "tab": "진행 중",
+      "chips": [],
+      "headline": "자문 결과를 저장하는 칸을 만드는 중",
+      "lastActivityAt": 1791946560000,
+      "lastBriefAt": 1791946740000,
+      "changes": [
+        {
+          "text": "자문 기록 형식 정함",
+          "truth": "reported",
+          "applied": "none",
+          "evidenceState": "ok"
+        }
+      ],
+      "done": [],
+      "next": "",
+      "decisions": [],
+      "alive": true,
+      "live": {
+        "workers": [
+          {
+            "id": "st_ad_01",
+            "name": "#3 자문 결과 저장",
+            "kind": "deep-low",
+            "model": "Opus 5.5",
+            "state": "running",
+            "step": "edit · src/advisor.mjs",
+            "startedAt": "2026-10-14T02:50:00.000Z",
+            "updatedAt": "2026-10-14T02:59:00.000Z",
+            "childSessionId": "01ad_01-0000-7000-8000-000000000001",
+            "stale": false
+          },
+          {
+            "id": "st_ad_02",
+            "name": "옛 자문 찾기",
+            "kind": "explore",
+            "model": "Opus 5.5",
+            "state": "done",
+            "step": "",
+            "startedAt": "2026-10-14T02:30:00.000Z",
+            "updatedAt": "2026-10-14T02:40:00.000Z",
+            "childSessionId": "01ad_02-0000-7000-8000-000000000001",
+            "stale": false,
+            "endedAt": "2026-10-14T02:40:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "id": "o-plan",
+      "project": "piomo-briefing",
+      "cwd": "C:/Users/USER/orca/projects/piomo-briefing",
+      "title": "OmO 사무실 기획",
+      "paneId": "w5-p1",
+      "tabId": "w5:to-plan",
+      "answerKinds": [
+        "option",
+        "text",
+        "annotation"
+      ],
+      "tabLabel": "작업 창",
+      "tabNumber": 190,
+      "workName": "omo-office-view",
+      "status": "needs_decision",
+      "statusKey": "needs_decision",
+      "tab": "나를 기다림",
+      "chips": [],
+      "headline": "첫 화면을 어느 층으로 열지 정하면 시작합니다",
+      "lastActivityAt": 1791946380000,
+      "lastBriefAt": 1791946740000,
+      "changes": [],
+      "done": [],
+      "next": "",
+      "decisions": [
+        {
+          "id": 517,
+          "sessionId": "o-plan",
+          "question": "사무실 첫 화면을 어느 층으로 열까요?",
+          "options": {
+            "A": {
+              "text": "일하는 층",
+              "consequence": "바로 진행"
+            },
+            "B": {
+              "text": "마지막 층",
+              "consequence": "나중에 다시 묻기"
+            }
+          },
+          "recommend": "B",
+          "reason": "설치 전 마지막 확인이 남음",
+          "blocks": false,
+          "createdAt": 1791946380000,
+          "answered": false,
+          "closed": false
+        }
+      ],
+      "alive": true
+    },
+    {
+      "id": "o-harness",
+      "project": "piomo-briefing",
+      "cwd": "C:/Users/USER/orca/projects/piomo-briefing",
+      "title": "하네스 점검",
+      "paneId": "w5-p1",
+      "tabId": "w5:to-harness",
+      "answerKinds": [
+        "option",
+        "text",
+        "annotation"
+      ],
+      "tabLabel": "작업 창",
+      "tabNumber": 190,
+      "workName": "harness-audit",
+      "status": "blocked",
+      "statusKey": "blocked",
+      "tab": "나를 기다림",
+      "chips": [],
+      "headline": "설정 파일이 잠겨 있어 멈췄습니다",
+      "lastActivityAt": 1791945900000,
+      "lastBriefAt": 1791946740000,
+      "changes": [
+        {
+          "text": "잠금 파일 위치 찾음",
+          "truth": "reported",
+          "applied": "none",
+          "evidenceState": "ok"
+        }
+      ],
+      "done": [],
+      "next": "",
+      "decisions": [],
+      "alive": true
+    },
+    {
+      "id": "o-once",
+      "project": "piomo-briefing",
+      "cwd": "C:/Users/USER/orca/projects/piomo-briefing",
+      "title": "원스휴먼 RE",
+      "paneId": "w5-p1",
+      "tabId": "w5:to-once",
+      "answerKinds": [
+        "option",
+        "text",
+        "annotation"
+      ],
+      "tabLabel": "작업 창",
+      "tabNumber": 190,
+      "workName": "onehuman-re",
+      "status": "done",
+      "statusKey": "done",
+      "tab": "끝남",
+      "chips": [],
+      "headline": "분석 메모 정리까지 끝났습니다",
+      "lastActivityAt": 1791928800000,
+      "lastBriefAt": 1791946740000,
+      "changes": [],
+      "done": [
+        {
+          "text": "분석 메모 정리",
+          "truth": "reported",
+          "applied": "none",
+          "evidenceState": "ok"
+        }
+      ],
+      "next": "",
+      "decisions": [],
+      "alive": false
+    },
+    {
+      "id": "o-old",
+      "project": "piomo-briefing",
+      "cwd": "C:/Users/USER/orca/projects/piomo-briefing",
+      "title": "옛 로그 정리",
+      "paneId": "w5-p1",
+      "tabId": "w5:to-old",
+      "answerKinds": [
+        "option",
+        "text",
+        "annotation"
+      ],
+      "tabLabel": "작업 창",
+      "tabNumber": 190,
+      "workName": "log-cleanup",
+      "status": "done",
+      "statusKey": "done",
+      "tab": "끝남",
+      "chips": [],
+      "headline": "오래된 로그를 묶어 두었습니다",
+      "lastActivityAt": 1791687600000,
+      "lastBriefAt": 1791946740000,
+      "changes": [],
+      "done": [],
+      "next": "",
+      "decisions": [],
+      "alive": false,
+      "folded": {
+        "key": "fold-o-old",
+        "reports": 2,
+        "decisions": 0
+      }
+    }
+  ]
+}

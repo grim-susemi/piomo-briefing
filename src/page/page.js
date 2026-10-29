@@ -60,6 +60,7 @@
   var cardsView = null, cardsEpoch = 0, cardsRead = 0, cardsOwnerAction = null;
   // A constant region keeps TASK14's own DOM, filters and expanded rows outside string-rendered agent updates.
   var CARDS_REGION = '<section aria-label="메멘토"><p id="memento-load" role="status"></p><div id="memento-cards"></div></section>';
+  var OFFICE_REGION = '<section id="office" class="of" aria-label="사무실"></section>'; // office-view.js draws in it
 
   // Fail closed: without view.js, model text still cannot become markup (same mapping as view.js escapeHtml).
   function esc(v) {
@@ -438,7 +439,7 @@
   function mainKey() {
     if (state.ui.view === 'profiles') return 'profiles';
     var sid = shownSid() || state.ui.active;
-    return state.ui.view === 'memento' ? 'memento' : sid ? sid + '/' + (state.ui.sub[sid] || 'ov') : 'overview';
+    return state.ui.view === 'memento' || state.ui.view === 'office' ? state.ui.view : sid ? sid + '/' + (state.ui.sub[sid] || 'ov') : 'overview';
   }
   function saveScroll() {
     if (renderedKey !== null) scrollMemory[renderedKey] = { y: main.scrollTop, anchor: captureAnchor() };
@@ -481,7 +482,7 @@
     var active = doc.activeElement;
     var sideToggle = active && active.getAttribute && active.getAttribute('data-sh') === 'toggleSide';
     var overlay = overlayOpen();
-    if (state.ui.view === 'memento' && (action.type === 'open' || action.type === 'active')) {
+    if ((state.ui.view === 'memento' || state.ui.view === 'office') && (action.type === 'open' || action.type === 'active')) {
       state.ui = g.BriefShell.reduce(state.ui, { type: 'view', key: 'conv' });
     }
     state.ui = g.BriefShell.reduce(state.ui, action);
@@ -566,7 +567,7 @@
       region('side', sideList, g.BriefShell.side(model, state.ui));
       region('tabs', tabs, g.BriefShell.tabs(model, state.ui));
       var s = currentSession();
-      var cards = state.ui.view === 'memento';
+      var cards = state.ui.view === 'memento', office = state.ui.view === 'office';
       if (!cards && cardsView) { cardsView.destroy(); cardsView = null; cardsEpoch++; }
       var html;
       if (state.ui.view === 'profiles') {
@@ -575,13 +576,14 @@
         html = g.BriefProfiles && typeof g.BriefProfiles.render === 'function'
           ? g.BriefProfiles.render(ps && ps.view, pe)
           : '<p class="empty">프로필 화면 모듈이 없어요</p>';
-      } else html = cards ? CARDS_REGION : s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision, checked: isChecked, fold: foldStatus(s), windowLive: g.BriefShell.windowLiveOf(model, state.ui) })
+      } else html = cards ? CARDS_REGION : office ? OFFICE_REGION : s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision, checked: isChecked, fold: foldStatus(s), windowLive: g.BriefShell.windowLiveOf(model, state.ui) })
         : state.ui.active ? '<p class="empty">(지금 안 보임)</p>' : g.BriefView.renderOverview(model, state.ui);
       if (region('main', main, html)) {
         g.BriefAnnotate.decorate();
         // a #main drawn later than the apply shows the current elapsed times at once, not the apply's (the 1 s ticker goes on)
         if (g.BriefWorkersView) g.BriefWorkersView.tick(main, state.now());
       }
+      if (office) g.BriefOfficeView.render(doc.getElementById('office'), model, state.ui);
       if (cards && !cardsView) {
         var cardBodies = Object.create(null);
         cardsView = g.BriefCards.mount(doc.getElementById('memento-cards'), {

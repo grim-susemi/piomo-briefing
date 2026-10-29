@@ -1155,10 +1155,10 @@ function dataJsText(vm) {
 const attrEscape = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 // tokens.css first: the design tokens every later sheet names.
-const PAGE_CSS = ['tokens.css', 'page.css', 'plan-view.css', 'workers-view.css', 'alarm.css', 'shell.css', 'profiles-view.css', 'convo.css', 'blocks.css', 'annotate.css', 'cards-view.css'];
-// icons.js (the icon helper the templates call), view.js, then the block renderers it calls into, then alarm.js, then
-// page.js which wires them together.
-const PAGE_JS = ['icons.js', 'view.js', 'plan-view.js', 'workers-view.js', 'blocks.js', 'convo-view.js', 'shell.js', 'profiles-view.js', 'alarm.js', 'annotate.js', 'cards-view.js', 'page.js'];
+const PAGE_CSS = ['tokens.css', 'page.css', 'plan-view.css', 'workers-view.css', 'alarm.css', 'shell.css', 'profiles-view.css', 'convo.css', 'blocks.css', 'annotate.css', 'cards-view.css', 'office.css'];
+// icons.js (the icon helper the templates call), view.js, then the block renderers it calls into, then alarm.js, the
+// office scripts (art, scene model, view), then page.js which wires them together.
+const PAGE_JS = ['icons.js', 'view.js', 'plan-view.js', 'workers-view.js', 'blocks.js', 'convo-view.js', 'shell.js', 'profiles-view.js', 'alarm.js', 'annotate.js', 'cards-view.js', 'office-assets.js', 'office-model.js', 'office-view.js', 'page.js'];
 // The icons the page scripts draw (icons.js): Lucide, one file per icon in assets/icons/lucide, vendored from LUCIDE_COMMIT
 // with the upstream LICENSE (ISC; MIT for the icons derived from Feather). pageHtml inlines them once as a hidden sprite of
 // <symbol id="i-<name>"> that keeps only the shapes' geometry: stroke, size and colour are page.css's (.ic).

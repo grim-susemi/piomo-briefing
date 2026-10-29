@@ -165,12 +165,12 @@ test('pageHtml inlines every page module and the first-paint model, with generat
   const html = pageHtml(vm, 4, { mode: 'server' });
   assert.match(html, /<meta name="omo-briefing-generation" content="4">/);
   assert.match(html, /<meta name="omo-briefing-mode" content="server">/);
-  const order = ['BriefIcons', 'BriefView', 'BriefPlanView', 'BriefWorkersView', 'BriefBlocks', 'BriefConvo', 'BriefShell', 'BriefProfiles', 'BriefAlarm', 'BriefAnnotate', 'BriefCards', 'BriefPage'].map((name) => html.search(new RegExp('\\bg\\.' + name + '\\s*=')));
-  assert.ok(order.every((i) => i > 0), `all twelve modules are inline: ${order}`);
+  const order = ['BriefIcons', 'BriefView', 'BriefPlanView', 'BriefWorkersView', 'BriefBlocks', 'BriefConvo', 'BriefShell', 'BriefProfiles', 'BriefAlarm', 'BriefAnnotate', 'BriefCards', 'BriefOfficeArt', 'BriefOffice', 'BriefOfficeView', 'BriefPage'].map((name) => html.search(new RegExp('\\bg\\.' + name + '\\s*=')));
+  assert.ok(order.every((i) => i > 0), `all fifteen modules are inline: ${order}`);
   assert.deepEqual(order, [...order].sort((a, b) => a - b), 'icons.js first, page.js last');
-  for (const css of ['.plan-view', '.w-row', '.alarm-sound', '.sh-shell', '.pf-sec', '.cv-page', '.ann-tray', '.mcards-root']) assert.ok(html.includes(css), css);
+  for (const css of ['.plan-view', '.w-row', '.alarm-sound', '.sh-shell', '.pf-sec', '.cv-page', '.ann-tray', '.mcards-root', '.of-stage']) assert.ok(html.includes(css), css);
   assert.doesNotMatch(html, /alarm-band|alarm-row|--alarm-h/, 'the page contains no removed-band markup, styles or offsets');
-  assert.equal((html.match(/<script>/g) ?? []).length, 13, 'twelve modules + first paint');
+  assert.equal((html.match(/<script>/g) ?? []).length, 16, 'fifteen modules + first paint');
   assert.ok(!html.includes('</script><script>alert(1)'));
   assert.equal(pageHtml(vm, null, { mode: 'file' }).includes('omo-briefing-generation'), false);
 });
@@ -225,7 +225,7 @@ test('pageHtml server mode stamps the style and every script with the same nonce
   const served = pageHtml(vm, 4, { mode: 'server', token: 't', nonce: PAGE_NONCE });
   const fileTags = pageTags(file), servedTags = pageTags(served);
   assert.equal(servedTags.filter((t) => t.startsWith('<style')).length, 1, 'one combined style');
-  assert.equal(servedTags.filter((t) => t.startsWith('<script')).length, 13, 'twelve modules + the first paint');
+  assert.equal(servedTags.filter((t) => t.startsWith('<script')).length, 16, 'fifteen modules + the first paint');
   assert.equal(servedTags.length, fileTags.length, 'the nonce changes no tag count');
   for (const tag of servedTags) assert.ok(tag.includes(`nonce="${PAGE_NONCE}"`), `missing nonce: ${tag.slice(0, 40)}`);
   assert.equal(pageHtml(vm, 4, { mode: 'file', nonce: PAGE_NONCE }), file, 'file mode ignores the nonce');

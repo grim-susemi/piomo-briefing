@@ -55,6 +55,7 @@ const REVIEWED_ROWS = [
   ["convo-view.js", "html-attr-string", "<img src=\"", "esc(src) + esc(alt); src from the assets/ allowlist"],
   ["convo-view.js", "html-attr-string", "<span class=\"chip x-stale x-server-stale\" style=\"white-space:normal;word-break:keep-all;overflow-wrap:anywhere\" title=\"설치된 상황판보다 예전 세대인 대화입니다. 대화를 재시작하면 최신 세대가 실시간 상황판을 맡습니다.\">", "constant style/title markup"],
   ["icons.js", "html-attr-string", "\" aria-hidden=\"true\" focusable=\"false\"><use href=\"#i-", "internal sprite name + constant markup"],
+  ["office-view.js", "setAttribute", "n.setAttribute(k, v)", "set(), the office view's one attribute writer: names are its own constants or the allowlisted art attributes (href only #cat / #body); values are numbers, our words or model text as a plain value (aria-label, data-sid/-desk/-floor), never markup, a URL or a handler"],
   ["page.js", "href", "linkEl.href =url", "loopback url that passed the origin regex"],
   ["page.js", "innerHTML", "badge.innerHTML =(g.BriefIcons ? g.BriefIcons.icon('refresh-cw', 'ic-xs') : '') + ' 새 내용 - 선택·입력이 끝나면 반영'", "constant icon + copy"],
   ["page.js", "innerHTML", "el.innerHTML =html", "html comes from view/convo renderers, each esc()-guarded"],
