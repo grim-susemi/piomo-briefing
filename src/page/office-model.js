@@ -9,7 +9,7 @@
   function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
   function str(v) { return typeof v === 'string' ? v : typeof v === 'number' && isFinite(v) ? String(v) : ''; }
   function roomOf(w) {
-    if (w.state === 'done' || w.state === 'cancelled') return 'lounge';
+    if (w.state === 'waiting' || w.state === 'done' || w.state === 'cancelled') return 'lounge';
     var k = str(w.kind).toLowerCase();
     if (has(ROOM_OF_KIND, k)) return ROOM_OF_KIND[k];
     if (/review|qa-executor/.test(k)) return 'review';

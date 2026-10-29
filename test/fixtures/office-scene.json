@@ -12,14 +12,14 @@
         "work": [
           "lead",
           "st_01a14080",
-          "st_01a14095",
           "st_01a14082",
-          "st_01a14096",
-          "st_01a14097"
+          "st_01a14096"
         ],
         "review": [],
         "lounge": [
-          "st_01a14081"
+          "st_01a14081",
+          "st_01a14095",
+          "st_01a14097"
         ]
       },
       "desks": [
@@ -54,7 +54,7 @@
         },
         {
           "id": "st_01a14095",
-          "room": "work",
+          "room": "lounge",
           "kind": "worker",
           "agent": "",
           "state": "waiting",
@@ -84,7 +84,7 @@
         },
         {
           "id": "st_01a14097",
-          "room": "work",
+          "room": "lounge",
           "kind": "worker",
           "agent": "quick",
           "state": "waiting",
@@ -456,7 +456,7 @@
       "id": "st_01a14095",
       "name": "알람 화면",
       "kind": "",
-      "room": "work",
+      "room": "lounge",
       "state": "waiting"
     },
     {
@@ -480,7 +480,7 @@
       "id": "st_01a14097",
       "name": "설치 안내서",
       "kind": "quick",
-      "room": "work",
+      "room": "lounge",
       "state": "waiting"
     }
   ],

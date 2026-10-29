@@ -134,7 +134,7 @@ test('the scene matches the frozen fixture', () => {
   assert.deepEqual(scene, fixture('office-scene.json'));
 });
 
-test('roles map to rooms and finished helpers rest in the lounge', () => {
+test('roles map to rooms; idle and finished helpers rest in the lounge', () => {
   // Given one session with one worker per role, When the scene is built, Then each desk sits in its role room
   const vm = {
     schema: 1, seq: 1, generatedAt: 1,
@@ -147,12 +147,14 @@ test('roles map to rooms and finished helpers rest in the lounge', () => {
         { id: 'd', kind: 'plan-reviewer', state: 'running', step: '' },
         { id: 'e', kind: 'sisyphus', state: 'running', step: '' },
         { id: 'f', kind: 'quick', state: 'done', step: '', endedAt: '2026-10-14T02:38:30.345Z' },
+        { id: 'g', kind: 'explore', state: 'error', step: '' },
+        { id: 'h', kind: 'sisyphus', state: 'waiting', step: '' },
       ] },
     }],
   };
   const scene = sceneOf(load(), vm, { publicMode: false, seen: {} });
   const room = Object.fromEntries(scene.floors[0].desks.map((d) => [d.id, d.room]));
-  assert.deepEqual(room, { lead: 'work', a: 'research', b: 'review', c: 'plan', d: 'plan', e: 'work', f: 'lounge' });
+  assert.deepEqual(room, { lead: 'work', a: 'research', b: 'lounge', c: 'plan', d: 'plan', e: 'work', f: 'lounge', g: 'research', h: 'lounge' });
 });
 
 test('live floors come first, and the walk grid is an empty placeholder', () => {
