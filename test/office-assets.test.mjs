@@ -13,7 +13,7 @@ const FIXTURE_SHA256 = '0e375357c4e6b0100df475dd9acdf236e94bbfb8e816a9398ad7f9b1
 const MOCKUP = process.env.OFFICE_MOCKUP || 'C:/Users/USER/orca/projects/기타 작업/.omo/evidence/omo-office-view/mockup/office-mockup.html';
 const ASSETS = process.env.OFFICE_ASSETS || path.join(ROOT, 'src/page/office-assets.js');
 const FIXTURE = path.join(ROOT, 'test/fixtures/office-symbols.svg');
-const REQUIRED_PROPS = ['desk', 'monitor', 'sofa', 'plant', 'shelf', 'conveyor'];
+const REQUIRED_PROPS = ['desk', 'monitor', 'sofa', 'plant', 'shelf', 'conveyor', 'whiteboard'];
 const FORBIDDEN = [/<image[\s>]/i, /<script[\s>]/i, /href="http/i, /xlink:href="http/i, /data:/i];
 
 const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
@@ -80,6 +80,21 @@ test('no symbol or prop loads third-party or executable content', () => {
   for (const svg of all) {
     for (const bad of FORBIDDEN) assert.doesNotMatch(svg, bad, 'forbidden pattern ' + bad);
   }
+});
+
+test('whiteboard is the mockup panel and its five sticky notes, in mockup order', (t) => {
+  const art = load(ASSETS);
+  const board = art.props.whiteboard;
+  assert.equal((board.match(/<polygon /g) || []).length, 6, 'one panel and five notes');
+  const fills = [...board.matchAll(/fill="(#[0-9a-f]{6})"/gi)].map((m) => m[1]);
+  assert.deepEqual(fills, ['#f4f6fb', '#ffcf5a', '#ff8fab', '#7aa2ff', '#4fd1a5', '#ffcf5a']);
+  if (!fs.existsSync(MOCKUP)) {
+    t.diagnostic('mockup not present; whiteboard source check skipped');
+    return;
+  }
+  const mockup = fs.readFileSync(MOCKUP, 'utf8');
+  assert.ok(mockup.includes('fill="#f4f6fb" stroke="#9aa6c0" stroke-width="2"'), 'panel is drawn in the mockup');
+  assert.ok(mockup.includes("[[10.5,86,'#ffcf5a'],[10.95,86,'#ff8fab'],[11.4,86,'#7aa2ff'],[10.5,72,'#4fd1a5'],[10.95,72,'#ffcf5a']]"), 'five notes are drawn in the mockup, in this order');
 });
 
 test('art size is reported for the page growth budget', (t) => {
