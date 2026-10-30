@@ -1045,7 +1045,7 @@
       if (b.tone !== tone) { b.g.textContent = ''; build(boxes[tone], b.g); b.tone = tone; }
       var p = iso(x + step / 2, 5.6, 8);
       belt.push({ id: i, x: p[0], y: p[1] - 26, label: (w.n || i + 1) + '단계' + (tone === 0 ? ' ✓' : tone === 1 ? ' ●' : ''), rank: tone === 1 ? 2 : tone === 0 ? 1 : 0,
-        o: { cls: tone ? 'of-wave' : 'of-wave of-done', alts: BELT_AT.filter(function (a) { return Math.abs(a[0]) < 29.5 * step / 2; }), h: 18, rx: 9, fs: 11.5, fill: '#0e1528', stroke: ink, color: ink } });
+        o: { cls: tone ? 'of-wave' : 'of-wave of-done', alts: BELT_AT.filter(function (a) { return Math.abs(a[0]) < 29.5 * step; }), h: 18, rx: 9, fs: 11.5, fill: '#0e1528', stroke: ink, color: ink } });
     });
     v.boxes.splice(waves.length).forEach(function (b) { drop(b.g); });
     var cur = conv && conv.current >= 0 ? waves[conv.current] : null;
