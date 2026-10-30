@@ -1,12 +1,15 @@
 // Office view CPU budget (plan omo-office-view, Must have 8; todo 7). The budgets are the plan's numbers and do not
-// change: main-thread TaskDuration growth (CDP Performance.getMetrics, seconds, read on the page target) <= 3.0 for the
-// visible office on the worst-case floor with no data change for 60 s (the avatar walks a 20-step path inside that
-// window), <= 0.3 with the tab hidden for 60 s, and <= 4.5 for 20 publishes in 60 s. Each round is a fresh browser and a
-// fresh candidate board over a temp state dir. A round is valid only when its driven input landed (20 accepted avatar
-// steps; 20 publishes applied); an invalid round never passes. A case passes when one of up to 3 rounds is valid and
-// within budget, and every round is recorded in the record file.
-// OFFICE_CPU_OUT names the JSON record to write; OFFICE_CPU_CASES filters cases; OFFICE_CPU_VIEW serves a scratch
-// office-view.js instead of W's (the negative controls: the same measurement must fail there).
+// change: main-thread TaskDuration growth (CDP Performance.getMetrics, seconds, read on the office page target) <= 3.0
+// for the visible office on the worst-case floor with no data change for 60 s (the avatar walks a 20-step click path
+// inside that window), <= 0.3 with the tab hidden for 60 s, and <= 4.5 for 20 publishes in 60 s.
+// Motion is forced on for every round (prefers-reduced-motion: no-preference), because with reduced motion the office
+// animates nothing and the measurement would not be of the office as users see it. Each round is a fresh browser and a
+// fresh candidate board over a temp state dir. A round is valid only when every check in its record holds (motion on,
+// animations running, the avatar's 20-step click walk animated, the floor composition, the visibility states, and the
+// publishes applied); an invalid round never passes and stays in the record. A case passes when one of up to 3 rounds
+// is valid and within budget.
+// OFFICE_CPU_OUT names the JSON record to write; OFFICE_CPU_CASES filters cases (the others are skipped, not passed);
+// OFFICE_CPU_VIEW serves a scratch office-view.js instead of W's (the negative controls: the same measurement must fail).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -20,17 +23,17 @@ import { createBoardServer } from '../../src/server.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 const BUDGET = { visible: 3.0, hidden: 0.3, publish: 4.5 };
-const WINDOW_MS = 60_000, ROUNDS = 3, GEN = 9, KEY_GAP_MS = 2000, PUBLISH_GAP_MS = 3000, PUBLISHES = 20, STEPS = 20;
+const WINDOW_MS = 60_000, ROUNDS = 3, GEN = 9, PUBLISH_GAP_MS = 3000, PUBLISHES = 20, STEPS = 20;
 const OUT = process.env.OFFICE_CPU_OUT || null;
 const VIEW = process.env.OFFICE_CPU_VIEW || null;
 const ONLY = process.env.OFFICE_CPU_CASES ? process.env.OFFICE_CPU_CASES.split(',') : null;
 const FIXTURE = JSON.parse(fs.readFileSync(path.join(ROOT, 'test/fixtures/view-model-office.json'), 'utf8'));
 const KINDS = ['explore', 'librarian', 'oracle', 'sisyphus', 'hephaestus', 'prometheus', 'plan-consultant', 'plan-reviewer', 'architect', 'atlas', 'qa-executor', 'code-reviewer'];
 const STATES = ['running', 'waiting', 'done'];
-const KEYCODE = { ArrowRight: 39, ArrowLeft: 37, ArrowDown: 40, ArrowUp: 38 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const record = { plan: 'omo-office-view todo 7 (Must have 8)', budgets_s: BUDGET, window_s: WINDOW_MS / 1000, rounds_max: ROUNDS,
   metric: 'Performance.getMetrics TaskDuration (seconds) of the office page target, read before and after each window',
+  motion: 'prefers-reduced-motion: no-preference emulated on the office page target before navigation, every round',
   view: VIEW ? 'scratch copy: ' + VIEW : 'W src/page/office-view.js', machine: machine(), cases: {} };
 
 // the worst case: one session whose floor has the lead desk and 12 worker desks (13 desks), each worker a walking cat
@@ -63,6 +66,12 @@ function viewFs(file) {
   });
 }
 
+// counts the avatar's own animated walk steps: every el.animate() on its .of-walk group (window.__avatarAnimated)
+const AVATAR_WATCH = `(() => { window.__avatarAnimated = 0; const real = Element.prototype.animate;
+  Element.prototype.animate = function (...a) {
+    if (this.classList && this.classList.contains('of-walk') && this.closest && this.closest('.of-me')) window.__avatarAnimated++;
+    return real.apply(this, a); }; })()`;
+
 async function waitFor(page, expr, what, ms = 10000) {
   return page.eval(`new Promise((resolve, reject) => { const t0 = performance.now();
     const f = () => { let v = false; try { v = !!(${expr}); } catch (e) {}
@@ -73,11 +82,12 @@ async function waitFor(page, expr, what, ms = 10000) {
 
 const taskDuration = async (page) => (await page.client.send('Performance.getMetrics')).metrics.find((m) => m.name === 'TaskDuration').value;
 const count = (page, sel) => page.eval(`document.querySelectorAll(${JSON.stringify(sel)}).length`);
+const motionState = (page) => page.eval(`({ reduce: matchMedia('(prefers-reduced-motion: reduce)').matches, visibility: document.visibilityState, animations: document.getAnimations().length })`);
 
-// the avatar's walk: the BFS path on the page's own walk map from the spawn tile (BriefOffice.scene of the shown model),
-// driven one arrow key per tile with real key events. A tile counts as accepted when the avatar's transform changes.
-async function walkPath(page, steps) {
-  const keys = await page.eval(`(() => { const sc = BriefOffice.scene(BriefPage.state.model, BriefPage.state.ui, Date.now());
+// one real click on the walk tile 20 BFS steps from the avatar's spawn tile, on the page's own walk map (BriefOffice.scene).
+// The click is a real mouse press at that tile's centre on the office svg; the avatar walks the shortest path (20 tiles).
+async function clickWalk(page, steps) {
+  const goal = await page.eval(`(() => { const sc = BriefOffice.scene(BriefPage.state.model, BriefPage.state.ui, Date.now());
     const f = sc.floors.find((x) => x.live) || sc.floors[0];
     const w = f.walk.w, h = f.walk.h, off = new Set(f.walk.blocked), start = f.spawn.y * w + f.spawn.x;
     const prev = new Map([[start, -1]]), dist = new Map([[start, 0]]), q = [start];
@@ -92,22 +102,25 @@ async function walkPath(page, steps) {
     const tiles = [];
     for (let t = far; t !== start; t = prev.get(t)) tiles.push(t);
     tiles.reverse();
-    const out = []; let cur = start;
-    for (const t of tiles.slice(0, ${steps})) { const d = t - cur; out.push(d === 1 ? 'ArrowRight' : d === -1 ? 'ArrowLeft' : d === w ? 'ArrowDown' : 'ArrowUp'); cur = t; }
-    return out; })()`);
-  const me = () => page.eval(`(() => { const g = document.querySelector('#office .of-me .of-walk > g'); return g ? g.getAttribute('transform') : null; })()`);
-  let accepted = 0;
-  for (const k of keys) {
-    const before = await me();
-    await page.client.send('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code: k, windowsVirtualKeyCode: KEYCODE[k], nativeVirtualKeyCode: KEYCODE[k] });
-    await page.client.send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: KEYCODE[k], nativeVirtualKeyCode: KEYCODE[k] });
-    for (let i = 0; i < 20; i++) {
-      await sleep(60);
-      if ((await me()) !== before) { accepted++; break; }
-    }
-    await sleep(KEY_GAP_MS);
-  }
-  return { planned: keys.length, accepted };
+    const T = tiles[${steps} - 1], tx = T % w, ty = (T - tx) / w;
+    const OX = 470, OY = 120, KX = 34 * 0.866, KY = 17, S = 0.5;
+    const svg = document.querySelector('#office svg.of-scene');
+    const p = svg.createSVGPoint(); p.x = OX + KX * S * (tx - ty); p.y = OY + KY * S * (tx + ty + 1);
+    const c = p.matrixTransform(svg.getScreenCTM());
+    return { x: c.x, y: c.y, tile: [tx, ty], goalDistance: dist.get(T), pathTiles: tiles.length, spawn: [f.spawn.x, f.spawn.y],
+      expectTransform: [OX + KX * S * (tx - ty), OY + KY * S * (tx + ty + 1)] }; })()`);
+  await page.client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: goal.x, y: goal.y, button: 'none', clickCount: 0 });
+  await page.client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: goal.x, y: goal.y, button: 'left', clickCount: 1 });
+  await page.client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: goal.x, y: goal.y, button: 'left', clickCount: 1 });
+  await page.eval(`new Promise((resolve, reject) => { const t0 = performance.now();
+    const f = () => { if ((window.__avatarAnimated || 0) >= ${steps}) return resolve(true);
+      if (performance.now() - t0 > 15000) return reject(new Error('avatar animated ' + (window.__avatarAnimated || 0) + ' of ${steps}'));
+      setTimeout(f, 50); }; f(); })`).catch(() => null);
+  const arrived = await page.eval(`(() => { const g = document.querySelector('#office .of-me .of-walk > g'); const t = g ? g.getAttribute('transform') : '';
+    const m = /translate\\(([-\\d.]+),([-\\d.]+)\\)/.exec(t || ''); if (!m) return null; return [Number(m[1]), Number(m[2])]; })()`);
+  const ok = arrived && Math.abs(arrived[0] - goal.expectTransform[0]) < 1 && Math.abs(arrived[1] - goal.expectTransform[1]) < 1;
+  return { planned: steps, goalDistance: goal.goalDistance, pathTiles: goal.pathTiles, goalTile: goal.tile, spawn: goal.spawn, click: [Math.round(goal.x), Math.round(goal.y)],
+    animated: await page.eval('window.__avatarAnimated || 0'), arrived: !!ok, finalTransform: arrived };
 }
 
 // a second browser connection, only to make a hidden second tab with Target.createTarget and Target.activateTarget
@@ -134,7 +147,7 @@ async function browserClient(port) {
   };
 }
 
-// one round: a fresh browser and candidate board; the case's window runs once and the delta is the number
+// one round: a fresh browser and candidate board, motion forced on; the case's window runs once and the delta is the number
 async function round(caseName) {
   const model = worstCaseModel();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-cpu-'));
@@ -156,37 +169,54 @@ async function round(caseName) {
     const { url } = await host.ensure();
     page = await launch({ width: 1440, height: 900 });
     out.chrome = (await (await fetch(`http://127.0.0.1:${page.port}/json/version`)).json()).Browser;
+    await page.client.send('Page.addScriptToEvaluateOnNewDocument', { source: AVATAR_WATCH });
+    await page.client.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
     await page.goto(url);
     await page.client.send('Performance.enable');
     await waitFor(page, `window.BriefPage && BriefPage.state.model && BriefPage.state.model.seq === ${model.seq}`, 'the page has the model');
     await page.eval(`document.querySelector('[data-sh="view"][data-key="office"]').click()`);
     await waitFor(page, `document.querySelectorAll('#office .of-desk').length >= 13`, '13 desks drawn');
-    out.floor = { desks: await count(page, '#office .of-desk'), svg_cats: await count(page, '#office .of-cat'), avatar: await count(page, '#office .of-me') };
+    const cats = await count(page, '#office .of-cat'), avatarCats = await count(page, '#office .of-me .of-cat');
+    out.floor = { desks: await count(page, '#office .of-desk'), desk_cats: cats - avatarCats, avatar: await count(page, '#office .of-me') };
+    const checks = { motion_on: null, floor_ok: out.floor.desks >= 12 && out.floor.desk_cats >= 12 && out.floor.avatar === 1 };
+    const start = await motionState(page);
+    out.motion_at_start = start;
+    checks.motion_on = start.reduce === false;
     if (caseName === 'visible') {
+      checks.visible_at_start = start.visibility === 'visible';
+      checks.animations_running_at_start = start.animations > 0;
       const before = await taskDuration(page);
       const t0 = Date.now();
-      const [walk] = await Promise.all([walkPath(page, STEPS), sleep(WINDOW_MS)]);
+      const [walk] = await Promise.all([clickWalk(page, STEPS), sleep(WINDOW_MS)]);
       out.window_ms = Date.now() - t0;
       out.TaskDuration_before = before;
       out.TaskDuration_after = await taskDuration(page);
-      out.avatar_steps_planned = walk.planned;
-      out.avatar_steps_accepted = walk.accepted;
-      out.valid = walk.planned === STEPS && walk.accepted === STEPS;
+      out.avatar_click_walk = walk;
+      out.motion_at_end = await motionState(page);
+      checks.visible_at_end = out.motion_at_end.visibility === 'visible';
+      checks.steps_animated_20 = walk.animated >= STEPS && walk.goalDistance === STEPS;
+      checks.arrived = walk.arrived;
     } else if (caseName === 'hidden') {
       const b = await browserClient(page.port);
       const { targetId } = await b.send('Target.createTarget', { url: 'about:blank' });
       await b.send('Target.activateTarget', { targetId });
       b.close();
       await waitFor(page, `document.visibilityState === 'hidden'`, 'the first tab is hidden');
-      out.visibilityState = await page.eval('document.visibilityState');
+      const hiddenStart = await motionState(page);
+      out.motion_at_start = hiddenStart;
+      checks.motion_on = hiddenStart.reduce === false;
+      checks.hidden_at_start = hiddenStart.visibility === 'hidden';
       const before = await taskDuration(page);
       const t0 = Date.now();
       await sleep(WINDOW_MS);
       out.window_ms = Date.now() - t0;
       out.TaskDuration_before = before;
       out.TaskDuration_after = await taskDuration(page);
-      out.valid = out.visibilityState === 'hidden';
+      out.motion_at_end = await motionState(page);
+      checks.hidden_at_end = out.motion_at_end.visibility === 'hidden';
     } else {
+      checks.visible_at_start = start.visibility === 'visible';
+      checks.animations_running_at_start = start.animations > 0;
       const before = await taskDuration(page);
       const t0 = Date.now();
       let applied = 0;
@@ -209,11 +239,16 @@ async function round(caseName) {
       out.window_ms = Date.now() - t0;
       out.TaskDuration_before = before;
       out.TaskDuration_after = await taskDuration(page);
+      out.motion_at_end = await motionState(page);
+      checks.visible_at_end = out.motion_at_end.visibility === 'visible';
       out.publishes_sent = PUBLISHES;
       out.publishes_applied = applied;
-      out.valid = applied === PUBLISHES;
+      checks.publishes_applied_all = applied === PUBLISHES;
     }
     out.growth_s = out.TaskDuration_after - out.TaskDuration_before;
+    out.checks = checks;
+    out.invalid_reasons = Object.entries(checks).filter(([, ok]) => ok !== true).map(([k]) => k);
+    out.valid = out.invalid_reasons.length === 0;
     out.server_errors = errors;
   } finally {
     if (page) await page.close();
@@ -223,21 +258,22 @@ async function round(caseName) {
   return out;
 }
 
-const CASES = [['visible', 'visible idle, worst-case floor, 20-step avatar walk'], ['hidden', 'tab hidden for 60 s'], ['publish', '20 publishes in 60 s']];
+const CASES = [['visible', 'visible idle, worst-case floor, 20-step avatar click walk'], ['hidden', 'tab hidden for 60 s'], ['publish', '20 publishes in 60 s']];
 for (const [name, label] of CASES) {
-  test(`office CPU budget, ${label}: a valid round within ${BUDGET[name]} s in one of ${ROUNDS} rounds`, { timeout: 900_000 }, async () => {
-    if (ONLY && !ONLY.includes(name)) return;
+  test(`office CPU budget, ${label}: a valid round within ${BUDGET[name]} s in one of ${ROUNDS} rounds`, { timeout: 900_000 }, async (t) => {
+    if (ONLY && !ONLY.includes(name)) { t.skip(`not selected by OFFICE_CPU_CASES (${ONLY.join(',')})`); return; }
     const budget = BUDGET[name];
     const rounds = [];
     record.cases[name] = { budget_s: budget, label, rounds, pass: false };
     for (let i = 0; i < ROUNDS && !record.cases[name].pass; i++) {
       const r = await round(name);
       r.pass = r.valid === true && r.growth_s <= budget;
+      r.margin_s = budget - r.growth_s;
       rounds.push(r);
       record.cases[name].pass = rounds.some((x) => x.pass);
       record.cases[name].best_valid_growth_s = Math.min(...rounds.filter((x) => x.valid).map((x) => x.growth_s), Infinity);
       if (OUT) fs.writeFileSync(OUT, JSON.stringify(record, null, 2) + '\n');
     }
-    assert.ok(record.cases[name].pass, `${name}: growth ${rounds.map((x) => x.growth_s.toFixed(3) + (x.valid ? '' : ' (invalid)')).join(', ')} s; budget ${budget} s; ${rounds.length} rounds`);
+    assert.ok(record.cases[name].pass, `${name}: growth ${rounds.map((x) => x.growth_s.toFixed(3) + (x.valid ? '' : ' (invalid: ' + x.invalid_reasons.join('+') + ')')).join(', ')} s; budget ${budget} s; ${rounds.length} rounds`);
   });
 }
