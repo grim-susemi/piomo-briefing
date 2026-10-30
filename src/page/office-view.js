@@ -306,9 +306,20 @@
   }
   // what the labels settle around: the overlays and the wall screens' text (hard), the boss cat and the other cats' faces
   // (soft), and the other desks' and lounge cats' hit rects (soft, kept off longest)
-  function obstacles(v) { return shade(v).concat(wallBoxes(v), meBox(v), v.faces || [], v.hitBoxes || []); }
+  function obstacles(v) { return shade(v).concat(wallBoxes(v), v.faces || [], v.hitBoxes || []); }
+  // the labels settle around the boss where it stands; when that would leave out a label that fits without the boss, they
+  // settle as without it (the boss never removes a label)
+  function placeLabels(v) {
+    var list = v.labels, base = obstacles(v), me = meBox(v);
+    if (!list) return;
+    settle(list, base);
+    if (!me.length) return;
+    var kept = list.filter(function (p) { return !!p.g.parentNode; });
+    settle(list, base.concat(me));
+    if (kept.some(function (p) { return !p.g.parentNode; })) settle(list, base);
+  }
   // the labels settle again around the boss where it stopped
-  function stopped(v) { if (v.labels) settle(v.labels, obstacles(v)); }
+  function stopped(v) { placeLabels(v); }
   // labels stay off the overlays, the wall screens' text and each other (a label with no free place stays out); a soft box
   // (face: its desk id, or '@me' for the boss cat; a label's own cat never counts) is kept off where any place allows it:
   // first every soft box, then only the hit rects (lvl 2), then none, so the boss never removes a label; every patch, every stage resize and every stop of the boss settles them again, so a
@@ -332,8 +343,8 @@
         if (p.o.keep) { pick = tries[i]; b = c; break; }
         if (k < 2) { if (!placed.some(function (q) { return (!q.face || (k < (q.lvl || 1) && q.face !== p.o.key)) && cross(c, q); })) { pick = tries[i]; b = c; } continue; }
         // no place clear of the soft boxes: the place clear of the hard ones that covers the least of them
-        // ... and never on the middle of another desk's or cat's hit rect (a tap there must reach that one)
-        if (placed.some(function (q) { return (!q.face || (q.lvl === 2 && q.face !== '@me' && q.face !== p.o.key && c.x0 < (q.x0 + q.x1) / 2 && (q.x0 + q.x1) / 2 < c.x1 && c.y0 < (q.y0 + q.y1) / 2 && (q.y0 + q.y1) / 2 < c.y1)) && cross(c, q); })) continue;
+        // ... and never on another lounge cat's hit box or the middle of another desk's hit rect (a tap there must reach that one)
+        if (placed.some(function (q) { return (!q.face || (q.lounge && q.face !== p.o.key) || (q.lvl === 2 && q.face !== '@me' && q.face !== p.o.key && c.x0 < (q.x0 + q.x1) / 2 && (q.x0 + q.x1) / 2 < c.x1 && c.y0 < (q.y0 + q.y1) / 2 && (q.y0 + q.y1) / 2 < c.y1)) && cross(c, q); })) continue;
         var lap = placed.reduce(function (n, q) { return q.face === p.o.key || !cross(c, q) ? n : n + (Math.min(c.x1, q.x1) - Math.max(c.x0, q.x0)) * (Math.min(c.y1, q.y1) - Math.max(c.y0, q.y0)); }, 0);
         if (lap < least) { least = lap; pick = tries[i]; b = c; }
       }
@@ -543,7 +554,7 @@
     // every hit rect, for the other cats' labels to keep off where they can
     v.hitBoxes = [];
     for (id in v.units) if (v.units[id].deskBox) v.hitBoxes.push(Object.assign({ face: id, lvl: 2 }, v.units[id].deskBox));
-    ls.forEach(function (a, i) { var c = best.boxes[i]; v.hitBoxes.push({ face: lid[i], lvl: 2, x0: c.x0, x1: c.x1, y0: c.y0, y1: c.y1 }); put(a.hit, 'x', r1(c.x0)); put(a.hit, 'y', r1(c.y0)); put(a.hit, 'width', r1(c.x1 - c.x0)); put(a.hit, 'height', r1(c.y1 - c.y0)); });
+    ls.forEach(function (a, i) { var c = best.boxes[i]; v.hitBoxes.push({ face: lid[i], lvl: 2, lounge: 1, x0: c.x0, x1: c.x1, y0: c.y0, y1: c.y1 }); put(a.hit, 'x', r1(c.x0)); put(a.hit, 'y', r1(c.y0)); put(a.hit, 'width', r1(c.x1 - c.x0)); put(a.hit, 'height', r1(c.y1 - c.y0)); });
   }
   function cross(p, q) { return p.x0 < q.x1 && q.x0 < p.x1 && p.y0 < q.y1 && q.y0 < p.y1; }
   function middleOf(b) { return { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 }; }
@@ -1084,13 +1095,14 @@
     v.order = items;
     boss(v, f);
     var byRank = function (list) { return list.sort(function (a, b) { return b.rank - a.rank; }); };
+    // the belt's labels first: each keeps to its own wave's slot, so the desks' and cats' labels make way for them
+    byRank(belt).forEach(function (t) { pill(v, labels, 'wave:' + t.id, t.x, t.y, t.label, t.o); });
     byRank(found.tags).forEach(function (t) { pill(v, labels, 'tag:' + t.id, t.x, t.y, t.label, t.o); });
     if (!pub) byRank(found.bubbles).forEach(function (t) { pill(v, labels, 'bub:' + t.id, t.x, t.y, t.label, t.o); });
-    byRank(belt).forEach(function (t) { pill(v, labels, 'wave:' + t.id, t.x, t.y, t.label, t.o); });
     for (var k in v.pills) if (v.pills[k].pass !== v.pass) { drop(v.pills[k].g); delete v.pills[k]; }
     v.labels = labels;
     v.faces = found.faces;
-    settle(labels, obstacles(v));
+    placeLabels(v);
   }
 
   // ---- HTML chrome -----------------------------------------------------------------------------------------------------
