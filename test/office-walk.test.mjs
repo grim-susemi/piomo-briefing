@@ -657,10 +657,13 @@ test('labels stay when the boss walks: after 5 steps up the hall the same labels
   for (let i = 1; i < waves.length; i++) assert.ok(waves[i][1] > waves[i - 1][1], 'belt labels in wave order: ' + JSON.stringify(waves));
 });
 
-test('no label covers the middle of a desk or lounge cat hit rect, so a tap there reaches that desk or cat', () => {
-  // Given the fixture floor, Then no drawn label box contains the middle of any desk's or lounge cat's hit rect
+test('a tap on the middle of a desk or lounge cat hit rect reaches it: no label that takes the pointer covers it, and every label stays', () => {
+  // Given the fixture floor, Then no drawn label that takes the pointer (data-pass not 1) contains the middle of any desk's
+  // or lounge cat's hit rect; the bubbles over one let the pointer through and stay drawn
   const { office } = openOffice();
-  const labels = labelBoxes(office), bad = [];
+  const pass = new Set(office.querySelector('.of-l-top').children.filter((n) => n.getAttribute('data-pass') === '1').map((n) => n.getAttribute('class') + ':' + n.textContent));
+  const labels = labelBoxes(office).filter((b) => !pass.has(b.name)), bad = [];
+  assert.ok(labelBoxes(office).some((b) => b.name === 'of-bub:사장님 결정 기다림'), 'the gate-reviewer bubble stays');
   for (const h of hitRects(office)) {
     const cx = (h.x0 + h.x1) / 2, cy = (h.y0 + h.y1) / 2;
     for (const b of labels) if (b.x0 < cx && cx < b.x1 && b.y0 < cy && cy < b.y1) bad.push(b.name + ' @ ' + Math.round(cx) + ',' + Math.round(cy));

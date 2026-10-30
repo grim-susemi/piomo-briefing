@@ -343,13 +343,14 @@
         if (p.o.keep) { pick = tries[i]; b = c; break; }
         if (k < 2) { if (!placed.some(function (q) { return (!q.face || (k < (q.lvl || 1) && q.face !== p.o.key)) && cross(c, q); })) { pick = tries[i]; b = c; } continue; }
         // no place clear of the soft boxes: the place clear of the hard ones that covers the least of them
-        // ... and never on another lounge cat's hit box or the middle of another desk's hit rect (a tap there must reach that one)
-        if (placed.some(function (q) { return (!q.face || (q.lounge && q.face !== p.o.key) || (q.lvl === 2 && q.face !== '@me' && q.face !== p.o.key && c.x0 < (q.x0 + q.x1) / 2 && (q.x0 + q.x1) / 2 < c.x1 && c.y0 < (q.y0 + q.y1) / 2 && (q.y0 + q.y1) / 2 < c.y1)) && cross(c, q); })) continue;
+        if (placed.some(function (q) { return !q.face && cross(c, q); })) continue;
         var lap = placed.reduce(function (n, q) { return q.face === p.o.key || !cross(c, q) ? n : n + (Math.min(c.x1, q.x1) - Math.max(c.x0, q.x0)) * (Math.min(c.y1, q.y1) - Math.max(c.y0, q.y0)); }, 0);
         if (lap < least) { least = lap; pick = tries[i]; b = c; }
       }
       if (pick === null) { drop(p.g); return; }
       if (!p.g.parentNode) p.parent.appendChild(p.g);
+      // a label left over another desk's or cat's hit rect lets a pointer through to it (its own cat keeps its hit area)
+      put(p.g, 'data-pass', placed.some(function (q) { return q.lvl === 2 && q.face !== '@me' && q.face !== p.o.key && cross(b, q); }) ? '1' : '0');
       put(p.g, 'transform', 'translate(' + r1(p.x + pick[0]) + ',' + r1(p.y + pick[1]) + ')');
       if (p.tail) put(p.tail, 'transform', 'translate(' + -pick[0] + ',0)');
       placed.push(b);
@@ -554,7 +555,7 @@
     // every hit rect, for the other cats' labels to keep off where they can
     v.hitBoxes = [];
     for (id in v.units) if (v.units[id].deskBox) v.hitBoxes.push(Object.assign({ face: id, lvl: 2 }, v.units[id].deskBox));
-    ls.forEach(function (a, i) { var c = best.boxes[i]; v.hitBoxes.push({ face: lid[i], lvl: 2, lounge: 1, x0: c.x0, x1: c.x1, y0: c.y0, y1: c.y1 }); put(a.hit, 'x', r1(c.x0)); put(a.hit, 'y', r1(c.y0)); put(a.hit, 'width', r1(c.x1 - c.x0)); put(a.hit, 'height', r1(c.y1 - c.y0)); });
+    ls.forEach(function (a, i) { var c = best.boxes[i]; v.hitBoxes.push({ face: lid[i], lvl: 2, x0: c.x0, x1: c.x1, y0: c.y0, y1: c.y1 }); put(a.hit, 'x', r1(c.x0)); put(a.hit, 'y', r1(c.y0)); put(a.hit, 'width', r1(c.x1 - c.x0)); put(a.hit, 'height', r1(c.y1 - c.y0)); });
   }
   function cross(p, q) { return p.x0 < q.x1 && q.x0 < p.x1 && p.y0 < q.y1 && q.y0 < p.y1; }
   function middleOf(b) { return { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 }; }
