@@ -737,3 +737,24 @@ test('the boss never leaves the walk map: keys up the free hall column stop at i
   clickTile(e, office, -3, -3);
   assert.deepEqual(bossAt(office), at);
 });
+
+test('belt labels keep a gap of at least 6 units from every label they share an x range with, at the spawn and after a 5-step walk, still in their slot and row', async () => {
+  // Given the fixture floor, When it is drawn and again after 5 steps up the hall, Then every belt label's pill keeps at
+  // least G = 6 scene units above and below from any other label pill whose x range it overlaps, and stays within half a
+  // slot (44) along and 35 up to 84 down from its anchor
+  const G = 6, anims = animations(), { e, office } = openOffice({ animate: anims.animate });
+  const check = (when) => {
+    const boxes = labelBoxes(office), off = Object.fromEntries(labelOffsets(office).map((l) => [l.name, l]));
+    for (const w of boxes.filter((b) => /^of-wave/.test(b.name))) {
+      const o = off[w.name];
+      assert.ok(Math.abs(o.dx) < 44 && o.dy >= -35 && o.dy <= 84, when + ' ' + w.name + ' ' + o.dx + ',' + o.dy);
+      for (const b of boxes) if (b !== w && b.x0 < w.x1 && w.x0 < b.x1) {
+        const gap = Math.max(b.y0 - w.y1, w.y0 - b.y1);
+        assert.ok(gap >= G, when + ': ' + w.name + ' / ' + b.name + ' gap ' + gap.toFixed(1));
+      }
+    }
+  };
+  check('spawn');
+  for (let i = 1; i <= 5; i++) { press(e, 'ArrowUp', 'ArrowUp'); await finishStep(anims, office); }
+  check('walked');
+});

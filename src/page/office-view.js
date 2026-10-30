@@ -277,11 +277,15 @@
   var BELT_AT = [[0, 0], [29, 17], [-29, -17], [59, 34], [-59, -34], [0, 50], [29, 67], [-29, 33], [59, 84], [-59, 16]];
   // then finer places inside the same bounds: along the belt (17 down per 29 across) on the belt, under it in steps and
   // just above it, never farther than 35 up or 84 down
-  var BELT_MORE = [0, 15, -15, 29, -29, 40, -40].reduce(function (all, dx) {
+  var BELT_MORE = [0, 8, -8, 15, -15, 22, -22, 29, -29, 36, -36, 40, -40].reduce(function (all, dx) {
     var on = Math.round(dx * 17 / 29);
-    [on, on + 33, on + 50, on + 67, on + 84, on - 26, on - 35].forEach(function (dy) { if (dy >= -35 && dy <= 84) all.push([dx, dy]); });
+    [on, on + 8, on + 16, on + 25, on + 33, on + 42, on + 50, on + 59, on + 67, on + 76, on + 84, on - 26, on - 35].forEach(function (dy) { if (dy >= -35 && dy <= 84) all.push([dx, dy]); });
     return all;
   }, []);
+  // a belt label tries the places on its belt row and under it before the lifted ones, and first those that keep BELT_GAP
+  // scene units from every other label (so it never reads as one more line of a stack of pills)
+  var BELT_ORDER = BELT_AT.concat(BELT_MORE).filter(function (a) { return a[1] >= 0; }).concat(BELT_AT.concat(BELT_MORE).filter(function (a) { return a[1] < 0; }));
+  var BELT_GAP = 6;
   // the stage's overlays (toolbar, floor picker, floor card) as boxes in scene units, read from the live layout
   function shade(v) {
     var m = typeof v.svg.getScreenCTM === 'function' ? v.svg.getScreenCTM() : null;
@@ -383,18 +387,23 @@
     };
     // the fixed labels (the rooms' names, the boss desk's count) first, so no label is placed where one of them lands
     list.filter(function (p) { return p.o.keep; }).concat(list.filter(function (p) { return !p.o.keep; })).forEach(function (p) {
-      var c = choose(p, own(p), placed, cover);
+      // a belt label: the widest margin it can keep (its gap, then two thirds, then a third of it) before none
+      var c = null;
+      if (p.o.gap) [p.o.gap, p.o.gap * 2 / 3, p.o.gap / 3].forEach(function (gp) { c = c || choose(p, own(p), placed, false, gp); });
+      c = c || choose(p, own(p), placed, cover);
       if (c) put1(p, c);
       else if (cover) later.push(p);
       else drop(p.g);
     });
     // a label still out when every other one has its place (the last settle only): a farther place of its own kind
     // (twice its offsets, a row or two higher, a row lower; a belt label still in its slot and row, a bubble still within
-    // its tail's reach: 24 up to 4 down), clear of every
+    // its tail's reach: 24 up to 4 down, a tag within 48 units), clear of every
     // label already placed, so it never costs another label its place; none free, it stays out
     later.forEach(function (p) {
       var far = [];
-      own(p).forEach(function (a) { [[a[0] * 2, a[1] * 2], [a[0], a[1] - 24], [a[0], a[1] + 24], [a[0], a[1] - 48]].forEach(function (f) { if (p.o.span ? Math.abs(f[0]) < p.o.span && f[1] >= -35 && f[1] <= 84 : !p.o.tail || (f[1] >= -24 && f[1] <= 4)) far.push(f); }); });
+      own(p).forEach(function (a) { [[a[0] * 2, a[1] * 2], [a[0], a[1] - 24], [a[0], a[1] + 24], [a[0], a[1] - 48]].forEach(function (f) { if (p.o.span ? Math.abs(f[0]) < p.o.span && f[1] >= -35 && f[1] <= 84 : p.o.tail ? f[1] >= -24 && f[1] <= 4 : Math.hypot(f[0], f[1]) <= 48) far.push(f); }); });
+      // a tag also tries a ring around its anchor at 36 and 48 units, every 30 degrees
+      if (!p.o.span && !p.o.tail) [36, 48].forEach(function (r) { for (var d = 0; d < 360; d += 30) far.push([r1(r * Math.cos(d * Math.PI / 180)), r1(r * Math.sin(d * Math.PI / 180))]); });
       var c = choose(p, far, placed, false);
       if (c) put1(p, c); else drop(p.g);
     });
@@ -402,14 +411,15 @@
   // the first of tries clear of every box (k 0), of all but the other cats' faces (k 1), else the place clear of the hard
   // boxes that covers the least of the soft ones (k 2); with cover (k 3) also one that covers other labels, weighed four
   // times, rather than none (the overlays, the wall text, the boss and the rooms' names stay hard). null: no place
-  function choose(p, tries, placed, cover) {
+  function choose(p, tries, placed, cover, gap) {
     var pick = null, b = null, least = Infinity;
-    for (var k = 0; k < (cover ? 4 : 3) && pick === null; k++) for (var i = 0; i < tries.length && (k >= 2 || pick === null); i++) {
+    // with gap: only a place clear of every box (k 0, 1) that also keeps gap units above and below from every label
+    for (var k = 0; k < (gap ? 2 : cover ? 4 : 3) && pick === null; k++) for (var i = 0; i < tries.length && (k >= 2 || pick === null); i++) {
       var dx = tries[i][0], dy = tries[i][1];
       if (p.tail && Math.abs(dx) > p.w / 2 - 12) continue;
       var c = { x0: p.x + dx - p.w / 2, x1: p.x + dx + p.w / 2, y0: p.y + dy - p.o.h / 2 - 3, y1: p.y + dy + p.o.h / 2 + (p.o.tail ? 4 : 1) };
       if (p.o.keep) { pick = tries[i]; b = c; break; }
-      if (k < 2) { if (!placed.some(function (q) { return (!q.face || (k < (q.lvl || 1) && q.face !== p.o.key)) && cross(c, q); })) { pick = tries[i]; b = c; } continue; }
+      if (k < 2) { if (!placed.some(function (q) { return (!q.face || (k < (q.lvl || 1) && q.face !== p.o.key)) && cross(gap && q.lab ? { x0: c.x0, x1: c.x1, y0: c.y0 - gap, y1: c.y1 + gap } : c, q); })) { pick = tries[i]; b = c; } continue; }
       if (k === 3 && least < Infinity) break;
       if (placed.some(function (q) { return !q.face && (k < 3 || q.lab !== 1) && cross(c, q); })) continue;
       var lap = placed.reduce(function (n, q) { return q.face === p.o.key || !cross(c, q) ? n : n + (q.lab ? 4 : 1) * (Math.min(c.x1, q.x1) - Math.max(c.x0, q.x0)) * (Math.min(c.y1, q.y1) - Math.max(c.y0, q.y0)); }, 0);
@@ -1108,7 +1118,7 @@
       if (b.tone !== tone) { b.g.textContent = ''; build(boxes[tone], b.g); b.tone = tone; }
       var p = iso(x + step / 2, 5.6, 8);
       belt.push({ id: i, x: p[0], y: p[1] - 26, label: (w.n || i + 1) + '단계' + (tone === 0 ? ' ✓' : tone === 1 ? ' ●' : ''), rank: tone === 1 ? 2 : tone === 0 ? 1 : 0,
-        o: { cls: tone ? 'of-wave' : 'of-wave of-done', alts: BELT_AT.concat(BELT_MORE), span: 29.5 * step / 2, h: 18, rx: 9, fs: 11.5, fill: '#0e1528', stroke: ink, color: ink } });
+        o: { cls: tone ? 'of-wave' : 'of-wave of-done', alts: BELT_ORDER, span: 29.5 * step / 2, gap: BELT_GAP, h: 18, rx: 9, fs: 11.5, fill: '#0e1528', stroke: ink, color: ink } });
     });
     v.boxes.splice(waves.length).forEach(function (b) { drop(b.g); });
     var cur = conv && conv.current >= 0 ? waves[conv.current] : null;
