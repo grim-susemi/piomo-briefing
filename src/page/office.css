@@ -10,6 +10,8 @@
 .of-scene text { font-family: var(--font-ui); }
 .of-desk, .of-tag, .of-bub[data-sh] { cursor: pointer; }
 .of-desk:focus { outline: none; }
+/* the boss cat (office-view.js): a click on it is a click on the floor or desk beneath */
+.of-me { pointer-events: none; }
 .of-desk:focus-visible .of-hit { stroke: var(--c-accent); stroke-width: 3; }
 
 .of-head, .of-floors, .of-card { position: absolute; box-sizing: border-box; border-radius: var(--r-xl); background: var(--c-pop); box-shadow: var(--shadow-pop); }

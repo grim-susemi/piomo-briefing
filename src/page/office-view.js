@@ -17,8 +17,10 @@
  * A desk is the board's existing open action, data-sh="open" + data-sid (+ data-sub="wk" on a worker) that shell.js
  * dispatches; Enter or Space on a focused desk clicks it. The 공개 모드 switch is page.js's data-act="office-public"
  * (ui.publicMode, off by default): it hides the bubbles, the conversation's tab label and its cwd.
+ * The boss cat (plan todo 10) is the owner's own cat on the shown floor: the arrow keys, W/A/S/D and a click on the floor
+ * walk it over the model's walk map (see "the boss cat" below); it is not a desk, a session or a count.
  *   g.BriefOfficeView.render(root, vm, ui)   draws or patches the office inside root (#office); one floor at a time
- *   g.BriefOfficeView.layout(floor)           -> {deskId: {x, y, z, s}} the grid cell of every desk (pure)
+ *   g.BriefOfficeView.layout(floor)           -> {deskId: {x, y, z, s}} the grid cell of every desk (pure; the model's)
  *   g.BriefOfficeView.visibility()            holds or resumes the shown office's motion with document.hidden and ends
  *                                             its walks under reduced motion
  *   g.__office                                {sid, desks: {id: node}, cats: {id: node}}: the live desk and cat nodes */
@@ -40,15 +42,15 @@
     ['lounge', '라운지', '#f4a261', 7.3, 7.4, 10.4, 13.6],
     ['review', '검토실', '#ff8fab', 11, 7.4, 17.6, 13.6]
   ];
-  // where desk footprints (1.6 x 1 tiles) may stand, clear of props; the lounge seats cats on the sofa, then on the floor
-  var AREA = { plan: [6, 1.3, 10.9, 4.3], research: [12.3, 1.3, 16.8, 4.3], work: [.9, 8.1, 6.6, 13], review: [11.5, 8.1, 16.7, 12.9], lounge: [7.6, 9.5, 10.2, 11.8] };
-  var SEATS = [[8.55, 8.6], [9.25, 8.6]];
-  var SCALES = [1, .85, .72, .6, .5, .42, .36];
-  var SOFA = [7.9, 8.2], BOSS = [1.6, 1.7];
-  var PLANTS = [[5, .6], [17, 2.9], [.6, 5.8], [10.2, 7.6], [.8, 12.9], [14.4, 12.9]];
-  // props drawn where the mockup drew them: [art name, depth x, depth y, grid move]; the sofa moves from (.6, 3.2)
-  var FURN = [['tower', 3.7, .7], ['rack', 17, 7.6], ['coffee', 7.6, 12], ['cooler', 9.9, 11.4], ['sofa', SOFA[0], SOFA[1], SOFA[0] - .6, SOFA[1] - 3.2]]
-    .concat(PLANTS.map(function (p) { return ['plant', p[0], p[1], p[0] - 5, p[1] - .6]; }));
+  // the props stand where the model's floor plan puts them (g.BriefOffice.map.props: art, x0, y0, x1, y1); the mockup drew
+  // the sofa and the plant art elsewhere (NATIVE: x0, y0 of those drawings), so they are moved there. The boss's desk is
+  // drawn with its monitor, the bookshelf with the static floor
+  var NATIVE = { sofa: [.6, 3.2], plant: [5, .6] }, FURN = [], BOSS = null;
+  g.BriefOffice.map.props.forEach(function (p) {
+    var r = p.slice(1), n = has(NATIVE, p[0]) ? NATIVE[p[0]] : null;
+    if (p[0] === 'desk') BOSS = r;
+    else if (p[0] !== 'shelf') FURN.push({ art: p[0], r: r, at: n ? [r[0] - n[0], r[1] - n[1]] : null });
+  });
   var LEAD_WORD = { in_progress: '진행 중', needs_decision: '결정 대기', blocked: '막힘', recheck: '재확인', done: '끝남', done_no_evidence: '끝(근거 없음)' };
   var WORKER_WORD = { working: '진행 중', running: '진행 중', waiting: '대기', done: '끝', cancelled: '취소', error: '오류', lost: '끊김' };
   var TONE = { working: 'run', running: 'run', in_progress: 'run', waiting: 'wait', needs_decision: 'wait', recheck: 'wait', blocked: 'err', error: 'err', lost: 'err' };
@@ -159,33 +161,8 @@
     return box;
   }
 
-  // ---- layout: every desk of a floor gets one grid cell in its room (pure) ---------------------------------------------
-  // desk rooms: rows of 1.6 x 1 desks at the mockup's 2.7 x 1.9 pitch, filled from the back wall (as in the mockup) and
-  // centred across, shrunk step by step until all fit. The lounge: two sofa seats, then a grid of standing cats
-  function grid(area, n, fw, fd, gx, gy) {
-    var w = area[2] - area[0], d = area[3] - area[1], s = 1, cols = 1, i;
-    for (i = 0; i < SCALES.length; i++) {
-      s = SCALES[i];
-      cols = Math.max(1, Math.floor((w - fw * s) / ((fw + gx) * s) + 1e-6) + 1);
-      if (cols * (Math.floor((d - fd * s) / ((fd + gy) * s) + 1e-6) + 1) >= n) break;
-    }
-    var used = Math.min(cols, n), px = (fw + gx) * s, py = (fd + gy) * s, ox = area[0] + Math.max(0, (w - (fw * s + (used - 1) * px)) / 2);
-    var cells = [];
-    for (i = 0; i < n; i++) cells.push({ x: r1(ox + (i % cols) * px), y: r1(area[1] + Math.floor(i / cols) * py), z: 0, s: s });
-    return cells;
-  }
-  function layout(floor) {
-    var cells = {}, rooms = floor && floor.rooms || {};
-    ['plan', 'research', 'work', 'review', 'lounge'].forEach(function (room) {
-      var ids = arr(rooms[room]), list;
-      if (room === 'lounge') {
-        list = SEATS.slice(0, ids.length).map(function (p) { return { x: p[0], y: p[1], z: 10, s: 1 }; });
-        list = list.concat(grid(AREA.lounge, Math.max(0, ids.length - SEATS.length), .7, .5, .25, .3));
-      } else list = grid(AREA[room], ids.length, 1.6, 1, 1.1, .9);
-      ids.forEach(function (id, i) { cells[id] = list[i]; });
-    });
-    return cells;
-  }
+  // ---- layout: every desk of a floor gets one grid cell in its room: the model's floor plan (pure) ----------------------
+  var layout = g.BriefOffice.layout;
 
   // ---- the static floor: sky, walls, windows, floor, rugs, glass, wall props, the belt --------------------------------
   function base(svg) {
@@ -232,7 +209,7 @@
     el('line', { x1: 0, y1: 0, x2: 4, y2: 0, stroke: '#0d1a1a', 'stroke-width': 1.6 }, clock);
     art('shelf', b);
     ROOMS.forEach(function (r) { el('polygon', { points: quad(r[3], r[4], r[5], r[6]), fill: r[2], opacity: .32, stroke: r[2], 'stroke-opacity': .7 }, b); });
-    [[5.1, 1.2, 4.5], [11.5, .5, 4.5], [10.7, 7.5, 13.5], [7.1, 8.4, 13.5]].forEach(function (s) {
+    g.BriefOffice.map.glass.forEach(function (s) {
       el('polygon', { points: pts([iso(s[0], s[1]), iso(s[0], s[2]), iso(s[0], s[2], 30), iso(s[0], s[1], 30)]), fill: '#a8dcff', 'fill-opacity': .08, stroke: '#a8dcff', 'stroke-opacity': .45 }, b);
     });
     tree('conveyor', g.BriefOfficeArt.props.conveyor).slice(0, 1).forEach(function (n) {
@@ -366,6 +343,16 @@
         if (!hidden && a.playState === 'paused') a.play();
       }
     }
+    // the boss cat: reduced motion puts it at once where its step or walk ends; a hidden tab holds its step
+    var me = v.me, step = me.anim;
+    if (step && reduce) {
+      var end = me.path && me.path.length ? me.path[me.path.length - 1] : me.to;
+      hush(me);
+      me.tile = end;
+      drawMe(v, end);
+      paint(v, [end]);
+    } else if (step && hidden && step.playState === 'running') step.pause();
+    else if (step && !hidden && step.playState === 'paused') step.play();
   }
   // the reduced-motion query, watched from the first mount on (a test's fake matchMedia is in place by then) and kept
   // here so its listener lives as long as the page: reduced motion turned on ends the walks under way right away
@@ -387,7 +374,7 @@
     var lid = el('g', { class: 'of-lid' }, head);
     el('path', { d: LID, fill: '#0d1a1a' }, lid);
     el('path', { d: LASH, fill: 'none', stroke: '#f2f2ee', 'stroke-width': 2.8, 'stroke-linecap': 'round' }, lid);
-    return { walk: walk, pos: pos, cat: c };
+    return { walk: walk, pos: pos, cat: c, head: head };
   }
   // a desk's beat (0-3, from its id) staggers its keyframes so the cats do not type and blink in step
   function unitOf(v, f, d) {
@@ -480,6 +467,180 @@
     }
   }
 
+  // ---- the boss cat (plan Must have 12): the owner's own cat, one per office; never a desk, a session or a count ---------
+  // It stands on the shown floor's walk map (office-model.js walk: tiles of half a floor tile and the blocked ones) and
+  // starts at the floor's spawn, the lounge door; another floor starts it there again. It moves a tile per step: the arrow
+  // keys and W/A/S/D step it along the map's axes, and a click on the floor walks it the shortest way there (breadth first
+  // over the free tiles). A step is one el.animate() of STEP ms on its .of-walk (FLIP, as travel()), and a walk's next step
+  // starts from the last one's finished promise: no timer. me.tile is the last tile it reached, me.to the tile a step is
+  // heading for, me.path the rest of a click walk. A new key or click ends a walk where it last arrived (a fresh key on a
+  // key step finishes that step first; a held key's repeats wait for it), Escape ends it, and a step into a blocked tile
+  // or a click on a tile it cannot reach is refused. Under reduced motion it is at once where it goes. Its place is page
+  // state only: never stored, never sent.
+  var STEP = 140, DIRS = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1], KeyD: [1, 0], KeyA: [-1, 0], KeyW: [0, -1], KeyS: [0, 1] };
+  // its gold badge: the mockup's crown accessory (its ACC.crown) in the traced head's 0 0 100 100 box
+  var CROWN = '38,19 36,7 43,12 50,3 57,12 64,7 62,19';
+  function tileSize(v) { return GX / v.walk.w; }
+  function free(v, x, y) { return x >= 0 && y >= 0 && x < v.walk.w && y < v.walk.h && !has(v.off, y * v.walk.w + x); }
+  // the middle of walk tile t on the scene: where the boss's feet go
+  function footOf(v, t) {
+    var w = v.walk.w, s = tileSize(v), x = t % w, p = iso((x + .5) * s, ((t - x) / w + .5) * s);
+    return { x: r1(p[0]), y: r1(p[1]), k: 1 };
+  }
+  function drawMe(v, t) {
+    var f = footOf(v, t);
+    put(v.me.pos, 'transform', 'translate(' + f.x + ',' + f.y + ') scale(1)');
+  }
+  // its painter place: right after the last prop or desk near it (within NEAR floor tiles) that it stands in front of (its
+  // middle beyond that thing's far x or y edge), from any of tiles; a step paints it from both ends, so it is drawn over
+  // what it passes. Things farther off never overlap it, and their order says nothing about it
+  var NEAR = 2;
+  function paint(v, tiles) {
+    var me = v.me, s = tileSize(v), w = v.walk.w, last = -1;
+    v.order.forEach(function (it, i) {
+      tiles.forEach(function (t) {
+        var x = (t % w + .5) * s, y = (Math.floor(t / w) + .5) * s, r = it.r;
+        if (x > r[0] - NEAR && x < r[2] + NEAR && y > r[1] - NEAR && y < r[3] + NEAR && (x >= r[2] || y >= r[3])) last = i;
+      });
+    });
+    var ref = last + 1 < v.order.length ? v.order[last + 1].n : null, kids = Array.prototype.slice.call(v.depth.children), at = kids.indexOf(me.g);
+    if (at < 0 || kids[at + 1] !== (ref || undefined)) v.depth.insertBefore(me.g, ref);
+  }
+  // ends its step or walk without a trace: the step's finished handler finds nothing of its own left
+  function hush(me) {
+    var a = me.anim;
+    me.anim = null;
+    me.to = null;
+    me.path = null;
+    if (a) a.cancel();
+  }
+  // ends a step or walk under way: the boss stays on the last tile it reached; -> where it showed (null when it stood)
+  function stand(v) {
+    var me = v.me, from = me.anim ? shown(me.walk, footOf(v, me.to)) : null, moving = !!me.anim;
+    hush(me);
+    if (moving) { drawMe(v, me.tile); paint(v, [me.tile]); }
+    return from;
+  }
+  function stepTo(v, to, from) {
+    var me = v.me, f0 = from || footOf(v, me.tile), f1 = footOf(v, to);
+    paint(v, [me.tile, to]);
+    drawMe(v, to);
+    me.to = to;
+    var a = me.anim = me.walk.animate([{ transform: 'translate(' + r1(f0.x - f1.x) + 'px,' + r1(f0.y - f1.y) + 'px)' }, { transform: 'none' }], { duration: STEP, easing: 'linear' });
+    if (doc.hidden === true) a.pause();
+    var end = function () { arrive(v, a); };
+    a.finished.then(end, end);
+  }
+  // a step done: the boss is on its tile; a click walk goes on unless the office is no longer shown
+  function arrive(v, a) {
+    var me = v.me, rest = me.path;
+    if (me.anim !== a) return;
+    me.anim = null;
+    me.tile = me.to;
+    me.to = null;
+    me.path = null;
+    if (rest && rest.length && doc.getElementById('office') === v.root) walk(v, rest, null, true);
+    else paint(v, [me.tile]);
+  }
+  // walks path (walk tiles) a step at a time from where it shows (from), or is at its end at once under reduced motion
+  function walk(v, path, from, click) {
+    var me = v.me;
+    if (calm() || typeof me.walk.animate !== 'function') {
+      me.tile = path[path.length - 1];
+      drawMe(v, me.tile);
+      paint(v, [me.tile]);
+      return;
+    }
+    stepTo(v, path[0], from);
+    me.path = click ? path.slice(1) : null;
+  }
+  // the shortest way (the four sides) from the boss's tile to tile goal: the tiles to step on, [] when it is there, null
+  // when it cannot get there (a blocked tile, or one walled in)
+  function way(v, goal) {
+    var w = v.walk.w, start = v.me.tile, prev = {}, queue = [start], i, k;
+    prev[start] = start;
+    for (i = 0; i < queue.length; i++) {
+      var at = queue[i], x = at % w, y = (at - x) / w;
+      if (at === goal) {
+        var path = [];
+        for (k = at; k !== start; k = prev[k]) path.unshift(k);
+        return path;
+      }
+      [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (d) {
+        var n = (y + d[1]) * w + x + d[0];
+        if (free(v, x + d[0], y + d[1]) && !has(prev, n)) { prev[n] = at; queue.push(n); }
+      });
+    }
+    return null;
+  }
+  // the walk tile under the pointer, -1 off the floor
+  function tileAt(v, ev) {
+    var m = typeof v.svg.getScreenCTM === 'function' ? v.svg.getScreenCTM() : null, s = tileSize(v);
+    if (!m || typeof ev.clientX !== 'number') return -1;
+    m = m.inverse();
+    var sx = m.a * ev.clientX + m.c * ev.clientY + m.e, sy = m.b * ev.clientX + m.d * ev.clientY + m.f;
+    var u = (sx - OX) / KX, w = (sy - OY) / KY, x = Math.floor((u + w) / 2 / s), y = Math.floor((w - u) / 2 / s);
+    return x >= 0 && y >= 0 && x < v.walk.w && y < v.walk.h ? y * v.walk.w + x : -1;
+  }
+  // a click on the floor: any walk ends, and the boss walks the shortest way to the clicked tile when it can get there
+  function toward(v, ev) {
+    var goal = tileAt(v, ev), from = stand(v), path = goal >= 0 ? way(v, goal) : null;
+    if (path && path.length) walk(v, path, from, true);
+  }
+  // one tile toward d: a held key's repeat waits for the step under way, a fresh press finishes it first, a click walk
+  // ends where it last arrived; a blocked tile refuses the step
+  function keyStep(v, d, repeat) {
+    var me = v.me, w = v.walk.w, from = null;
+    if (me.anim && !me.path) {
+      if (repeat) return;
+      var to = me.to;
+      from = shown(me.walk, footOf(v, to));
+      hush(me);
+      me.tile = to;
+    } else if (me.anim) from = stand(v);
+    var x = me.tile % w + d[0], y = Math.floor(me.tile / w) + d[1];
+    if (free(v, x, y)) walk(v, [y * w + x], from, false);
+    else if (from) { drawMe(v, me.tile); paint(v, [me.tile]); }
+  }
+  // the keys are the office's only while it is the view shown (its root in the page, not under the narrow sidebar
+  // overlay) and the focus is in no text field (an input, textarea, select or contenteditable keeps its keys: the annotate
+  // tray, the answer reply box, the search box); never with Ctrl, Alt or Meta, never a key another handler took
+  function onKey(ev) {
+    var root = doc.getElementById('office'), v = root && views.get(root), a = doc.activeElement, d = null;
+    if (!v || !v.walk || ev.defaultPrevented || ev.ctrlKey || ev.altKey || ev.metaKey || root.closest('[inert]')) return;
+    if (a && (/^(?:input|textarea|select)$/i.test(a.tagName || '') || a.isContentEditable === true)) return;
+    if (ev.key === 'Escape') { stand(v); return; }
+    if (has(DIRS, ev.key)) d = DIRS[ev.key];
+    else if (has(DIRS, ev.code)) d = DIRS[ev.code];
+    if (!d) return;
+    ev.preventDefault();
+    keyStep(v, d, ev.repeat === true);
+  }
+  var keysOn = false;
+  function watchKeys() {
+    if (keysOn) return;
+    keysOn = true;
+    doc.addEventListener('keydown', onKey);
+  }
+  // the boss on the floor drawn now: a new floor starts it at its spawn; a changed walk map ends a walk that crosses a
+  // tile it blocks now and takes the boss to the spawn if it blocks the boss's own tile; no floor, no boss
+  function boss(v, f) {
+    var me = v.me;
+    if (!f) { hush(me); v.walk = null; drop(me.g); return; }
+    if (!me.g.parentNode) v.depth.appendChild(me.g);
+    var key = f.walk.blocked.join(',');
+    if (v.fresh || key !== v.walkKey) {
+      v.walk = f.walk;
+      v.walkKey = key;
+      v.off = {};
+      f.walk.blocked.forEach(function (k) { v.off[k] = 1; });
+      if (v.fresh || has(v.off, me.tile)) { hush(me); me.tile = f.spawn.y * f.walk.w + f.spawn.x; }
+      else if ([me.to].concat(me.path || []).some(function (t) { return t !== null && has(v.off, t); })) hush(me);
+      v.fresh = false;
+    }
+    if (!me.anim) { drawMe(v, me.tile); paint(v, [me.tile]); }
+  }
+
   // ---- one floor -----------------------------------------------------------------------------------------------------
   // a dark floor (closed and folded): the whole scene under a night shade, below the labels
   function dim(v, on) {
@@ -490,7 +651,7 @@
     for (var id in v.units) gone(v.units[id]);
     for (var k in v.pills) drop(v.pills[k].g);
     v.boxes.forEach(function (b) { drop(b.g); });
-    v.units = {}; v.pills = {}; v.boxes = []; v.floor = sid;
+    v.units = {}; v.pills = {}; v.boxes = []; v.floor = sid; v.fresh = true;
   }
   // the belt: one box per plan wave (done / current / to come, the mockup's three box colours) that office.css moves along
   // its own slot, and the back-wall screen with the plan's progress
@@ -537,9 +698,15 @@
     desks.forEach(function (d) { deskUnit(v, f, d, cells[d.id], people, found, pub); });
     for (var id in v.units) if (v.units[id].pass !== v.pass) { gone(v.units[id]); delete v.units[id]; }
     // the mockup's painter order by x + y: the props never move, and a desk moves in it only when its place changed
-    var items = v.props.concat(desks.map(function (d) { return { x: cells[d.id].x, y: cells[d.id].y, n: v.units[d.id].g }; }));
+    // (r: what each stands on, in floor tiles, for the boss cat's place among them; a lounge cat is about a tile wide)
+    var items = v.props.concat(desks.map(function (d) {
+      var c = cells[d.id];
+      return { x: c.x, y: c.y, r: d.room === 'lounge' ? [c.x - .2, c.y - .2, c.x + .2, c.y + .2] : [c.x, c.y, c.x + 1.6 * c.s, c.y + c.s], n: v.units[d.id].g };
+    }));
     items.sort(function (a, b) { return (a.x + a.y) - (b.x + b.y); });
     order(v.depth, items.map(function (it) { return it.n; }));
+    v.order = items;
+    boss(v, f);
     var byRank = function (list) { return list.sort(function (a, b) { return b.rank - a.rank; }); };
     byRank(found.tags).forEach(function (t) { pill(v, labels, 'tag:' + t.id, t.x, t.y, t.label, t.o); });
     if (!pub) byRank(found.bubbles).forEach(function (t) { pill(v, labels, 'bub:' + t.id, t.x, t.y, t.label, t.o); });
@@ -687,8 +854,10 @@
   // ---- mount and draw --------------------------------------------------------------------------------------------------
   function mount(root) {
     watchCalm();
+    watchKeys();
     root.textContent = '';
-    var v = { root: root, sid: null, keys: {}, units: {}, pills: {}, boxes: [], rows: {}, pass: 0, floor: undefined, dim: null, noFloor: null, cardParts: null };
+    var v = { root: root, sid: null, keys: {}, units: {}, pills: {}, boxes: [], rows: {}, pass: 0, floor: undefined, dim: null, noFloor: null, cardParts: null,
+      walk: null, walkKey: null, off: {}, order: [], fresh: true };
     var body = h('div', 'of-body', root), stage = h('div', 'of-stage', body);
     v.svg = el('svg', { class: 'of-scene', viewBox: '30 0 1000 700', preserveAspectRatio: 'xMidYMid meet', role: 'group' }, stage);
     set(base(v.svg), 'aria-hidden', 'true');
@@ -697,12 +866,16 @@
     v.wall = [0, 1, 2].map(function (i) { return el('text', { transform: 'translate(' + r1(c0[0] + 10) + ',' + r1(c0[1] + 20 + i * 15) + ') skewY(30)', 'font-size': 11, fill: i ? '#8fb0ff' : '#ffcf5a' }, v.dyn); });
     v.depth = el('g', { class: 'of-l-depth' }, v.svg);
     // the props and the boss's desk are drawn once, where the mockup drew them; the desks are sorted in between
-    v.props = FURN.map(function (fu) { return { x: fu[1], y: fu[2], n: art(fu[0], v.depth, fu.length > 3 ? move(fu[3], fu[4]) : null) }; });
-    var boss = el('g', { class: 'of-boss', transform: move(BOSS[0], BOSS[1]) }, v.depth);
-    art('desk', boss);
+    v.props = FURN.map(function (fu) { return { x: fu.r[0], y: fu.r[1], r: fu.r, n: art(fu.art, v.depth, fu.at ? move(fu.at[0], fu.at[1]) : null) }; });
+    var desk = el('g', { class: 'of-boss', transform: move(BOSS[0], BOSS[1]) }, v.depth);
+    art('desk', desk);
     v.boss = {};
-    monitor(v.boss, boss);
-    v.props.push({ x: BOSS[0], y: BOSS[1], n: boss });
+    monitor(v.boss, desk);
+    v.props.push({ x: BOSS[0], y: BOSS[1], r: BOSS, n: desk });
+    // the boss cat with its crown, placed on the first floor drawn (boss())
+    var me = cat(el('g', { class: 'of-me', 'aria-hidden': 'true' }, v.depth));
+    el('polygon', { points: CROWN, fill: '#ffcf5a' }, me.head);
+    v.me = { g: me.walk.parentNode, walk: me.walk, pos: me.pos, tile: -1, to: null, path: null, anim: null };
     v.top = el('g', { class: 'of-l-top', 'aria-hidden': 'true' }, v.svg);
     v.head = h('div', 'of-head', stage);
     h('h2', 'of-title', v.head, '사무실');
@@ -719,9 +892,9 @@
     if (typeof g.ResizeObserver === 'function') new g.ResizeObserver(function () { if (v.labels) settle(v.labels, shade(v)); }).observe(stage);
     root.addEventListener('click', function (ev) {
       var t = ev.target && ev.target.closest ? ev.target.closest('[data-floor]') : null;
-      if (!t || !root.contains(t)) return;
-      v.sid = t.getAttribute('data-floor');
-      draw(v);
+      if (t && root.contains(t)) { v.sid = t.getAttribute('data-floor'); draw(v); return; }
+      // the floor walks the boss there; a desk or a label with the open action keeps its own click
+      if (v.walk && ev.target && ev.target.closest && ev.target.closest('[data-sh],.of-scene') === v.svg) toward(v, ev);
     });
     root.addEventListener('keydown', function (ev) {
       var t = ev.target;

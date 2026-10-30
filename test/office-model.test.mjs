@@ -157,16 +157,169 @@ test('roles map to rooms; idle and finished helpers rest in the lounge', () => {
   assert.deepEqual(room, { lead: 'work', a: 'research', b: 'lounge', c: 'plan', d: 'plan', e: 'work', f: 'lounge', g: 'research', h: 'lounge' });
 });
 
-test('live floors come first, and the walk grid is an empty placeholder', () => {
-  // Given live and closed sessions, When the scene is built, Then live floors lead and walk/spawn are placeholders
+test('live floors come first', () => {
+  // Given live and closed sessions, When the scene is built, Then live floors lead
   const { vm, ui } = input();
   const scene = sceneOf(load(), vm, ui);
   const lives = scene.floors.map((f) => f.live);
   assert.deepEqual(lives, [...lives].sort((a, b) => Number(b) - Number(a)));
-  for (const f of scene.floors) {
-    assert.deepEqual(f.walk, { w: 0, h: 0, blocked: [] });
-    assert.deepEqual(f.spawn, { x: 0, y: 0 });
+});
+
+// ---- the walk map (plan Must have 12): the floor office-view.js draws (18 x 14 floor tiles) in walk tiles of half a floor
+// tile; walls, desks and props block, a wall's open end is a door, the boss starts at the lounge door and every desk has a
+// free tile next to it that the boss can reach from there
+const TILE = 0.5;
+const LOUNGE = [7.3, 7.4, 10.4, 13.6]; // the lounge rug as office-view.js ROOMS draws it: x0, y0, x1, y1 in floor tiles
+const SIDES = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const mid = (i) => (i + 0.5) * TILE;
+function walkGrid(floor) {
+  const { w, h, blocked } = floor.walk, off = new Set(blocked);
+  return { w, h, off, free: (x, y) => x >= 0 && y >= 0 && x < w && y < h && !off.has(y * w + x) };
+}
+// every tile the boss can reach from the spawn, stepping to the four sides
+function reachable(floor) {
+  const g = walkGrid(floor), start = floor.spawn.y * g.w + floor.spawn.x, seen = new Set([start]), queue = [start];
+  while (queue.length) {
+    const at = queue.shift(), x = at % g.w, y = (at - x) / g.w;
+    for (const [dx, dy] of SIDES) {
+      const k = (y + dy) * g.w + x + dx;
+      if (g.free(x + dx, y + dy) && !seen.has(k)) { seen.add(k); queue.push(k); }
+    }
   }
+  return seen;
+}
+// the tiles a rect stands on: every tile whose middle is inside it, and the tile under its own middle
+function tilesUnder(g, [x0, y0, x1, y1]) {
+  const out = new Set([Math.floor((y0 + y1) / 2 / TILE) * g.w + Math.floor((x0 + x1) / 2 / TILE)]);
+  for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) if (mid(x) > x0 && mid(x) < x1 && mid(y) > y0 && mid(y) < y1) out.add(y * g.w + x);
+  return out;
+}
+// the blocked tiles a desk takes: the tiles under it and the blocked ones its rect touches (the map keeps a margin)
+function tilesTaken(g, rect) {
+  const out = tilesUnder(g, rect), [x0, y0, x1, y1] = rect;
+  for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) {
+    if (x * TILE < x1 && (x + 1) * TILE > x0 && y * TILE < y1 && (y + 1) * TILE > y0 && g.off.has(y * g.w + x)) out.add(y * g.w + x);
+  }
+  return out;
+}
+// what a desk stands on: a desk 1.6 x 1 floor tiles at its cell's scale; a lounge cat (no desk) only the tile under its feet
+function deskRects(ctx, floor) {
+  const cells = ctx.BriefOffice.layout(floor);
+  return floor.desks.map((d) => {
+    const c = cells[d.id];
+    return { id: d.id, lounge: d.room === 'lounge', seated: d.room === 'lounge' && c.z > 0, rect: d.room === 'lounge' ? [c.x, c.y, c.x, c.y] : [c.x, c.y, c.x + 1.6 * c.s, c.y + c.s] };
+  });
+}
+// one live session whose rooms hold n desks each (the work room also holds the session's lead)
+function crowd(counts) {
+  const kinds = { plan: 'prometheus', research: 'explore', work: 'sisyphus', review: 'oracle', lounge: 'quick' };
+  const workers = Object.entries(counts).flatMap(([room, n]) => Array.from({ length: n }, (_, i) => ({
+    id: room + i, kind: kinds[room], name: room + i, state: room === 'lounge' ? 'waiting' : 'running', step: '' })));
+  return { schema: 1, seq: 1, generatedAt: 1, sessions: [{ id: 'c1', title: 't', lastActivityAt: 1, alive: true, decisions: [], changes: [], done: [], live: { workers } }] };
+}
+
+test('each floor has a walk map of the whole floor in half tiles; text and public mode do not change it', () => {
+  // Given the fixture board, When the scene is built (normal, public, hostile title), Then every walk map covers 18 x 14
+  // floor tiles as 36 x 28 walk tiles, lists each blocked tile once in order, and is the same whatever the text says
+  const { vm, ui } = input();
+  const ctx = load();
+  const scene = sceneOf(ctx, vm, ui);
+  const pub = sceneOf(ctx, vm, { ...ui, publicMode: true });
+  const renamed = clone(vm);
+  renamed.sessions.forEach((s) => { s.title = HOSTILE[0]; });
+  const other = sceneOf(ctx, renamed, ui);
+  assert.ok(scene.floors.length > 1);
+  for (const [i, f] of scene.floors.entries()) {
+    assert.deepEqual([f.walk.w * TILE, f.walk.h * TILE], [18, 14], f.sid);
+    assert.ok(f.walk.blocked.length > 0, f.sid + ': something blocks');
+    assert.ok(f.walk.blocked.every((k, j, all) => Number.isInteger(k) && k >= 0 && k < f.walk.w * f.walk.h && (j === 0 || all[j - 1] < k)), f.sid + ': sorted, unique, on the map');
+    assert.deepEqual(pub.floors[i].walk, f.walk, f.sid + ': public mode');
+    assert.deepEqual(other.floors.find((x) => x.sid === f.sid).walk, f.walk, f.sid + ': titles');
+  }
+});
+
+test('the boss starts at the lounge door: a free tile in the middle of the lounge edge that faces the hall', () => {
+  // Given every fixture floor, When the scene is built, Then the spawn is free, inside the lounge rug, its back neighbour is
+  // the hall (outside the lounge) and it sits in the lounge's middle column
+  const { vm, ui } = input();
+  const scene = sceneOf(load(), vm, ui);
+  for (const f of scene.floors) {
+    const g = walkGrid(f), { x, y } = f.spawn;
+    assert.ok(g.free(x, y), f.sid + ': free');
+    assert.ok(mid(x) > LOUNGE[0] && mid(x) < LOUNGE[2] && mid(y) > LOUNGE[1] && mid(y) < LOUNGE[3], f.sid + ': in the lounge');
+    assert.ok(mid(y - 1) < LOUNGE[1] && g.free(x, y - 1), f.sid + ': the tile behind it is the open hall');
+    assert.ok(Math.abs(mid(x) - (LOUNGE[0] + LOUNGE[2]) / 2) <= TILE / 2, f.sid + ': the middle of the lounge');
+  }
+});
+
+test('the glass walls block their tiles and each keeps an open end, its door, that the boss can reach', () => {
+  // Given the model's floor plan, When the scene is built, Then every tile along a glass wall is blocked and a tile just
+  // past one of its ends is free and reachable from the spawn
+  const { vm, ui } = input();
+  const ctx = load();
+  const glass = clone(ctx.BriefOffice.map.glass);
+  assert.equal(glass.length, 4, 'the four glass walls between rooms');
+  for (const f of sceneOf(ctx, vm, ui).floors) {
+    const g = walkGrid(f), seen = reachable(f);
+    for (const [x, y0, y1] of glass) {
+      const col = Math.floor(x / TILE), rows = [];
+      for (let y = 0; y < g.h; y++) if (mid(y) >= y0 && mid(y) <= y1) rows.push(y);
+      assert.ok(rows.length > 0);
+      for (const y of rows) assert.equal(g.free(col, y), false, f.sid + ': wall at ' + [x, y0, y1] + ' row ' + y);
+      const doors = [rows[0] - 1, rows.at(-1) + 1].filter((y) => g.free(col, y) && seen.has(y * g.w + col));
+      assert.ok(doors.length > 0, f.sid + ': wall at ' + [x, y0, y1] + ' has a door');
+    }
+  }
+});
+
+test('props block the floor under them, and the hall between the upper rooms and the lounge is crossed straight', () => {
+  // Given the model's floor plan, When the scene is built, Then every tile under a prop is blocked, and the column from the
+  // spawn to the upper rooms (the belt lies on the floor of that hall) is free
+  const { vm, ui } = input();
+  const ctx = load();
+  const props = clone(ctx.BriefOffice.map.props);
+  assert.deepEqual([...new Set(props.map((p) => p[0]))].sort(), ['coffee', 'cooler', 'desk', 'plant', 'rack', 'shelf', 'sofa', 'tower']);
+  for (const f of sceneOf(ctx, vm, ui).floors) {
+    const g = walkGrid(f);
+    for (const [art, ...rect] of props) for (const k of tilesUnder(g, rect)) assert.ok(g.off.has(k), f.sid + ': ' + art + ' at ' + rect + ' tile ' + k);
+    for (let y = Math.floor(4.6 / TILE); y <= f.spawn.y; y++) assert.ok(g.free(f.spawn.x, y), f.sid + ': hall row ' + y);
+  }
+});
+
+test('desks block the floor under them; lounge cats have no desk and block nothing', () => {
+  // Given the fixture floors and crowded floors, When the scene is built, Then the tiles under every desk are blocked and
+  // the tile under a standing lounge cat is free
+  const ctx = load(), { vm, ui } = input();
+  const floors = sceneOf(ctx, vm, ui).floors.concat(sceneOf(ctx, crowd({ plan: 12, research: 12, work: 12, review: 12, lounge: 12 }), ui).floors);
+  let standing = 0;
+  for (const f of floors) {
+    const g = walkGrid(f);
+    for (const d of deskRects(ctx, f)) {
+      if (d.lounge) { if (!d.seated) { standing++; assert.ok(g.free(Math.floor(d.rect[0] / TILE), Math.floor(d.rect[1] / TILE)), f.sid + ': ' + d.id); } continue; }
+      for (const k of tilesUnder(g, d.rect)) assert.ok(g.off.has(k), f.sid + ': desk ' + d.id + ' tile ' + k);
+    }
+  }
+  assert.ok(standing > 0, 'a standing lounge cat was checked');
+});
+
+test('every desk has a free tile next to it that the boss can reach from the spawn, in every room holding 0 to 16 desks', () => {
+  // Given the fixture floors, each room filled with 0..16 desks (the others with 2) and every room with 12, When the scene
+  // is built, Then each desk (or lounge cat) has a free tile beside the tiles it stands on that is reachable from the spawn
+  const ctx = load(), { vm, ui } = input();
+  const boards = [vm, crowd({ plan: 12, research: 12, work: 12, review: 12, lounge: 12 })];
+  for (const room of ['plan', 'research', 'work', 'review', 'lounge']) for (let n = 0; n <= 16; n++) boards.push(crowd({ plan: 2, research: 2, work: 2, review: 2, lounge: 2, [room]: n }));
+  let desks = 0;
+  for (const board of boards) for (const f of sceneOf(ctx, board, ui).floors) {
+    const g = walkGrid(f), seen = reachable(f);
+    for (const d of deskRects(ctx, f)) {
+      desks++;
+      const own = d.lounge ? new Set([Math.floor(d.rect[1] / TILE) * g.w + Math.floor(d.rect[0] / TILE)]) : tilesTaken(g, d.rect);
+      const next = [...own].flatMap((k) => SIDES.map(([dx, dy]) => [k % g.w + dx, Math.floor(k / g.w) + dy]))
+        .filter(([x, y]) => !own.has(y * g.w + x) && g.free(x, y) && seen.has(y * g.w + x));
+      assert.ok(next.length > 0, f.sid + ': ' + d.id + ' (' + JSON.stringify(Object.fromEntries(Object.entries(f.rooms).map(([r, l]) => [r, l.length]))) + ')');
+    }
+  }
+  assert.ok(desks > 1000, 'desks checked: ' + desks);
 });
 
 test('the plan view exports the lane helpers the conveyor uses', () => {

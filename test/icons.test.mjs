@@ -154,10 +154,10 @@ const BASELINE_PAGE_BYTES = 563709;
 // "퀄리티 좋아지는거면 제한 올려도됨 대신에 마지막엔 최적화 렉 안걸리는 정도로 검수해서 마무리만 하자".
 // OFFICE_ALLOWANCE_BYTES records the measured bytes of the office files (art, model, view, css) as they sit in this page
 // (each script in its 20 B <script>\n...\n</script>\n wrapper, the sheet with its join newline), measured when the office
-// files last changed (plan todo 6, live updates and motion); it is taken out of the growth and the 32 KB budget still holds
+// files last changed (plan todo 10, the walkable boss cat); it is taken out of the growth and the 32 KB budget still holds
 // for everything else. No further size cap: lag is judged by todo 7 (CPU budget) and F3. The diagnostic prints the
 // current office bytes; re-record the constant under the same decision when the office files change.
-const OFFICE_ALLOWANCE_BYTES = 87725;
+const OFFICE_ALLOWANCE_BYTES = 101957;
 const OFFICE_FILES = ['office-assets.js', 'office-model.js', 'office-view.js', 'office.css'];
 function officeChunks() {
   return OFFICE_FILES.map((f) => {
