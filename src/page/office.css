@@ -63,12 +63,48 @@
 .of-log b { flex: none; color: var(--c-fg); font-variant-numeric: tabular-nums; }
 .of-empty { margin: 0; padding: 0 var(--sp-2); color: var(--c-fg-3); font-size: var(--fs-sm); }
 
-.of-fl:hover, .of-it:hover, .of-pub:hover { background: var(--fill-hover); }
+/* the talk dialog (office-view.js): the rail's first box. The cat's face, name, floor and state, the info rows, the
+ * decisions to answer (view.js's answer box in page.css's .ans-* look), the note box and 대화 열기. The region and the
+ * dialog take the focus from script only (tabindex -1) */
+.of:focus, .of-talk:focus { outline: none; }
+.of-talk { display: grid; gap: var(--sp-2); margin: 0; padding: var(--sp-3); border-radius: var(--r-xl); background: var(--c-elev);
+  box-shadow: var(--shadow-pop), 0 0 0 var(--hair) var(--c-line-strong); }
+.of-talk:focus-visible { box-shadow: var(--shadow-pop), 0 0 0 2px var(--c-accent); }
+.of-tk-head { display: flex; align-items: center; gap: var(--sp-2); }
+.of-tk-face { flex: none; width: 36px; height: 36px; overflow: visible; }
+.of-tk-who { display: grid; flex: 1; min-width: 0; }
+.of-tk-name { margin: 0; font-size: var(--fs-base); font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
+.of-tk-where { margin: 0; overflow: hidden; color: var(--c-fg-3); font-size: var(--fs-sm); text-overflow: ellipsis; white-space: nowrap; }
+.of-tk-head .of-st { align-self: center; }
+.of-tk-x, .of-tk-new, .of-tk-send { flex: none; min-height: var(--ctl-h); padding: 0 var(--sp-3); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md);
+  background: none; color: var(--c-fg); font: inherit; font-size: var(--fs-sm); white-space: nowrap; cursor: pointer; }
+.of-tk-x { padding: 0 var(--sp-2); border-color: transparent; color: var(--c-fg-2); }
+.of-tk-send { border-color: var(--c-primary); background: var(--c-primary); color: var(--c-on-primary); font-weight: var(--fw-medium); }
+.of-tk-send:disabled { border-color: var(--ctl-edge); background: var(--fill-soft); color: var(--c-fg-3); cursor: default; }
+.of-tk-info { display: grid; gap: 2px; margin: 0; }
+.of-tk-info div { display: grid; grid-template-columns: 4.5em minmax(0, 1fr); gap: var(--sp-2); font-size: var(--fs-sm); }
+.of-tk-info dt { color: var(--c-fg-3); }
+.of-tk-info dd { margin: 0; word-break: keep-all; overflow-wrap: anywhere; }
+.of-tk-asks, .of-tk-note { display: grid; gap: var(--sp-2); padding-top: var(--sp-2); border-top: var(--hair) solid var(--c-line); }
+.of-tk-q { margin: 0; font-size: var(--fs-sm); font-weight: var(--fw-medium); word-break: keep-all; overflow-wrap: anywhere; }
+.of-tk-kit .ans-box { margin: var(--sp-1) 0 0; }
+.of-tk-lb { display: grid; gap: var(--sp-1); color: var(--c-fg-2); font-size: var(--fs-sm); }
+.of-tk-ta { width: 100%; min-height: 4.4em; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--ctl-edge); border-radius: var(--r-md); background: var(--c-main);
+  color: var(--c-fg); font: inherit; font-size: var(--fs-sm); resize: vertical; }
+.of-tk-acts { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-1) var(--sp-2); }
+.of-tk-msg { flex: 1 1 160px; margin: 0; font-size: var(--fs-sm); font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
+.of-tk-msg[role="status"] { color: var(--c-teal); }
+.of-tk-msg[role="alert"] { color: var(--c-red); }
+.of-tk-foot { display: flex; justify-content: flex-end; }
+
+.of-fl:hover, .of-it:hover, .of-pub:hover, .of-tk-x:hover, .of-tk-new:hover { background: var(--fill-hover); }
 .of-fl[aria-pressed="true"] { background: var(--fill-sel); }
-.of-fl:active, .of-it:active, .of-pub:active { background: var(--fill-press); }
-.of-open:hover { background: var(--c-fg-2); }
+.of-fl:active, .of-it:active, .of-pub:active, .of-tk-x:active, .of-tk-new:active { background: var(--fill-press); }
+.of-open:hover, .of-tk-send:hover:not(:disabled) { background: var(--c-fg-2); }
 .of-open:active { background: color-mix(in srgb, var(--c-primary) 80%, var(--c-main)); }
-.of-fl:focus-visible, .of-it:focus-visible, .of-open:focus-visible, .of-pub:focus-visible { outline: 2px solid var(--c-accent); outline-offset: -2px; }
+.of-fl:focus-visible, .of-it:focus-visible, .of-open:focus-visible, .of-pub:focus-visible, .of-tk-x:focus-visible, .of-tk-new:focus-visible,
+.of-tk-send:focus-visible { outline: 2px solid var(--c-accent); outline-offset: -2px; }
+.of-tk-ta:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; }
 
 @container (min-width: 1040px) {
   .of-body { height: 100%; grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: minmax(0, 1fr); }
@@ -77,9 +113,10 @@
 }
 @container (max-width: 1039px) {
   .of-rail { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .of-talk { grid-column: 1 / -1; }
 }
 @media (max-width: 599px) {
-  .of-fl, .of-it, .of-open { min-height: var(--hit); }
+  .of-fl, .of-it, .of-open, .of-tk-x, .of-tk-new, .of-tk-send { min-height: var(--hit); }
   /* the switch keeps the toolbar one control high: its touch target grows to --hit around it, invisibly */
   .of-pub::before { content: ""; position: absolute; inset: calc((var(--ctl-h) - var(--hit)) / 2) 0; }
   /* a phone-wide card would only show the start of the tab label and cwd; the conversation view has them */

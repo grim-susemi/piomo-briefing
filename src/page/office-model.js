@@ -1,6 +1,7 @@
 /* omo-briefing office scene model: classic script (file:// safe). Pure: board view-model -> scene data.
  * Reads no clock, makes no request and builds no markup; office-view.js draws the scene. It also holds the office's floor
- * plan (desk cells, glass walls, props) and the walk map the boss cat walks on (plan Must have 12). */
+ * plan (desk cells, glass walls, props), the walk map the boss cat walks on (plan Must have 12), and who the boss can
+ * talk to from its tile with the data of that talk dialog (near() and talk(), Must have 13). */
 (function (g) {
   'use strict';
   var ROOM_OF_KIND = { prometheus: 'plan', 'plan-consultant': 'plan', 'plan-reviewer': 'plan', architect: 'plan', explore: 'research', librarian: 'research', oracle: 'review', sisyphus: 'work', hephaestus: 'work', atlas: 'work' };
@@ -111,6 +112,67 @@
     }
     return floor;
   }
+  // ---- talking to a cat (plan Must have 13) ------------------------------------------------------------------------------
+  // near(floor, tile): the cat the boss on walk tile tile (y * w + x) can talk to, or null. A cat's spot is the walk tiles
+  // its floor rectangle overlaps: a desk's 1.6 x 1 at its cell's scale, a lounge cat's the 0.4 x 0.4 square office-view.js
+  // paints it by (so the sofa cats are next to the lounge door the boss starts at). The boss is next to a cat when its tile
+  // is in that spot or touches it, sides or corners; of several, the fewest steps (a corner counts two), then desk order
+  function near(floor, tile) {
+    var w = floor.walk.w, h = floor.walk.h, x = tile % w, y = (tile - x) / w, cells = layout(floor), best = null, dist = 3;
+    floor.desks.forEach(function (d) {
+      if (!has(cells, d.id)) return;
+      var c = cells[d.id], r = d.room === 'lounge' ? [c.x - .2, c.y - .2, c.x + .2, c.y + .2] : [c.x, c.y, c.x + 1.6 * c.s, c.y + c.s];
+      for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+          var tx = x + dx, ty = y + dy, n = Math.abs(dx) + Math.abs(dy);
+          if (n < dist && tx >= 0 && ty >= 0 && tx < w && ty < h && tx * WT < r[2] && (tx + 1) * WT > r[0] && ty * WT < r[3] && (ty + 1) * WT > r[1]) { dist = n; best = d.id; }
+        }
+      }
+    });
+    return best;
+  }
+  // the five state words of the dialog and their tones: a worker's from its row, the lead's from its session
+  var TALK_WORD = { running: ['일함', 'run'], waiting: ['대기', 'rest'], done: ['끝남', 'rest'], cancelled: ['끝남', 'rest'], error: ['오류', 'err'], lost: ['오류', 'err'] };
+  function leadWord(s) {
+    var k = str(s.statusKey) || str(s.status);
+    if (k === 'done' || k === 'done_no_evidence') return ['끝남', 'rest'];
+    if (k === 'needs_decision' || k === 'blocked' || obj(s.openQuestion)) return ['입력 기다림', 'wait'];
+    return s.alive === true ? ['일함', 'run'] : ['대기', 'rest'];
+  }
+  function posId(v) { return typeof v === 'number' && isFinite(v) && v >= 1 && Math.floor(v) === v; }
+  function num(v) { return typeof v === 'number' && isFinite(v); }
+  // talk(vm, ui, scene, sid, id): the dialog of cat id on floor sid, from the view model only; null when either is gone.
+  // n is the floor as the picker numbers it; step is a worker's step, the lead's current todo; headline, next, todo
+  // (done/total) and open (open decisions) are the session's. asks (the lead on the live board only, never in public mode):
+  // the decisions to answer here, by id: the open ones, and those this page has an answer under way for (ui.answers: a
+  // confirm pending, sending, found closed, or sent and not delivered yet), so the answer box shows each phase until the
+  // delivery receipt. note: the note box (the same lead, when the session takes annotations). Public mode blanks the
+  // agent-written text (step, headline, next) as it blanks the bubbles
+  function talk(vm, ui, scene, sid, id) {
+    var floors = arr(scene && scene.floors), f = null, d = null, i;
+    var s = arr(vm && vm.sessions).filter(function (x) { return obj(x) && str(x.id) === sid; })[0];
+    for (i = 0; i < floors.length; i++) if (floors[i].sid === sid) f = floors[i];
+    for (i = 0; f && i < f.desks.length; i++) if (f.desks[i].id === id) d = f.desks[i];
+    if (!s || !d) return null;
+    var lead = d.kind === 'lead', pub = !!ui && ui.publicMode === true, live = !!ui && ui.live === true && !pub, auto = obj(s.auto) ? s.auto : {};
+    var w = lead ? null : arr(obj(s.live) && s.live.workers).filter(function (x) { return obj(x) && str(x.id) === id; })[0];
+    if (!lead && !w) return null;
+    var role = lead ? '리더' : str(w.kind).replace(/^omo-native-/, '') || str(w.name) || '작업자';
+    var word = lead ? leadWord(s) : has(TALK_WORD, w.state) ? TALK_WORD[w.state] : TALK_WORD.waiting;
+    var answers = obj(ui && ui.answers) ? ui.answers : {}, decisions = arr(s.decisions).filter(function (x) { return obj(x) && posId(x.id); });
+    var open = function (x) { return !x.answered && !x.closed && !x.held; };
+    var asks = !lead || !live ? [] : decisions.filter(function (x) {
+      var a = has(answers, String(x.id)) && obj(answers[String(x.id)]) ? answers[String(x.id)] : null;
+      return open(x) || !!a && (obj(a.confirm) || a.phase === 'sending' || a.phase === 'closed' || (a.phase === 'sent' && !obj(x.receipt)));
+    }).map(function (x) { return x.id; }).sort(function (a, b) { return a - b; });
+    return {
+      sid: sid, id: id, lead: lead, n: floors.length - floors.indexOf(f), title: str(s.title), role: role, room: d.room,
+      name: lead || str(w.name) === role ? '' : str(w.name), state: word[0], tone: word[1],
+      step: pub ? '' : lead ? str(auto.todoCurrent) : str(w.step), headline: pub ? '' : str(s.headline), next: pub ? '' : str(s.next),
+      todo: num(auto.todoDone) && num(auto.todoTotal) ? auto.todoDone + '/' + auto.todoTotal : '', open: decisions.filter(open).length,
+      asks: asks, note: lead && live && arr(s.answerKinds).indexOf('annotation') >= 0, sub: lead ? '' : 'wk'
+    };
+  }
   function byFloor(a, b) {
     return (b.live - a.live) || ((Number(b.at) || 0) - (Number(a.at) || 0)) || (a.sid < b.sid ? -1 : a.sid > b.sid ? 1 : 0);
   }
@@ -134,5 +196,5 @@
     });
     return { floors: floors, ceo: { items: items, count: g.BriefShell.badge(vm, ui) }, alerts: alerts, people: people, log: log };
   }
-  g.BriefOffice = { scene: scene, layout: layout, map: MAP };
+  g.BriefOffice = { scene: scene, layout: layout, map: MAP, near: near, talk: talk };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

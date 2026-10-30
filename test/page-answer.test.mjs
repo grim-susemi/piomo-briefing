@@ -787,3 +787,79 @@ test('C-HOLD on the all-conversations overview: 보류 shows the same confirm ro
   assert.equal(decHtml(e, 12), '', 'held: no longer an open card');
   assert.equal(e.errors.length, 0);
 });
+
+// ---- ui.sendNote (plan omo-office-view todo 11): the office dialog's note box goes out through sendAnnotation(s, text,
+// { keepTray: true }) with the tray's guards, request id, body and replies unchanged; a success keeps the conversation's
+// unsent tray notes and leaves the page where it is (the tray's own send empties the tray and opens 개요)
+const noteModel = (seq) => { const m = answerModel(seq); m.sessions[0].answerKinds = ['option', 'text', 'annotation']; return m; };
+const plainOf = (v) => (v === null || v === undefined ? v : JSON.parse(JSON.stringify(v)));
+const TRAY_NOTE = { blocks: ['now'], sub: 'ov', text: '', snip: '지금', intent: '고쳐줘', comment: '트레이에 둔 주석', paths: [] };
+
+test('ui.sendNote posts one annotation; on success the tray notes stay and the page stays on its view and sub-tab', async () => {
+  const e = makeEnv({ sessionStorage: memoryStorage() }), A = e.ctx.BriefAnnotate;
+  e.page.receive(noteModel(1));
+  e.page.open('s-a1', 'dec');
+  assert.equal(A.add('s-a1', TRAY_NOTE).ok, true);
+  const where = () => ({ view: e.page.state.ui.view, sub: e.page.state.ui.sub['s-a1'], active: e.page.state.ui.active });
+  const before = where();
+  assert.equal(typeof e.page.state.ui.sendNote, 'function');
+  e.page.state.ui.sendNote('s-a1', '사무실에서 보낸 글');
+  assert.equal(posts(e).length, 1);
+  const post = posts(e)[0];
+  assert.deepEqual({ ...post.opts.headers }, { 'Content-Type': 'application/json', 'X-Board-Token': 'tok-1' });
+  assert.deepEqual(JSON.parse(post.opts.body), { kind: 'annotation', sessionId: 's-a1', requestId: '11111111-1111-4111-8111-000000000001', text: '사무실에서 보낸 글' });
+  assert.deepEqual(plainOf(A.message('s-a1')), { text: '보내는 중…', sending: true });
+  assert.equal(A.sending('s-a1'), true);
+  post.resolve(reply(200, { ok: true, key: 'a-11111111-1111-4111-8111-000000000001' }));
+  await settle();
+  assert.deepEqual(plainOf(A.list('s-a1')).map((n) => n.comment), ['트레이에 둔 주석'], 'the unsent tray note is still there');
+  assert.deepEqual(where(), before, 'no jump to 개요');
+  assert.deepEqual(plainOf(A.message('s-a1')), { text: '보냄 · 전달 상태 기다리는 중…', ok: true });
+  assert.equal(e.ctx.sessionStorage.getItem('omo-briefing.annotation.s-a1'), null, 'the stored request is done');
+  assert.equal(posts(e).length, 1);
+  assert.deepEqual(e.errors, []);
+});
+
+test('ui.sendNote keeps the guards: no live board, no annotation kind, an unknown conversation or one in flight sends nothing', () => {
+  const file = makeEnv({ protocol: 'file:' });
+  file.page.receive(noteModel(1));
+  file.page.state.ui.sendNote('s-a1', '글');
+  assert.equal(file.fetches.length, 0, 'the file page never posts');
+  const plainKinds = makeEnv();
+  plainKinds.page.receive(answerModel(1));
+  plainKinds.page.state.ui.sendNote('s-a1', '글');
+  assert.equal(posts(plainKinds).length, 0, 'a conversation without the annotation kind');
+  const e = makeEnv({ sessionStorage: memoryStorage() });
+  e.page.receive(noteModel(1));
+  e.page.state.ui.sendNote('no-such-session', '글');
+  assert.equal(posts(e).length, 0, 'an unknown conversation');
+  e.page.state.ui.sendNote('s-a1', '글');
+  e.page.state.ui.sendNote('s-a1', '글');
+  assert.equal(posts(e).length, 1, 'one in flight at a time');
+  assert.deepEqual([file.errors, plainKinds.errors, e.errors], [[], [], []]);
+});
+
+test('ui.sendNote: a pending request of other text is the conflict line with nothing sent; the same text retries the same request; 409 and 403 as before', async () => {
+  const storage = memoryStorage(), e = makeEnv({ sessionStorage: storage }), A = e.ctx.BriefAnnotate;
+  e.page.receive(noteModel(1));
+  e.page.state.ui.sendNote('s-a1', '첫 글');
+  posts(e)[0].resolve(reply(503, { ok: false, code: 'PAUSED' }));
+  await settle();
+  assert.equal(A.sending('s-a1'), false);
+  e.page.state.ui.sendNote('s-a1', '다른 글');
+  assert.equal(posts(e).length, 1, 'nothing sent');
+  assert.deepEqual(plainOf(A.message('s-a1')), { text: '같은 묶음이 이미 다른 내용으로 보내졌어요 - 새로 보내기', conflict: true });
+  e.page.state.ui.sendNote('s-a1', '첫 글');
+  assert.equal(posts(e).length, 2);
+  assert.equal(posts(e)[1].opts.body, posts(e)[0].opts.body, 'the retry is the same request id and text');
+  posts(e)[1].resolve(reply(409, { ok: false, code: 'REQUEST_ID_CONFLICT' }));
+  await settle();
+  assert.deepEqual(plainOf(A.message('s-a1')), { text: '같은 묶음이 이미 다른 내용으로 보내졌어요 - 새로 보내기', conflict: true });
+  const reload = makeEnv({ sessionStorage: memoryStorage() });
+  reload.page.receive(noteModel(1));
+  reload.page.state.ui.sendNote('s-a1', '글');
+  posts(reload)[0].resolve(reply(403, { ok: false, code: 'FORBIDDEN_TOKEN' }));
+  await settle();
+  assert.equal(reload.reloads.length, 1, 'a 403 reloads the board once, as the tray\'s send does');
+  assert.deepEqual([e.errors, reload.errors], [[], []]);
+});

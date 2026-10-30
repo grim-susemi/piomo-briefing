@@ -322,6 +322,176 @@ test('every desk has a free tile next to it that the boss can reach from the spa
   assert.ok(desks > 1000, 'desks checked: ' + desks);
 });
 
+// ---- talking to a cat (plan todo 11, Must have 13): who the boss can talk to from its tile, and the dialog's data --------
+// The rule, restated from the reading office-model.js documents: a cat's spot is the walk tiles its floor rectangle
+// overlaps (a desk 1.6 x 1 at its cell's scale; a lounge cat the 0.4 x 0.4 square it is painted by); the boss is next to a
+// cat when its tile is in that spot or touches it, sides or corners; of several, the fewest steps (a corner counts two),
+// then the floor's desk order.
+function spotOf(ctx, floor, d) {
+  const c = ctx.BriefOffice.layout(floor)[d.id], r = d.room === 'lounge' ? [c.x - 0.2, c.y - 0.2, c.x + 0.2, c.y + 0.2] : [c.x, c.y, c.x + 1.6 * c.s, c.y + c.s];
+  const out = [];
+  for (let y = 0; y < floor.walk.h; y++) for (let x = 0; x < floor.walk.w; x++) if (x * TILE < r[2] && (x + 1) * TILE > r[0] && y * TILE < r[3] && (y + 1) * TILE > r[1]) out.push([x, y]);
+  return out;
+}
+// spots = [{ id, tiles }] in the floor's desk order
+function nearByRule(spots, [x, y]) {
+  let best = null, dist = 3;
+  for (const s of spots) for (const [sx, sy] of s.tiles) {
+    const dx = Math.abs(sx - x), dy = Math.abs(sy - y);
+    if (dx <= 1 && dy <= 1 && dx + dy < dist) { dist = dx + dy; best = s.id; }
+  }
+  return { id: best, dist };
+}
+const near = (ctx, floor, [x, y]) => ctx.BriefOffice.near(floor, y * floor.walk.w + x);
+
+test('next to a cat: beside, on a corner of or on its spot; one tile further off is not, and an empty spot talks to nobody', () => {
+  // Given a floor with only the lead (its desk in the work room) and floors with two cats on the lounge sofa, When the boss
+  // stands beside the lead's desk, on its corner, two tiles off, or at the lounge door, Then near() names the lead, the
+  // lead, nobody, and the first sofa cat (the door is drawn right beside it); with an empty lounge the door talks to nobody
+  const ctx = load(), ui = { publicMode: false };
+  const lone = sceneOf(ctx, crowd({}), ui).floors[0], c = clone(ctx.BriefOffice.layout(lone)).lead;
+  const x0 = Math.floor(c.x / TILE), y0 = Math.floor(c.y / TILE);
+  assert.equal(near(ctx, lone, [x0 - 1, y0]), 'lead', 'the tile left of the desk');
+  assert.equal(near(ctx, lone, [x0 - 1, y0 - 1]), 'lead', 'the tile on its corner');
+  assert.equal(near(ctx, lone, [x0 - 2, y0]), null, 'two tiles off');
+  assert.equal(near(ctx, lone, [lone.spawn.x, lone.spawn.y]), null, 'nobody in the lounge');
+  const sofa = sceneOf(ctx, crowd({ lounge: 2 }), ui).floors[0];
+  assert.equal(near(ctx, sofa, [sofa.spawn.x, sofa.spawn.y]), 'lounge0', 'the lounge door is next to the first sofa seat');
+  const standing = sceneOf(ctx, crowd({ lounge: 4 }), ui).floors[0], cat = clone(ctx.BriefOffice.layout(standing)).lounge3;
+  assert.equal(cat.z, 0, 'the fourth lounge cat stands');
+  assert.equal(near(ctx, standing, [Math.floor(cat.x / TILE), Math.floor(cat.y / TILE)]), 'lounge3', 'the boss can stand on a standing cat\'s tile');
+});
+
+test('near() follows the rule on every tile of every room filling: the nearest cat, ties to the first in desk order', () => {
+  // Given the fixture floors and each room filled with 0..16 desks, When near() is asked for every walk tile, Then it
+  // names the cat the rule above names (null where none is next to the tile), and some tiles are ties it gives to the
+  // first cat in the floor's desk order
+  const ctx = load(), { vm, ui } = input();
+  const boards = [vm, fixture('view-model-office.json')];
+  for (const room of ['plan', 'research', 'work', 'review', 'lounge']) for (let n = 0; n <= 16; n += 4) boards.push(crowd({ plan: 2, research: 2, work: 2, review: 2, lounge: 2, [room]: n }));
+  let tiles = 0, named = 0, ties = 0;
+  for (const board of boards) for (const f of sceneOf(ctx, board, ui).floors) {
+    const spots = f.desks.map((d) => ({ id: d.id, tiles: spotOf(ctx, f, d) }));
+    for (let y = 0; y < f.walk.h; y++) for (let x = 0; x < f.walk.w; x++) {
+      const want = nearByRule(spots, [x, y]);
+      assert.equal(near(ctx, f, [x, y]), want.id, f.sid + ' tile ' + [x, y]);
+      tiles++;
+      if (want.id) named++;
+      const others = spots.filter((s) => s.id !== want.id && s.tiles.some(([sx, sy]) => Math.abs(sx - x) <= 1 && Math.abs(sy - y) <= 1 && Math.abs(sx - x) + Math.abs(sy - y) === want.dist));
+      if (want.id && others.length) {
+        ties++;
+        assert.ok(spots.findIndex((s) => s.id === want.id) < spots.findIndex((s) => s.id === others[0].id), f.sid + ' tile ' + [x, y] + ': a tie goes to the first desk');
+      }
+    }
+  }
+  assert.ok(tiles > 20000 && named > 1000 && ties > 50, JSON.stringify({ tiles, named, ties }));
+});
+
+// the dialog's data: the fixture board with s-a1 (needs_decision, three open decisions) and s-a2 (live workers)
+function talkInput(patch = {}) {
+  const { vm, ui } = input();
+  Object.assign(ui, { live: true, answers: {} }, patch.ui);
+  if (patch.vm) patch.vm(vm);
+  return { vm, ui };
+}
+function talkOf(ctx, vm, ui, sid, id) {
+  const scene = ctx.BriefOffice.scene(vm, ui, vm.generatedAt);
+  return clone(ctx.BriefOffice.talk(vm, ui, scene, sid, id));
+}
+
+test('the lead cat\'s dialog data comes from its session: title, floor, state, current todo, headline, next, progress and decisions', () => {
+  // Given s-a1 (statusKey needs_decision, auto todo 3/9, decisions 12, 13, 14 open, no annotation kind), When the dialog
+  // data of its lead is built on the live board, Then every field is the session's own, its decisions are to answer here,
+  // and there is no note box until the session takes annotations
+  const ctx = load(), { vm, ui } = talkInput();
+  const s = vm.sessions.find((x) => x.id === 's-a1'), floors = sceneOf(ctx, vm, ui).floors;
+  const t = talkOf(ctx, vm, ui, 's-a1', 'lead');
+  assert.deepEqual(t, {
+    sid: 's-a1', id: 'lead', lead: true, n: floors.length - floors.findIndex((f) => f.sid === 's-a1'), title: HOSTILE[1], role: '리더', room: 'work', name: '',
+    state: '입력 기다림', tone: 'wait', step: s.auto.todoCurrent, headline: s.headline, next: s.next, todo: s.auto.todoDone + '/' + s.auto.todoTotal,
+    open: 3, asks: [12, 13, 14], note: false, sub: '',
+  });
+  const kinds = talkInput({ vm: (v) => { v.sessions.find((x) => x.id === 's-a1').answerKinds = ['option', 'text', 'annotation']; } });
+  assert.equal(talkOf(ctx, kinds.vm, kinds.ui, 's-a1', 'lead').note, true, 'a session that takes annotations gets the note box');
+});
+
+test('a worker cat\'s dialog data is its own row: role, name, state and step; it has nothing to answer or send', () => {
+  // Given s-a2's worker rows (one step hostile), When the dialog data of each worker is built, Then the role is its kind
+  // (without omo-native-), the state word follows its state, the step is its step, and it answers nothing and sends nothing
+  const ctx = load(), { vm, ui } = talkInput({ vm: (v) => { v.sessions.find((x) => x.id === 's-a2').answerKinds = ['option', 'text', 'annotation']; } });
+  const s = vm.sessions.find((x) => x.id === 's-a2'), WORD = { running: '일함', waiting: '대기', done: '끝남', cancelled: '끝남', error: '오류', lost: '오류' };
+  assert.ok(s.live.workers.length >= 3);
+  for (const w of s.live.workers) {
+    const t = talkOf(ctx, vm, ui, 's-a2', w.id), role = w.kind.replace(/^omo-native-/, '') || w.name || '작업자';
+    assert.deepEqual([t.lead, t.role, t.name, t.state, t.step, t.asks, t.note, t.sub], [false, role, w.name === role ? '' : w.name, WORD[w.state] || '대기', w.step || '', [], false, 'wk'], w.id);
+    assert.equal(t.title, s.title);
+  }
+  assert.ok(s.live.workers.some((w) => w.step === HOSTILE[2]), 'the hostile step is one of them, passed on as the plain string');
+});
+
+test('the dialog\'s five state words: 대기, 일함, 입력 기다림, 끝남 and 오류, from the session or the worker row', () => {
+  // Given leads in every session status and workers in every row state, When the dialog data is built, Then the state
+  // word and its tone are the five of the plan
+  const ctx = load();
+  const lead = (patch) => {
+    const { vm, ui } = talkInput({ vm: (v) => Object.assign(v.sessions.find((x) => x.id === 's-a1'), patch) });
+    const t = talkOf(ctx, vm, ui, 's-a1', 'lead');
+    return [t.state, t.tone];
+  };
+  assert.deepEqual(lead({ statusKey: 'in_progress', status: 'in_progress', alive: true }), ['일함', 'run']);
+  assert.deepEqual(lead({ statusKey: 'in_progress', status: 'in_progress', alive: false }), ['대기', 'rest']);
+  assert.deepEqual(lead({ statusKey: 'needs_decision' }), ['입력 기다림', 'wait']);
+  assert.deepEqual(lead({ statusKey: 'blocked', status: 'blocked' }), ['입력 기다림', 'wait']);
+  assert.deepEqual(lead({ statusKey: 'in_progress', status: 'in_progress', alive: true, openQuestion: { text: 'q', at: 1 } }), ['입력 기다림', 'wait']);
+  assert.deepEqual(lead({ statusKey: 'done', status: 'done' }), ['끝남', 'rest']);
+  assert.deepEqual(lead({ statusKey: 'done_no_evidence', status: 'done' }), ['끝남', 'rest']);
+  const worker = (state) => {
+    const { vm, ui } = talkInput({ vm: (v) => { v.sessions.find((x) => x.id === 's-a2').live.workers[0].state = state; } });
+    const t = talkOf(ctx, vm, ui, 's-a2', vm.sessions.find((x) => x.id === 's-a2').live.workers[0].id);
+    return [t.state, t.tone];
+  };
+  assert.deepEqual(['running', 'waiting', 'done', 'cancelled', 'error', 'lost'].map(worker),
+    [['일함', 'run'], ['대기', 'rest'], ['끝남', 'rest'], ['끝남', 'rest'], ['오류', 'err'], ['오류', 'err']]);
+});
+
+test('the decisions to answer: the open ones, and those this page has an answer under way for until it is delivered', () => {
+  // Given s-a1's decisions answered or closed elsewhere and the page's own answer state (ui.answers), When the dialog data
+  // is built, Then the open ones are listed, a held, closed or answered one is not, unless this page has a confirm pending
+  // for it, is sending it, found it closed, or sent it and no delivery receipt came yet
+  const ctx = load();
+  const asks = (decisions, answers) => {
+    const { vm, ui } = talkInput({ ui: { answers }, vm: (v) => { const s = v.sessions.find((x) => x.id === 's-a1'); s.decisions.forEach((d) => Object.assign(d, decisions[d.id])); } });
+    return talkOf(ctx, vm, ui, 's-a1', 'lead');
+  };
+  assert.deepEqual(asks({}, {}).asks, [12, 13, 14]);
+  assert.deepEqual(asks({ 12: { answered: true }, 13: { closed: true }, 14: { held: { at: 1 }, closed: true } }, {}).asks, []);
+  const t = asks({ 12: { answered: true }, 13: { answered: true }, 14: { closed: true } }, { 12: { confirm: { option: 'A' }, phase: '' }, 13: { phase: 'closed', error: 'x' }, 14: { phase: 'sending' } });
+  assert.deepEqual([t.asks, t.open], [[12, 13, 14], 0], 'confirm pending, found closed, sending; none of them open');
+  assert.deepEqual(asks({ 12: { answered: true } }, { 12: { phase: 'sent' } }).asks, [12, 13, 14], 'sent, no receipt yet');
+  assert.deepEqual(asks({ 12: { answered: true, receipt: { at: 1 } } }, { 12: { phase: 'sent' } }).asks, [13, 14], 'delivered: it leaves the dialog');
+  assert.deepEqual(asks({ 12: { answered: true } }, { 12: { phase: '', confirm: null, open: true, draft: 'x' } }).asks, [13, 14], 'a reply being typed is no answer under way');
+});
+
+test('the file:// copy and public mode have nothing to answer or send; public mode blanks the step, headline and next', () => {
+  // Given the lead of a session that takes annotations, When the dialog data is built off the live board or in public mode,
+  // Then asks is empty and note is false; in public mode the agent-written text is blank and the counts stay
+  const ctx = load(), kinds = (v) => { v.sessions.find((x) => x.id === 's-a1').answerKinds = ['option', 'text', 'annotation']; };
+  const file = talkInput({ ui: { live: false }, vm: kinds }), pub = talkInput({ ui: { publicMode: true }, vm: kinds });
+  const f = talkOf(ctx, file.vm, file.ui, 's-a1', 'lead'), p = talkOf(ctx, pub.vm, pub.ui, 's-a1', 'lead');
+  assert.deepEqual([f.asks, f.note], [[], false]);
+  assert.deepEqual([p.asks, p.note, p.step, p.headline, p.next], [[], false, '', '', '']);
+  assert.deepEqual([p.title, p.state, p.todo, p.open], [f.title, f.state, f.todo, f.open]);
+  const w = talkInput({ ui: { publicMode: true } }), id = w.vm.sessions.find((x) => x.id === 's-a2').live.workers[0].id;
+  assert.equal(talkOf(ctx, w.vm, w.ui, 's-a2', id).step, '', 'a worker\'s step is its bubble: blank in public mode');
+});
+
+test('a session or a cat that is gone has no dialog data', () => {
+  // Given the board, When the dialog data is asked for a session or a desk that is not there, Then it is null
+  const ctx = load(), { vm, ui } = talkInput();
+  assert.equal(talkOf(ctx, vm, ui, 'no-such', 'lead'), null);
+  assert.equal(talkOf(ctx, vm, ui, 's-a1', 'no-such-worker'), null);
+});
+
 test('the plan view exports the lane helpers the conveyor uses', () => {
   // Given the page scripts, When plan-view loads, Then lanesOf and currentOf are exported
   const ctx = load();

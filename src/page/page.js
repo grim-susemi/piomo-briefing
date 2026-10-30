@@ -44,7 +44,7 @@
     transport: 'file',
     pointerDown: false,
     now: function () { return Date.now(); },
-    ui: { expanded: Object.create(null), live: false, focus: Object.create(null) },
+    ui: { expanded: Object.create(null), live: false, focus: Object.create(null), sendNote: function (sid, text) { var s = sessionById(sid); if (s) sendAnnotation(s, text, { keepTray: true }); } },
     full: new Map(),
     fullFlight: Object.create(null),
     fold: Object.create(null),
@@ -160,7 +160,7 @@
     if (g.BriefProfiles && typeof g.BriefProfiles.bind === 'function') {
       g.BriefProfiles.bind(root, { controller: ensureProfiles, reload: function () { g.location.reload(); }, render: render });
     }
-    g.BriefAnnotate.mount(main, { context: annotationContext, send: sendAnnotation, idle: scheduleRelease });
+    g.BriefAnnotate.mount(main, { context: annotationContext, send: sendAnnotation, idle: scheduleRelease, status: function (sid) { if (g.BriefOfficeView) g.BriefOfficeView.status(sid); } });
     // "busy" release triggers
     doc.addEventListener('selectionchange', guard('selectionchange', scheduleRelease));
     doc.addEventListener('focusout', guard('focusout', scheduleRelease));
@@ -1266,8 +1266,8 @@
     try { if (g.sessionStorage) g.sessionStorage.removeItem(ANN_REQUEST_KEY + sid); }
     catch (e) { warn('annotation reload request', e); }
   }
-  function sendAnnotation(s, text) {
-    var sid = s.id, A = g.BriefAnnotate;
+  function sendAnnotation(s, text, o) {
+    var sid = s.id, A = g.BriefAnnotate, keep = !!o && o.keepTray === true;
     if (!state.ui.live || !Array.isArray(s.answerKinds) || s.answerKinds.indexOf('annotation') < 0) return;
     if (A.sending(sid)) return;
     var r = annotationRequest(sid);
@@ -1286,12 +1286,12 @@
       if (res.status === 200 && res.json && res.json.ok === true) {
         reloadedFor403 = false;
         A.status(sid, null);
-        A.clear(sid);
+        if (!keep) A.clear(sid);
         clearAnnotationRequest(sid);
         annotationSent[sid] = res.json.key;
         A.status(sid, { text: '보냄 · 전달 상태 기다리는 중…', ok: true });
         state.ui.expanded['cv:' + sid + ':notes'] = true;
-        if (shownSid() === sid) open(sid, 'ov');
+        if (!keep && shownSid() === sid) open(sid, 'ov');
       } else if (res.status === 403 && !reloadedFor403 && rememberForReload()) {
         A.status(sid, null);
         reloadedFor403 = true;

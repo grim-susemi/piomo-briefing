@@ -227,7 +227,8 @@
   }
   function refreshTray(c) { all(env.root, '[data-ann-tray]').forEach(function (slot) { if (slot.getAttribute('data-ann-tray') === c.sid) slot.innerHTML = trayInner(c.session, load(c.sid), !!openList[c.sid], c.mode, own(msgs, c.sid) || null, c.expanded); }); }
   function sending(sid) { return !!(own(msgs, sid) && msgs[sid].sending); }
-  function status(sid, msg) { if (msg) msgs[sid] = msg; else delete msgs[sid]; var c = context(); if (c && c.sid === sid) refreshTray(c); }
+  function status(sid, msg) { if (msg) msgs[sid] = msg; else delete msgs[sid]; var c = context(); if (c && c.sid === sid) refreshTray(c); call('status', [sid]); }
+  function message(sid) { var m = own(msgs, str(sid)); return obj(m) ? Object.assign({}, m) : m || null; }
   function busy() { return !!pop || !!band; }
   function noteBusy() { var b = busy(); if (wasBusy && !b) call('idle', []); wasBusy = b; }
   function draft() { return !!(pop && pop.ta && str(pop.ta.value).trim()); }
@@ -347,5 +348,5 @@
     doc.addEventListener('click', guard('click', onClick), true); doc.addEventListener('keydown', guard('keydown', onKey)); doc.addEventListener('scroll', guard('scroll', position), true);
     if (typeof g.addEventListener === 'function') g.addEventListener('resize', guard('resize', position));
   }
-  g.BriefAnnotate = { mount: mount, decorate: decorate, trayBar: trayBar, tray: tray, toMarkdown: toMarkdown, compose: compose, place: place, busy: busy, list: list, add: add, remove: remove, clear: clear, status: status, sending: sending, text: TXT, limits: { notes: MAX_NOTES, text: TEXT_MAX, comment: COMMENT_MAX } };
+  g.BriefAnnotate = { mount: mount, decorate: decorate, trayBar: trayBar, tray: tray, toMarkdown: toMarkdown, compose: compose, place: place, busy: busy, list: list, add: add, remove: remove, clear: clear, status: status, sending: sending, message: message, text: TXT, limits: { notes: MAX_NOTES, text: TEXT_MAX, comment: COMMENT_MAX } };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

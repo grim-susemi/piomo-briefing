@@ -18,11 +18,14 @@
  * dispatches; Enter or Space on a focused desk clicks it. The 공개 모드 switch is page.js's data-act="office-public"
  * (ui.publicMode, off by default): it hides the bubbles, the conversation's tab label and its cwd.
  * The boss cat (plan todo 10) is the owner's own cat on the shown floor: the arrow keys, W/A/S/D and a click on the floor
- * walk it over the model's walk map (see "the boss cat" below); it is not a desk, a session or a count.
+ * walk it over the model's walk map (see "the boss cat" below); it is not a desk, a session or a count. Next to a cat, E
+ * (or Space, Enter) or a click on the cat opens the talk dialog (plan todo 11, see "the talk dialog" below).
  *   g.BriefOfficeView.render(root, vm, ui)   draws or patches the office inside root (#office); one floor at a time
  *   g.BriefOfficeView.layout(floor)           -> {deskId: {x, y, z, s}} the grid cell of every desk (pure; the model's)
  *   g.BriefOfficeView.visibility()            holds or resumes the shown office's motion with document.hidden and ends
  *                                             its walks under reduced motion
+ *   g.BriefOfficeView.status(sid)             annotate.js's status line of sid changed (page.js's status hook): the
+ *                                             talk dialog's note line follows it
  *   g.__office                                {sid, desks: {id: node}, cats: {id: node}}: the live desk and cat nodes */
 (function (g) {
   'use strict';
@@ -604,17 +607,23 @@
   }
   // the keys are the office's only while it is the view shown (its root in the page, not under the narrow sidebar
   // overlay) and the focus is in no text field (an input, textarea, select or contenteditable keeps its keys: the annotate
-  // tray, the answer reply box, the search box); never with Ctrl, Alt or Meta, never a key another handler took
+  // tray, the answer reply box, the search box, the talk dialog's own fields); never with Ctrl, Alt or Meta, never a key
+  // another handler took. Escape closes the talk dialog; E, and Space or Enter while no control has the focus (the page,
+  // the office region or the dialog itself has it), talk to the cat next to the boss
   function onKey(ev) {
-    var root = doc.getElementById('office'), v = root && views.get(root), a = doc.activeElement, d = null;
+    var root = doc.getElementById('office'), v = root && views.get(root), a = doc.activeElement, d = null, box = v && v.talk.el;
     if (!v || !v.walk || ev.defaultPrevented || ev.ctrlKey || ev.altKey || ev.metaKey || root.closest('[inert]')) return;
     if (a && (/^(?:input|textarea|select)$/i.test(a.tagName || '') || a.isContentEditable === true)) return;
-    if (ev.key === 'Escape') { stand(v); return; }
+    if (ev.key === 'Escape') { stand(v); if (box) { ev.preventDefault(); shut(v); } return; }
     if (has(DIRS, ev.key)) d = DIRS[ev.key];
     else if (has(DIRS, ev.code)) d = DIRS[ev.code];
-    if (!d) return;
+    if (d) { ev.preventDefault(); keyStep(v, d, ev.repeat === true); return; }
+    var talkKey = ev.code === 'KeyE' || ev.key === 'e' || ev.key === 'E' || ((ev.key === ' ' || ev.key === 'Enter') && (!a || a === doc.body || a === root || a === box));
+    var id = talkKey ? g.BriefOffice.near(v.f, v.me.tile) : null;
+    if (id === null) return;
     ev.preventDefault();
-    keyStep(v, d, ev.repeat === true);
+    stand(v);
+    talkTo(v, id);
   }
   var keysOn = false;
   function watchKeys() {
@@ -639,6 +648,222 @@
       v.fresh = false;
     }
     if (!me.anim) { drawMe(v, me.tile); paint(v, [me.tile]); }
+  }
+
+  // ---- the talk dialog (plan Must have 13) ------------------------------------------------------------------------------
+  // Talking: the boss on a tile next to a cat (office-model.js near()) plus E, Space or Enter (onKey), or a pointer click
+  // on the cat's own drawing: a lounge cat, a desk cat's head (a keyboard click on a desk, the rest of a desk and a label
+  // keep the open action). The dialog is the rail's first box, a section of the office region under the page root, so
+  // page.js's delegated click handler serves its answer boxes and 새로 보내기, and shell.js its 대화 열기 (the open
+  // action). Its data is office-model.js talk(): on the lead cat of the live board it lists the decisions to answer, each
+  // with view.js's answer box (kit answerBox(d, s, ui, 'office'): pick, confirm, send and hold are page.js's), and when
+  // the session takes annotations a note box whose 보내기 is page.js's ui.sendNote(sid, text). Every render patches it in
+  // place and every annotate.js status() patches its note line (status()): a part whose content stays keeps its nodes,
+  // so a typed note with its caret and a half-picked answer outlive a publish. Escape or 닫기 closes it and gives the
+  // focus back to the office region; another floor and the cat or its conversation going away close it too. A typed note
+  // is this page's memory only, per conversation until it went out: never stored, never sent by itself.
+  var drafts = Object.create(null), sent = Object.create(null);
+  // the kit's markup -> nodes, through a tag and attribute allowlist (anything else throws, as the art does): its text and
+  // attribute values are decoded from the kit's escapes and go in as text nodes and through set(). An icon (<use
+  // href="#i-x">) becomes a copy of the page sprite's own drawing of it, so set() writes no other href than #cat / #body
+  var KIT_TAGS = { div: 1, p: 1, span: 1, b: 1, q: 1, button: 1, textarea: 1, label: 1, input: 1, fieldset: 1, legend: 1, select: 1, option: 1, svg: 0, use: 0 };
+  var KIT_ATTRS = /^(?:class|role|type|id|name|value|for|rows|maxlength|min|max|step|inputmode|placeholder|checked|selected|focusable|aria-[a-z]+|data-(?:ans|act|opt|id|where|draft|field))$/;
+  var ENTITY = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+  function unesc(t) {
+    return t.replace(/&(?:([a-z]+)|#(\d+)|#x([0-9a-f]+));/gi, function (all, name, dec, hex) {
+      return name ? (has(ENTITY, name) ? ENTITY[name] : all) : String.fromCodePoint(dec ? Number(dec) : parseInt(hex, 16));
+    });
+  }
+  function kit(html) {
+    var top = { kids: [] }, stack = [top], re = /<(\/?)([a-z]+)((?:\s+[a-z-]+(?:="[^"]*")?)*)\s*>|([^<]+)/g, m, end = 0;
+    var bad = function (why) { throw new Error('office answer box: ' + why); };
+    while ((m = re.exec(html))) {
+      if (m.index !== end) bad('stray markup');
+      end = re.lastIndex;
+      var at = stack[stack.length - 1], tag = m[2];
+      if (m[4] !== undefined) { at.kids.push({ text: unesc(m[4]) }); continue; }
+      if (m[1]) { if (stack.length < 2 || stack.pop().tag !== tag) bad('unbalanced </' + tag + '>'); continue; }
+      if (!has(KIT_TAGS, tag)) bad('<' + tag + '> is not allowed');
+      var node = { tag: tag, attrs: [], kids: [] };
+      m[3].replace(/([a-z-]+)(?:="([^"]*)")?/g, function (all, k, val) {
+        if (!(tag === 'use' && k === 'href') && !KIT_ATTRS.test(k)) bad(k + ' is not allowed');
+        node.attrs.push([k, unesc(val || '')]);
+        return '';
+      });
+      at.kids.push(node);
+      if (tag !== 'input') stack.push(node);
+    }
+    if (stack.length !== 1 || end !== html.length) bad('unbalanced');
+    return top.kids;
+  }
+  function kitNode(node, parent) {
+    if (has(node, 'text')) { parent.appendChild(doc.createTextNode(node.text)); return; }
+    if (node.tag === 'use') { glyph(parent, node.attrs); return; }
+    var n = el(node.tag, null, parent, KIT_TAGS[node.tag] === 1);
+    node.attrs.forEach(function (a) { set(n, a[0], a[1]); });
+    node.kids.forEach(function (k) { kitNode(k, n); });
+  }
+  function glyph(svg, attrs) {
+    var ref = attrs.length === 1 && attrs[0][0] === 'href' ? attrs[0][1] : '', sym = /^#i-[a-z0-9-]+$/.test(ref) ? doc.getElementById(ref.slice(1)) : null;
+    if (!sym || sym.parentNode !== doc.getElementById('icon-sprite')) return;
+    set(svg, 'viewBox', sym.getAttribute('viewBox'));
+    Array.prototype.forEach.call(sym.childNodes, function (k) { svg.appendChild(k.cloneNode(true)); });
+  }
+  // a control's kind inside one answer box: what keeps the focus when the box is drawn again
+  function ctlKey(n) { return [n.tagName, n.getAttribute('data-act'), n.getAttribute('data-opt'), n.getAttribute('data-field'), n.getAttribute('type') === 'radio' ? n.getAttribute('value') : ''].join('|'); }
+  // a decision's answer box is drawn again only when the kit's markup for it changed; the control that had the focus gets
+  // it back in the new box (the same kind) with its caret, else the box's 취소 (as page.js region() does)
+  function kitBox(ask, html) {
+    if (ask.html === html) return;
+    var a = doc.activeElement, key = a && a !== ask.box && ask.box.contains(a) ? ctlKey(a) : null, sel = key && [a.selectionStart, a.selectionEnd, a.selectionDirection];
+    ask.html = html;
+    ask.box.textContent = '';
+    kit(html).forEach(function (n) { kitNode(n, ask.box); });
+    if (key === null) return;
+    var all = ask.box.querySelectorAll('button,input,select,textarea'), to = null;
+    for (var i = 0; i < all.length && !to; i++) if (ctlKey(all[i]) === key) to = all[i];
+    to = to || ask.box.querySelector('[data-act="ans-cancel"]');
+    if (!to) return;
+    to.focus({ preventScroll: true });
+    if (typeof sel[0] === 'number' && typeof to.setSelectionRange === 'function') to.setSelectionRange(sel[0], sel[1], sel[2] || undefined);
+  }
+  function sessionOf(vm, sid) { return arr(vm && vm.sessions).filter(function (x) { return x && str(x.id) === sid; })[0] || null; }
+  function talkBox(v, m) {
+    var b = el('section', { class: 'of-talk', tabindex: -1 }, null, true), head = h('div', 'of-tk-head', b);
+    el('use', { href: '#cat' }, el('svg', { class: 'of-tk-face', viewBox: '0 0 100 100', 'aria-hidden': 'true' }, head));
+    var who = h('div', 'of-tk-who', head);
+    v.talk.parts = { name: h('h3', 'of-tk-name', who), where: h('p', 'of-tk-where', who), state: h('span', '', head), info: el('dl', { class: 'of-tk-info' }, b, true), asks: null, note: null };
+    el('button', { type: 'button', class: 'of-tk-x' }, head, true).textContent = '닫기';
+    v.talk.parts.foot = h('div', 'of-tk-foot', b);
+    el('button', { type: 'button', class: 'of-open', 'data-sh': 'open', 'data-sid': m.sid, 'data-sub': m.sub || null }, v.talk.parts.foot, true).textContent = '대화 열기';
+    return b;
+  }
+  function infoRow(it) {
+    var r = el('div', { 'data-k': it.key }, null, true);
+    h('dt', '', r, it.label);
+    h('dd', '', r, it.text);
+    return r;
+  }
+  // the decisions to answer, keyed by id: a row keeps its nodes while its decision stays listed
+  function drawAsks(v, m, s) {
+    var t = v.talk, p = t.parts, old = t.asks, next = {};
+    if (m.asks.length && !p.asks) p.asks = t.el.insertBefore(el('div', { class: 'of-tk-asks', role: 'group', 'aria-label': '답할 결정' }, null, true), p.note ? p.note.el : p.foot);
+    var list = m.asks.map(function (id) {
+      var key = String(id), d = arr(s.decisions).filter(function (x) { return x && x.id === id; })[0], ask = has(old, key) ? old[key] : null, q = str(d.question);
+      if (!ask) {
+        ask = { row: el('div', { class: 'of-tk-ask', 'data-ask': key }, null, true), q: null, box: null, qt: null, html: null };
+        ask.q = h('p', 'of-tk-q', ask.row);
+        ask.box = h('div', 'of-tk-kit', ask.row);
+      }
+      if (ask.qt !== q) { ask.q.textContent = ''; h('b', '', ask.q, '#' + key); ask.q.appendChild(doc.createTextNode(' ' + q)); ask.qt = q; }
+      kitBox(ask, g.BriefView.kit.answerBox(d, s, v.ui, 'office'));
+      next[key] = ask;
+      return ask.row;
+    });
+    for (var k in old) if (!has(next, k)) drop(old[k].row);
+    t.asks = next;
+    if (p.asks && list.length) order(p.asks, list);
+    if (p.asks && !list.length) { drop(p.asks); p.asks = null; }
+  }
+  function drawNote(v, m) {
+    var p = v.talk.parts, n = p.note;
+    if (!m.note) { if (n) drop(n.el); p.note = null; return; }
+    if (!n) {
+      n = p.note = { el: h('div', 'of-tk-note', null), msg: null, renew: null };
+      var lb = el('label', { class: 'of-tk-lb' }, n.el, true);
+      h('span', '', lb, '이 대화에 메모 보내기');
+      n.ta = el('textarea', { class: 'of-tk-ta', rows: 3, maxlength: g.BriefAnnotate.limits.text }, lb, true);
+      n.ta.value = has(drafts, m.sid) ? drafts[m.sid] : '';
+      n.acts = h('div', 'of-tk-acts', n.el);
+      n.send = el('button', { type: 'button', class: 'of-tk-send' }, n.acts, true);
+      n.send.textContent = '보내기';
+      v.talk.el.insertBefore(n.el, p.foot);
+    }
+    noteLine(v);
+  }
+  // the note line and 보내기 follow annotate.js's status line of the conversation, in the tray's own words: 보내는 중…
+  // with 보내기 off, 보냄 · 전달 상태 기다리는 중…, the conflict line beside 새로 보내기 (page.js's data-act="ann-new")
+  function noteLine(v) {
+    var t = v.talk, n = t.parts.note, A = g.BriefAnnotate, m = A.message(t.sid), text = m && typeof m === 'object' ? str(m.text) : str(m), conflict = !!(m && m.conflict);
+    if (text && !n.msg) n.msg = n.acts.insertBefore(h('p', 'of-tk-msg', null), n.acts.firstChild);
+    if (!text && n.msg) { drop(n.msg); n.msg = null; }
+    if (n.msg) { txt(n.msg, text); put(n.msg, 'role', m.sending || m.ok ? 'status' : 'alert'); }
+    if (conflict && !n.renew) { n.renew = n.acts.insertBefore(el('button', { type: 'button', class: 'of-tk-new', 'data-act': 'ann-new', 'data-sid': t.sid }, null, true), n.send); n.renew.textContent = '새로 보내기'; }
+    if (!conflict && n.renew) {
+      var focused = doc.activeElement === n.renew;
+      drop(n.renew);
+      n.renew = null;
+      if (focused) n.ta.focus({ preventScroll: true });
+    }
+    n.send.disabled = A.sending(t.sid) || !n.ta.value.trim();
+  }
+  function sendNote(v) {
+    var t = v.talk, n = t.parts.note, text = n ? n.ta.value.trim() : '', A = g.BriefAnnotate;
+    if (!text || A.sending(t.sid)) return;
+    drafts[t.sid] = n.ta.value;
+    v.ui.sendNote(t.sid, text);
+    if (A.sending(t.sid)) sent[t.sid] = text;
+    noteLine(v);
+  }
+  // the dialog of the cat talked to, from the scene and view model drawn now; the focus it had stays in it
+  function drawTalk(v, f) {
+    var t = v.talk;
+    if (t.id === null) return;
+    var m = f && f.sid === t.sid ? g.BriefOffice.talk(v.vm, v.ui, v.scene, t.sid, t.id) : null;
+    if (!m) { shut(v); return; }
+    var a = doc.activeElement, had = !!(t.el && a && t.el.contains(a));
+    if (!t.el) t.el = v.rail.insertBefore(talkBox(v, m), v.rail.firstChild);
+    var p = t.parts;
+    put(t.el, 'aria-label', ['말 걸기', m.role, m.name].filter(Boolean).join(' · '));
+    txt(p.name, m.role + ' · ' + (ROOM_NAME[m.room] || ''));
+    txt(p.where, [m.n + '층', m.title || '(제목 없음)', m.name].filter(Boolean).join(' · '));
+    txt(p.state, m.state);
+    put(p.state, 'class', 'of-st is-' + m.tone);
+    rows(v, 'talk', p.info, [['step', '하는 일', m.step], ['headline', '지금', m.headline], ['next', '다음', m.next], ['todo', '할 일', m.todo], ['open', '결정', m.open ? m.open + '건 기다림' : '없음']]
+      .filter(function (r) { return r[2]; }).map(function (r) { return { key: r[0], label: r[1], text: r[2] }; }), infoRow);
+    drawAsks(v, m, sessionOf(v.vm, m.sid));
+    drawNote(v, m);
+    if (had && !t.el.contains(doc.activeElement)) t.el.focus({ preventScroll: true });
+  }
+  // talks to cat id of the floor shown: its dialog opens (another cat's closes first) and takes the focus
+  function talkTo(v, id) {
+    var t = v.talk;
+    if (!(t.el && t.id === id && t.sid === v.sid)) {
+      shut(v);
+      t.id = id;
+      t.sid = v.sid;
+      drawTalk(v, v.f);
+    }
+    if (t.el) t.el.focus();
+  }
+  function shut(v) {
+    var t = v.talk, a = doc.activeElement, had = !!(t.el && a && t.el.contains(a));
+    drop(t.el);
+    t.el = t.parts = t.id = t.sid = null;
+    t.asks = {};
+    delete v.rows.talk;
+    if (had) v.root.focus({ preventScroll: true });
+  }
+  // the cat under a pointer click: a lounge cat's whole drawing, a desk cat's head; null on its desk or anything else
+  function catAt(v, ev) {
+    var u = ev.target.closest('[data-desk]'), id = u && u.getAttribute('data-desk'), rec = id !== null && has(v.units, id) ? v.units[id] : null;
+    if (!rec || rec.g !== u) return null;
+    if (!rec.slide) return id;
+    var r = rec.head.getBoundingClientRect();
+    return ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom ? id : null;
+  }
+  // annotate.js status() of conversation sid, through page.js's status hook: a note sent from here leaves its box once it
+  // went out (the line says 보냄), and an open dialog of sid shows the new line
+  function status(sid) {
+    var m = g.BriefAnnotate.message(sid), root = doc.getElementById('office'), v = root && views.get(root), t = v && v.talk;
+    if (has(sent, sid) && m && !m.sending) {
+      if (m.ok === true && has(drafts, sid) && drafts[sid].trim() === sent[sid]) {
+        drafts[sid] = '';
+        if (t && t.sid === sid && t.parts.note) t.parts.note.ta.value = '';
+      }
+      delete sent[sid];
+    }
+    if (t && t.sid === sid && t.parts.note) noteLine(v);
   }
 
   // ---- one floor -----------------------------------------------------------------------------------------------------
@@ -856,8 +1081,10 @@
     watchCalm();
     watchKeys();
     root.textContent = '';
+    // the region takes the focus back from a closed talk dialog
+    set(root, 'tabindex', '-1');
     var v = { root: root, sid: null, keys: {}, units: {}, pills: {}, boxes: [], rows: {}, pass: 0, floor: undefined, dim: null, noFloor: null, cardParts: null,
-      walk: null, walkKey: null, off: {}, order: [], fresh: true };
+      walk: null, walkKey: null, off: {}, order: [], fresh: true, f: null, talk: { id: null, sid: null, el: null, parts: null, asks: {} } };
     var body = h('div', 'of-body', root), stage = h('div', 'of-stage', body);
     v.svg = el('svg', { class: 'of-scene', viewBox: '30 0 1000 700', preserveAspectRatio: 'xMidYMid meet', role: 'group' }, stage);
     set(base(v.svg), 'aria-hidden', 'true');
@@ -891,10 +1118,25 @@
     // the overlays keep their CSS size while the scene scales, so a new stage size settles the labels again
     if (typeof g.ResizeObserver === 'function') new g.ResizeObserver(function () { if (v.labels) settle(v.labels, shade(v)); }).observe(stage);
     root.addEventListener('click', function (ev) {
-      var t = ev.target && ev.target.closest ? ev.target.closest('[data-floor]') : null;
+      var n = ev.target && ev.target.closest ? ev.target : null, t = n ? n.closest('[data-floor]') : null, id = null;
       if (t && root.contains(t)) { v.sid = t.getAttribute('data-floor'); draw(v); return; }
-      // the floor walks the boss there; a desk or a label with the open action keeps its own click
-      if (v.walk && ev.target && ev.target.closest && ev.target.closest('[data-sh],.of-scene') === v.svg) toward(v, ev);
+      // the dialog's own two buttons; its other buttons are page.js's and shell.js's
+      if (n && v.talk.el && v.talk.el.contains(n)) {
+        if (n.closest('.of-tk-x')) shut(v);
+        else if (n.closest('.of-tk-send')) sendNote(v);
+        return;
+      }
+      // a pointer click on a cat talks to it (no open action); the floor walks the boss there; a desk or a label with the
+      // open action keeps its own click
+      if (n && v.walk && ev.detail > 0 && (id = catAt(v, ev)) !== null) { ev.stopPropagation(); stand(v); talkTo(v, id); return; }
+      if (v.walk && n && n.closest('[data-sh],.of-scene') === v.svg) toward(v, ev);
+    });
+    // the note box: typing goes to the page's memory and turns 보내기 on or off
+    root.addEventListener('input', function (ev) {
+      var t = v.talk, n = t.parts && t.parts.note;
+      if (!n || ev.target !== n.ta) return;
+      drafts[t.sid] = n.ta.value;
+      n.send.disabled = g.BriefAnnotate.sending(t.sid) || !n.ta.value.trim();
     });
     root.addEventListener('keydown', function (ev) {
       var t = ev.target;
@@ -920,6 +1162,7 @@
     for (var i = 0; i < sc.floors.length; i++) if (sc.floors[i].sid === v.sid) f = sc.floors[i];
     f = f || sc.floors[0] || null;
     v.sid = f ? f.sid : null;
+    v.f = f;
     var floors = JSON.stringify(sc.floors.map(function (x) { return [x.sid, x.label, x.live, x.dark, decisionsOf(sc, x.sid)]; }));
     var pub = v.ui.publicMode === true, place = f && !pub ? placeOf(v.vm, f.sid) : '';
     put(v.pub, 'aria-checked', pub ? 'true' : 'false');
@@ -929,6 +1172,7 @@
       keepFocus(v.depth, 'data-desk', function () { drawFloor(v, f); });
     });
     part(v, 'rail', JSON.stringify([f, sc.ceo, sc.alerts, sc.people, sc.log, pub, floors]), function () { drawRail(v, f); });
+    drawTalk(v, f);
     refs(v);
     motion(v);
   }
@@ -946,5 +1190,5 @@
     var root = doc.getElementById('office'), v = root && views.get(root);
     if (v) motion(v);
   }
-  g.BriefOfficeView = { render: render, layout: layout, visibility: visibility };
+  g.BriefOfficeView = { render: render, layout: layout, visibility: visibility, status: status };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
