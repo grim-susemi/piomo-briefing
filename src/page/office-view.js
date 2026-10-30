@@ -11,14 +11,16 @@
  * el.animate() per desk or cat that moved (a cat whose room changed walks through the hall). No timer, rAF or polling
  * here. A hidden tab holds it all (the root's data-motion="paused" for the CSS, pause() for the walks; page.js's
  * visibilitychange hook calls visibility()); under reduced motion office.css stops the keyframes and no walk starts, so
- * a cat is simply in its new room. The todo-5 probe found SVG transform animations composited on their own layers, so
- * the actors stay in this SVG.
+ * a cat is simply in its new room, and turning reduced motion on ends the walks under way (the query's change listener
+ * calls visibility() too). The todo-5 probe found SVG transform animations composited on their own layers, so the
+ * actors stay in this SVG.
  * A desk is the board's existing open action, data-sh="open" + data-sid (+ data-sub="wk" on a worker) that shell.js
  * dispatches; Enter or Space on a focused desk clicks it. The 공개 모드 switch is page.js's data-act="office-public"
  * (ui.publicMode, off by default): it hides the bubbles, the conversation's tab label and its cwd.
  *   g.BriefOfficeView.render(root, vm, ui)   draws or patches the office inside root (#office); one floor at a time
  *   g.BriefOfficeView.layout(floor)           -> {deskId: {x, y, z, s}} the grid cell of every desk (pure)
- *   g.BriefOfficeView.visibility()            holds or resumes the shown office's motion with document.hidden
+ *   g.BriefOfficeView.visibility()            holds or resumes the shown office's motion with document.hidden and ends
+ *                                             its walks under reduced motion
  *   g.__office                                {sid, desks: {id: node}, cats: {id: node}}: the live desk and cat nodes */
 (function (g) {
   'use strict';
@@ -316,7 +318,8 @@
   }
 
   // ---- motion ----------------------------------------------------------------------------------------------------------
-  function still() { return doc.hidden === true || !!(g.matchMedia && g.matchMedia(CALM).matches); }
+  function calm() { return !!(g.matchMedia && g.matchMedia(CALM).matches); }
+  function still() { return doc.hidden === true || calm(); }
   // where a moving part shows now: its running transform applied to the place it was heading for
   function shown(n, to) {
     var m = to && typeof g.getComputedStyle === 'function' ? /^matrix\(([^)]+)\)$/.exec(g.getComputedStyle(n).transform) : null;
@@ -348,15 +351,29 @@
     var end = function () { if (rec.anims[part] === a) { delete rec.anims[part]; look(rec); } };
     a.finished.then(end, end);
   }
-  // a hidden tab holds every office animation where it is: the CSS ones by the root's data-motion, the walks by pause()
+  // a hidden tab holds every office animation where it is: the CSS ones by the root's data-motion, the walks by pause().
+  // Under reduced motion office.css stops the CSS ones and every walk ends at once, a held one too: its cat or desk is
+  // simply in the place its pos or place group already holds
   function motion(v) {
-    var hidden = doc.hidden === true;
+    var hidden = doc.hidden === true, reduce = calm();
     put(v.root, 'data-motion', hidden ? 'paused' : 'run');
-    for (var id in v.units) for (var part in v.units[id].anims) {
-      var a = v.units[id].anims[part];
-      if (hidden && a.playState === 'running') a.pause();
-      if (!hidden && a.playState === 'paused') a.play();
+    for (var id in v.units) {
+      var rec = v.units[id];
+      if (reduce) { if (halt(rec)) look(rec); continue; }
+      for (var part in rec.anims) {
+        var a = rec.anims[part];
+        if (hidden && a.playState === 'running') a.pause();
+        if (!hidden && a.playState === 'paused') a.play();
+      }
     }
+  }
+  // the reduced-motion query, watched from the first mount on (a test's fake matchMedia is in place by then) and kept
+  // here so its listener lives as long as the page: reduced motion turned on ends the walks under way right away
+  var calmList = null;
+  function watchCalm() {
+    if (calmList || !g.matchMedia) return;
+    calmList = g.matchMedia(CALM);
+    if (typeof calmList.addEventListener === 'function') calmList.addEventListener('change', visibility);
   }
 
   // ---- desks and cats: one keyed unit per desk -------------------------------------------------------------------------
@@ -387,10 +404,16 @@
     rec.dark = rec.screen ? rec.screen.getAttribute('fill') : '';
   }
   function lit(rec, on) { if (rec.screen) put(rec.screen, 'fill', on ? '#5ac8fa' : rec.dark); }
-  function gone(rec) {
-    var a = rec.anims;
+  // a unit's walks end where they are heading (pos and place already hold the new spot), and their finished handlers
+  // find nothing of theirs left in rec.anims; true when one was under way
+  function halt(rec) {
+    var a = rec.anims, any = false;
     rec.anims = {};
-    for (var part in a) a[part].cancel();
+    for (var part in a) { a[part].cancel(); any = true; }
+    return any;
+  }
+  function gone(rec) {
+    halt(rec);
     drop(rec.g);
   }
   function deskLabel(d, people) {
@@ -663,6 +686,7 @@
 
   // ---- mount and draw --------------------------------------------------------------------------------------------------
   function mount(root) {
+    watchCalm();
     root.textContent = '';
     var v = { root: root, sid: null, keys: {}, units: {}, pills: {}, boxes: [], rows: {}, pass: 0, floor: undefined, dim: null, noFloor: null, cardParts: null };
     var body = h('div', 'of-body', root), stage = h('div', 'of-stage', body);

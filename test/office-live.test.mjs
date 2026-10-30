@@ -29,7 +29,8 @@ function animations() {
   return { made, animate };
 }
 // the fake document has no SVG namespace: an SVG node remembers the namespace it was made in, and the page's hidden icon
-// sprite is where office-view.js reads it; env.reduce answers the prefers-reduced-motion query
+// sprite is where office-view.js reads it; env.reduce answers the prefers-reduced-motion query, and the change listeners
+// a query was given are kept in env.heard (reduceMotion() below tells them, as a browser does)
 function openOffice({ animate, env = {}, configure } = {}) {
   const vm = fixture('view-model-office.json');
   const e = makeController({ modules: MODULES, configure: (ctx) => {
@@ -41,7 +42,10 @@ function openOffice({ animate, env = {}, configure } = {}) {
     const sprite = Object.assign(ctx.document.createElement('svg'), { namespaceURI: SVG_NS });
     sprite.id = 'icon-sprite';
     ctx.document.body.appendChild(sprite);
-    ctx.matchMedia = (q) => ({ matches: /reduce/.test(q) ? env.reduce === true : ctx.innerWidth < 900 });
+    env.heard = [];
+    ctx.matchMedia = (q) => ({ get matches() { return /reduce/.test(q) ? env.reduce === true : ctx.innerWidth < 900; },
+      addEventListener: (type, fn) => { if (type === 'change') env.heard.push({ q, fn }); },
+      removeEventListener: (type, fn) => { if (type === 'change') env.heard = env.heard.filter((h) => h.fn !== fn); } });
     configure?.(ctx);
   } });
   e.page.receive(vm);
@@ -59,6 +63,17 @@ function publish(e, vm, seq) {
 const worker = (vm, id) => vm.sessions[0].live.workers.find((w) => w.id === id);
 const desk = (office, id) => office.querySelector('.of-desk[data-desk="' + id + '"]');
 const toLounge = (vm) => { const next = clone(vm); worker(next, 'st_r3_03').state = 'waiting'; return next; };
+// the OS reduced-motion setting changes: the query answers anew and its change listeners hear it, as in a browser
+function reduceMotion(env, on) {
+  env.reduce = on;
+  for (const h of env.heard.filter((l) => /reduce/.test(l.q))) h.fn({ type: 'change', matches: on, media: h.q });
+}
+// the tab goes to the background or comes back: page.js's visibilitychange hook runs
+function tab(e, hidden) {
+  e.document.hidden = hidden;
+  e.document.visibilityState = hidden ? 'hidden' : 'visible';
+  e.document.listeners.visibilitychange({ type: 'visibilitychange' });
+}
 // a cat's place: the translate and scale of the group inside its .of-walk wrapper
 function place(unit) {
   const pos = unit.querySelector('.of-walk').children.find((n) => n.tagName === 'G');
@@ -140,6 +155,69 @@ test('hiding the tab holds the office: the root is marked paused and running wal
   turn(false);
   assert.equal(office.getAttribute('data-motion'), 'run');
   assert.deepEqual(walks.map((a) => a.playState), walks.map(() => 'running'));
+});
+
+test('reduced motion turned on during a walk ends every walk at that change: nothing of the office runs on and the cat is in its room', { timeout: 10000 }, async () => {
+  const unhandled = [], note = (why) => unhandled.push(String(why));
+  process.on('unhandledRejection', note);
+  try {
+    const anims = animations(), env = {}, { e, vm, office } = openOffice({ animate: anims.animate, env });
+    publish(e, toLounge(vm), vm.seq + 1);
+    const unit = desk(office, 'st_r3_03'), walks = anims.made.slice(), lounge = place(unit);
+    assert.ok(walks.length > 1 && walks.every((a) => a.playState === 'running'), 'the cat walks and its old neighbour moves');
+    assert.equal(unit.classList.contains('is-walking'), true);
+    reduceMotion(env, true);
+    assert.deepEqual(walks.map((a) => a.playState), walks.map(() => 'idle'), 'every walk ended at the change: none runs on');
+    assert.equal(unit.classList.contains('is-walking'), false, 'the cat no longer walks');
+    assert.deepEqual(place(unit), lounge, 'it is in the room the model says: the lounge');
+    assert.equal(unit.classList.contains('is-idle') && !unit.querySelector('.of-slide'), true);
+    assert.equal(office.getAttribute('data-motion'), 'run', 'as on the reduced path: office.css holds the keyframes');
+    await Promise.allSettled(walks.map((a) => a.finished));
+    // one turn of the event loop: Node reports a rejection nobody handled before an immediate runs
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(unhandled, [], 'an ended walk leaves no unhandled rejection');
+    assert.equal(unit.classList.contains('is-walking'), false, 'the ended walks\' finished handlers leave the cat as it is');
+    publish(e, clone(vm), vm.seq + 2);
+    assert.equal(anims.made.length, walks.length, 'no walk starts while reduced motion is on');
+    assert.equal(unit.classList.contains('is-typing') && !!unit.querySelector('.of-slide'), true, 'back at its desk at once');
+  } finally {
+    process.off('unhandledRejection', note);
+  }
+});
+
+test('reduced motion off again: no ended walk comes back, the root runs and the next room change walks', () => {
+  const anims = animations(), env = {}, { e, vm, office } = openOffice({ animate: anims.animate, env });
+  publish(e, toLounge(vm), vm.seq + 1);
+  reduceMotion(env, true);
+  reduceMotion(env, false);
+  const unit = desk(office, 'st_r3_03'), ended = anims.made.length;
+  assert.deepEqual(anims.made.map((a) => a.playState), anims.made.map(() => 'idle'), 'nothing starts again by itself');
+  assert.equal(unit.classList.contains('is-walking'), false);
+  assert.equal(office.getAttribute('data-motion'), 'run');
+  publish(e, clone(vm), vm.seq + 2);
+  const back = anims.made.slice(ended).filter((a) => a.target === unit.querySelector('.of-walk'));
+  assert.equal(back.length, 1, 'the next room change walks: back to its desk');
+  assert.deepEqual([back[0].playState, back[0].frames.length], ['running', 4], 'through the hall');
+  assert.equal(unit.classList.contains('is-walking'), true);
+});
+
+test('a walk held by a hidden tab ends too under reduced motion, whether the change is heard while hidden or only met when the tab is back', () => {
+  for (const heard of [true, false]) {
+    const anims = animations(), env = {}, { e, vm, office } = openOffice({ animate: anims.animate, env });
+    publish(e, toLounge(vm), vm.seq + 1);
+    const unit = desk(office, 'st_r3_03'), walks = anims.made.slice(), states = (s) => walks.map(() => s);
+    tab(e, true);
+    assert.deepEqual(walks.map((a) => a.playState), states('paused'), 'held while hidden');
+    if (heard) {
+      reduceMotion(env, true);
+      assert.deepEqual(walks.map((a) => a.playState), states('idle'), 'heard while hidden: ended at once');
+      assert.equal(office.getAttribute('data-motion'), 'paused', 'still a hidden tab');
+    } else env.reduce = true; // a background tab may hear the change only later
+    tab(e, false);
+    assert.deepEqual(walks.map((a) => a.playState), states('idle'), (heard ? 'heard' : 'not heard') + ': nothing plays on when the tab is back');
+    assert.equal(office.getAttribute('data-motion'), 'run');
+    assert.equal(unit.classList.contains('is-walking'), false);
+  }
 });
 
 test('the office owns no timer: publishes, floor switches, the public switch and a hidden tab make no timer or rAF call from office code', () => {
