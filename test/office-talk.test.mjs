@@ -475,6 +475,30 @@ test('hostile decision text renders as text: no element, attribute or handler co
   assert.deepEqual(e.errors, []);
 });
 
+test('an answer box whose markup the office parser does not take leaves the office up: that box points to the conversation', () => {
+  // Given the lead's dialog while view.js's kit answer box carries markup outside the office allowlist (a title attribute
+  // and a <br>, what a later kit change could add), When the lead is talked to, Then nothing throws: the office and its
+  // desks stay, the decision keeps its question, its box shows the line that points to 대화 열기 and no control from that
+  // markup, and the failure is reported once; When the kit's markup is back to what the office takes, Then the next
+  // publish draws the answer box again
+  const { e, office, vm } = openOffice(), kit = e.ctx.BriefView.kit, real = kit.answerBox;
+  kit.answerBox = (...a) => real(...a).replace('<button', '<button title="새 속성"').replace('</div>', '<br></div>');
+  const box = talkToLead(e, office);
+  assert.equal(e.byId.main.querySelector('#office'), office, 'the office region stays');
+  assert.equal(office.querySelectorAll('.of-desk').length, 13);
+  const ask = box.querySelector('.of-tk-ask[data-ask="' + DEC + '"]');
+  assert.ok(ask.querySelector('.of-tk-q').textContent.includes(vm.sessions.find((x) => x.id === SID).decisions.find((x) => x.id === DEC).question));
+  assert.deepEqual([ask.querySelector('.ans-box'), ask.querySelector('button'), ask.querySelector('br')], [null, null, null]);
+  assert.match(ask.querySelector('.of-tk-kit').textContent, /대화 열기/);
+  assert.ok(box.querySelector('.of-tk-foot [data-sh="open"]'), '대화 열기 stays');
+  assert.equal(e.errors.length, 1, 'reported once');
+  assert.match(String(e.errors[0][0]), /office answer box/);
+  kit.answerBox = real;
+  publish(e, clone(vm));
+  assert.deepEqual(box.querySelectorAll('.ans-box[data-ans="' + DEC + '"] [data-act="ans-pick"]').map((b) => b.getAttribute('data-opt')), ['A', 'B']);
+  assert.equal(e.errors.length, 1);
+});
+
 test('the dialog follows the status hook: 보내는 중… with 보내기 off, the conflict line with 새로 보내기, then no line', () => {
   // Given the lead's dialog, When annotate.js status() sets o-r3's line to sending, to the conflict and back to nothing,
   // Then the dialog's line and its 보내기 follow each step at once

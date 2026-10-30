@@ -1,11 +1,12 @@
 /* omo-briefing office view (office-view.js). The chrome around the scene (toolbar, floor picker, floor card, rail) uses
  * tokens.css only, in both themes. The scene inside the SVG keeps the mockup's own night palette in both themes: those
- * colours are art and live in office-view.js / office-assets.js. Wide: scene | rail; narrow: the scene, the rail under it.
- * The scene's motion is at the end of this sheet. */
+ * colours are art and live in office-view.js / office-assets.js. Wide: scene | rail, with the toolbar, the floor picker and
+ * the floor card floating over the scene as in the mockup; narrow: the toolbar and the folded picker above the scene, the
+ * card under it, then the rail, so nothing covers a desk, a cat or the floor. The scene's motion is at the end of this sheet. */
 .of { container-type: inline-size; box-sizing: border-box; height: 100%; color: var(--c-fg); }
 .of-body { display: grid; gap: var(--sp-3); box-sizing: border-box; padding: var(--sp-3); }
-.of-stage { position: relative; overflow: hidden; aspect-ratio: 10 / 7; min-height: 240px; max-height: calc(100dvh - 96px);
-  border-radius: var(--r-xl); background: var(--c-sunk); box-shadow: 0 0 0 var(--hair) var(--c-line-strong); }
+.of-stage { position: relative; overflow: hidden; border-radius: var(--r-xl); background: var(--c-sunk); box-shadow: 0 0 0 var(--hair) var(--c-line-strong); }
+.of-pan { display: contents; }
 .of-scene { display: block; width: 100%; height: 100%; user-select: none; }
 .of-scene text { font-family: var(--font-ui); }
 .of-desk, .of-tag, .of-bub[data-sh] { cursor: pointer; }
@@ -30,10 +31,17 @@
 .of-floors h3 { margin: 0 0 var(--sp-1); padding: 0 var(--sp-2); color: var(--c-fg-3); font-size: var(--fs-sm); font-weight: var(--fw-medium); }
 .of-fl { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--ctl-h); padding: 0 var(--sp-2); border: 0;
   border-radius: var(--r-md); background: none; color: var(--c-fg); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; }
+/* the picker's toggle: narrow only (below), where the list folds under it */
+.of-ftog { display: none; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--ctl-h); padding: 0 var(--sp-2); border: 0; border-radius: var(--r-md);
+  background: none; color: var(--c-fg); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; }
+.of-ftog .of-fs { margin-left: auto; }
+.of-ftog .ic { color: var(--c-fg-2); transition: transform var(--dur) var(--ease-out); }
+.of-ftog[aria-expanded="true"] .ic { transform: rotate(180deg); }
+.of-no.is-none { display: none; }
 .of-no { flex: none; min-width: 30px; padding: 0 var(--sp-1); border-radius: var(--r-xs); background: var(--fill-soft); color: var(--c-fg-2);
   font-size: var(--fs-xs); font-weight: var(--fw-semibold); text-align: center; font-variant-numeric: tabular-nums; }
 .of-ft { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.of-fs { flex: none; color: var(--c-fg-3); font-size: var(--fs-xs); }
+.of-fs { flex: none; color: var(--c-fg-2); font-size: var(--fs-xs); }
 .of-n { flex: none; min-width: 18px; padding: 0 var(--sp-1); box-sizing: border-box; border-radius: var(--r-full); background: var(--c-amber-tint);
   color: var(--c-amber-text); font-size: var(--fs-xs); font-weight: var(--fw-semibold); text-align: center; }
 .of-card { left: var(--sp-3); bottom: var(--sp-3); display: flex; align-items: center; gap: var(--sp-3); max-width: min(440px, calc(100% - 2 * var(--sp-3))); padding: var(--sp-2) var(--sp-3); }
@@ -41,6 +49,7 @@
 .of-ct { display: grid; min-width: 0; }
 .of-ct b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .of-ct small { color: var(--c-fg-3); font-size: var(--fs-sm); }
+.of-seg { display: inline-block; max-width: 100%; }
 .of-where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .of-open { flex: none; min-height: var(--ctl-h); padding: 0 var(--sp-3); border: 0; border-radius: var(--r-md); background: var(--c-primary);
   color: var(--c-on-primary); font: inherit; font-size: var(--fs-sm); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
@@ -54,11 +63,12 @@
   border-radius: var(--r-md); background: none; color: var(--c-fg); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; }
 .of-it-t { min-width: 0; font-weight: var(--fw-medium); word-break: keep-all; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .of-it-m { grid-column: 1 / -1; color: var(--c-fg-3); font-size: var(--fs-xs); word-break: keep-all; overflow-wrap: anywhere; }
+/* a state chip: its tint over the box's own surface, opaque, so a hovered or pressed row's fill never darkens it */
 .of-st { align-self: start; padding: 0 var(--sp-2); border-radius: var(--r-full); font-size: var(--fs-xs); white-space: nowrap; }
-.of-st.is-run { background: var(--c-green-tint); color: var(--c-green); }
-.of-st.is-wait { background: var(--c-amber-tint); color: var(--c-amber); }
-.of-st.is-err { background: var(--c-red-tint); color: var(--c-red); }
-.of-st.is-rest { background: var(--c-gray-tint); color: var(--c-gray); }
+.of-st.is-run { background: linear-gradient(var(--c-green-tint), var(--c-green-tint)), var(--c-elev); color: var(--c-green); }
+.of-st.is-wait { background: linear-gradient(var(--c-amber-tint), var(--c-amber-tint)), var(--c-elev); color: var(--c-amber); }
+.of-st.is-err { background: linear-gradient(var(--c-red-tint), var(--c-red-tint)), var(--c-elev); color: var(--c-red); }
+.of-st.is-rest { background: linear-gradient(var(--c-gray-tint), var(--c-gray-tint)), var(--c-elev); color: var(--c-gray); }
 .of-log li { display: flex; gap: var(--sp-2); padding: 2px var(--sp-2); color: var(--c-fg-2); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: anywhere; }
 .of-log b { flex: none; color: var(--c-fg); font-variant-numeric: tabular-nums; }
 .of-empty { margin: 0; padding: 0 var(--sp-2); color: var(--c-fg-3); font-size: var(--fs-sm); }
@@ -74,7 +84,7 @@
 .of-tk-face { flex: none; width: 36px; height: 36px; overflow: visible; }
 .of-tk-who { display: grid; flex: 1; min-width: 0; }
 .of-tk-name { margin: 0; font-size: var(--fs-base); font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
-.of-tk-where { margin: 0; overflow: hidden; color: var(--c-fg-3); font-size: var(--fs-sm); text-overflow: ellipsis; white-space: nowrap; }
+.of-tk-where { margin: 0; color: var(--c-fg-3); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: anywhere; }
 .of-tk-head .of-st { align-self: center; }
 .of-tk-x, .of-tk-new, .of-tk-send { flex: none; min-height: var(--ctl-h); padding: 0 var(--sp-3); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md);
   background: none; color: var(--c-fg); font: inherit; font-size: var(--fs-sm); white-space: nowrap; cursor: pointer; }
@@ -97,31 +107,49 @@
 .of-tk-msg[role="alert"] { color: var(--c-red); }
 .of-tk-foot { display: flex; justify-content: flex-end; }
 
-.of-fl:hover, .of-it:hover, .of-pub:hover, .of-tk-x:hover, .of-tk-new:hover { background: var(--fill-hover); }
+.of-fl:hover, .of-ftog:hover, .of-it:hover, .of-pub:hover, .of-tk-x:hover, .of-tk-new:hover { background: var(--fill-hover); }
 .of-fl[aria-pressed="true"] { background: var(--fill-sel); }
-.of-fl:active, .of-it:active, .of-pub:active, .of-tk-x:active, .of-tk-new:active { background: var(--fill-press); }
+.of-fl:active, .of-ftog:active, .of-it:active, .of-pub:active, .of-tk-x:active, .of-tk-new:active { background: var(--fill-press); }
 .of-open:hover, .of-tk-send:hover:not(:disabled) { background: var(--c-fg-2); }
 .of-open:active { background: color-mix(in srgb, var(--c-primary) 80%, var(--c-main)); }
-.of-fl:focus-visible, .of-it:focus-visible, .of-open:focus-visible, .of-pub:focus-visible, .of-tk-x:focus-visible, .of-tk-new:focus-visible,
+.of-fl:focus-visible, .of-ftog:focus-visible, .of-it:focus-visible, .of-open:focus-visible, .of-pub:focus-visible, .of-tk-x:focus-visible, .of-tk-new:focus-visible,
 .of-tk-send:focus-visible { outline: 2px solid var(--c-accent); outline-offset: -2px; }
 .of-tk-ta:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; }
 
 @container (min-width: 1040px) {
   .of-body { height: 100%; grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: minmax(0, 1fr); }
-  .of-stage { aspect-ratio: auto; min-height: 0; max-height: none; }
   .of-rail { min-height: 0; overflow: auto; }
 }
 @container (max-width: 1039px) {
   .of-rail { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
   .of-talk { grid-column: 1 / -1; }
+  /* the stage holds the rows around the scene: the toolbar beside the folded picker, the scene, the card */
+  .of-stage { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--sp-2); overflow: visible;
+    border-radius: 0; background: none; box-shadow: none; }
+  .of-head, .of-floors, .of-card { position: static; }
+  .of-head { justify-content: space-between; }
+  .of-floors { width: auto; max-height: none; overflow: visible; padding: var(--sp-1); }
+  .of-floors h3 { display: none; }
+  .of-floors:not(.is-open) .of-flist { display: none; }
+  .of-ftog { display: flex; }
+  .of-pan, .of-card { grid-column: 1 / -1; }
+  .of-pan { display: block; overflow: hidden; border-radius: var(--r-xl); box-shadow: 0 0 0 var(--hair) var(--c-line-strong); }
+  .of-scene { height: auto; aspect-ratio: 10 / 7; max-height: calc(100dvh - 96px); }
+  .of-card { max-width: none; }
+}
+/* a phone: the scene keeps a size its desks can be tapped and its names read at, and pans sideways inside its frame (the
+   page itself never scrolls sideways); the cut-off rooms at the frame's edge show there is more */
+@container (max-width: 599px) {
+  .of-stage { grid-template-columns: minmax(0, 1fr); }
+  .of-pan { overflow-x: auto; overscroll-behavior-x: contain; }
+  .of-scene { width: 720px; max-width: none; max-height: none; }
 }
 @media (max-width: 599px) {
-  .of-fl, .of-it, .of-open, .of-tk-x, .of-tk-new, .of-tk-send { min-height: var(--hit); }
+  .of-fl, .of-ftog, .of-it, .of-open, .of-tk-x, .of-tk-new, .of-tk-send { min-height: var(--hit); }
   /* the switch keeps the toolbar one control high: its touch target grows to --hit around it, invisibly */
   .of-pub::before { content: ""; position: absolute; inset: calc((var(--ctl-h) - var(--hit)) / 2) 0; }
   /* a phone-wide card would only show the start of the tab label and cwd; the conversation view has them */
   .of-where { display: none; }
-  .of-floors { top: calc(2 * var(--sp-3) + var(--ctl-h) + 2 * var(--sp-1)); left: var(--sp-3); width: auto; max-height: 40%; }
 }
 
 /* motion (plan todo 6): transform and opacity keyframes only, all driven by the browser (office-view.js starts no timer).

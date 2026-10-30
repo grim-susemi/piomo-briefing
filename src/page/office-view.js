@@ -1,7 +1,9 @@
 /* omo-briefing office view (plan todos 5-6): classic script (file:// safe, no modules). Draws one floor of the scene
  * g.BriefOffice.scene(vm, ui, now) builds as an isometric SVG in the mockup's projection (origin 470,120, 34-unit tiles,
  * office-assets.js art), plus the HTML chrome around it: the toolbar (title, 공개 모드 switch), the floor picker, the
- * floor card and the rail (대표님 할 일, 알림, 사무실 사람들, 활동 로그). Model text only ever goes through textContent or
+ * floor card and the rail (대표님 할 일, 알림, 사무실 사람들, 활동 로그). Wide, the toolbar, the picker and the card float
+ * over the scene as in the mockup; narrow (office.css), they sit above and below it, and the picker folds into one row (the
+ * floor shown) that opens its list. Model text only ever goes through textContent or
  * a plain attribute value (set(), this file's one attribute sink); the art strings are parsed through a tag and attribute
  * allowlist, never handed to innerHTML.
  * Every render patches what is already drawn. Desks, cats, labels, belt boxes, picker rows and rail rows are keyed (desk
@@ -62,6 +64,8 @@
   // motion: CAT is a cat's drawn size (its pos transform scales it); a walk between rooms crosses the hall row HALL (tiles,
   // between the belt and the lower rooms) at PACE px/s and lasts WALK[0]..WALK[1] ms
   var CALM = '(prefers-reduced-motion: reduce)', CAT = 46, HALL = 7, PACE = 140, WALK = [400, 3000];
+  // a lounge cat's hit box is at least TAP scene units each way: 44 px where a phone shows the scene (office.css, x 0.72)
+  var TAP = 62;
   // the blink's closed eyes in the traced head's 0 0 100 100 box: a face-coloured lid over each eye ring and a lash line
   var LID = 'M18.8,60.1a10.4,11.3 0 1,0 20.8,0a10.4,11.3 0 1,0 -20.8,0ZM60.4,60.1a10.4,11.3 0 1,0 20.8,0a10.4,11.3 0 1,0 -20.8,0Z';
   var LASH = 'M20.6,59.4Q29.2,66.4 37.8,59.4M62.2,59.4Q70.8,66.4 79.4,59.4';
@@ -81,6 +85,13 @@
   function set(n, k, v) { n.setAttribute(k, v); }
   function put(n, k, v) { if (n.getAttribute(k) !== String(v)) set(n, k, String(v)); }
   function txt(n, t) { if (n.textContent !== t) n.textContent = t; }
+  // facts joined by ·, each its own run (office.css .of-seg) with its · kept at its end: a line breaks only after a ·, never
+  // inside 결정 1건 대기 or a title (a run longer than the line still wraps inside itself)
+  function facts(n, list) {
+    if (n.textContent === list.join(' · ')) return;
+    n.textContent = '';
+    list.forEach(function (s, i) { if (i) n.appendChild(doc.createTextNode(' ')); h('span', 'of-seg', n, i < list.length - 1 ? s + ' ·' : s); });
+  }
   function drop(n) { if (n && n.parentNode) n.parentNode.removeChild(n); }
   function el(tag, a, parent, html) {
     var n = html ? doc.createElement(tag) : doc.createElementNS(svgNs(), tag);
@@ -268,8 +279,9 @@
       return { x0: m.a * r.left + m.c * r.top + m.e, y0: m.b * r.left + m.d * r.top + m.f, x1: m.a * r.right + m.c * r.bottom + m.e, y1: m.b * r.right + m.d * r.bottom + m.f };
     });
   }
-  // labels stay off the overlays and off each other; every patch and every stage resize settles them again, so a label
-  // dropped at one size or moment can come back at another; a text is measured once while it is in the page
+  // labels stay off the overlays and off each other, and off another cat's face where any of their places allows it (a
+  // face is a box with face: its desk id; a label's own cat never counts); every patch and every stage resize settles them
+  // again, so a label dropped at one size or moment can come back at another; a text is measured once while in the page
   function settle(list, shadeBoxes) {
     var placed = shadeBoxes.slice();
     list.forEach(function (p) {
@@ -281,11 +293,11 @@
       // a label that would cover another tries its other places first: a bubble higher or to a side (its tail stays on
       // the cat), a belt label along the belt or under it
       var tries = p.o.alts || [[0, 0]], pick = null, b = null;
-      for (var i = 0; i < tries.length && pick === null; i++) {
+      for (var k = 0; k < 2 && pick === null; k++) for (var i = 0; i < tries.length && pick === null; i++) {
         var dx = tries[i][0], dy = tries[i][1];
         if (p.tail && Math.abs(dx) > p.w / 2 - 12) continue;
         var c = { x0: p.x + dx - p.w / 2, x1: p.x + dx + p.w / 2, y0: p.y + dy - p.o.h / 2 - 3, y1: p.y + dy + p.o.h / 2 + (p.o.tail ? 4 : 1) };
-        if (p.o.keep || !placed.some(function (q) { return c.x0 < q.x1 && q.x0 < c.x1 && c.y0 < q.y1 && q.y0 < c.y1; })) { pick = tries[i]; b = c; }
+        if (p.o.keep || !placed.some(function (q) { return (!q.face || (!k && q.face !== p.o.key)) && c.x0 < q.x1 && q.x0 < c.x1 && c.y0 < q.y1 && q.y0 < c.y1; })) { pick = tries[i]; b = c; }
       }
       if (pick === null) { drop(p.g); return; }
       if (!p.g.parentNode) p.parent.appendChild(p.g);
@@ -435,10 +447,8 @@
       if (rec.anims.slide) { rec.anims.slide.cancel(); delete rec.anims.slide; }
       if (rec.slide) { drop(rec.slide); rec.slide = rec.place = rec.at = rec.lamp = rec.screen = null; }
       if (!rec.hit) rec.hit = rec.walk.insertBefore(el('rect', { class: 'of-hit', rx: 6, fill: 'transparent' }), rec.walk.firstChild);
-      put(rec.hit, 'x', r1(foot.x - size / 2 - 3));
-      put(rec.hit, 'y', r1(top - 3));
-      put(rec.hit, 'width', r1(size + 6));
-      put(rec.hit, 'height', r1(size * 1.42 + 6));
+      var hw = Math.max(size + 6, TAP), hh = Math.max(size * 1.42 + 6, TAP);
+      rec.hitBox = { x0: foot.x - hw / 2, x1: foot.x + hw / 2, y0: foot.y + 3 - hh, y1: foot.y + 3 };
     } else {
       drop(rec.hit);
       rec.hit = null;
@@ -461,6 +471,9 @@
       found.tags.push({ id: d.id, x: n[0], y: n[1] + 13 * s, label: label + (alert ? ' · ' + word(WORKER_WORD, d.state) : ''), rank: alert ? 3 : d.kind === 'lead' ? 2 : 1,
         o: { cls: 'of-tag', act: act, key: d.id, alts: TAG_AT.map(function (t) { return [r1(t[0] * s), r1(t[1] * s)]; }), h: 19, rx: 8, fs: 12.5, fill: '#0e1528', stroke: alert ? '#ff5a7a' : '#34446e', color: '#e6ebf5' } });
     }
+    // its face, for the labels to keep off (a strolling lounge cat's whole round)
+    var roam = lounge && d.pose === 'idle' && !c.z ? 10 : 0;
+    found.faces.push({ face: d.id, x0: foot.x - size / 2 - roam, x1: foot.x + size / 2 + roam, y0: top, y1: top + size + (roam ? 12 : 0) });
     if (d.pose === 'rest' && !rec.z) { rec.z = el('text', { class: 'of-z', 'font-size': 13, 'font-weight': 700, fill: '#8fb0ff' }, rec.walk); rec.z.textContent = 'z'; }
     if (d.pose !== 'rest' && rec.z) { drop(rec.z); rec.z = null; }
     if (rec.z) { put(rec.z, 'x', r1(foot.x + size * .3)); put(rec.z, 'y', r1(top + 4)); }
@@ -468,6 +481,24 @@
       found.bubbles.push({ id: d.id, x: foot.x, y: top - 20 * s, label: cut(d.bubble, 12.5, 176), rank: d.state === 'working' ? 2 : 1,
         o: { cls: 'of-bub', act: act, key: d.id, alts: BUBBLE_AT, h: 23, rx: 8, fs: 12.5, fill: '#0f1834', stroke: alert ? '#ff5a7a' : d.state === 'waiting' ? '#ffcf5a' : '#3d6ef0', color: '#e6ebf5', tail: 1 } });
     }
+  }
+
+  // lounge cats sit close (side by side on the sofa): two hit boxes that would overlap meet halfway between their middles,
+  // across the axis the two are farther apart along, so a click on a cat is never its neighbour's
+  function hits(v) {
+    var ls = [], mid = function (b) { return { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 }; };
+    for (var id in v.units) if (v.units[id].hit) ls.push(v.units[id]);
+    ls.forEach(function (a) { var b = a.hitBox; a.cut = { x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1 }; });
+    ls.forEach(function (a, i) {
+      ls.slice(i + 1).forEach(function (b) {
+        var p = a.hitBox, q = b.hitBox, pa = mid(p), pb = mid(q);
+        if (!(p.x0 < q.x1 && q.x0 < p.x1 && p.y0 < q.y1 && q.y0 < p.y1)) return;
+        var ax = Math.abs(pb.x - pa.x) >= Math.abs(pb.y - pa.y) ? 'x' : 'y', at = (pa[ax] + pb[ax]) / 2, lo = pb[ax] > pa[ax] ? a : b, hi = lo === a ? b : a;
+        lo.cut[ax + '1'] = Math.min(lo.cut[ax + '1'], at);
+        hi.cut[ax + '0'] = Math.max(hi.cut[ax + '0'], at);
+      });
+    });
+    ls.forEach(function (a) { var c = a.cut; put(a.hit, 'x', r1(c.x0)); put(a.hit, 'y', r1(c.y0)); put(a.hit, 'width', r1(c.x1 - c.x0)); put(a.hit, 'height', r1(c.y1 - c.y0)); });
   }
 
   // ---- the boss cat (plan Must have 12): the owner's own cat, one per office; never a desk, a session or a count ---------
@@ -663,7 +694,8 @@
   // focus back to the office region; another floor and the cat or its conversation going away close it too. A typed note
   // is this page's memory only, per conversation until it went out: never stored, never sent by itself.
   var drafts = Object.create(null), sent = Object.create(null);
-  // the kit's markup -> nodes, through a tag and attribute allowlist (anything else throws, as the art does): its text and
+  // the kit's markup -> nodes, through a tag and attribute allowlist (kit() throws on anything else; kitBox() then draws
+  // that one box as a line pointing to 대화 열기 and reports it, so a kit change never takes the office down): its text and
   // attribute values are decoded from the kit's escapes and go in as text nodes and through set(). An icon (<use
   // href="#i-x">) becomes a copy of the page sprite's own drawing of it, so set() writes no other href than #cat / #body
   var KIT_TAGS = { div: 1, p: 1, span: 1, b: 1, q: 1, button: 1, textarea: 1, label: 1, input: 1, fieldset: 1, legend: 1, select: 1, option: 1, svg: 0, use: 0 };
@@ -715,10 +747,12 @@
   // it back in the new box (the same kind) with its caret, else the box's 취소 (as page.js region() does)
   function kitBox(ask, html) {
     if (ask.html === html) return;
-    var a = doc.activeElement, key = a && a !== ask.box && ask.box.contains(a) ? ctlKey(a) : null, sel = key && [a.selectionStart, a.selectionEnd, a.selectionDirection];
+    var a = doc.activeElement, key = a && a !== ask.box && ask.box.contains(a) ? ctlKey(a) : null, sel = key && [a.selectionStart, a.selectionEnd, a.selectionDirection], nodes = null;
+    try { nodes = kit(html); } catch (e) { if (g.console && g.console.warn) g.console.warn('[omo-briefing] office answer box', e); }
     ask.html = html;
     ask.box.textContent = '';
-    kit(html).forEach(function (n) { kitNode(n, ask.box); });
+    if (!nodes) { h('p', 'of-empty', ask.box, '이 결정은 여기서 답할 수 없어요 · 대화 열기에서 답해 주세요'); return; }
+    nodes.forEach(function (n) { kitNode(n, ask.box); });
     if (key === null) return;
     var all = ask.box.querySelectorAll('button,input,select,textarea'), to = null;
     for (var i = 0; i < all.length && !to; i++) if (ctlKey(all[i]) === key) to = all[i];
@@ -816,7 +850,7 @@
     var p = t.parts;
     put(t.el, 'aria-label', ['말 걸기', m.role, m.name].filter(Boolean).join(' · '));
     txt(p.name, m.role + ' · ' + (ROOM_NAME[m.room] || ''));
-    txt(p.where, [m.n + '층', m.title || '(제목 없음)', m.name].filter(Boolean).join(' · '));
+    facts(p.where, [m.n + '층', m.title || '(제목 없음)', m.name].filter(Boolean));
     txt(p.state, m.state);
     put(p.state, 'class', 'of-st is-' + m.tone);
     rows(v, 'talk', p.info, [['step', '하는 일', m.step], ['headline', '지금', m.headline], ['next', '다음', m.next], ['todo', '할 일', m.todo], ['open', '결정', m.open ? m.open + '건 기다림' : '없음']]
@@ -849,8 +883,9 @@
     var u = ev.target.closest('[data-desk]'), id = u && u.getAttribute('data-desk'), rec = id !== null && has(v.units, id) ? v.units[id] : null;
     if (!rec || rec.g !== u) return null;
     if (!rec.slide) return id;
-    var r = rec.head.getBoundingClientRect();
-    return ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom ? id : null;
+    // a touch screen talks from a head-centred box of at least 44 px (a phone's scene draws a head at about 33)
+    var r = rec.head.getBoundingClientRect(), pad = g.matchMedia && g.matchMedia('(pointer: coarse)').matches ? Math.max(0, (44 - Math.min(r.width, r.height)) / 2) : 0;
+    return ev.clientX >= r.left - pad && ev.clientX <= r.right + pad && ev.clientY >= r.top - pad && ev.clientY <= r.bottom + pad ? id : null;
   }
   // annotate.js status() of conversation sid, through page.js's status hook: a note sent from here leaves its box once it
   // went out (the line says 보냄), and an open dialog of sid shows the new line
@@ -896,9 +931,16 @@
     v.boxes.splice(waves.length).forEach(function (b) { drop(b.g); });
     var cur = conv && conv.current >= 0 ? waves[conv.current] : null;
     var lines = !conv ? [] : [cur ? '계획 ' + (cur.n || conv.current + 1) + '단계 진행 중' : '계획 단계 모두 끝', cur ? '상자 ' + cur.done + '/' + cur.total + ' 끝' : '상자 ' + waves.length + '단계',
-      cur ? cut(str(cur.label), 11, 150) : ''];
+      // the label ends 96 units into the screen: left of where the floor picker starts over the narrowest wide stage
+      cur ? cut(str(cur.label), 11, 96) : ''];
     v.wall.forEach(function (t, i) { txt(t, lines[i] || ''); });
     return belt;
+  }
+  // the left wall's screen: the whole office now (the mockup's 오늘의 사무실 screen, with the board's own counts)
+  function drawStats(v) {
+    var sc = v.scene, dec = arr(sc.ceo && sc.ceo.items).filter(function (it) { return it.sub === 'dec'; }).length;
+    var lines = ['사무실 전체', '층 ' + sc.floors.length + '개 · 작업자 ' + arr(sc.people).length + '명', dec ? '결정 대기 ' + dec + '건' : '결정 대기 없음'];
+    v.wallL.forEach(function (t, i) { txt(t, cut(lines[i], 11, 128)); });
   }
   function drawFloor(v, f) {
     var sc = v.scene, pub = v.ui.publicMode === true, people = {}, labels = [], sid = f ? f.sid : null;
@@ -918,10 +960,11 @@
       pill(v, labels, 'boss', bc[0], bc[1] - 18, '할 일 ' + ceoN + '건', { cls: 'of-bub', h: 23, rx: 8, fs: 12.5, fill: '#0f1834', stroke: '#ffcf5a', color: '#e6ebf5', tail: 1, keep: 1 });
     }
     lit(v.boss, ceoN > 0);
-    var belt = drawBelt(v, f), cells = f ? layout(f) : {}, found = { tags: [], bubbles: [] };
+    var belt = drawBelt(v, f), cells = f ? layout(f) : {}, found = { tags: [], bubbles: [], faces: [] };
     var desks = f ? arr(f.desks).filter(function (d) { return has(cells, d.id); }) : [];
     desks.forEach(function (d) { deskUnit(v, f, d, cells[d.id], people, found, pub); });
     for (var id in v.units) if (v.units[id].pass !== v.pass) { gone(v.units[id]); delete v.units[id]; }
+    hits(v);
     // the mockup's painter order by x + y: the props never move, and a desk moves in it only when its place changed
     // (r: what each stands on, in floor tiles, for the boss cat's place among them; a lounge cat is about a tile wide)
     var items = v.props.concat(desks.map(function (d) {
@@ -938,7 +981,8 @@
     byRank(belt).forEach(function (t) { pill(v, labels, 'wave:' + t.id, t.x, t.y, t.label, t.o); });
     for (var k in v.pills) if (v.pills[k].pass !== v.pass) { drop(v.pills[k].g); delete v.pills[k]; }
     v.labels = labels;
-    settle(labels, shade(v));
+    v.faces = found.faces;
+    settle(labels, shade(v).concat(v.faces));
   }
 
   // ---- HTML chrome -----------------------------------------------------------------------------------------------------
@@ -973,6 +1017,16 @@
     h('span', 'of-fs', b, it.word);
     return b;
   }
+  // the picker's toggle (shown narrow only, office.css): the floor shown, and whether the folded list is open
+  function drawToggle(v, f) {
+    var t = v.ftog, p = v.ftogParts, title = f ? f.label || '(제목 없음)' : '층 없음';
+    put(t, 'aria-expanded', v.pickOpen ? 'true' : 'false');
+    put(t, 'aria-label', '층 고르기 · ' + (f ? floorNo(v, f) + 'F · ' : '') + title);
+    put(v.picker, 'class', 'of-floors' + (v.pickOpen ? ' is-open' : ''));
+    put(p.no, 'class', f ? 'of-no' : 'of-no is-none');
+    txt(p.no, f ? floorNo(v, f) + 'F' : '');
+    txt(p.ft, title);
+  }
   function drawPicker(v, f) {
     var sc = v.scene;
     keepFocus(v.picker, 'data-floor', function () {
@@ -1002,7 +1056,7 @@
       var desks = arr(f.desks), working = desks.filter(function (d) { return d.state === 'working'; }).length, dec = decisionsOf(v.scene, f.sid);
       txt(c.no, floorNo(v, f) + 'F');
       txt(c.title, f.label || '(제목 없음)');
-      txt(c.meta, [floorWord(f), '작업자 ' + (desks.length - 1) + '명', working ? '일하는 중 ' + working : '', dec ? '결정 ' + dec + '건 대기' : ''].filter(Boolean).join(' · '));
+      facts(c.meta, [floorWord(f), '작업자 ' + (desks.length - 1) + '명', working ? '일하는 중 ' + working : '', dec ? '결정 ' + dec + '건 대기' : ''].filter(Boolean));
       // the tab label and cwd: never drawn in public mode (place is '' then)
       if (place && !c.where) c.where = h('small', 'of-where', c.box);
       if (!place && c.where) { drop(c.where); c.where = null; }
@@ -1085,12 +1139,16 @@
     set(root, 'tabindex', '-1');
     var v = { root: root, sid: null, keys: {}, units: {}, pills: {}, boxes: [], rows: {}, pass: 0, floor: undefined, dim: null, noFloor: null, cardParts: null,
       walk: null, walkKey: null, off: {}, order: [], fresh: true, f: null, talk: { id: null, sid: null, el: null, parts: null, asks: {} } };
-    var body = h('div', 'of-body', root), stage = h('div', 'of-stage', body);
-    v.svg = el('svg', { class: 'of-scene', viewBox: '30 0 1000 700', preserveAspectRatio: 'xMidYMid meet', role: 'group' }, stage);
+    // .of-pan: nothing of its own wide (display: contents); narrow, the scene's frame; on a phone, the scene pans sideways
+    var body = h('div', 'of-body', root), stage = h('div', 'of-stage', body), pan = h('div', 'of-pan', stage);
+    v.svg = el('svg', { class: 'of-scene', viewBox: '30 0 1000 700', preserveAspectRatio: 'xMidYMid meet', role: 'group' }, pan);
     set(base(v.svg), 'aria-hidden', 'true');
     v.dyn = el('g', { class: 'of-l-belt', 'aria-hidden': 'true' }, v.svg);
     var c0 = iso(4, 0, 100);
     v.wall = [0, 1, 2].map(function (i) { return el('text', { transform: 'translate(' + r1(c0[0] + 10) + ',' + r1(c0[1] + 20 + i * 15) + ') skewY(30)', 'font-size': 11, fill: i ? '#8fb0ff' : '#ffcf5a' }, v.dyn); });
+    // the left wall's screen leans the other way: its lines start as far under its top edge as the back wall's do
+    var c1 = iso(0, 9, 100);
+    v.wallL = [0, 1, 2].map(function (i) { return el('text', { transform: 'translate(' + r1(c1[0] + 10) + ',' + r1(c1[1] + 8.5 + i * 15) + ') skewY(-30)', 'font-size': 11, fill: i ? '#8fb0ff' : '#ffcf5a' }, v.dyn); });
     v.depth = el('g', { class: 'of-l-depth' }, v.svg);
     // the props and the boss's desk are drawn once, where the mockup drew them; the desks are sorted in between
     v.props = FURN.map(function (fu) { return { x: fu.r[0], y: fu.r[1], r: fu.r, n: art(fu.art, v.depth, fu.at ? move(fu.at[0], fu.at[1]) : null) }; });
@@ -1110,16 +1168,32 @@
     el('span', { class: 'of-sw', 'aria-hidden': 'true' }, v.pub, true);
     h('span', '', v.pub, '공개 모드');
     v.picker = el('nav', { class: 'of-floors', 'aria-label': '층 고르기' }, stage, true);
+    v.ftog = el('button', { type: 'button', class: 'of-ftog', 'aria-expanded': 'false', 'aria-controls': 'of-flist' }, v.picker, true);
+    v.ftogParts = { no: h('span', 'of-no', v.ftog), ft: h('span', 'of-ft', v.ftog), fs: h('span', 'of-fs', v.ftog, '층 고르기') };
+    glyph(el('svg', { class: 'ic', 'aria-hidden': 'true', focusable: 'false' }, v.ftog), [['href', '#i-chevron-down']]);
+    v.pickOpen = false;
     h('h3', '', v.picker, '층 고르기 · 대화 1개 = 1층');
-    v.flist = h('div', 'of-flist', v.picker);
+    v.flist = el('div', { class: 'of-flist', id: 'of-flist' }, v.picker, true);
+    // in reading order before the scene: narrow, they are the rows above it
+    stage.insertBefore(v.head, pan);
+    stage.insertBefore(v.picker, pan);
     v.card = h('div', 'of-card', stage);
     v.rail = h('div', 'of-rail', body);
     v.box = { todo: section(v.rail, '대표님 할 일', 'ul', true), alert: section(v.rail, '알림', 'ul', true), people: section(v.rail, '사무실 사람들', 'ul', true), log: section(v.rail, '활동 로그', 'ol', false) };
     // the overlays keep their CSS size while the scene scales, so a new stage size settles the labels again
-    if (typeof g.ResizeObserver === 'function') new g.ResizeObserver(function () { if (v.labels) settle(v.labels, shade(v)); }).observe(stage);
+    if (typeof g.ResizeObserver === 'function') new g.ResizeObserver(function () { if (v.labels) settle(v.labels, shade(v).concat(v.faces)); }).observe(stage);
     root.addEventListener('click', function (ev) {
       var n = ev.target && ev.target.closest ? ev.target : null, t = n ? n.closest('[data-floor]') : null, id = null;
-      if (t && root.contains(t)) { v.sid = t.getAttribute('data-floor'); draw(v); return; }
+      if (n && n.closest('.of-ftog')) { v.pickOpen = !v.pickOpen; drawToggle(v, v.f); return; }
+      // a floor chosen in the folded list folds it and gives its focus to the toggle; wide, the list stays as it is
+      if (t && root.contains(t)) {
+        var had = doc.activeElement === t;
+        v.sid = t.getAttribute('data-floor');
+        v.pickOpen = false;
+        draw(v);
+        if (had && typeof v.ftog.getClientRects === 'function' && v.ftog.getClientRects().length) v.ftog.focus({ preventScroll: true });
+        return;
+      }
       // the dialog's own two buttons; its other buttons are page.js's and shell.js's
       if (n && v.talk.el && v.talk.el.contains(n)) {
         if (n.closest('.of-tk-x')) shut(v);
@@ -1166,6 +1240,8 @@
     var floors = JSON.stringify(sc.floors.map(function (x) { return [x.sid, x.label, x.live, x.dark, decisionsOf(sc, x.sid)]; }));
     var pub = v.ui.publicMode === true, place = f && !pub ? placeOf(v.vm, f.sid) : '';
     put(v.pub, 'aria-checked', pub ? 'true' : 'false');
+    drawToggle(v, f);
+    drawStats(v);
     part(v, 'picker', floors + '|' + v.sid, function () { drawPicker(v, f); });
     part(v, 'card', JSON.stringify([f, floors, place]), function () { drawCard(v, f, place); });
     part(v, 'floor', JSON.stringify([f, sc.people.filter(function (p) { return f && p.sid === f.sid; }), sc.ceo && sc.ceo.count, pub, floors]), function () {
