@@ -12,7 +12,8 @@
   function str(v) { return typeof v === 'string' ? v : typeof v === 'number' && isFinite(v) ? String(v) : ''; }
   function roomOf(w) {
     if (w.state === 'waiting' || w.state === 'done' || w.state === 'cancelled') return 'lounge';
-    var k = str(w.kind).toLowerCase();
+    // the bare agent name: a kind with the omo-native- prefix goes where the plain name goes (as talk() names its role)
+    var k = str(w.kind).toLowerCase().replace(/^omo-native-/, '');
     if (has(ROOM_OF_KIND, k)) return ROOM_OF_KIND[k];
     if (/review|qa-executor/.test(k)) return 'review';
     if (/explore|librarian/.test(k)) return 'research';

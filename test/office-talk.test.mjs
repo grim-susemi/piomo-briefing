@@ -330,6 +330,22 @@ test('the note box: 보내기 goes out through ui.sendNote; 보내기 is off whi
   assert.deepEqual(e.errors, []);
 });
 
+test('an empty or whitespace-only note sends nothing, even when 보내기 is pressed', () => {
+  // Given the lead's dialog, When the note box holds nothing or only spaces and 보내기 is clicked (also with its disabled
+  // flag lifted, so the send handler itself runs), Then no annotation POST goes out
+  const { e, office } = openOffice();
+  const box = talkToLead(e, office), ta = box.querySelector('.of-tk-ta'), send = box.querySelector('.of-tk-send');
+  for (const text of ['', '   ', ' \n\t ']) {
+    ta.value = text;
+    e.fire(ta, 'input');
+    assert.equal(send.disabled, true, JSON.stringify(text));
+    send.disabled = false;
+    e.fire(send, 'click', { detail: 1 });
+    assert.equal(answerPosts(e).length, 0, JSON.stringify(text));
+  }
+  assert.deepEqual(e.errors, []);
+});
+
 test('a pending tray request of other text: the dialog shows the conflict line and sends nothing; 새로 보내기 then sends anew', async () => {
   // Given the tray's send for o-r3 refused with 503 (its request stays pending), When a different note is sent from the
   // office dialog, Then the conflict line with 새로 보내기 shows and no POST goes out; after 새로 보내기, 보내기 posts a new

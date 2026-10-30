@@ -3,11 +3,13 @@
 // el.animate() is a recording fake, matchMedia a live fake whose change listeners the tests call, and the scene's screen
 // matrix is the identity, so a click's clientX/Y is a point of the scene. The browser side (real keys in the real note box
 // and annotate tray, real clicks, a real hidden tab and media change) is the CDP run of plan todo 10.
-import { test } from 'node:test';
+import { test as nodeTest } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { makeController } from './fixtures/controller-dom.mjs';
 
+// every test here walks the boss over way() / free(): a walk map that lost its bounds fails the test in time, not hangs
+const test = (name, fn) => nodeTest(name, { timeout: 20000 }, fn);
 const read = (p) => fs.readFileSync(new URL('../' + p, import.meta.url), 'utf8');
 const fixture = (p) => JSON.parse(read('test/fixtures/' + p));
 const clone = (v) => JSON.parse(JSON.stringify(v));

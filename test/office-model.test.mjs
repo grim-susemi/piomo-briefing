@@ -498,3 +498,16 @@ test('the plan view exports the lane helpers the conveyor uses', () => {
   assert.equal(typeof ctx.BriefPlanView.lanesOf, 'function');
   assert.equal(typeof ctx.BriefPlanView.currentOf, 'function');
 });
+
+test('a kind with the omo-native- prefix lands in the room of its bare name', () => {
+  // Given a running worker of the office fixture, When its kind is a bare agent name and then the same name with the
+  // omo-native- prefix, Then the scene puts its desk in the same room both times
+  const ctx = load(), vm = clone(fixture('view-model-office.json'));
+  const w = vm.sessions.flatMap((s) => (s.live && s.live.workers) || []).find((x) => x.state === 'running');
+  const roomFor = (kind) => { w.kind = kind; for (const f of sceneOf(ctx, vm, {}).floors) for (const d of f.desks) if (d.id === w.id) return d.room; return null; };
+  for (const k of ['oracle', 'plan-reviewer', 'plan-consultant', 'prometheus', 'architect', 'explore', 'librarian', 'gate-reviewer', 'qa-executor', 'deep-low']) {
+    const bare = roomFor(k);
+    assert.ok(bare, k);
+    assert.equal(roomFor('omo-native-' + k), bare, 'omo-native-' + k);
+  }
+});
