@@ -9,7 +9,8 @@ import fs from 'node:fs';
 import { makeController } from './fixtures/controller-dom.mjs';
 
 // every test here walks the boss over way() / free(): a walk map that lost its bounds fails the test in time, not hangs
-const test = (name, fn) => nodeTest(name, { timeout: 20000 }, fn);
+// test(name, fn) or test(name, options, fn): every body runs, 20 s per test unless the options say otherwise
+const test = (name, a, b) => (typeof a === 'function' ? nodeTest(name, { timeout: 20000 }, a) : nodeTest(name, { timeout: 20000, ...a }, b));
 const read = (p) => fs.readFileSync(new URL('../' + p, import.meta.url), 'utf8');
 const fixture = (p) => JSON.parse(read('test/fixtures/' + p));
 const clone = (v) => JSON.parse(JSON.stringify(v));
