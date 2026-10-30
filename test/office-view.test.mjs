@@ -42,6 +42,23 @@ function labelBoxes(office) {
   });
 }
 const hit = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+// the wall screens' text in scene units, one box per glyph: a line is translate(x,y) skewY(+-30) at its font size, a glyph
+// one advance wide (1 em for Hangul, 0.62 em otherwise, as office-view.js estimate()), 0.8 em above the baseline to 0.2 under
+function wallGlyphs(office) {
+  return office.querySelectorAll('text').filter((t) => /skewY/.test(t.getAttribute('transform') || '') && t.textContent.trim()).flatMap((t) => {
+    const [x, y, deg] = /translate\(([-\d.]+),([-\d.]+)\) skewY\((-?[\d.]+)\)/.exec(t.getAttribute('transform')).slice(1).map(Number);
+    const fs = Number(t.getAttribute('font-size')), tan = Math.tan(deg * Math.PI / 180);
+    let at = 0;
+    return [...t.textContent].map((ch) => {
+      const adv = ch.charCodeAt(0) > 0x2e80 ? fs : fs * 0.62, ya = y + tan * at, yb = y + tan * (at + adv);
+      const box = { name: 'wall:' + t.textContent + '[' + ch + ']', x0: x + at, x1: x + at + adv, y0: Math.min(ya, yb) - fs * 0.8, y1: Math.max(ya, yb) + fs * 0.2 };
+      at += adv;
+      return box;
+    });
+  });
+}
+// a box's area inside another
+const inside = (a, b) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
 
 test('사무실 in the rail draws the first floor; every desk is a named button with the open action of its session', () => {
   const vm = fixture('view-model-office.json');
@@ -139,6 +156,69 @@ test('hostile titles, names, steps, kinds and questions render as text, never as
   assert.equal(office.querySelector('.of-fl .of-ft').textContent, HOSTILE[1]);
   assert.equal(office.querySelector('.of-scene').getAttribute('aria-label'), '6층 · ' + HOSTILE[1]);
   assert.equal(e.ctx.pwned, undefined);
+});
+
+test('no label covers the wall screens\' text: a bubble, a desk name or a belt label takes another place or stays out', () => {
+  // Given the fixture board (the plan-reviewer's bubble sits under the back wall's screen), When 사무실 opens, Then no
+  // label box lies on a glyph of the back wall's three plan lines or the left wall's three office lines
+  const { office } = openOffice(fixture('view-model-office.json'));
+  const walls = wallGlyphs(office), boxes = labelBoxes(office);
+  assert.ok(walls.length > 40, 'both screens carry their lines');
+  assert.deepEqual(boxes.flatMap((b) => walls.filter((w) => hit(b, w)).map((w) => b.name + ' / ' + w.name)), []);
+});
+
+test('every lounge cat\'s hit box is at least 61 scene units each way (44 px on a phone), touches no other target and holds most of its own head', () => {
+  // Given the fixture floor (two cats side by side on the sofa, one strolling in front of it), When 사무실 opens, Then each
+  // lounge cat's hit rect is 61 x 61 or more, no two hit rects of the floor overlap (lounge or desk), and each lounge rect
+  // holds its cat's head middle and at least 70 % of its head
+  const { office } = openOffice(fixture('view-model-office.json'));
+  const num = (n, k) => Number(n.getAttribute(k)), units = office.querySelectorAll('.of-desk');
+  const lounge = units.filter((u) => u.querySelector('.of-walk').children[0].classes.has('of-hit')).map((u) => {
+    const walk = u.querySelector('.of-walk'), r = walk.children[0], [fx, fy, k] = /translate\(([-\d.]+),([-\d.]+)\) scale\(([-\d.]+)\)/.exec(walk.children[1].getAttribute('transform')).slice(1).map(Number), size = 46 * k;
+    return { id: u.getAttribute('data-desk'), box: { x0: num(r, 'x'), y0: num(r, 'y'), x1: num(r, 'x') + num(r, 'width'), y1: num(r, 'y') + num(r, 'height') }, head: { x0: fx - size / 2, x1: fx + size / 2, y0: fy - 1.42 * size, y1: fy - 0.42 * size } };
+  });
+  // a desk's hit rect drawn in its place group: translate(x,y) scale(s) translate(-470,-120)
+  const desks = units.filter((u) => u.querySelector('.of-slide')).map((u) => {
+    const g = u.querySelector('.of-slide').children[0], r = g.querySelector('.of-hit'), [ax, ay, s] = /translate\(([-\d.]+),([-\d.]+)\) scale\(([-\d.]+)\)/.exec(g.getAttribute('transform')).slice(1).map(Number);
+    const at = (x, y) => [ax + (x - 470) * s, ay + (y - 120) * s], [x0, y0] = at(num(r, 'x'), num(r, 'y')), [x1, y1] = at(num(r, 'x') + num(r, 'width'), num(r, 'y') + num(r, 'height'));
+    return { id: u.getAttribute('data-desk'), box: { x0, y0, x1, y1 } };
+  });
+  assert.equal(lounge.length, 3, 'the fixture floor has three lounge cats');
+  const shrink = (b) => ({ x0: b.x0 + 0.05, y0: b.y0 + 0.05, x1: b.x1 - 0.05, y1: b.y1 - 0.05 });
+  for (const c of lounge) {
+    assert.ok(c.box.x1 - c.box.x0 >= 61 && c.box.y1 - c.box.y0 >= 61, c.id + ' ' + JSON.stringify(c.box));
+    const mx = (c.head.x0 + c.head.x1) / 2, my = (c.head.y0 + c.head.y1) / 2;
+    assert.ok(mx > c.box.x0 && mx < c.box.x1 && my > c.box.y0 && my < c.box.y1, c.id + ' holds its head middle');
+    assert.ok(inside(c.head, c.box) >= 0.7 * (c.head.x1 - c.head.x0) * (c.head.y1 - c.head.y0), c.id + ' holds most of its head');
+  }
+  const all = lounge.concat(desks);
+  for (const c of lounge) for (const d of all) if (d !== c) assert.ok(!hit(shrink(c.box), shrink(d.box)), c.id + ' / ' + d.id);
+});
+
+test('the belt\'s done waves take the rest tone and green means working only: a done box and its label carry of-done, never the work green', () => {
+  // Given the fixture plan (wave 1 done, wave 2 under way, waves 3-5 to come), When 사무실 opens, Then the done wave's box
+  // and label are marked of-done (office.css gives them --c-gray), the others are not, and no belt label is inked green
+  const vm = fixture('view-model-office.json');
+  const { e, office } = openOffice(vm);
+  const conv = clone(e.ctx.BriefOffice.scene(e.page.state.model, e.page.state.ui, vm.generatedAt)).floors[0].conveyor;
+  assert.ok(conv.current > 0, 'the fixture has a done wave');
+  const boxes = office.querySelector('.of-l-belt').children.filter((n) => n.tagName === 'G');
+  assert.deepEqual(boxes.map((b) => b.classes.has('of-done')), conv.waves.map((w, i) => i < conv.current));
+  const waves = office.querySelectorAll('.of-wave');
+  assert.deepEqual(waves.filter((w) => / ✓$/.test(w.textContent) !== w.classes.has('of-done')).map((w) => w.textContent), []);
+  assert.deepEqual(waves.filter((w) => [w.querySelector('rect').getAttribute('stroke'), w.querySelector('text').getAttribute('fill')].includes('#4fd1a5')).map((w) => w.textContent), []);
+});
+
+test('the shown floor\'s picker row carries a check glyph besides its wash; no other row does', () => {
+  // Given the picker, When 사무실 opens and then another floor is chosen, Then exactly the pressed row has the check
+  const { office, e } = openOffice(fixture('view-model-office.json'));
+  const marked = () => office.querySelectorAll('.of-fl').filter((b) => b.querySelector('.of-on')).map((b) => b.getAttribute('data-floor'));
+  const pressed = () => office.querySelectorAll('.of-fl[aria-pressed="true"]').map((b) => b.getAttribute('data-floor'));
+  assert.deepEqual(marked(), pressed());
+  assert.equal(marked().length, 1);
+  e.fire(office.querySelectorAll('.of-fl')[2].querySelector('.of-ft'), 'click');
+  assert.deepEqual(marked(), pressed());
+  assert.equal(marked()[0], office.querySelectorAll('.of-fl')[2].getAttribute('data-floor'));
 });
 
 test('the art passes an allowlist: a tag or attribute outside it throws instead of drawing', () => {

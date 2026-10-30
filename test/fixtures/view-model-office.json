@@ -18,6 +18,11 @@
       "tabLabel": "작업 창",
       "tabNumber": 190,
       "workName": "r3-advisor-seams",
+      "auto": {
+        "todoDone": 3,
+        "todoTotal": 7,
+        "todoCurrent": "설치기 시험 3개 추가"
+      },
       "status": "in_progress",
       "statusKey": "in_progress",
       "tab": "진행 중",
@@ -47,7 +52,7 @@
           "evidenceState": "ok"
         }
       ],
-      "next": "",
+      "next": "3단계: 실사용 폴더 설치를 확인받고 되돌리기 키트 묶기",
       "decisions": [
         {
           "id": 516,

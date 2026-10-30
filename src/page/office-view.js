@@ -66,6 +66,8 @@
   var CALM = '(prefers-reduced-motion: reduce)', CAT = 46, HALL = 7, PACE = 140, WALK = [400, 3000];
   // a lounge cat's hit box is at least TAP scene units each way: 44 px where a phone shows the scene (office.css, x 0.72)
   var TAP = 62;
+  // the wall screens' text leans 30 degrees (skewY): the back wall's falls to the right, the left wall's rises
+  var TAN = Math.tan(Math.PI / 6);
   // the blink's closed eyes in the traced head's 0 0 100 100 box: a face-coloured lid over each eye ring and a lash line
   var LID = 'M18.8,60.1a10.4,11.3 0 1,0 20.8,0a10.4,11.3 0 1,0 -20.8,0ZM60.4,60.1a10.4,11.3 0 1,0 20.8,0a10.4,11.3 0 1,0 -20.8,0Z';
   var LASH = 'M20.6,59.4Q29.2,66.4 37.8,59.4M62.2,59.4Q70.8,66.4 79.4,59.4';
@@ -279,9 +281,37 @@
       return { x0: m.a * r.left + m.c * r.top + m.e, y0: m.b * r.left + m.d * r.top + m.f, x1: m.a * r.right + m.c * r.bottom + m.e, y1: m.b * r.right + m.d * r.bottom + m.f };
     });
   }
-  // labels stay off the overlays and off each other, and off another cat's face where any of their places allows it (a
-  // face is a box with face: its desk id; a label's own cat never counts); every patch and every stage resize settles them
-  // again, so a label dropped at one size or moment can come back at another; a text is measured once while in the page
+  // the wall screens' lines glyph by glyph, as boxes in scene units: a line is translate(x,y) skewY(+-30) at font 11; a
+  // glyph's cell is the browser's own (getExtentOfChar) once the line is laid out, else estimate() wide from a little above
+  // its letters to under its baseline
+  function wallBoxes(v) {
+    var out = [];
+    v.wall.concat(v.wallL).forEach(function (t, i) {
+      var s = t.textContent, m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(t.getAttribute('transform')), x = Number(m[1]), y = Number(m[2]), tan = i < 3 ? TAN : -TAN, at = 0;
+      var real = s.length > 0 && typeof t.getNumberOfChars === 'function' && t.getNumberOfChars() === s.length;
+      for (var k = 0; k < s.length; k++) {
+        var e = real ? t.getExtentOfChar(k) : null, a = e && e.width > 0 ? e.x : at, b = e && e.width > 0 ? e.x + e.width : at + estimate(s[k], 11);
+        var top = e && e.width > 0 ? e.y : -10, bot = e && e.width > 0 ? e.y + e.height : 3;
+        out.push({ x0: x + a - 1, x1: x + b + 1, y0: y + Math.min(tan * a, tan * b) + top, y1: y + Math.max(tan * a, tan * b) + bot });
+        at = b;
+      }
+    });
+    return out;
+  }
+  // the boss cat's drawing (head and body) on the tile it stands on
+  function meBox(v) {
+    if (!v.walk || !v.me.g.parentNode) return [];
+    var f = footOf(v, v.me.tile);
+    return [{ x0: f.x - CAT / 2, x1: f.x + CAT / 2, y0: f.y - CAT * 1.42, y1: f.y + 2 }];
+  }
+  // what the labels settle around: the overlays, the wall screens' text and the boss cat, then the other cats' faces
+  function obstacles(v) { return shade(v).concat(wallBoxes(v), meBox(v), v.faces || []); }
+  // the labels settle again around the boss where it stopped
+  function stopped(v) { if (v.labels) settle(v.labels, obstacles(v)); }
+  // labels stay off the overlays, the wall screens' text, the boss cat and each other (a label with no free place stays
+  // out), and off another cat's face where any of their places allows it (a face is a box with face: its desk id; a
+  // label's own cat never counts); every patch, every stage resize and every stop of the boss settles them again, so a
+  // label dropped at one size or moment can come back at another; a text is measured once while in the page
   function settle(list, shadeBoxes) {
     var placed = shadeBoxes.slice();
     list.forEach(function (p) {
@@ -366,6 +396,8 @@
       me.tile = end;
       drawMe(v, end);
       paint(v, [end]);
+      follow(v, false);
+      stopped(v);
     } else if (step && hidden && step.playState === 'running') step.pause();
     else if (step && !hidden && step.playState === 'paused') step.play();
   }
@@ -449,6 +481,8 @@
       if (!rec.hit) rec.hit = rec.walk.insertBefore(el('rect', { class: 'of-hit', rx: 6, fill: 'transparent' }), rec.walk.firstChild);
       var hw = Math.max(size + 6, TAP), hh = Math.max(size * 1.42 + 6, TAP);
       rec.hitBox = { x0: foot.x - hw / 2, x1: foot.x + hw / 2, y0: foot.y + 3 - hh, y1: foot.y + 3 };
+      rec.headBox = { x0: foot.x - size / 2, x1: foot.x + size / 2, y0: top, y1: top + size };
+      rec.deskBox = null;
     } else {
       drop(rec.hit);
       rec.hit = null;
@@ -463,6 +497,9 @@
       if (rec.at) travel(rec, 'slide', rec.at, at, false);
       put(rec.place, 'transform', 'translate(' + at.x + ',' + at.y + ') scale(' + s + ') translate(' + -OX + ',' + -OY + ')');
       rec.at = at;
+      // its hit rect (drawn above in the place group's units) in scene units, for the lounge cats' hit boxes to keep off
+      var hy = r1(cc[1] + 11 - 46 * 1.42 - 3), hb = hy + r1(164.2 - (cc[1] + 11 - 46 * 1.42 - 3) + 2);
+      rec.deskBox = { x0: at.x + (438 - OX) * s, x1: at.x + (520 - OX) * s, y0: at.y + (hy - OY) * s, y1: at.y + (hb - OY) * s };
       lit(rec, d.lamp === 'on');
       if (d.lamp === 'alert' && !rec.lamp) { var a = iso(.2, .8, 14); rec.lamp = el('circle', { cx: r1(a[0]), cy: r1(a[1] - 4), r: 4 }, rec.place); }
       if (d.lamp !== 'alert' && rec.lamp) { drop(rec.lamp); rec.lamp = null; }
@@ -483,22 +520,46 @@
     }
   }
 
-  // lounge cats sit close (side by side on the sofa): two hit boxes that would overlap meet halfway between their middles,
-  // across the axis the two are farther apart along, so a click on a cat is never its neighbour's
+  // lounge cats sit close (two side by side on the sofa, more in front of it): their hit boxes never overlap each other or
+  // a desk's, and each keeps TAP scene units each way where it can (44 px on a phone). Two lounge boxes that overlap meet
+  // halfway between their middles, along x or along y; a box cut on only one side of an axis grows back to TAP from its
+  // other side. Of the ways to pick those axes (up to 8 overlapping pairs), the one that keeps every box TAP each way and
+  // clear of the others and of the desks wins, the one that keeps most of each cat's own head first; with none (a crowded
+  // lounge), each pair meets along the axis the two are farther apart along, so a click on a cat is never its neighbour's
   function hits(v) {
-    var ls = [], mid = function (b) { return { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 }; };
-    for (var id in v.units) if (v.units[id].hit) ls.push(v.units[id]);
-    ls.forEach(function (a) { var b = a.hitBox; a.cut = { x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1 }; });
-    ls.forEach(function (a, i) {
-      ls.slice(i + 1).forEach(function (b) {
-        var p = a.hitBox, q = b.hitBox, pa = mid(p), pb = mid(q);
-        if (!(p.x0 < q.x1 && q.x0 < p.x1 && p.y0 < q.y1 && q.y0 < p.y1)) return;
-        var ax = Math.abs(pb.x - pa.x) >= Math.abs(pb.y - pa.y) ? 'x' : 'y', at = (pa[ax] + pb[ax]) / 2, lo = pb[ax] > pa[ax] ? a : b, hi = lo === a ? b : a;
-        lo.cut[ax + '1'] = Math.min(lo.cut[ax + '1'], at);
-        hi.cut[ax + '0'] = Math.max(hi.cut[ax + '0'], at);
-      });
+    var ls = [], desks = [], pairs = [], best = null, id, n, t;
+    for (id in v.units) if (v.units[id].hit) ls.push(v.units[id]); else if (v.units[id].deskBox) desks.push(v.units[id].deskBox);
+    ls.forEach(function (a, i) { for (var j = i + 1; j < ls.length; j++) if (cross(a.hitBox, ls[j].hitBox)) pairs.push([i, j]); });
+    for (n = 0; pairs.length <= 8 && n < 1 << pairs.length; n++) if ((t = carve(ls, pairs, n, desks)) && (!best || t.score > best.score)) best = t;
+    best = best || carve(ls, pairs, -1, null);
+    ls.forEach(function (a, i) { var c = best.boxes[i]; put(a.hit, 'x', r1(c.x0)); put(a.hit, 'y', r1(c.y0)); put(a.hit, 'width', r1(c.x1 - c.x0)); put(a.hit, 'height', r1(c.y1 - c.y0)); });
+  }
+  function cross(p, q) { return p.x0 < q.x1 && q.x0 < p.x1 && p.y0 < q.y1 && q.y0 < p.y1; }
+  function middleOf(b) { return { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 }; }
+  // the lounge boxes with overlapping pair k split along y when bit k of axes is set, else along x (axes -1: along the axis
+  // the two are farther apart along); with desks, every box grows back to TAP where it can and is checked: null when one
+  // stays under TAP or overlaps another box or a desk, else its score (how much of each cat's head its own box holds)
+  function carve(ls, pairs, axes, desks) {
+    var boxes = ls.map(function (a) { var b = a.hitBox; return { x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, cut: {} }; });
+    pairs.forEach(function (p, k) {
+      var pa = middleOf(ls[p[0]].hitBox), pb = middleOf(ls[p[1]].hitBox), ax = axes < 0 ? (Math.abs(pb.x - pa.x) >= Math.abs(pb.y - pa.y) ? 'x' : 'y') : axes >> k & 1 ? 'y' : 'x';
+      var at = (pa[ax] + pb[ax]) / 2, lo = pb[ax] > pa[ax] ? boxes[p[0]] : boxes[p[1]], hi = lo === boxes[p[0]] ? boxes[p[1]] : boxes[p[0]];
+      lo[ax + '1'] = Math.min(lo[ax + '1'], at);
+      lo.cut[ax + '1'] = 1;
+      hi[ax + '0'] = Math.max(hi[ax + '0'], at);
+      hi.cut[ax + '0'] = 1;
     });
-    ls.forEach(function (a) { var c = a.cut; put(a.hit, 'x', r1(c.x0)); put(a.hit, 'y', r1(c.y0)); put(a.hit, 'width', r1(c.x1 - c.x0)); put(a.hit, 'height', r1(c.y1 - c.y0)); });
+    if (!desks) return { boxes: boxes };
+    var ok = boxes.every(function (b) {
+      return ['x', 'y'].every(function (ax) {
+        if (b[ax + '1'] - b[ax + '0'] >= TAP) return true;
+        if (!b.cut[ax + '0']) b[ax + '0'] = b[ax + '1'] - TAP;
+        else if (!b.cut[ax + '1']) b[ax + '1'] = b[ax + '0'] + TAP;
+        else return false;
+        return true;
+      });
+    }) && boxes.every(function (b, i) { return boxes.concat(desks).every(function (c, j) { return j === i || !cross(b, c); }); });
+    return ok ? { boxes: boxes, score: boxes.reduce(function (s, b, i) { var h = ls[i].headBox; return s + Math.max(0, Math.min(b.x1, h.x1) - Math.max(b.x0, h.x0)) * Math.max(0, Math.min(b.y1, h.y1) - Math.max(b.y0, h.y0)); }, 0) } : null;
   }
 
   // ---- the boss cat (plan Must have 12): the owner's own cat, one per office; never a desk, a session or a count ---------
@@ -524,6 +585,31 @@
   function drawMe(v, t) {
     var f = footOf(v, t);
     put(v.me.pos, 'transform', 'translate(' + f.x + ',' + f.y + ') scale(1)');
+  }
+  // a phone's pan frame keeps the boss in view: when its floor is drawn (at once) and whenever it reaches a tile (smoothly,
+  // at once under reduced motion) the frame scrolls just enough to hold its drawing a cat's width inside the edge; a hand
+  // pan in between is the owner's. The floor drawing and the step's own finish call it: no timer
+  function follow(v, first) {
+    var pan = v.pan, m = v.walk && pan && pan.scrollWidth > pan.clientWidth + 1 && typeof v.svg.getScreenCTM === 'function' ? v.svg.getScreenCTM() : null;
+    if (!m || typeof m.a !== 'number') return;
+    var f = footOf(v, v.me.tile), r = pan.getBoundingClientRect(), pad = CAT * m.a;
+    var x0 = m.a * (f.x - CAT / 2) + m.c * f.y + m.e, x1 = m.a * (f.x + CAT / 2) + m.c * f.y + m.e;
+    var by = x0 < r.left + pad ? x0 - r.left - pad : x1 > r.right - pad ? x1 - r.right + pad : 0;
+    if (by) panBy(pan, by, first || calm() ? 'instant' : 'smooth');
+  }
+  // a desk or cat that takes the focus (Tab) comes whole into a phone's pan frame at once: its hit rect, where its focus
+  // ring is drawn, inside the frame's edge; one wholly inside keeps the frame
+  function reveal(v, n) {
+    var pan = v.pan, hit = n && n.querySelector('.of-hit');
+    if (!hit || !(pan.scrollWidth > pan.clientWidth + 1)) return;
+    var r = hit.getBoundingClientRect(), f = pan.getBoundingClientRect(), by = r.left < f.left ? r.left - f.left - 8 : r.right > f.right ? r.right - f.right + 8 : 0;
+    if (by) panBy(pan, by, 'instant');
+  }
+  // the pan frame scrolled by `by` px within its range (scrollTo where the browser has it)
+  function panBy(pan, by, how) {
+    var to = Math.max(0, Math.min(pan.scrollWidth - pan.clientWidth, pan.scrollLeft + by));
+    if (typeof pan.scrollTo === 'function') pan.scrollTo({ left: to, behavior: how });
+    else pan.scrollLeft = to;
   }
   // its painter place: right after the last prop or desk near it (within NEAR floor tiles) that it stands in front of (its
   // middle beyond that thing's far x or y edge), from any of tiles; a step paints it from both ends, so it is drawn over
@@ -552,7 +638,7 @@
   function stand(v) {
     var me = v.me, from = me.anim ? shown(me.walk, footOf(v, me.to)) : null, moving = !!me.anim;
     hush(me);
-    if (moving) { drawMe(v, me.tile); paint(v, [me.tile]); }
+    if (moving) { drawMe(v, me.tile); paint(v, [me.tile]); stopped(v); }
     return from;
   }
   function stepTo(v, to, from) {
@@ -573,8 +659,9 @@
     me.tile = me.to;
     me.to = null;
     me.path = null;
+    follow(v, false);
     if (rest && rest.length && doc.getElementById('office') === v.root) walk(v, rest, null, true);
-    else paint(v, [me.tile]);
+    else { paint(v, [me.tile]); stopped(v); }
   }
   // walks path (walk tiles) a step at a time from where it shows (from), or is at its end at once under reduced motion
   function walk(v, path, from, click) {
@@ -583,6 +670,8 @@
       me.tile = path[path.length - 1];
       drawMe(v, me.tile);
       paint(v, [me.tile]);
+      follow(v, false);
+      stopped(v);
       return;
     }
     stepTo(v, path[0], from);
@@ -634,7 +723,7 @@
     } else if (me.anim) from = stand(v);
     var x = me.tile % w + d[0], y = Math.floor(me.tile / w) + d[1];
     if (free(v, x, y)) walk(v, [y * w + x], from, false);
-    else if (from) { drawMe(v, me.tile); paint(v, [me.tile]); }
+    else if (from) { drawMe(v, me.tile); paint(v, [me.tile]); stopped(v); }
   }
   // the keys are the office's only while it is the view shown (its root in the page, not under the narrow sidebar
   // overlay) and the focus is in no text field (an input, textarea, select or contenteditable keeps its keys: the annotate
@@ -667,6 +756,7 @@
   function boss(v, f) {
     var me = v.me;
     if (!f) { hush(me); v.walk = null; drop(me.g); return; }
+    var fresh = v.fresh;
     if (!me.g.parentNode) v.depth.appendChild(me.g);
     var key = f.walk.blocked.join(',');
     if (v.fresh || key !== v.walkKey) {
@@ -679,6 +769,7 @@
       v.fresh = false;
     }
     if (!me.anim) { drawMe(v, me.tile); paint(v, [me.tile]); }
+    if (fresh) follow(v, true);
   }
 
   // ---- the talk dialog (plan Must have 13) ------------------------------------------------------------------------------
@@ -769,7 +860,7 @@
     v.talk.parts = { name: h('h3', 'of-tk-name', who), where: h('p', 'of-tk-where', who), state: h('span', '', head), info: el('dl', { class: 'of-tk-info' }, b, true), asks: null, note: null };
     el('button', { type: 'button', class: 'of-tk-x' }, head, true).textContent = '닫기';
     v.talk.parts.foot = h('div', 'of-tk-foot', b);
-    el('button', { type: 'button', class: 'of-open', 'data-sh': 'open', 'data-sid': m.sid, 'data-sub': m.sub || null }, v.talk.parts.foot, true).textContent = '대화 열기';
+    el('button', { type: 'button', class: 'of-tk-open', 'data-sh': 'open', 'data-sid': m.sid, 'data-sub': m.sub || null }, v.talk.parts.foot, true).textContent = '대화 열기';
     return b;
   }
   function infoRow(it) {
@@ -867,15 +958,19 @@
       t.id = id;
       t.sid = v.sid;
       drawTalk(v, v.f);
+      quiet(v);
     }
     if (t.el) t.el.focus();
   }
+  // with a dialog open, the floor card's 대화 열기 takes the outline look the dialog's has: one filled 대화 열기 at most
+  function quiet(v) { var b = v.cardParts && v.cardParts.open; if (b) put(b, 'class', v.talk.el ? 'of-open is-quiet' : 'of-open'); }
   function shut(v) {
     var t = v.talk, a = doc.activeElement, had = !!(t.el && a && t.el.contains(a));
     drop(t.el);
     t.el = t.parts = t.id = t.sid = null;
     t.asks = {};
     delete v.rows.talk;
+    quiet(v);
     if (had) v.root.focus({ preventScroll: true });
   }
   // the cat under a pointer click: a lounge cat's whole drawing, a desk cat's head; null on its desk or anything else
@@ -920,13 +1015,15 @@
     var boxes = tree('conveyor', g.BriefOfficeArt.props.conveyor)[0].kids.slice(2, 5);
     var step = waves.length > 1 ? Math.min(3, 15.2 / (waves.length - 1)) : 3;
     waves.forEach(function (w, i) {
-      var tone = i < conv.current || conv.current < 0 ? 0 : i === conv.current ? 1 : 2, x = 1.8 + i * step, ink = ['#4fd1a5', '#7aa2ff', '#8b97b3'][tone];
+      // a done wave takes the rest tone (office.css .of-done: --c-gray; green is a working cat's), the current one blue
+      var tone = i < conv.current || conv.current < 0 ? 0 : i === conv.current ? 1 : 2, x = 1.8 + i * step, ink = ['#8b97b3', '#7aa2ff', '#8b97b3'][tone];
       var b = v.boxes[i] || (v.boxes[i] = { g: el('g', null, v.dyn), tone: -1 });
       put(b.g, 'transform', move(i * step - [0, 3, 6][tone], 0));
+      put(b.g, 'class', tone ? 'of-crate' : 'of-crate of-done');
       if (b.tone !== tone) { b.g.textContent = ''; build(boxes[tone], b.g); b.tone = tone; }
       var p = iso(x + step / 2, 5.6, 8);
       belt.push({ id: i, x: p[0], y: p[1] - 26, label: (w.n || i + 1) + '단계' + (tone === 0 ? ' ✓' : tone === 1 ? ' ●' : ''), rank: tone === 1 ? 2 : tone === 0 ? 1 : 0,
-        o: { cls: 'of-wave', alts: BELT_AT, h: 18, rx: 9, fs: 11.5, fill: '#0e1528', stroke: ink, color: ink } });
+        o: { cls: tone ? 'of-wave' : 'of-wave of-done', alts: BELT_AT, h: 18, rx: 9, fs: 11.5, fill: '#0e1528', stroke: ink, color: ink } });
     });
     v.boxes.splice(waves.length).forEach(function (b) { drop(b.g); });
     var cur = conv && conv.current >= 0 ? waves[conv.current] : null;
@@ -982,7 +1079,7 @@
     for (var k in v.pills) if (v.pills[k].pass !== v.pass) { drop(v.pills[k].g); delete v.pills[k]; }
     v.labels = labels;
     v.faces = found.faces;
-    settle(labels, shade(v).concat(v.faces));
+    settle(labels, obstacles(v));
   }
 
   // ---- HTML chrome -----------------------------------------------------------------------------------------------------
@@ -1015,6 +1112,8 @@
     h('span', 'of-ft', b, it.title);
     if (it.dec) h('span', 'of-n', b, String(it.dec));
     h('span', 'of-fs', b, it.word);
+    // the floor shown: a check besides the pressed wash, so it never looks like a hovered row
+    if (it.on) glyph(el('svg', { class: 'ic of-on', 'aria-hidden': 'true', focusable: 'false' }, b), [['href', '#i-check']]);
     return b;
   }
   // the picker's toggle (shown narrow only, office.css): the floor shown, and whether the folded list is open
@@ -1141,8 +1240,11 @@
       walk: null, walkKey: null, off: {}, order: [], fresh: true, f: null, talk: { id: null, sid: null, el: null, parts: null, asks: {} } };
     // .of-pan: nothing of its own wide (display: contents); narrow, the scene's frame; on a phone, the scene pans sideways
     var body = h('div', 'of-body', root), stage = h('div', 'of-stage', body), pan = h('div', 'of-pan', stage);
+    v.pan = pan;
     v.svg = el('svg', { class: 'of-scene', viewBox: '30 0 1000 700', preserveAspectRatio: 'xMidYMid meet', role: 'group' }, pan);
     set(base(v.svg), 'aria-hidden', 'true');
+    // on the frame, not the svg: a focus listener on an svg element makes Chrome give the svg a Tab stop of its own
+    pan.addEventListener('focusin', function (ev) { reveal(v, ev.target.closest('[data-desk]')); });
     v.dyn = el('g', { class: 'of-l-belt', 'aria-hidden': 'true' }, v.svg);
     var c0 = iso(4, 0, 100);
     v.wall = [0, 1, 2].map(function (i) { return el('text', { transform: 'translate(' + r1(c0[0] + 10) + ',' + r1(c0[1] + 20 + i * 15) + ') skewY(30)', 'font-size': 11, fill: i ? '#8fb0ff' : '#ffcf5a' }, v.dyn); });
@@ -1181,7 +1283,7 @@
     v.rail = h('div', 'of-rail', body);
     v.box = { todo: section(v.rail, '대표님 할 일', 'ul', true), alert: section(v.rail, '알림', 'ul', true), people: section(v.rail, '사무실 사람들', 'ul', true), log: section(v.rail, '활동 로그', 'ol', false) };
     // the overlays keep their CSS size while the scene scales, so a new stage size settles the labels again
-    if (typeof g.ResizeObserver === 'function') new g.ResizeObserver(function () { if (v.labels) settle(v.labels, shade(v).concat(v.faces)); }).observe(stage);
+    if (typeof g.ResizeObserver === 'function') new g.ResizeObserver(function () { stopped(v); }).observe(stage);
     root.addEventListener('click', function (ev) {
       var n = ev.target && ev.target.closest ? ev.target : null, t = n ? n.closest('[data-floor]') : null, id = null;
       if (n && n.closest('.of-ftog')) { v.pickOpen = !v.pickOpen; drawToggle(v, v.f); return; }
@@ -1249,6 +1351,7 @@
     });
     part(v, 'rail', JSON.stringify([f, sc.ceo, sc.alerts, sc.people, sc.log, pub, floors]), function () { drawRail(v, f); });
     drawTalk(v, f);
+    quiet(v);
     refs(v);
     motion(v);
   }

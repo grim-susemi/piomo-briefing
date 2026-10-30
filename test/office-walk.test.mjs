@@ -106,6 +106,63 @@ function tab(e, hidden) {
 }
 // a free walk tile `rows` tiles up the hall from the spawn (the column from the lounge door to the upper rooms is free)
 const upHall = (floor, rows) => [floor.spawn.x, floor.spawn.y - rows];
+// every drawn label as its pill box in scene units, and the boss's drawing on walk tile x, y (head and body: CAT 46 at
+// scale 1, its feet on the tile's middle)
+function labelBoxes(office) {
+  return office.querySelector('.of-l-top').children.filter((n) => n.querySelector('rect')).map((n) => {
+    const [x, y] = /translate\(([-\d.]+),([-\d.]+)\)/.exec(n.getAttribute('transform')).slice(1).map(Number), r = n.querySelector('rect');
+    const x0 = x + Number(r.getAttribute('x')), y0 = y + Number(r.getAttribute('y'));
+    return { name: n.getAttribute('class') + ':' + n.textContent, x0, y0, x1: x0 + Number(r.getAttribute('width')), y1: y0 + Number(r.getAttribute('height')) };
+  });
+}
+const overlap = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+function bossBox(x, y) { const [fx, fy] = iso((x + 0.5) * TILE, (y + 0.5) * TILE); return { x0: fx - 23, x1: fx + 23, y0: fy - 46 * 1.42, y1: fy }; }
+// the walk tiles the boss reaches from the spawn, nearest first
+function reachOrder(floor) {
+  const w = floor.walk.w, start = floor.spawn.y * w + floor.spawn.x, seen = new Set([start]), queue = [start];
+  for (let i = 0; i < queue.length; i++) {
+    const x = queue[i] % w, y = (queue[i] - x) / w;
+    for (const [dx, dy] of SIDES) if (free(floor, x + dx, y + dy) && !seen.has((y + dy) * w + x + dx)) { seen.add((y + dy) * w + x + dx); queue.push((y + dy) * w + x + dx); }
+  }
+  return queue.map((t) => [t % w, (t - (t % w)) / w]);
+}
+// a phone's pan frame: the scene's 720 px at 0.72 px a unit (viewBox x from 30) inside a 310 px frame at (12, 160) that
+// scrolls; the scene's screen matrix follows the frame's scrollLeft, its scrollTo calls are recorded, and a hit rect's
+// client box comes from its scene box (a desk's through its place group). The shell stays wide: its narrow overlay would
+// make the office inert in this DOM
+function phonePan({ animate, env = {} } = {}) {
+  const k = 0.72, frame = { left: 12, top: 160, width: 310, height: 504 }, calls = [];
+  let pan = null;
+  const ctm = function () {
+    const m = { a: k, b: 0, c: 0, d: k, e: frame.left - 30 * k - (this.parentNode ? this.parentNode.scrollLeft : 0), f: frame.top };
+    return { ...m, inverse: () => ({ a: 1 / k, b: 0, c: 0, d: 1 / k, e: -m.e / k, f: -m.f / k }) };
+  };
+  const sceneBox = (r) => {
+    const num = (a) => Number(r.getAttribute(a)), b = { x0: num('x'), y0: num('y'), x1: num('x') + num('width'), y1: num('y') + num('height') };
+    const place = /translate\(([-\d.]+),([-\d.]+)\) scale\(([-\d.]+)\) translate/.exec(r.parentNode.getAttribute('transform') || '');
+    if (!place) return b;
+    const [ax, ay, s] = place.slice(1).map(Number);
+    return { x0: ax + (b.x0 - 470) * s, x1: ax + (b.x1 - 470) * s, y0: ay + (b.y0 - 120) * s, y1: ay + (b.y1 - 120) * s };
+  };
+  const client = (b) => { const left = k * b.x0 + frame.left - 30 * k - pan.scrollLeft, top = k * b.y0 + frame.top; return { left, top, width: k * (b.x1 - b.x0), height: k * (b.y1 - b.y0) }; };
+  const has = (n, c) => (n.getAttribute('class') || '').split(' ').includes(c);
+  const opened = openOffice({ animate, env, configure: (ctx) => {
+    const make = ctx.document.createElement, get = ctx.rects.get.bind(ctx.rects);
+    ctx.document.createElement = (tag) => {
+      const n = make(tag);
+      n.scrollLeft = 0;
+      n.getScreenCTM = ctm;
+      n.scrollTo = function (o) { calls.push({ left: o.left, behavior: o.behavior }); this.scrollLeft = Math.max(0, Math.min(o.left, 720 - frame.width)); };
+      Object.defineProperty(n, 'scrollWidth', { get() { return has(this, 'of-pan') ? 720 : 0; } });
+      return n;
+    };
+    ctx.rects.get = (n) => get(n) || (has(n, 'of-pan') ? frame : has(n, 'of-hit') && pan ? client(sceneBox(n)) : undefined);
+  } });
+  opened.office.querySelector('.of-scene').getScreenCTM = ctm;
+  pan = opened.office.querySelector('.of-pan');
+  const hitBox = (u) => { const r = client(sceneBox(u.querySelector('.of-hit'))); return { ...r, right: r.left + r.width }; };
+  return { ...opened, k, frame, calls, pan, hitBox };
+}
 
 test('the boss cat stands at the lounge door of the shown floor in its gold crown, and it is no desk, session or count', () => {
   // Given the fixture board, When 사무실 opens, Then one boss cat stands on the floor's spawn tile with the crown, and the
@@ -408,6 +465,77 @@ test('another floor starts the boss at that floor\'s lounge door and ends its wa
   press(e, 'ArrowUp', 'ArrowUp');
   e.fire(office.querySelectorAll('.of-fl')[0], 'click');
   assert.deepEqual(bossAt(office), [first.spawn.x, first.spawn.y]);
+});
+
+test('labels step aside from the boss cat once it stops: no bubble, desk name or belt label stays on its drawing', async () => {
+  // Given a tile the boss reaches where a label now lies on its drawing, When it walks there and stops (a click walk with
+  // motion, then under reduced motion a walk that ends at once), Then no label but the rooms' and the boss desk's own count
+  // lies on the boss
+  const anims = animations(), env = {}, { e, office } = openOffice({ animate: anims.animate, env }), floor = shown(e, office);
+  const fixed = (b) => /^of-room:|^of-bub:할 일 /.test(b.name);
+  const covered = ([x, y]) => labelBoxes(office).filter((b) => !fixed(b) && overlap(b, bossBox(x, y))).map((b) => b.name);
+  const target = reachOrder(floor).find((t) => covered(t).length);
+  assert.ok(target, 'a reachable tile under a label');
+  clickTile(e, office, ...target);
+  while (steps(anims, office).some((a) => a.playState === 'running')) await finishStep(anims, office);
+  assert.deepEqual(bossAt(office), target);
+  assert.deepEqual(covered(target), []);
+  reduceMotion(env, true);
+  const again = reachOrder(floor).find((t) => covered(t).length && shortest(floor, target, t) > 0);
+  assert.ok(again, 'another reachable tile under a label');
+  clickTile(e, office, ...again);
+  assert.deepEqual(bossAt(office), again);
+  assert.deepEqual(covered(again), []);
+});
+
+test('on a phone the pan frame keeps the boss in view: scrolled to it when its floor is drawn, again when it stops near an edge; a hand pan stays', async () => {
+  // Given a phone's pan frame (phonePan: scrolled to 0), When 사무실 opens, Then the frame was scrolled at once (instant)
+  // so the boss's drawing is inside it; When the boss steps up the hall towards the frame's right edge, Then after every
+  // step it is still inside, scrolled smoothly from the step's own finish (no timer); a hand pan away and a publish do not
+  // scroll the frame back; under reduced motion the next step scrolls at once
+  const env = {}, anims = animations(), { e, office, vm, k, frame, calls, pan } = phonePan({ animate: anims.animate, env });
+  const floor = shown(e, office);
+  const inFrame = () => { const b = bossBox(...bossAt(office)), x0 = k * b.x0 + frame.left - 30 * k - pan.scrollLeft, x1 = k * b.x1 + frame.left - 30 * k - pan.scrollLeft; return x0 >= frame.left && x1 <= frame.left + frame.width; };
+  assert.deepEqual(bossAt(office), [floor.spawn.x, floor.spawn.y]);
+  assert.ok(calls.length >= 1 && calls.every((c) => c.behavior === 'instant'), JSON.stringify(calls));
+  assert.ok(pan.scrollLeft > 0 && inFrame(), 'the spawn is in the frame');
+  const timers = e.timers.length, first = calls.length;
+  for (let i = 1; i <= 6; i++) {
+    press(e, 'ArrowUp', 'ArrowUp');
+    await finishStep(anims, office);
+    assert.deepEqual(bossAt(office), upHall(floor, i));
+    assert.ok(inFrame(), 'in the frame after step ' + i);
+  }
+  assert.ok(calls.length > first && calls.slice(first).every((c) => c.behavior === 'smooth'), JSON.stringify(calls.slice(first)));
+  assert.equal(e.timers.length, timers, 'no timer');
+  pan.scrollLeft = 0;
+  const before = calls.length;
+  vm.seq = e.page.state.seq + 1;
+  e.advance(600);
+  e.page.receive(clone(vm));
+  assert.deepEqual([calls.length, pan.scrollLeft], [before, 0], 'a hand pan stays');
+  reduceMotion(env, true);
+  press(e, 'ArrowUp', 'ArrowUp');
+  assert.deepEqual(bossAt(office), upHall(floor, 7));
+  assert.ok(inFrame() && calls.length > before && calls.at(-1).behavior === 'instant', JSON.stringify(calls.slice(before)));
+});
+
+test('on a phone a desk or cat that takes the focus is brought whole into the pan frame at once; one wholly in it keeps the frame', () => {
+  // Given the phone's pan frame with the leftmost desk cut 20 px by the frame's left edge, When that desk takes the focus
+  // (Tab), Then the frame scrolls at once (instant, from the focus event: no timer) until the desk's hit rect, where its
+  // focus ring is drawn, lies inside; When a desk wholly inside takes the focus, Then the frame stays where it is
+  const { e, office, frame, calls, pan, hitBox } = phonePan();
+  const units = office.querySelectorAll('.of-desk'), leftmost = units.slice().sort((a, b) => hitBox(a).left - hitBox(b).left)[0];
+  pan.scrollLeft += hitBox(leftmost).left - frame.left + 20;
+  assert.ok(hitBox(leftmost).left < frame.left, 'the desk is cut by the frame');
+  const timers = e.timers.length, before = calls.length;
+  e.fire(leftmost, 'focusin');
+  const b = hitBox(leftmost);
+  assert.ok(b.left >= frame.left && b.right <= frame.left + frame.width, JSON.stringify(b));
+  assert.deepEqual([calls.length - before, calls.at(-1).behavior, e.timers.length], [1, 'instant', timers]);
+  const inside = units.find((u) => hitBox(u).left > frame.left + 9 && hitBox(u).right < frame.left + frame.width - 9), at = pan.scrollLeft;
+  e.fire(inside, 'focusin');
+  assert.deepEqual([pan.scrollLeft, calls.length - before], [at, 1]);
 });
 
 test('the boss is painted after what it stands in front of and before what it stands behind', () => {

@@ -193,17 +193,40 @@ test('a pointer click on a cat\'s own drawing talks to it; the desk under it, a 
   assert.deepEqual(e.errors, []);
 });
 
+test('one filled 대화 열기 at most: the floor card\'s while no dialog is open; with a dialog open the card\'s and the dialog\'s are the outline kind', () => {
+  // Given the office, Then the card's 대화 열기 is the one filled open button (.of-open, not .is-quiet); When the lead's
+  // dialog opens (and a publish comes in), Then no filled 대화 열기 is left: the dialog's is .of-tk-open and the card's
+  // .is-quiet; When it closes, Then the card's is filled again; a worker's dialog the same
+  const { e, office, vm } = openOffice();
+  const filled = () => office.querySelectorAll('button[data-sh="open"]').filter((b) => b.classes.has('of-open') && !b.classes.has('is-quiet')).map((b) => b.closest('.of-card') ? 'card' : b.closest('.of-talk') ? 'dialog' : 'other');
+  const kinds = () => [office.querySelector('.of-card [data-sh="open"]').getAttribute('class'), dialog(office).querySelector('.of-tk-foot [data-sh="open"]').getAttribute('class')];
+  assert.deepEqual(filled(), ['card']);
+  talkToLead(e, office);
+  assert.deepEqual(filled(), []);
+  assert.deepEqual(kinds(), ['of-open is-quiet', 'of-tk-open']);
+  publish(e, clone(vm));
+  assert.deepEqual(filled(), []);
+  press(e, 'Escape', 'Escape');
+  assert.equal(dialog(office), null);
+  assert.deepEqual(filled(), ['card']);
+  walkTo(e, office, besideOnly(e, shown(e, office), 'st_r3_03'));
+  press(e, 'e', 'KeyE');
+  assert.ok(dialog(office), 'the worker\'s dialog is open');
+  assert.deepEqual(filled(), []);
+  assert.deepEqual(kinds(), ['of-open is-quiet', 'of-tk-open']);
+});
+
 test('the lead cat\'s dialog shows its session from the view model, the kit\'s answer box for each open decision and the note box', () => {
   // Given o-r3 (in progress, live, decision 516 open, notes taken), When the lead is talked to on the live board, Then the
-  // dialog names the floor, the title, the state and the headline, lists #516 with view.js's answer box (data-where office)
-  // and has the note box; 대화 열기 is the lead's open action
+  // dialog names the floor, the title, the state, the headline and the todo rows (하는 일, 다음, 할 일 from auto and next),
+  // lists #516 with view.js's answer box (data-where office) and has the note box; 대화 열기 is the lead's open action
   const { e, office, vm } = openOffice();
   const s = vm.sessions.find((x) => x.id === SID), d = s.decisions.find((x) => x.id === DEC), box = talkToLead(e, office);
   assert.equal(box.querySelector('.of-tk-name').textContent, '리더 · 작업실');
   assert.equal(box.querySelector('.of-tk-where').textContent, '6층 · ' + s.title);
   assert.equal(box.querySelector('.of-tk-head .of-st').textContent, '일함');
   assert.equal(rowText(box, 'headline'), s.headline);
-  assert.equal(rowText(box, 'next'), null, 'an empty next is no row');
+  assert.deepEqual(['step', 'next', 'todo'].map((k) => rowText(box, k)), [s.auto.todoCurrent, s.next, s.auto.todoDone + '/' + s.auto.todoTotal]);
   assert.equal(rowText(box, 'open'), '1건 기다림');
   const ask = box.querySelector('.of-tk-ask[data-ask="' + DEC + '"]');
   assert.ok(ask.querySelector('.of-tk-q').textContent.includes(d.question));
