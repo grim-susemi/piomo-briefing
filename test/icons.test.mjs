@@ -157,7 +157,7 @@ const BASELINE_PAGE_BYTES = 563709;
 // files last changed (plan todo 8, the visual QA round 3 fixes); it is taken out of the growth and the 32 KB budget still holds
 // for everything else. No further size cap: lag is judged by todo 7 (CPU budget) and F3. The diagnostic prints the
 // current office bytes; re-record the constant under the same decision when the office files change.
-const OFFICE_ALLOWANCE_BYTES = 145897;
+const OFFICE_ALLOWANCE_BYTES = 146297;
 const OFFICE_FILES = ['office-assets.js', 'office-model.js', 'office-view.js', 'office.css'];
 function officeChunks() {
   return OFFICE_FILES.map((f) => {

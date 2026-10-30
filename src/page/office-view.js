@@ -304,19 +304,29 @@
     var f = footOf(v, v.me.tile);
     return [{ face: '@me', lvl: 2, x0: f.x - CAT / 2, x1: f.x + CAT / 2, y0: f.y - CAT * 1.42, y1: f.y + 2 }];
   }
+  // where the boss's drawing stands at the spawn: kept clear by the labels wherever the boss is, so the labels the floor
+  // shows at the spawn show however far it walks
+  function homeBox(v) {
+    if (!v.walk || !v.me.g.parentNode || v.me.home == null) return [];
+    var f = footOf(v, v.me.home);
+    return [{ x0: f.x - CAT / 2, x1: f.x + CAT / 2, y0: f.y - CAT * 1.42, y1: f.y + 2 }];
+  }
   // what the labels settle around: the overlays and the wall screens' text (hard), the boss cat and the other cats' faces
   // (soft), and the other desks' and lounge cats' hit rects (soft, kept off longest)
-  function obstacles(v) { return shade(v).concat(wallBoxes(v), v.faces || [], v.hitBoxes || []); }
-  // the labels settle around the boss where it stands; when that would leave out a label that fits without the boss, they
-  // settle as without it (the boss never removes a label)
+  function obstacles(v) { return shade(v).concat(wallBoxes(v), v.faces || []); }
+  // the labels settle four ways: around the boss and the other desks' and cats' hit rects, around the hit rects only,
+  // around the boss only, around neither; the first way that places the most labels wins, so neither the boss nor a hit
+  // rect ever costs a label. A label left over another desk's or cat's hit rect lets the pointer through to it
   function placeLabels(v) {
-    var list = v.labels, base = obstacles(v), me = meBox(v);
+    var list = v.labels, base = obstacles(v).concat(homeBox(v)), hit = v.hitBoxes || [], me = meBox(v), best = null, most = -1;
     if (!list) return;
-    settle(list, base);
-    if (!me.length) return;
-    var kept = list.filter(function (p) { return !!p.g.parentNode; });
-    settle(list, base.concat(me));
-    if (kept.some(function (p) { return !p.g.parentNode; })) settle(list, base);
+    [base.concat(hit, me), base.concat(hit), base.concat(me), base].forEach(function (o) {
+      settle(list, o);
+      var n = list.filter(function (p) { return !!p.g.parentNode; }).length;
+      if (n > most) { most = n; best = o; }
+    });
+    settle(list, best);
+    list.forEach(function (p) { if (p.g.parentNode) put(p.g, 'data-pass', hit.some(function (q) { return q.face !== p.o.key && cross(p.box, q); }) ? '1' : '0'); });
   }
   // the labels settle again around the boss where it stopped
   function stopped(v) { placeLabels(v); }
@@ -349,8 +359,7 @@
       }
       if (pick === null) { drop(p.g); return; }
       if (!p.g.parentNode) p.parent.appendChild(p.g);
-      // a label left over another desk's or cat's hit rect lets a pointer through to it (its own cat keeps its hit area)
-      put(p.g, 'data-pass', placed.some(function (q) { return q.lvl === 2 && q.face !== '@me' && q.face !== p.o.key && cross(b, q); }) ? '1' : '0');
+      p.box = b;
       put(p.g, 'transform', 'translate(' + r1(p.x + pick[0]) + ',' + r1(p.y + pick[1]) + ')');
       if (p.tail) put(p.tail, 'transform', 'translate(' + -pick[0] + ',0)');
       placed.push(b);
@@ -787,7 +796,8 @@
       v.walkKey = key;
       v.off = {};
       f.walk.blocked.forEach(function (k) { v.off[k] = 1; });
-      if (v.fresh || has(v.off, me.tile)) { hush(me); me.tile = f.spawn.y * f.walk.w + f.spawn.x; }
+      me.home = f.spawn.y * f.walk.w + f.spawn.x;
+      if (v.fresh || has(v.off, me.tile)) { hush(me); me.tile = me.home; }
       else if ([me.to].concat(me.path || []).some(function (t) { return t !== null && has(v.off, t); })) hush(me);
       v.fresh = false;
     }
@@ -1046,7 +1056,7 @@
       if (b.tone !== tone) { b.g.textContent = ''; build(boxes[tone], b.g); b.tone = tone; }
       var p = iso(x + step / 2, 5.6, 8);
       belt.push({ id: i, x: p[0], y: p[1] - 26, label: (w.n || i + 1) + '단계' + (tone === 0 ? ' ✓' : tone === 1 ? ' ●' : ''), rank: tone === 1 ? 2 : tone === 0 ? 1 : 0,
-        o: { cls: tone ? 'of-wave' : 'of-wave of-done', alts: BELT_AT.filter(function (a) { return Math.abs(a[0]) < 29.5 * step; }), h: 18, rx: 9, fs: 11.5, fill: '#0e1528', stroke: ink, color: ink } });
+        o: { cls: tone ? 'of-wave' : 'of-wave of-done', alts: BELT_AT, h: 18, rx: 9, fs: 11.5, fill: '#0e1528', stroke: ink, color: ink } });
     });
     v.boxes.splice(waves.length).forEach(function (b) { drop(b.g); });
     var cur = conv && conv.current >= 0 ? waves[conv.current] : null;
@@ -1096,10 +1106,9 @@
     v.order = items;
     boss(v, f);
     var byRank = function (list) { return list.sort(function (a, b) { return b.rank - a.rank; }); };
-    // the belt's labels first: each keeps to its own wave's slot, so the desks' and cats' labels make way for them
-    byRank(belt).forEach(function (t) { pill(v, labels, 'wave:' + t.id, t.x, t.y, t.label, t.o); });
     byRank(found.tags).forEach(function (t) { pill(v, labels, 'tag:' + t.id, t.x, t.y, t.label, t.o); });
     if (!pub) byRank(found.bubbles).forEach(function (t) { pill(v, labels, 'bub:' + t.id, t.x, t.y, t.label, t.o); });
+    byRank(belt).forEach(function (t) { pill(v, labels, 'wave:' + t.id, t.x, t.y, t.label, t.o); });
     for (var k in v.pills) if (v.pills[k].pass !== v.pass) { drop(v.pills[k].g); delete v.pills[k]; }
     v.labels = labels;
     v.faces = found.faces;
