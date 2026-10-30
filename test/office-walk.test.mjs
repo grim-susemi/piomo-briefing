@@ -469,12 +469,13 @@ test('another floor starts the boss at that floor\'s lounge door and ends its wa
   assert.deepEqual(bossAt(office), [first.spawn.x, first.spawn.y]);
 });
 
-test('the boss cat stopping never removes a label: the labels drawn after a stop (with motion, then reduced) are the ones drawn before', async () => {
+test('the boss cat stopping never removes a desk name, room name or belt label; only a bubble whose every place within its tail\'s reach lies on the boss is left out while it stands there', async () => {
   // Given a tile the boss reaches where a label lies on its drawing, When it walks there and stops (a click walk with
   // motion, then under reduced motion a walk that ends at once), Then the same labels are drawn: the boss is a soft
   // obstacle, avoided only where a label has a free place
   const anims = animations(), env = {}, { e, office } = openOffice({ animate: anims.animate, env }), floor = shown(e, office);
-  const names = () => labelBoxes(office).map((b) => b.name).sort();
+  // the labels that must stay through a stop: all but the bubbles (a bubble yields to the boss and comes back after)
+  const names = () => labelBoxes(office).map((b) => b.name).filter((n) => !/^of-bub:/.test(n)).sort();
   const covered = ([x, y]) => labelBoxes(office).filter((b) => !/^of-room:/.test(b.name) && overlap(b, bossBox(x, y))).map((b) => b.name);
   const before = names();
   const target = reachOrder(floor).find((t) => covered(t).length);
@@ -656,7 +657,10 @@ test('labels stay when the boss walks: after 5 steps up the hall the same labels
   const spawn = names();
   for (let i = 1; i <= 5; i++) { press(e, 'ArrowUp', 'ArrowUp'); await finishStep(anims, office); }
   assert.deepEqual(bossAt(office), upHall(floor, 5));
-  assert.deepEqual(names(), spawn);
+  // every desk name, room name and belt label stays; only a bubble may yield to the boss where it stands
+  const keep = (l) => l.filter((n) => !/^of-bub:/.test(n));
+  assert.deepEqual(keep(names()), keep(spawn));
+  assert.ok(names().every((n) => spawn.includes(n)), 'no label appears that was not drawn at the spawn');
   // and none of them lies on the boss's drawing (the rooms' names are fixed and never move)
   const onBoss = () => { const b = bossBox(...bossAt(office)); return labelBoxes(office).filter((l) => !/^of-room:/.test(l.name) && overlap(l, b)).map((l) => l.name); };
   assert.deepEqual(onBoss(), []);
@@ -683,4 +687,53 @@ test('the empty floor card keeps the numeral with its counter: no breakable spac
   const t = office.querySelector('.of-card .of-empty').textContent;
   assert.ok(t.includes('층'), t);
   assert.ok(!/한[ \t\n]층/.test(t), JSON.stringify(t));
+});
+
+// every drawn label's offset from its own anchor (the pill group's data-ax/data-ay, the place it was asked for), in scene
+// units, with its class:text name
+function labelOffsets(office) {
+  return office.querySelector('.of-l-top').children.filter((n) => n.querySelector('rect')).map((n) => {
+    const [x, y] = /translate\(([-\d.]+),([-\d.]+)\)/.exec(n.getAttribute('transform')).slice(1).map(Number);
+    return { name: n.getAttribute('class') + ':' + n.textContent, dx: x - Number(n.getAttribute('data-ax')), dy: y - Number(n.getAttribute('data-ay')) };
+  });
+}
+
+test('labels stay near what they name, at the spawn and after a 5-step walk: belt labels in their wave slot and one belt row, others within 48 units, a bubble only where its tail reaches its cat, none on the boss', async () => {
+  // Given the fixture floor, When it is drawn and again after 5 steps up the hall, Then every belt label sits less than
+  // half a slot (44 units) along the belt from its anchor and at most one belt row (0..84 down, 35 up along the belt)
+  // off it; a tag lies within 48 units of its anchor; a bubble at most 54 sideways (its tail stays on the cat) and 24 up
+  // or 4 down (its tail's reach); no label lies on the boss; and the labels drawn are the same set both times
+  const anims = animations(), { e, office } = openOffice({ animate: anims.animate }), floor = shown(e, office);
+  const check = (when) => {
+    for (const l of labelOffsets(office)) {
+      if (/^of-room:/.test(l.name)) continue;
+      if (/^of-wave/.test(l.name)) {
+        assert.ok(Math.abs(l.dx) < 44, when + ' ' + l.name + ' dx ' + l.dx);
+        assert.ok(l.dy >= -35 && l.dy <= 84, when + ' ' + l.name + ' dy ' + l.dy);
+      } else if (/^of-bub:/.test(l.name)) assert.ok(Math.abs(l.dx) <= 54 && l.dy >= -24 && l.dy <= 4, when + ' ' + l.name + ' ' + l.dx + ',' + l.dy);
+      else assert.ok(Math.hypot(l.dx, l.dy) <= 48 + 0.5, when + ' ' + l.name + ' ' + l.dx + ',' + l.dy);
+    }
+    const b = bossBox(...bossAt(office));
+    assert.deepEqual(labelBoxes(office).filter((l) => !/^of-room:/.test(l.name) && overlap(l, b)).map((l) => l.name), [], when + ' on the boss');
+  };
+  check('spawn');
+  const spawn = labelBoxes(office).map((b) => b.name).sort();
+  for (let i = 1; i <= 5; i++) { press(e, 'ArrowUp', 'ArrowUp'); await finishStep(anims, office); }
+  assert.deepEqual(bossAt(office), upHall(floor, 5));
+  check('walked');
+  const now = labelBoxes(office).map((b) => b.name).sort(), keep = (l) => l.filter((n) => !/^of-bub:/.test(n));
+  assert.deepEqual(keep(now), keep(spawn), 'every desk name, room name and belt label stays');
+  assert.ok(now.every((n) => spawn.includes(n)), 'no new label');
+});
+
+test('the boss never leaves the walk map: keys up the free hall column stop at its top row, and a click walk ends', () => {
+  // Given reduced motion (each key moves at once), When ArrowUp is pressed more times than there are rows above the
+  // spawn, Then the boss stands on a tile of the map (row 0 or below); then a click off the floor walks nowhere
+  const env = { reduce: true }, { e, office } = openOffice({ env }), floor = shown(e, office);
+  for (let i = 0; i < floor.spawn.y + 4; i++) press(e, 'ArrowUp', 'ArrowUp');
+  const [x, y] = bossAt(office);
+  assert.ok(x >= 0 && y >= 0 && x < floor.walk.w && y < floor.walk.h, 'on the map: ' + x + ',' + y);
+  const at = bossAt(office);
+  clickTile(e, office, -3, -3);
+  assert.deepEqual(bossAt(office), at);
 });
