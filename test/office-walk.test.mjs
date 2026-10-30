@@ -467,25 +467,26 @@ test('another floor starts the boss at that floor\'s lounge door and ends its wa
   assert.deepEqual(bossAt(office), [first.spawn.x, first.spawn.y]);
 });
 
-test('labels step aside from the boss cat once it stops: no bubble, desk name or belt label stays on its drawing', async () => {
-  // Given a tile the boss reaches where a label now lies on its drawing, When it walks there and stops (a click walk with
-  // motion, then under reduced motion a walk that ends at once), Then no label but the rooms' and the boss desk's own count
-  // lies on the boss
+test('the boss cat stopping never removes a label: the labels drawn after a stop (with motion, then reduced) are the ones drawn before', async () => {
+  // Given a tile the boss reaches where a label lies on its drawing, When it walks there and stops (a click walk with
+  // motion, then under reduced motion a walk that ends at once), Then the same labels are drawn: the boss is a soft
+  // obstacle, avoided only where a label has a free place
   const anims = animations(), env = {}, { e, office } = openOffice({ animate: anims.animate, env }), floor = shown(e, office);
-  const fixed = (b) => /^of-room:|^of-bub:할 일 /.test(b.name);
-  const covered = ([x, y]) => labelBoxes(office).filter((b) => !fixed(b) && overlap(b, bossBox(x, y))).map((b) => b.name);
+  const names = () => labelBoxes(office).map((b) => b.name).sort();
+  const covered = ([x, y]) => labelBoxes(office).filter((b) => !/^of-room:/.test(b.name) && overlap(b, bossBox(x, y))).map((b) => b.name);
+  const before = names();
   const target = reachOrder(floor).find((t) => covered(t).length);
   assert.ok(target, 'a reachable tile under a label');
   clickTile(e, office, ...target);
   while (steps(anims, office).some((a) => a.playState === 'running')) await finishStep(anims, office);
   assert.deepEqual(bossAt(office), target);
-  assert.deepEqual(covered(target), []);
+  assert.deepEqual(names(), before);
   reduceMotion(env, true);
   const again = reachOrder(floor).find((t) => covered(t).length && shortest(floor, target, t) > 0);
   assert.ok(again, 'another reachable tile under a label');
   clickTile(e, office, ...again);
   assert.deepEqual(bossAt(office), again);
-  assert.deepEqual(covered(again), []);
+  assert.deepEqual(names(), before);
 });
 
 test('on a phone the pan frame keeps the boss in view: scrolled to it when its floor is drawn, again when it stops near an edge; a hand pan stays', async () => {
@@ -628,4 +629,48 @@ test('the boss\'s place stays in the page: the office files never store or send 
   } finally {
     Error.stackTraceLimit = limit;
   }
+});
+
+// the hit rects of every desk and lounge cat in scene units: a lounge cat's rect sits in its walk group (scene units), a
+// desk's in its place group (translate(ax,ay) scale(s) translate(-OX,-OY))
+function hitRects(office) {
+  return office.querySelectorAll('rect.of-hit').map((r) => {
+    const x = Number(r.getAttribute('x')), y = Number(r.getAttribute('y')), w = Number(r.getAttribute('width')), h = Number(r.getAttribute('height'));
+    const m = /^translate\(([-\d.]+),([-\d.]+)\) scale\(([-\d.]+)\)/.exec(r.parentNode.getAttribute('transform') || '');
+    if (!m) return { x0: x, y0: y, x1: x + w, y1: y + h };
+    const [ax, ay, s] = m.slice(1).map(Number), f = (px, py) => [ax + (px - OX) * s, ay + (py - OY) * s];
+    const [x0, y0] = f(x, y), [x1, y1] = f(x + w, y + h);
+    return { x0, y0, x1, y1 };
+  });
+}
+
+test('labels stay when the boss walks: after 5 steps up the hall the same labels show as at the spawn, each belt label in its own wave order', async () => {
+  // Given the fixture floor, When the boss steps 5 tiles up the hall (each step finished), Then the drawn labels are the
+  // ones drawn at the spawn (none dropped for the boss), and the belt labels keep the waves' order along the belt
+  const anims = animations(), { e, office } = openOffice({ animate: anims.animate }), floor = shown(e, office);
+  const names = () => labelBoxes(office).map((b) => b.name).sort();
+  const spawn = names();
+  for (let i = 1; i <= 5; i++) { press(e, 'ArrowUp', 'ArrowUp'); await finishStep(anims, office); }
+  assert.deepEqual(bossAt(office), upHall(floor, 5));
+  assert.deepEqual(names(), spawn);
+  const waves = labelBoxes(office).filter((b) => /of-wave/.test(b.name)).map((b) => [parseInt(b.name.split(':')[1], 10), (b.x0 + b.x1) / 2]).sort((a, b) => a[0] - b[0]);
+  for (let i = 1; i < waves.length; i++) assert.ok(waves[i][1] > waves[i - 1][1], 'belt labels in wave order: ' + JSON.stringify(waves));
+});
+
+test('no label covers the middle of a desk or lounge cat hit rect, so a tap there reaches that desk or cat', () => {
+  // Given the fixture floor, Then no drawn label box contains the middle of any desk's or lounge cat's hit rect
+  const { office } = openOffice();
+  const labels = labelBoxes(office), bad = [];
+  for (const h of hitRects(office)) {
+    const cx = (h.x0 + h.x1) / 2, cy = (h.y0 + h.y1) / 2;
+    for (const b of labels) if (b.x0 < cx && cx < b.x1 && b.y0 < cy && cy < b.y1) bad.push(b.name + ' @ ' + Math.round(cx) + ',' + Math.round(cy));
+  }
+  assert.deepEqual(bad, []);
+});
+
+test('the empty floor card keeps the numeral with its counter: no breakable space between 한 and 층', () => {
+  const { office } = openOffice({ vm: { ...fixture('view-model-office.json'), sessions: [] } });
+  const t = office.querySelector('.of-card .of-empty').textContent;
+  assert.ok(t.includes('층'), t);
+  assert.ok(!/한[ \t\n]층/.test(t), JSON.stringify(t));
 });

@@ -302,15 +302,16 @@
   function meBox(v) {
     if (!v.walk || !v.me.g.parentNode) return [];
     var f = footOf(v, v.me.tile);
-    return [{ x0: f.x - CAT / 2, x1: f.x + CAT / 2, y0: f.y - CAT * 1.42, y1: f.y + 2 }];
+    return [{ face: '@me', lvl: 2, x0: f.x - CAT / 2, x1: f.x + CAT / 2, y0: f.y - CAT * 1.42, y1: f.y + 2 }];
   }
-  // what the labels settle around: the overlays, the wall screens' text and the boss cat, then the other cats' faces
-  function obstacles(v) { return shade(v).concat(wallBoxes(v), meBox(v), v.faces || []); }
+  // what the labels settle around: the overlays and the wall screens' text (hard), the boss cat and the other cats' faces
+  // (soft), and the other desks' and lounge cats' hit rects (soft, kept off longest)
+  function obstacles(v) { return shade(v).concat(wallBoxes(v), meBox(v), v.faces || [], v.hitBoxes || []); }
   // the labels settle again around the boss where it stopped
   function stopped(v) { if (v.labels) settle(v.labels, obstacles(v)); }
-  // labels stay off the overlays, the wall screens' text, the boss cat and each other (a label with no free place stays
-  // out), and off another cat's face where any of their places allows it (a face is a box with face: its desk id; a
-  // label's own cat never counts); every patch, every stage resize and every stop of the boss settles them again, so a
+  // labels stay off the overlays, the wall screens' text and each other (a label with no free place stays out); a soft box
+  // (face: its desk id, or '@me' for the boss cat; a label's own cat never counts) is kept off where any place allows it:
+  // first every soft box, then only the hit rects (lvl 2), then none, so the boss never removes a label; every patch, every stage resize and every stop of the boss settles them again, so a
   // label dropped at one size or moment can come back at another; a text is measured once while in the page
   function settle(list, shadeBoxes) {
     var placed = shadeBoxes.slice();
@@ -323,11 +324,18 @@
       // a label that would cover another tries its other places first: a bubble higher or to a side (its tail stays on
       // the cat), a belt label along the belt or under it
       var tries = p.o.alts || [[0, 0]], pick = null, b = null;
-      for (var k = 0; k < 2 && pick === null; k++) for (var i = 0; i < tries.length && pick === null; i++) {
+      var least = Infinity;
+      for (var k = 0; k < 3 && pick === null; k++) for (var i = 0; i < tries.length && (k === 2 || pick === null); i++) {
         var dx = tries[i][0], dy = tries[i][1];
         if (p.tail && Math.abs(dx) > p.w / 2 - 12) continue;
         var c = { x0: p.x + dx - p.w / 2, x1: p.x + dx + p.w / 2, y0: p.y + dy - p.o.h / 2 - 3, y1: p.y + dy + p.o.h / 2 + (p.o.tail ? 4 : 1) };
-        if (p.o.keep || !placed.some(function (q) { return (!q.face || (!k && q.face !== p.o.key)) && c.x0 < q.x1 && q.x0 < c.x1 && c.y0 < q.y1 && q.y0 < c.y1; })) { pick = tries[i]; b = c; }
+        if (p.o.keep) { pick = tries[i]; b = c; break; }
+        if (k < 2) { if (!placed.some(function (q) { return (!q.face || (k < (q.lvl || 1) && q.face !== p.o.key)) && cross(c, q); })) { pick = tries[i]; b = c; } continue; }
+        // no place clear of the soft boxes: the place clear of the hard ones that covers the least of them
+        // ... and never on the middle of another desk's or cat's hit rect (a tap there must reach that one)
+        if (placed.some(function (q) { return (!q.face || (q.lvl === 2 && q.face !== '@me' && q.face !== p.o.key && c.x0 < (q.x0 + q.x1) / 2 && (q.x0 + q.x1) / 2 < c.x1 && c.y0 < (q.y0 + q.y1) / 2 && (q.y0 + q.y1) / 2 < c.y1)) && cross(c, q); })) continue;
+        var lap = placed.reduce(function (n, q) { return q.face === p.o.key || !cross(c, q) ? n : n + (Math.min(c.x1, q.x1) - Math.max(c.x0, q.x0)) * (Math.min(c.y1, q.y1) - Math.max(c.y0, q.y0)); }, 0);
+        if (lap < least) { least = lap; pick = tries[i]; b = c; }
       }
       if (pick === null) { drop(p.g); return; }
       if (!p.g.parentNode) p.parent.appendChild(p.g);
@@ -527,12 +535,15 @@
   // clear of the others and of the desks wins, the one that keeps most of each cat's own head first; with none (a crowded
   // lounge), each pair meets along the axis the two are farther apart along, so a click on a cat is never its neighbour's
   function hits(v) {
-    var ls = [], desks = [], pairs = [], best = null, id, n, t;
-    for (id in v.units) if (v.units[id].hit) ls.push(v.units[id]); else if (v.units[id].deskBox) desks.push(v.units[id].deskBox);
+    var ls = [], lid = [], desks = [], pairs = [], best = null, id, n, t;
+    for (id in v.units) if (v.units[id].hit) { ls.push(v.units[id]); lid.push(id); } else if (v.units[id].deskBox) desks.push(v.units[id].deskBox);
     ls.forEach(function (a, i) { for (var j = i + 1; j < ls.length; j++) if (cross(a.hitBox, ls[j].hitBox)) pairs.push([i, j]); });
     for (n = 0; pairs.length <= 8 && n < 1 << pairs.length; n++) if ((t = carve(ls, pairs, n, desks)) && (!best || t.score > best.score)) best = t;
     best = best || carve(ls, pairs, -1, null);
-    ls.forEach(function (a, i) { var c = best.boxes[i]; put(a.hit, 'x', r1(c.x0)); put(a.hit, 'y', r1(c.y0)); put(a.hit, 'width', r1(c.x1 - c.x0)); put(a.hit, 'height', r1(c.y1 - c.y0)); });
+    // every hit rect, for the other cats' labels to keep off where they can
+    v.hitBoxes = [];
+    for (id in v.units) if (v.units[id].deskBox) v.hitBoxes.push(Object.assign({ face: id, lvl: 2 }, v.units[id].deskBox));
+    ls.forEach(function (a, i) { var c = best.boxes[i]; v.hitBoxes.push({ face: lid[i], lvl: 2, x0: c.x0, x1: c.x1, y0: c.y0, y1: c.y1 }); put(a.hit, 'x', r1(c.x0)); put(a.hit, 'y', r1(c.y0)); put(a.hit, 'width', r1(c.x1 - c.x0)); put(a.hit, 'height', r1(c.y1 - c.y0)); });
   }
   function cross(p, q) { return p.x0 < q.x1 && q.x0 < p.x1 && p.y0 < q.y1 && q.y0 < p.y1; }
   function middleOf(b) { return { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 }; }
@@ -1023,7 +1034,7 @@
       if (b.tone !== tone) { b.g.textContent = ''; build(boxes[tone], b.g); b.tone = tone; }
       var p = iso(x + step / 2, 5.6, 8);
       belt.push({ id: i, x: p[0], y: p[1] - 26, label: (w.n || i + 1) + '단계' + (tone === 0 ? ' ✓' : tone === 1 ? ' ●' : ''), rank: tone === 1 ? 2 : tone === 0 ? 1 : 0,
-        o: { cls: tone ? 'of-wave' : 'of-wave of-done', alts: BELT_AT, h: 18, rx: 9, fs: 11.5, fill: '#0e1528', stroke: ink, color: ink } });
+        o: { cls: tone ? 'of-wave' : 'of-wave of-done', alts: BELT_AT.filter(function (a) { return Math.abs(a[0]) < 29.5 * step / 2; }), h: 18, rx: 9, fs: 11.5, fill: '#0e1528', stroke: ink, color: ink } });
     });
     v.boxes.splice(waves.length).forEach(function (b) { drop(b.g); });
     var cur = conv && conv.current >= 0 ? waves[conv.current] : null;
@@ -1142,7 +1153,7 @@
       if (!c || c.floor !== !!f) {
         v.card.textContent = '';
         c = v.cardParts = { floor: !!f };
-        if (!f) { h('p', 'of-empty', v.card, '대화를 시작하면 그 대화가 한 층이 돼요'); return; }
+        if (!f) { h('p', 'of-empty', v.card, '대화를 시작하면 그 대화가 한\u00a0층이 돼요'); return; }
         c.no = h('span', 'of-cn', v.card);
         c.box = h('div', 'of-ct', v.card);
         c.title = h('b', '', c.box);
