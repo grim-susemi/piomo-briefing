@@ -1,6 +1,7 @@
-/* omo-briefing office view (office-view.js). The chrome around the scene (title, floor picker, floor card, rail) uses
+/* omo-briefing office view (office-view.js). The chrome around the scene (toolbar, floor picker, floor card, rail) uses
  * tokens.css only, in both themes. The scene inside the SVG keeps the mockup's own night palette in both themes: those
- * colours are art and live in office-view.js / office-assets.js. Wide: scene | rail; narrow: the scene, the rail under it. */
+ * colours are art and live in office-view.js / office-assets.js. Wide: scene | rail; narrow: the scene, the rail under it.
+ * The scene's motion is at the end of this sheet. */
 .of { container-type: inline-size; box-sizing: border-box; height: 100%; color: var(--c-fg); }
 .of-body { display: grid; gap: var(--sp-3); box-sizing: border-box; padding: var(--sp-3); }
 .of-stage { position: relative; overflow: hidden; aspect-ratio: 10 / 7; min-height: 240px; max-height: calc(100dvh - 96px);
@@ -12,7 +13,17 @@
 .of-desk:focus-visible .of-hit { stroke: var(--c-accent); stroke-width: 3; }
 
 .of-head, .of-floors, .of-card { position: absolute; box-sizing: border-box; border-radius: var(--r-xl); background: var(--c-pop); box-shadow: var(--shadow-pop); }
-.of-head { left: var(--sp-3); top: var(--sp-3); margin: 0; padding: var(--sp-1) var(--sp-3); border-radius: var(--r-md); font-size: var(--fs-base); font-weight: var(--fw-semibold); }
+/* the toolbar: the title and the 공개 모드 switch (page.js data-act="office-public"; aria-checked is ui.publicMode) */
+.of-head { left: var(--sp-3); top: var(--sp-3); display: flex; align-items: center; gap: var(--sp-2); margin: 0; padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3); border-radius: var(--r-md); }
+.of-title { margin: 0; font-size: var(--fs-base); font-weight: var(--fw-semibold); }
+.of-pub { position: relative; display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--ctl-h); padding: 0 var(--sp-2); border: 0; border-radius: var(--r-md);
+  background: none; color: var(--c-fg-2); font: inherit; font-size: var(--fs-sm); white-space: nowrap; cursor: pointer; }
+.of-sw { position: relative; flex: none; width: var(--sp-6); height: var(--sp-4); border-radius: var(--r-full); background: var(--fill-sel); }
+.of-sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: var(--sp-3); height: var(--sp-3); border-radius: var(--r-full); background: var(--c-fg-3);
+  transition: transform var(--dur) var(--ease-out); }
+.of-pub[aria-checked="true"] { color: var(--c-fg); }
+.of-pub[aria-checked="true"] .of-sw { background: var(--c-primary); }
+.of-pub[aria-checked="true"] .of-sw::after { background: var(--c-on-primary); transform: translateX(var(--sp-2)); }
 .of-floors { right: var(--sp-3); top: var(--sp-3); width: 224px; max-height: 46%; overflow: auto; padding: var(--sp-2); }
 .of-floors h3 { margin: 0 0 var(--sp-1); padding: 0 var(--sp-2); color: var(--c-fg-3); font-size: var(--fs-sm); font-weight: var(--fw-medium); }
 .of-fl { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--ctl-h); padding: 0 var(--sp-2); border: 0;
@@ -28,6 +39,7 @@
 .of-ct { display: grid; min-width: 0; }
 .of-ct b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .of-ct small { color: var(--c-fg-3); font-size: var(--fs-sm); }
+.of-where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .of-open { flex: none; min-height: var(--ctl-h); padding: 0 var(--sp-3); border: 0; border-radius: var(--r-md); background: var(--c-primary);
   color: var(--c-on-primary); font: inherit; font-size: var(--fs-sm); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
 
@@ -49,12 +61,12 @@
 .of-log b { flex: none; color: var(--c-fg); font-variant-numeric: tabular-nums; }
 .of-empty { margin: 0; padding: 0 var(--sp-2); color: var(--c-fg-3); font-size: var(--fs-sm); }
 
-.of-fl:hover, .of-it:hover { background: var(--fill-hover); }
+.of-fl:hover, .of-it:hover, .of-pub:hover { background: var(--fill-hover); }
 .of-fl[aria-pressed="true"] { background: var(--fill-sel); }
-.of-fl:active, .of-it:active { background: var(--fill-press); }
+.of-fl:active, .of-it:active, .of-pub:active { background: var(--fill-press); }
 .of-open:hover { background: var(--c-fg-2); }
 .of-open:active { background: color-mix(in srgb, var(--c-primary) 80%, var(--c-main)); }
-.of-fl:focus-visible, .of-it:focus-visible, .of-open:focus-visible { outline: 2px solid var(--c-accent); outline-offset: -2px; }
+.of-fl:focus-visible, .of-it:focus-visible, .of-open:focus-visible, .of-pub:focus-visible { outline: 2px solid var(--c-accent); outline-offset: -2px; }
 
 @container (min-width: 1040px) {
   .of-body { height: 100%; grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: minmax(0, 1fr); }
@@ -66,5 +78,38 @@
 }
 @media (max-width: 599px) {
   .of-fl, .of-it, .of-open { min-height: var(--hit); }
-  .of-floors { top: calc(2 * var(--sp-3) + 28px); left: var(--sp-3); width: auto; max-height: 40%; }
+  /* the switch keeps the toolbar one control high: its touch target grows to --hit around it, invisibly */
+  .of-pub::before { content: ""; position: absolute; inset: calc((var(--ctl-h) - var(--hit)) / 2) 0; }
+  /* a phone-wide card would only show the start of the tab label and cwd; the conversation view has them */
+  .of-where { display: none; }
+  .of-floors { top: calc(2 * var(--sp-3) + var(--ctl-h) + 2 * var(--sp-1)); left: var(--sp-3); width: auto; max-height: 40%; }
+}
+
+/* motion (plan todo 6): transform and opacity keyframes only, all driven by the browser (office-view.js starts no timer).
+ * Working cats type, idle lounge cats stroll, a cat on its way bobs, every cat blinks, the belt's boxes move along their
+ * slots and a resting cat's z floats up; a desk's of-b0..3 beat staggers its delays. A desk or cat that moved gets one
+ * el.animate() on .of-walk / .of-slide, whose keyframes are scene coordinates (origin 0 0). */
+.of-walk, .of-slide { transform-box: view-box; transform-origin: 0 0; }
+.of-desk.is-typing .of-cat { animation: of-type .42s ease-in-out infinite alternate; }
+.of-desk.is-stroll .of-cat { animation: of-stroll 11s ease-in-out infinite; }
+.of-desk.is-walking .of-cat { animation: of-type .28s ease-in-out infinite alternate; }
+.of-lid { opacity: 0; animation: of-blink 4.2s linear infinite; }
+.of-z { animation: of-z 2.4s ease-out infinite; }
+.of .oa-box { animation: of-belt 6s linear infinite; }
+.of-desk.of-b1 .of-cat { animation-delay: -2.1s; }
+.of-desk.of-b2 .of-cat { animation-delay: -4.6s; }
+.of-desk.of-b3 .of-cat { animation-delay: -7.3s; }
+.of-b1 .of-lid, .of-b1 .of-z { animation-delay: -1.3s; }
+.of-b2 .of-lid, .of-b2 .of-z { animation-delay: -2.6s; }
+.of-b3 .of-lid, .of-b3 .of-z { animation-delay: -3.5s; }
+@keyframes of-type { to { transform: translateY(-2.5px); } }
+@keyframes of-stroll { 0%, 100% { transform: none; } 20%, 30% { transform: translate(10px, 6px); } 50%, 60% { transform: translate(0, 12px); } 80%, 90% { transform: translate(-10px, 6px); } }
+@keyframes of-blink { 0%, 94%, 100% { opacity: 0; } 95.5%, 97.5% { opacity: 1; } }
+@keyframes of-z { 0% { opacity: 0; transform: none; } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(10px, -18px); } }
+@keyframes of-belt { 0% { opacity: 0; transform: none; } 12%, 88% { opacity: 1; } 100% { opacity: 0; transform: translate(29.4px, 17px); } }
+/* a hidden tab: office-view.js visibility() sets data-motion="paused" and pauses the walks; every keyframe holds */
+.of[data-motion="paused"] * { animation-play-state: paused !important; }
+/* reduced motion: nothing in the office moves, and no walk starts, so a cat is simply in its new room */
+@media (prefers-reduced-motion: reduce) {
+  .of *, .of *::before, .of *::after { animation: none !important; transition: none !important; }
 }

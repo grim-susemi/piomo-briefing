@@ -1,14 +1,25 @@
-/* omo-briefing office view (plan todo 5): classic script (file:// safe, no modules). Draws one floor of the scene
+/* omo-briefing office view (plan todos 5-6): classic script (file:// safe, no modules). Draws one floor of the scene
  * g.BriefOffice.scene(vm, ui, now) builds as an isometric SVG in the mockup's projection (origin 470,120, 34-unit tiles,
- * office-assets.js art), plus the HTML chrome around it: the floor picker, the floor card and the rail (대표님 할 일, 알림,
- * 사무실 사람들, 활동 로그). Model text only ever goes through textContent or a plain attribute value (set(), this file's one
- * attribute sink); the art strings are parsed through a tag and attribute allowlist, never handed to innerHTML.
+ * office-assets.js art), plus the HTML chrome around it: the toolbar (title, 공개 모드 switch), the floor picker, the
+ * floor card and the rail (대표님 할 일, 알림, 사무실 사람들, 활동 로그). Model text only ever goes through textContent or
+ * a plain attribute value (set(), this file's one attribute sink); the art strings are parsed through a tag and attribute
+ * allowlist, never handed to innerHTML.
+ * Every render patches what is already drawn. Desks, cats, labels, belt boxes, picker rows and rail rows are keyed (desk
+ * id, label key, wave, floor sid, row key): a node stays while its key stays, a changed value is written in place, and
+ * only a key that appears or goes away adds or removes nodes. Another floor is drawn anew.
+ * Motion is the browser's: CSS keyframes in office.css (typing, lounge strolls, blinking, the belt, z) and one
+ * el.animate() per desk or cat that moved (a cat whose room changed walks through the hall). No timer, rAF or polling
+ * here. A hidden tab holds it all (the root's data-motion="paused" for the CSS, pause() for the walks; page.js's
+ * visibilitychange hook calls visibility()); under reduced motion office.css stops the keyframes and no walk starts, so
+ * a cat is simply in its new room. The todo-5 probe found SVG transform animations composited on their own layers, so
+ * the actors stay in this SVG.
  * A desk is the board's existing open action, data-sh="open" + data-sid (+ data-sub="wk" on a worker) that shell.js
- * dispatches; Enter or Space on a focused desk clicks it. Static on purpose: no timer, rAF or animation here (todo 6).
- * The todo-5 probe found SVG transform animations composited on their own layers, so actors stay in this SVG: each cat is
- * an outer <g transform> (position) around a free <g class="of-cat"> (todo 6's motion target).
+ * dispatches; Enter or Space on a focused desk clicks it. The 공개 모드 switch is page.js's data-act="office-public"
+ * (ui.publicMode, off by default): it hides the bubbles, the conversation's tab label and its cwd.
  *   g.BriefOfficeView.render(root, vm, ui)   draws or patches the office inside root (#office); one floor at a time
- *   g.BriefOfficeView.layout(floor)           -> {deskId: {x, y, z, s}} the grid cell of every desk (pure) */
+ *   g.BriefOfficeView.layout(floor)           -> {deskId: {x, y, z, s}} the grid cell of every desk (pure)
+ *   g.BriefOfficeView.visibility()            holds or resumes the shown office's motion with document.hidden
+ *   g.__office                                {sid, desks: {id: node}, cats: {id: node}}: the live desk and cat nodes */
 (function (g) {
   'use strict';
   var doc = g.document;
@@ -41,29 +52,72 @@
   var TONE = { working: 'run', running: 'run', in_progress: 'run', waiting: 'wait', needs_decision: 'wait', recheck: 'wait', blocked: 'err', error: 'err', lost: 'err' };
   var ROOM_NAME = {};
   ROOMS.forEach(function (r) { ROOM_NAME[r[0]] = r[1]; });
+  // motion: CAT is a cat's drawn size (its pos transform scales it); a walk between rooms crosses the hall row HALL (tiles,
+  // between the belt and the lower rooms) at PACE px/s and lasts WALK[0]..WALK[1] ms
+  var CALM = '(prefers-reduced-motion: reduce)', CAT = 46, HALL = 7, PACE = 140, WALK = [400, 3000];
+  // the blink's closed eyes in the traced head's 0 0 100 100 box: a face-coloured lid over each eye ring and a lash line
+  var LID = 'M18.8,60.1a10.4,11.3 0 1,0 20.8,0a10.4,11.3 0 1,0 -20.8,0ZM60.4,60.1a10.4,11.3 0 1,0 20.8,0a10.4,11.3 0 1,0 -20.8,0Z';
+  var LASH = 'M20.6,59.4Q29.2,66.4 37.8,59.4M62.2,59.4Q70.8,66.4 79.4,59.4';
 
   function has(o, k) { return o != null && Object.prototype.hasOwnProperty.call(o, k); }
   function str(v) { return typeof v === 'string' ? v : typeof v === 'number' && isFinite(v) ? String(v) : ''; }
   function arr(v) { return Array.isArray(v) ? v : []; }
   function r1(n) { return Math.round(n * 10) / 10; }
+  function r3(n) { return Math.round(n * 1000) / 1000; }
   function iso(x, y, z) { return [OX + (x - y) * KX, OY + (x + y) * KY - (z || 0)]; }
   function pts(list) { return list.map(function (p) { return r1(p[0]) + ',' + r1(p[1]); }).join(' '); }
   function quad(x0, y0, x1, y1) { return pts([iso(x0, y0), iso(x1, y0), iso(x1, y1), iso(x0, y1)]); }
   function move(dx, dy) { return 'translate(' + r1((dx - dy) * KX) + ',' + r1((dx + dy) * KY) + ')'; }
   function word(map, k) { return has(map, k) ? map[k] : str(k); }
 
-  // ---- DOM: one attribute sink, text through textContent -------------------------------------------------------------
+  // ---- DOM: one attribute sink, text through textContent; a patch writes only what changed --------------------------
   function set(n, k, v) { n.setAttribute(k, v); }
+  function put(n, k, v) { if (n.getAttribute(k) !== String(v)) set(n, k, String(v)); }
+  function txt(n, t) { if (n.textContent !== t) n.textContent = t; }
+  function drop(n) { if (n && n.parentNode) n.parentNode.removeChild(n); }
   function el(tag, a, parent, html) {
     var n = html ? doc.createElement(tag) : doc.createElementNS(svgNs(), tag);
     for (var k in a) if (has(a, k) && a[k] !== null && a[k] !== undefined) set(n, k, String(a[k]));
     if (parent) parent.appendChild(n);
     return n;
   }
-  function h(tag, cls, parent, txt) {
+  function h(tag, cls, parent, text) {
     var n = el(tag, cls ? { class: cls } : null, parent, true);
-    if (txt !== undefined) n.textContent = txt;
+    if (text !== undefined) n.textContent = text;
     return n;
+  }
+  // parent's children become wanted, in that order, with the fewest moves: the longest run already in order stays (a
+  // moved node restarts its CSS animations and drops focus, so a node that kept its place is never touched)
+  function order(parent, wanted) {
+    var kids = Array.prototype.slice.call(parent.children), at = wanted.map(function (n) { return kids.indexOf(n); });
+    var len = [], prev = [], best = -1, keep = {}, i, j;
+    for (i = 0; i < at.length; i++) {
+      len[i] = at[i] < 0 ? 0 : 1;
+      prev[i] = -1;
+      for (j = 0; j < i && len[i]; j++) if (len[j] && at[j] < at[i] && len[j] + 1 > len[i]) { len[i] = len[j] + 1; prev[i] = j; }
+      if (len[i] && (best < 0 || len[i] > len[best])) best = i;
+    }
+    for (i = best; i >= 0; i = prev[i]) keep[i] = true;
+    for (i = wanted.length - 1; i >= 0; i--) if (!keep[i]) parent.insertBefore(wanted[i], wanted[i + 1] || null);
+  }
+  // keyed rows: a row whose key and content stay keeps its node, a changed row is drawn again in its place, a key that
+  // went away is removed; make(it) draws one row
+  function rows(v, name, box, items, make) {
+    var old = v.rows[name] || {}, next = {};
+    var nodes = items.map(function (it) {
+      var sig = JSON.stringify(it), r = has(old, it.key) ? old[it.key] : null;
+      if (r && r.sig !== sig) { drop(r.n); r = null; }
+      next[it.key] = r = r || { n: make(it), sig: sig };
+      return r.n;
+    });
+    for (var k in old) if (!has(next, k)) drop(old[k].n);
+    v.rows[name] = next;
+    order(box, nodes);
+  }
+  // row keys from content: the same content twice gets #1, #2
+  function keyed(list, keyOf) {
+    var seen = {};
+    return list.map(function (it) { var k = keyOf(it); seen[k] = (seen[k] || 0) + 1; it.key = k + '#' + seen[k]; return it; });
   }
 
   // ---- art: office-assets.js strings -> nodes, through an allowlist (anything else throws) ---------------------------
@@ -186,7 +240,7 @@
     return b;
   }
 
-  // ---- labels: measured once after insertion, then the first that fits wins (no two overlap) -------------------------
+  // ---- labels: measured once per text after insertion, then the first place that fits wins (no two overlap) ----------
   function estimate(t, fs) {
     var w = 0;
     for (var i = 0; i < t.length; i++) w += t.charCodeAt(i) > 0x2e80 ? fs : fs * .62;
@@ -198,15 +252,22 @@
     for (var i = 0; i < t.length && estimate(out + t[i] + '…', fs) <= max; i++) out += t[i];
     return out + '…';
   }
-  function pill(list, parent, x, y, label, o) {
-    var box = el('g', { class: o.cls, transform: 'translate(' + r1(x) + ',' + r1(y) + ')' }, parent);
-    if (o.act) { set(box, 'data-sh', 'open'); set(box, 'data-sid', o.act[0]); if (o.act[1]) set(box, 'data-sub', o.act[1]); }
-    if (o.key) set(box, 'data-for', o.key);
-    var rect = el('rect', { y: -o.h / 2 - (o.tail ? 2 : 0), height: o.h, rx: o.rx, fill: o.fill, stroke: o.stroke, 'stroke-width': o.tail ? 1.5 : 1 }, box);
-    var tail = o.tail ? el('path', { d: 'M-5,' + r1(o.h / 2 - 2) + ' L0,' + r1(o.h / 2 + 4) + ' L5,' + r1(o.h / 2 - 2) + ' Z', fill: o.stroke }, box) : null;
-    var t = el('text', { 'text-anchor': 'middle', y: r1(o.fs * .36 - (o.tail ? 2 : 0)), 'font-size': o.fs, 'font-weight': o.fw || null, fill: o.color }, box);
-    t.textContent = label;
-    list.push({ g: box, parent: parent, rect: rect, tail: tail, text: t, x: x, y: y, label: label, o: o });
+  // one label per key, kept from patch to patch: a new text is measured again, a new look is a new label
+  function pill(v, list, key, x, y, label, o) {
+    var look = JSON.stringify([o.cls, o.h, o.rx, o.fs, o.fw, o.fill, o.stroke, o.color, o.tail, o.act, o.key]), p = v.pills[key];
+    if (p && p.look !== look) { drop(p.g); p = null; }
+    if (!p) {
+      var box = el('g', { class: o.cls }, v.top);
+      if (o.act) { set(box, 'data-sh', 'open'); set(box, 'data-sid', o.act[0]); if (o.act[1]) set(box, 'data-sub', o.act[1]); }
+      if (o.key) set(box, 'data-for', o.key);
+      p = v.pills[key] = { g: box, parent: v.top, look: look, label: null,
+        rect: el('rect', { y: -o.h / 2 - (o.tail ? 2 : 0), height: o.h, rx: o.rx, fill: o.fill, stroke: o.stroke, 'stroke-width': o.tail ? 1.5 : 1 }, box),
+        tail: o.tail ? el('path', { d: 'M-5,' + r1(o.h / 2 - 2) + ' L0,' + r1(o.h / 2 + 4) + ' L5,' + r1(o.h / 2 - 2) + ' Z', fill: o.stroke }, box) : null,
+        text: el('text', { 'text-anchor': 'middle', y: r1(o.fs * .36 - (o.tail ? 2 : 0)), 'font-size': o.fs, 'font-weight': o.fw || null, fill: o.color }, box) };
+    }
+    if (p.label !== label) { p.text.textContent = label; p.label = label; p.w = 0; }
+    p.x = x; p.y = y; p.o = o; p.pass = v.pass;
+    list.push(p);
   }
   // [dx, dy] tries in order; [0, 4] still ends the tail above the head; sideways tries need a bubble wide enough to keep
   // its tail on the cat
@@ -215,7 +276,7 @@
   // still finds its own desk
   var TAG_AT = [[0, 0], [12, 7], [-12, -7], [24, 14], [-24, -14]];
   var BELT_AT = [[0, 0], [29, 17], [-29, -17], [59, 34], [-59, -34], [0, 50], [29, 67], [-29, 33], [59, 84], [-59, 16]];
-  // the stage's overlays (title, floor picker, floor card) as boxes in scene units, read from the live layout
+  // the stage's overlays (toolbar, floor picker, floor card) as boxes in scene units, read from the live layout
   function shade(v) {
     var m = typeof v.svg.getScreenCTM === 'function' ? v.svg.getScreenCTM() : null;
     if (!m) return [];
@@ -225,13 +286,13 @@
       return { x0: m.a * r.left + m.c * r.top + m.e, y0: m.b * r.left + m.d * r.top + m.f, x1: m.a * r.right + m.c * r.bottom + m.e, y1: m.b * r.right + m.d * r.bottom + m.f };
     });
   }
-  // labels stay off the overlays and off each other; a stage resize settles the same labels again (mount), so a label
-  // dropped at one size can come back at another and the widths are measured once
+  // labels stay off the overlays and off each other; every patch and every stage resize settles them again, so a label
+  // dropped at one size or moment can come back at another; a text is measured once while it is in the page
   function settle(list, shadeBoxes) {
     var placed = shadeBoxes.slice();
     list.forEach(function (p) {
       if (p.w) return;
-      var w = (typeof p.text.getComputedTextLength === 'function' ? p.text.getComputedTextLength() : 0) || estimate(p.label, p.o.fs);
+      var w = (p.g.parentNode && typeof p.text.getComputedTextLength === 'function' ? p.text.getComputedTextLength() : 0) || estimate(p.label, p.o.fs);
       p.w = w + 14;
     });
     list.forEach(function (p) {
@@ -244,23 +305,93 @@
         var c = { x0: p.x + dx - p.w / 2, x1: p.x + dx + p.w / 2, y0: p.y + dy - p.o.h / 2 - 3, y1: p.y + dy + p.o.h / 2 + (p.o.tail ? 4 : 1) };
         if (p.o.keep || !placed.some(function (q) { return c.x0 < q.x1 && q.x0 < c.x1 && c.y0 < q.y1 && q.y0 < c.y1; })) { pick = tries[i]; b = c; }
       }
-      if (pick === null) { if (p.g.parentNode) p.g.parentNode.removeChild(p.g); return; }
+      if (pick === null) { drop(p.g); return; }
       if (!p.g.parentNode) p.parent.appendChild(p.g);
-      set(p.g, 'transform', 'translate(' + r1(p.x + pick[0]) + ',' + r1(p.y + pick[1]) + ')');
-      if (p.tail) set(p.tail, 'transform', 'translate(' + -pick[0] + ',0)');
+      put(p.g, 'transform', 'translate(' + r1(p.x + pick[0]) + ',' + r1(p.y + pick[1]) + ')');
+      if (p.tail) put(p.tail, 'transform', 'translate(' + -pick[0] + ',0)');
       placed.push(b);
-      set(p.rect, 'x', r1(-p.w / 2));
-      set(p.rect, 'width', r1(p.w));
+      put(p.rect, 'x', r1(-p.w / 2));
+      put(p.rect, 'width', r1(p.w));
     });
   }
 
-  // ---- one floor -----------------------------------------------------------------------------------------------------
-  function cat(parent, cx, by, size) {
-    var hh = size * 1.42, pos = el('g', { transform: 'translate(' + r1(cx - size / 2) + ',' + r1(by - hh) + ')' }, parent);
-    var c = el('g', { class: 'of-cat' }, pos);
-    el('use', { href: '#body' }, el('svg', { y: r1(size * .82), width: r1(size), height: r1(size * .6), viewBox: '0 0 100 60', overflow: 'visible' }, c));
-    el('use', { href: '#cat' }, el('svg', { width: r1(size), height: r1(size), viewBox: '0 0 100 100', overflow: 'visible' }, c));
-    return pos;
+  // ---- motion ----------------------------------------------------------------------------------------------------------
+  function still() { return doc.hidden === true || !!(g.matchMedia && g.matchMedia(CALM).matches); }
+  // where a moving part shows now: its running transform applied to the place it was heading for
+  function shown(n, to) {
+    var m = to && typeof g.getComputedStyle === 'function' ? /^matrix\(([^)]+)\)$/.exec(g.getComputedStyle(n).transform) : null;
+    if (!m) return null;
+    var c = m[1].split(',').map(Number);
+    return { x: r1(c[0] * to.x + c[2] * to.y + c[4]), y: r1(c[1] * to.x + c[3] * to.y + c[5]), k: r3(to.k * c[0]) };
+  }
+  // the hall row straight across from p: the ground under p, at the same depth x
+  function onHall(p) {
+    var u = (p.x - OX) / KX, w = (p.y - OY) / KY, q = iso((u + w) / 2, HALL);
+    return { x: q[0], y: q[1] };
+  }
+  // a part that moved travels there: its wrapper starts as the old place (translate, then scale about the new anchor) and
+  // eases to none, through the hall when the room changed; one still on its way starts from where it shows now. Nothing
+  // starts while the tab is hidden or under reduced motion: the part is simply in its new place
+  function travel(rec, part, from, to, hall) {
+    if (from.x === to.x && from.y === to.y && from.k === to.k) return;
+    var n = rec[part], a = rec.anims[part];
+    if (a) { from = shown(n, rec.to[part]) || from; delete rec.anims[part]; a.cancel(); }
+    if (typeof n.animate !== 'function' || still()) return;
+    var path = hall ? [from, onHall(from), onHall(to), to] : [from, to], len = [0], i;
+    for (i = 1; i < path.length; i++) len.push(len[i - 1] + Math.sqrt(Math.pow(path[i].x - path[i - 1].x, 2) + Math.pow(path[i].y - path[i - 1].y, 2)));
+    var all = len[len.length - 1], at = function (j) { return all ? len[j] / all : j / (path.length - 1); };
+    a = rec.anims[part] = n.animate(path.map(function (p, j) {
+      var k = (from.k + (to.k - from.k) * at(j)) / to.k;
+      return { offset: at(j), transform: 'translate(' + r1(p.x) + 'px,' + r1(p.y) + 'px) scale(' + r3(k) + ') translate(' + -to.x + 'px,' + -to.y + 'px)' };
+    }), { duration: Math.round(Math.min(WALK[1], Math.max(WALK[0], all / PACE * 1000))), easing: 'ease-in-out' });
+    rec.to[part] = to;
+    var end = function () { if (rec.anims[part] === a) { delete rec.anims[part]; look(rec); } };
+    a.finished.then(end, end);
+  }
+  // a hidden tab holds every office animation where it is: the CSS ones by the root's data-motion, the walks by pause()
+  function motion(v) {
+    var hidden = doc.hidden === true;
+    put(v.root, 'data-motion', hidden ? 'paused' : 'run');
+    for (var id in v.units) for (var part in v.units[id].anims) {
+      var a = v.units[id].anims[part];
+      if (hidden && a.playState === 'running') a.pause();
+      if (!hidden && a.playState === 'paused') a.play();
+    }
+  }
+
+  // ---- desks and cats: one keyed unit per desk -------------------------------------------------------------------------
+  // a cat drawn at CAT size with its feet on 0,0: walk (el.animate) > pos (transform: place and scale) > .of-cat (the CSS
+  // keyframes) with the body, the head and the head's blink lid
+  function cat(parent) {
+    var walk = el('g', { class: 'of-walk' }, parent), pos = el('g', null, walk), c = el('g', { class: 'of-cat' }, pos);
+    el('use', { href: '#body' }, el('svg', { x: -CAT / 2, y: r1(-CAT * .6), width: CAT, height: r1(CAT * .6), viewBox: '0 0 100 60', overflow: 'visible' }, c));
+    var head = el('svg', { x: -CAT / 2, y: r1(-CAT * 1.42), width: CAT, height: CAT, viewBox: '0 0 100 100', overflow: 'visible' }, c);
+    el('use', { href: '#cat' }, head);
+    var lid = el('g', { class: 'of-lid' }, head);
+    el('path', { d: LID, fill: '#0d1a1a' }, lid);
+    el('path', { d: LASH, fill: 'none', stroke: '#f2f2ee', 'stroke-width': 2.8, 'stroke-linecap': 'round' }, lid);
+    return { walk: walk, pos: pos, cat: c };
+  }
+  // a desk's beat (0-3, from its id) staggers its keyframes so the cats do not type and blink in step
+  function unitOf(v, f, d) {
+    var u = el('g', { 'data-desk': d.id, 'data-sh': 'open', 'data-sid': f.sid, 'data-sub': d.kind === 'worker' ? 'wk' : null, role: 'button', tabindex: 0 }, v.depth);
+    var rec = cat(u), beat = 0;
+    for (var i = 0; i < d.id.length; i++) beat = (beat * 31 + d.id.charCodeAt(i)) % 4;
+    rec.g = u; rec.beat = beat; rec.anims = {}; rec.to = {};
+    return rec;
+  }
+  function look(rec) { put(rec.g, 'class', rec.cls + (rec.anims.walk ? ' is-walking' : '')); }
+  // a monitor's screen: the mockup's on-screen colour when lit, the art's own when not
+  function monitor(rec, parent) {
+    rec.screen = art('monitor', parent).querySelector('polygon');
+    rec.dark = rec.screen ? rec.screen.getAttribute('fill') : '';
+  }
+  function lit(rec, on) { if (rec.screen) put(rec.screen, 'fill', on ? '#5ac8fa' : rec.dark); }
+  function gone(rec) {
+    var a = rec.anims;
+    rec.anims = {};
+    for (var part in a) a[part].cancel();
+    drop(rec.g);
   }
   function deskLabel(d, people) {
     if (d.kind === 'lead') return '리더';
@@ -273,159 +404,219 @@
   }
   function decisionsOf(sc, sid) { return arr(sc.ceo && sc.ceo.items).filter(function (it) { return it.sid === sid && it.sub === 'dec'; }).length; }
 
+  function deskUnit(v, f, d, c, people, found, pub) {
+    var rec = v.units[d.id] || (v.units[d.id] = unitOf(v, f, d));
+    var p = people[d.id], label = deskLabel(d, people), s = c.s, lounge = d.room === 'lounge', alert = d.state === 'error' || d.state === 'lost';
+    var act = [f.sid, d.kind === 'worker' ? 'wk' : ''], o = iso(c.x, c.y, c.z * s), cc = iso(.65, .05, 14);
+    var foot = lounge ? { x: r1(o[0]), y: r1(o[1]), k: r3(34 * s / CAT) } : { x: r1(o[0] + (cc[0] - OX) * s), y: r1(o[1] + (cc[1] + 11 - OY) * s), k: s };
+    var size = CAT * foot.k, top = foot.y - size * 1.42;
+    rec.pass = v.pass;
+    rec.cls = 'of-desk is-' + (d.pose || 'idle') + (lounge && d.pose === 'idle' && !c.z ? ' is-stroll' : '') + ' of-b' + rec.beat;
+    put(rec.g, 'aria-label', deskName(d, p, label) + ' · 대화 열기');
+    if (rec.foot) travel(rec, 'walk', rec.foot, foot, rec.room !== d.room);
+    put(rec.pos, 'transform', 'translate(' + foot.x + ',' + foot.y + ') scale(' + foot.k + ')');
+    rec.foot = foot;
+    rec.room = d.room;
+    look(rec);
+    if (lounge) {
+      if (rec.anims.slide) { rec.anims.slide.cancel(); delete rec.anims.slide; }
+      if (rec.slide) { drop(rec.slide); rec.slide = rec.place = rec.at = rec.lamp = rec.screen = null; }
+      if (!rec.hit) rec.hit = rec.walk.insertBefore(el('rect', { class: 'of-hit', rx: 6, fill: 'transparent' }), rec.walk.firstChild);
+      put(rec.hit, 'x', r1(foot.x - size / 2 - 3));
+      put(rec.hit, 'y', r1(top - 3));
+      put(rec.hit, 'width', r1(size + 6));
+      put(rec.hit, 'height', r1(size * 1.42 + 6));
+    } else {
+      drop(rec.hit);
+      rec.hit = null;
+      if (!rec.slide) {
+        rec.slide = el('g', { class: 'of-slide' }, rec.g);
+        rec.place = el('g', null, rec.slide);
+        el('rect', { class: 'of-hit', x: 438, y: r1(cc[1] + 11 - 46 * 1.42 - 3), width: 82, height: r1(164.2 - (cc[1] + 11 - 46 * 1.42 - 3) + 2), rx: 8, fill: 'transparent' }, rec.place);
+        art('desk', rec.place);
+        monitor(rec, rec.place);
+      }
+      var at = { x: r1(o[0]), y: r1(o[1]), k: s };
+      if (rec.at) travel(rec, 'slide', rec.at, at, false);
+      put(rec.place, 'transform', 'translate(' + at.x + ',' + at.y + ') scale(' + s + ') translate(' + -OX + ',' + -OY + ')');
+      rec.at = at;
+      lit(rec, d.lamp === 'on');
+      if (d.lamp === 'alert' && !rec.lamp) { var a = iso(.2, .8, 14); rec.lamp = el('circle', { cx: r1(a[0]), cy: r1(a[1] - 4), r: 4 }, rec.place); }
+      if (d.lamp !== 'alert' && rec.lamp) { drop(rec.lamp); rec.lamp = null; }
+      if (rec.lamp) put(rec.lamp, 'fill', alert ? '#ff5a7a' : '#ffcf5a');
+      var n = iso(c.x + .8 * s, c.y + s, 0);
+      found.tags.push({ id: d.id, x: n[0], y: n[1] + 13 * s, label: label + (alert ? ' · ' + word(WORKER_WORD, d.state) : ''), rank: alert ? 3 : d.kind === 'lead' ? 2 : 1,
+        o: { cls: 'of-tag', act: act, key: d.id, alts: TAG_AT.map(function (t) { return [r1(t[0] * s), r1(t[1] * s)]; }), h: 19, rx: 8, fs: 12.5, fill: '#0e1528', stroke: alert ? '#ff5a7a' : '#34446e', color: '#e6ebf5' } });
+    }
+    if (d.pose === 'rest' && !rec.z) { rec.z = el('text', { class: 'of-z', 'font-size': 13, 'font-weight': 700, fill: '#8fb0ff' }, rec.walk); rec.z.textContent = 'z'; }
+    if (d.pose !== 'rest' && rec.z) { drop(rec.z); rec.z = null; }
+    if (rec.z) { put(rec.z, 'x', r1(foot.x + size * .3)); put(rec.z, 'y', r1(top + 4)); }
+    if (!pub && d.bubble) {
+      found.bubbles.push({ id: d.id, x: foot.x, y: top - 20 * s, label: cut(d.bubble, 12.5, 176), rank: d.state === 'working' ? 2 : 1,
+        o: { cls: 'of-bub', act: act, key: d.id, alts: BUBBLE_AT, h: 23, rx: 8, fs: 12.5, fill: '#0f1834', stroke: alert ? '#ff5a7a' : d.state === 'waiting' ? '#ffcf5a' : '#3d6ef0', color: '#e6ebf5', tail: 1 } });
+    }
+  }
+
+  // ---- one floor -----------------------------------------------------------------------------------------------------
+  // a dark floor (closed and folded): the whole scene under a night shade, below the labels
+  function dim(v, on) {
+    if (on && !v.dim) v.dim = v.top.insertBefore(el('rect', { x: -2000, y: -2000, width: 5000, height: 5000, fill: '#05070f', opacity: .5 }), v.top.firstChild);
+    if (!on && v.dim) { drop(v.dim); v.dim = null; }
+  }
+  function clearFloor(v, sid) {
+    for (var id in v.units) gone(v.units[id]);
+    for (var k in v.pills) drop(v.pills[k].g);
+    v.boxes.forEach(function (b) { drop(b.g); });
+    v.units = {}; v.pills = {}; v.boxes = []; v.floor = sid;
+  }
+  // the belt: one box per plan wave (done / current / to come, the mockup's three box colours) that office.css moves along
+  // its own slot, and the back-wall screen with the plan's progress
+  function drawBelt(v, f) {
+    var conv = f && f.conveyor, waves = conv ? arr(conv.waves) : [], belt = [];
+    var boxes = tree('conveyor', g.BriefOfficeArt.props.conveyor)[0].kids.slice(2, 5);
+    var step = waves.length > 1 ? Math.min(3, 15.2 / (waves.length - 1)) : 3;
+    waves.forEach(function (w, i) {
+      var tone = i < conv.current || conv.current < 0 ? 0 : i === conv.current ? 1 : 2, x = 1.8 + i * step, ink = ['#4fd1a5', '#7aa2ff', '#8b97b3'][tone];
+      var b = v.boxes[i] || (v.boxes[i] = { g: el('g', null, v.dyn), tone: -1 });
+      put(b.g, 'transform', move(i * step - [0, 3, 6][tone], 0));
+      if (b.tone !== tone) { b.g.textContent = ''; build(boxes[tone], b.g); b.tone = tone; }
+      var p = iso(x + step / 2, 5.6, 8);
+      belt.push({ id: i, x: p[0], y: p[1] - 26, label: (w.n || i + 1) + '단계' + (tone === 0 ? ' ✓' : tone === 1 ? ' ●' : ''), rank: tone === 1 ? 2 : tone === 0 ? 1 : 0,
+        o: { cls: 'of-wave', alts: BELT_AT, h: 18, rx: 9, fs: 11.5, fill: '#0e1528', stroke: ink, color: ink } });
+    });
+    v.boxes.splice(waves.length).forEach(function (b) { drop(b.g); });
+    var cur = conv && conv.current >= 0 ? waves[conv.current] : null;
+    var lines = !conv ? [] : [cur ? '계획 ' + (cur.n || conv.current + 1) + '단계 진행 중' : '계획 단계 모두 끝', cur ? '상자 ' + cur.done + '/' + cur.total + ' 끝' : '상자 ' + waves.length + '단계',
+      cur ? cut(str(cur.label), 11, 150) : ''];
+    v.wall.forEach(function (t, i) { txt(t, lines[i] || ''); });
+    return belt;
+  }
   function drawFloor(v, f) {
-    var sc = v.scene, pub = v.ui.publicMode === true, people = {}, labels = [];
+    var sc = v.scene, pub = v.ui.publicMode === true, people = {}, labels = [], sid = f ? f.sid : null;
+    if (v.floor !== sid) clearFloor(v, sid);
+    v.pass++;
     arr(sc.people).forEach(function (p) { if (f && p.sid === f.sid) people[p.id] = p; });
-    v.depth.textContent = '';
-    v.top.textContent = '';
-    v.dyn.textContent = '';
-    set(v.svg, 'aria-label', f ? floorNo(v, f) + '층 · ' + (f.label || '(제목 없음)') : '빈 사무실');
-    if (f && f.dark) el('rect', { x: -2000, y: -2000, width: 5000, height: 5000, fill: '#05070f', opacity: .5 }, v.top);
+    put(v.svg, 'aria-label', f ? floorNo(v, f) + '층 · ' + (f.label || '(제목 없음)') : '빈 사무실');
+    dim(v, !!(f && f.dark));
     // labels in priority order: rooms and the boss's count always, then desk names (alerts first), bubbles, the belt
     ROOMS.forEach(function (r) {
       var n = f ? arr(f.rooms && f.rooms[r[0]]).length : 0, p = iso(r[3] + .5, r[6] - .3);
-      pill(labels, v.top, p[0], p[1] - 6, r[1] + (n ? ' ' + n : ''), { cls: 'of-room', h: 20, rx: 5, fs: 13, fw: 700, fill: '#141c36', stroke: r[2], color: r[2], keep: 1 });
+      pill(v, labels, 'room:' + r[0], p[0], p[1] - 6, r[1] + (n ? ' ' + n : ''), { cls: 'of-room', h: 20, rx: 5, fs: 13, fw: 700, fill: '#141c36', stroke: r[2], color: r[2], keep: 1 });
     });
     var ceoN = sc.ceo ? sc.ceo.count : 0;
     if (ceoN > 0) {
       var bc = iso(BOSS[0] + .8, BOSS[1] + .1, 32);
-      pill(labels, v.top, bc[0], bc[1] - 18, '할 일 ' + ceoN + '건', { cls: 'of-bub', h: 23, rx: 8, fs: 12.5, fill: '#0f1834', stroke: '#ffcf5a', color: '#e6ebf5', tail: 1, keep: 1 });
+      pill(v, labels, 'boss', bc[0], bc[1] - 18, '할 일 ' + ceoN + '건', { cls: 'of-bub', h: 23, rx: 8, fs: 12.5, fill: '#0f1834', stroke: '#ffcf5a', color: '#e6ebf5', tail: 1, keep: 1 });
     }
-    // the belt: one box per plan wave (done / current / to come, the mockup's three box colours) and its label
-    var conv = f && f.conveyor, waves = conv ? arr(conv.waves) : [];
-    var boxes = tree('conveyor', g.BriefOfficeArt.props.conveyor)[0].kids.slice(2, 5);
-    var step = waves.length > 1 ? Math.min(3, 15.2 / (waves.length - 1)) : 3, belt = [];
-    waves.forEach(function (w, i) {
-      var tone = i < conv.current || conv.current < 0 ? 0 : i === conv.current ? 1 : 2, x = 1.8 + i * step;
-      var b = el('g', { transform: move(i * step - [0, 3, 6][tone], 0) }, v.dyn);
-      build(boxes[tone], b);
-      var p = iso(x + step / 2, 5.6, 8);
-      belt.push([p[0], p[1] - 26, (w.n || i + 1) + '단계' + (tone === 0 ? ' ✓' : tone === 1 ? ' ●' : ''),
-        { cls: 'of-wave', alts: BELT_AT, rank: tone === 1 ? 2 : tone === 0 ? 1 : 0, h: 18, rx: 9, fs: 11.5, fill: '#0e1528', stroke: ['#4fd1a5', '#7aa2ff', '#8b97b3'][tone], color: ['#4fd1a5', '#7aa2ff', '#8b97b3'][tone] }]);
-    });
-    // the back-wall screen: the plan's progress, when this floor has a plan
-    if (conv) {
-      var cur = conv.current >= 0 ? waves[conv.current] : null, c0 = iso(4, 0, 100);
-      [cur ? '계획 ' + (cur.n || conv.current + 1) + '단계 진행 중' : '계획 단계 모두 끝', cur ? '상자 ' + cur.done + '/' + cur.total + ' 끝' : '상자 ' + waves.length + '단계',
-        cur ? cut(str(cur.label), 11, 150) : ''].forEach(function (line, i) {
-        if (line) el('text', { transform: 'translate(' + r1(c0[0] + 10) + ',' + r1(c0[1] + 20 + i * 15) + ') skewY(30)', 'font-size': 11, fill: i ? '#8fb0ff' : '#ffcf5a' }, v.dyn).textContent = line;
-      });
-    }
-    // depth-sorted desks, cats and props (the mockup's painter order by x + y)
-    var items = FURN.map(function (fu) { return { x: fu[1], y: fu[2], draw: function (p) { art(fu[0], p, fu.length > 3 ? move(fu[3], fu[4]) : null); } }; });
-    items.push({ x: BOSS[0], y: BOSS[1], draw: function (p) {
-      var at = el('g', { class: 'of-boss', transform: move(BOSS[0], BOSS[1]) }, p);
-      art('desk', at);
-      lit(art('monitor', at), ceoN > 0);
-    } });
-    var cells = f ? layout(f) : {};
+    lit(v.boss, ceoN > 0);
+    var belt = drawBelt(v, f), cells = f ? layout(f) : {}, found = { tags: [], bubbles: [] };
     var desks = f ? arr(f.desks).filter(function (d) { return has(cells, d.id); }) : [];
-    var tags = [], bubbles = [];
-    desks.forEach(function (d) {
-      var c = cells[d.id];
-      items.push({ x: c.x, y: c.y, draw: function (p) { unit(v, f, d, c, p, people, tags, bubbles, pub); } });
-    });
+    desks.forEach(function (d) { deskUnit(v, f, d, cells[d.id], people, found, pub); });
+    for (var id in v.units) if (v.units[id].pass !== v.pass) { gone(v.units[id]); delete v.units[id]; }
+    // the mockup's painter order by x + y: the props never move, and a desk moves in it only when its place changed
+    var items = v.props.concat(desks.map(function (d) { return { x: cells[d.id].x, y: cells[d.id].y, n: v.units[d.id].g }; }));
     items.sort(function (a, b) { return (a.x + a.y) - (b.x + b.y); });
-    items.forEach(function (it) { it.draw(v.depth); });
-    var order = function (list) { return list.sort(function (a, b) { return b.rank - a.rank; }); };
-    order(tags).forEach(function (t) { pill(labels, v.top, t.x, t.y, t.label, t.o); });
-    if (!pub) order(bubbles).forEach(function (t) { pill(labels, v.top, t.x, t.y, t.label, t.o); });
-    belt.sort(function (a, b) { return b[3].rank - a[3].rank; }).forEach(function (b) { pill(labels, v.top, b[0], b[1], b[2], b[3]); });
+    order(v.depth, items.map(function (it) { return it.n; }));
+    var byRank = function (list) { return list.sort(function (a, b) { return b.rank - a.rank; }); };
+    byRank(found.tags).forEach(function (t) { pill(v, labels, 'tag:' + t.id, t.x, t.y, t.label, t.o); });
+    if (!pub) byRank(found.bubbles).forEach(function (t) { pill(v, labels, 'bub:' + t.id, t.x, t.y, t.label, t.o); });
+    byRank(belt).forEach(function (t) { pill(v, labels, 'wave:' + t.id, t.x, t.y, t.label, t.o); });
+    for (var k in v.pills) if (v.pills[k].pass !== v.pass) { drop(v.pills[k].g); delete v.pills[k]; }
     v.labels = labels;
     settle(labels, shade(v));
-  }
-  // a lit monitor: the mockup's on-screen colour on the monitor's one polygon
-  function lit(mon, on) {
-    var screen = on && mon.querySelector('polygon');
-    if (screen) set(screen, 'fill', '#5ac8fa');
-  }
-
-  function unit(v, f, d, c, parent, people, tags, bubbles, pub) {
-    var p = people[d.id], label = deskLabel(d, people), s = c.s, lounge = d.room === 'lounge';
-    var alert = d.state === 'error' || d.state === 'lost', act = [f.sid, d.kind === 'worker' ? 'wk' : ''];
-    var u = el('g', { class: 'of-desk is-' + (d.pose || 'idle'), 'data-desk': d.id, 'data-sh': 'open', 'data-sid': f.sid, 'data-sub': act[1] || null,
-      role: 'button', tabindex: 0, 'aria-label': deskName(d, p, label) + ' · 대화 열기' }, parent);
-    var o = iso(c.x, c.y, c.z * s), size = (lounge ? 34 : 46) * s, cx, by, top;
-    if (lounge) {
-      cx = o[0]; by = o[1];
-      el('rect', { class: 'of-hit', x: r1(cx - size / 2 - 3), y: r1(by - size * 1.42 - 3), width: r1(size + 6), height: r1(size * 1.42 + 6), rx: 6, fill: 'transparent' }, u);
-      cat(u, cx, by, size);
-      top = by - size * 1.42;
-    } else {
-      var at = el('g', { transform: 'translate(' + r1(o[0]) + ',' + r1(o[1]) + ') scale(' + s + ') translate(' + -OX + ',' + -OY + ')' }, u);
-      var cc = iso(.65, .05, 14);
-      el('rect', { class: 'of-hit', x: 438, y: r1(cc[1] + 11 - 46 * 1.42 - 3), width: 82, height: r1(164.2 - (cc[1] + 11 - 46 * 1.42 - 3) + 2), rx: 8, fill: 'transparent' }, at);
-      cat(at, cc[0], cc[1] + 11, 46);
-      art('desk', at);
-      lit(art('monitor', at), d.lamp === 'on');
-      if (d.lamp === 'alert') { var a = iso(.2, .8, 14); el('circle', { cx: r1(a[0]), cy: r1(a[1] - 4), r: 4, fill: alert ? '#ff5a7a' : '#ffcf5a' }, at); }
-      cx = o[0] + (cc[0] - OX) * s; by = o[1] + (cc[1] + 11 - OY) * s; top = by - 46 * 1.42 * s;
-      var n = iso(c.x + .8 * s, c.y + s, 0);
-      tags.push({ x: n[0], y: n[1] + 13 * s, label: label + (alert ? ' · ' + word(WORKER_WORD, d.state) : ''), rank: alert ? 3 : d.kind === 'lead' ? 2 : 1,
-        o: { cls: 'of-tag', act: act, key: d.id, alts: TAG_AT.map(function (a) { return [r1(a[0] * s), r1(a[1] * s)]; }), h: 19, rx: 8, fs: 12.5, fill: '#0e1528', stroke: alert ? '#ff5a7a' : '#34446e', color: '#e6ebf5' } });
-    }
-    if (d.pose === 'rest') el('text', { class: 'of-z', x: r1(cx + size * .3), y: r1(top + 4), 'font-size': 13, 'font-weight': 700, fill: '#8fb0ff' }, u).textContent = 'z';
-    if (!pub && d.bubble) {
-      bubbles.push({ x: cx, y: top - 20 * s, label: cut(d.bubble, 12.5, 176), rank: d.state === 'working' ? 2 : 1,
-        o: { cls: 'of-bub', act: act, key: d.id, alts: BUBBLE_AT, h: 23, rx: 8, fs: 12.5, fill: '#0f1834', stroke: alert ? '#ff5a7a' : d.state === 'waiting' ? '#ffcf5a' : '#3d6ef0', color: '#e6ebf5', tail: 1 } });
-    }
-    return u;
   }
 
   // ---- HTML chrome -----------------------------------------------------------------------------------------------------
   function floorNo(v, f) { return v.scene.floors.length - v.scene.floors.indexOf(f); }
   function floorWord(f) { return f.live ? '실행 중' : f.dark ? '불 꺼짐' : '쉬는 중'; }
-  // a part redrawn under the owner's focus gives it back: to the control with the same attr value, else the same position
+  // the conversation's place: its tab label (and number) and cwd, straight from the view model (the scene has neither)
+  function placeOf(vm, sid) {
+    var s = arr(vm && vm.sessions).filter(function (x) { return x && x.id === sid; })[0];
+    if (!s) return '';
+    var tab = str(s.tabLabel) ? str(s.tabLabel) + (typeof s.tabNumber === 'number' && isFinite(s.tabNumber) ? ' #' + s.tabNumber : '') : '';
+    return [tab, str(s.cwd)].filter(Boolean).join(' · ');
+  }
+  // a part patched under the owner's focus keeps it; a replaced control gives it back to the control with the same attr
+  // value, else to the same position
   function keepFocus(container, attr, fn) {
     var a = doc.activeElement, inside = !!(a && a !== container && container.contains(a) && a.getAttribute), key = null, at = -1;
     var controls = function () { return Array.prototype.slice.call(container.querySelectorAll('button,[tabindex]')); };
     if (inside) { key = attr ? a.getAttribute(attr) : null; at = controls().indexOf(a); }
     fn();
-    if (!inside) return;
+    if (!inside || (doc.activeElement === a && container.contains(a))) return;
     var all = controls(), to = null;
     for (var i = 0; key !== null && i < all.length && !to; i++) if (all[i].getAttribute(attr) === key) to = all[i];
     to = to || all[Math.min(at, all.length - 1)];
     if (to && to.focus) to.focus({ preventScroll: true });
   }
+  function floorRow(it) {
+    var b = el('button', { type: 'button', class: 'of-fl', 'data-floor': it.key, 'aria-pressed': it.on ? 'true' : 'false',
+      'aria-label': it.n + '층 · ' + it.title + ' · ' + it.word + (it.dec ? ' · 결정 ' + it.dec + '건' : '') }, null, true);
+    h('span', 'of-no', b, it.n + 'F');
+    h('span', 'of-ft', b, it.title);
+    if (it.dec) h('span', 'of-n', b, String(it.dec));
+    h('span', 'of-fs', b, it.word);
+    return b;
+  }
   function drawPicker(v, f) {
     var sc = v.scene;
     keepFocus(v.picker, 'data-floor', function () {
-      v.picker.textContent = '';
-      h('h3', '', v.picker, '층 고르기 · 대화 1개 = 1층');
-      if (!sc.floors.length) { h('p', 'of-empty', v.picker, '아직 층이 없어요'); return; }
-      sc.floors.forEach(function (fl) {
-        var n = floorNo(v, fl), dec = decisionsOf(sc, fl.sid), title = fl.label || '(제목 없음)';
-        var b = el('button', { type: 'button', class: 'of-fl', 'data-floor': fl.sid, 'aria-pressed': fl === f ? 'true' : 'false',
-          'aria-label': n + '층 · ' + title + ' · ' + floorWord(fl) + (dec ? ' · 결정 ' + dec + '건' : '') }, v.picker, true);
-        h('span', 'of-no', b, n + 'F');
-        h('span', 'of-ft', b, title);
-        if (dec) h('span', 'of-n', b, String(dec));
-        h('span', 'of-fs', b, floorWord(fl));
-      });
+      if (!sc.floors.length && !v.noFloor) v.noFloor = h('p', 'of-empty', v.picker, '아직 층이 없어요');
+      if (sc.floors.length && v.noFloor) { drop(v.noFloor); v.noFloor = null; }
+      rows(v, 'floors', v.flist, sc.floors.map(function (fl) {
+        return { key: fl.sid, n: floorNo(v, fl), title: fl.label || '(제목 없음)', word: floorWord(fl), dec: decisionsOf(sc, fl.sid), on: fl === f };
+      }), floorRow);
     });
   }
-  function drawCard(v, f) {
+  function drawCard(v, f, place) {
     keepFocus(v.card, null, function () {
-      v.card.textContent = '';
-      if (!f) { h('p', 'of-empty', v.card, '대화를 시작하면 그 대화가 한 층이 돼요'); return; }
+      var c = v.cardParts;
+      if (!c || c.floor !== !!f) {
+        v.card.textContent = '';
+        c = v.cardParts = { floor: !!f };
+        if (!f) { h('p', 'of-empty', v.card, '대화를 시작하면 그 대화가 한 층이 돼요'); return; }
+        c.no = h('span', 'of-cn', v.card);
+        c.box = h('div', 'of-ct', v.card);
+        c.title = h('b', '', c.box);
+        c.meta = h('small', '', c.box);
+        c.where = null;
+        c.open = el('button', { type: 'button', class: 'of-open', 'data-sh': 'open' }, v.card, true);
+        c.open.textContent = '대화 열기';
+      }
+      if (!f) return;
       var desks = arr(f.desks), working = desks.filter(function (d) { return d.state === 'working'; }).length, dec = decisionsOf(v.scene, f.sid);
-      h('span', 'of-cn', v.card, floorNo(v, f) + 'F');
-      var t = h('div', 'of-ct', v.card);
-      h('b', '', t, f.label || '(제목 없음)');
-      h('small', '', t, [floorWord(f), '작업자 ' + (desks.length - 1) + '명', working ? '일하는 중 ' + working : '', dec ? '결정 ' + dec + '건 대기' : ''].filter(Boolean).join(' · '));
-      el('button', { type: 'button', class: 'of-open', 'data-sh': 'open', 'data-sid': f.sid }, v.card, true).textContent = '대화 열기';
+      txt(c.no, floorNo(v, f) + 'F');
+      txt(c.title, f.label || '(제목 없음)');
+      txt(c.meta, [floorWord(f), '작업자 ' + (desks.length - 1) + '명', working ? '일하는 중 ' + working : '', dec ? '결정 ' + dec + '건 대기' : ''].filter(Boolean).join(' · '));
+      // the tab label and cwd: never drawn in public mode (place is '' then)
+      if (place && !c.where) c.where = h('small', 'of-where', c.box);
+      if (!place && c.where) { drop(c.where); c.where = null; }
+      if (c.where) { txt(c.where, place); put(c.where, 'title', place); }
+      put(c.open, 'data-sid', f.sid);
     });
   }
-  function box(parent, title, count) {
+  // a rail box: its title with a count, a one-line note while it has one (empty, or the rest), and its keyed rows
+  function section(parent, title, tag, counted) {
     var s = h('section', 'of-box', parent), t = h('h3', '', s, title);
-    if (count !== null) h('small', '', t, count);
-    return s;
+    return { s: s, count: counted ? h('small', '', t, '') : null, list: h(tag, tag === 'ol' ? 'of-log' : 'of-list', s), note: null, more: null };
   }
-  function item(list, act, title, meta, tone, state) {
-    var b = el('button', { type: 'button', class: 'of-it', 'data-sh': 'open', 'data-sid': act[0], 'data-sub': act[1] || null }, h('li', '', list), true);
-    h('span', 'of-it-t', b, title);
-    if (state) h('span', 'of-st is-' + tone, b, state);
-    if (meta) h('span', 'of-it-m', b, meta);
+  function note(b, which, text, after) {
+    if (text && !b[which]) b[which] = b.s.insertBefore(h('p', 'of-empty', null, text), after ? null : b.list);
+    if (!text && b[which]) { drop(b[which]); b[which] = null; }
+    if (b[which]) txt(b[which], text);
+  }
+  function item(it) {
+    var li = h('li', ''), b = el('button', { type: 'button', class: 'of-it', 'data-sh': 'open', 'data-sid': it.act[0], 'data-sub': it.act[1] || null }, li, true);
+    h('span', 'of-it-t', b, it.title);
+    if (it.state) h('span', 'of-st is-' + it.tone, b, it.state);
+    if (it.meta) h('span', 'of-it-m', b, it.meta);
+    return li;
+  }
+  function logRow(it) {
+    var li = h('li', '');
+    if (it.time) h('b', '', li, it.time);
+    h('span', '', li, it.text);
+    return li;
   }
   function label(sc, sid) {
     for (var i = 0; i < sc.floors.length; i++) if (sc.floors[i].sid === sid) return sc.floors[i].label || '(제목 없음)';
@@ -438,64 +629,68 @@
     return two(d.getHours()) + ':' + two(d.getMinutes());
   }
   function drawRail(v, f) {
-    var sc = v.scene, pub = v.ui.publicMode === true, ceo = sc.ceo || { items: [], count: 0 };
+    var sc = v.scene, pub = v.ui.publicMode === true, ceo = sc.ceo || { items: [], count: 0 }, b = v.box;
     keepFocus(v.rail, null, function () {
-      v.rail.textContent = '';
-      var todo = box(v.rail, '대표님 할 일', ceo.count + '건'), items = arr(ceo.items);
-      if (!items.length) h('p', 'of-empty', todo, '지금 대표님을 기다리는 일은 없어요');
-      else {
-        var list = h('ul', 'of-list', todo);
-        items.slice(0, 6).forEach(function (it) { item(list, [it.sid, it.sub], it.text || it.kind, [it.kind, label(sc, it.sid)].filter(Boolean).join(' · ')); });
-        if (items.length > 6) h('p', 'of-empty', todo, '나머지 ' + (items.length - 6) + '건은 수신함에 있어요');
-      }
-      var alerts = arr(sc.alerts), al = box(v.rail, '알림', alerts.length + '건');
-      if (!alerts.length) h('p', 'of-empty', al, '오류나 끊긴 작업자가 없어요');
-      else {
-        var list2 = h('ul', 'of-list', al);
-        alerts.forEach(function (a) { item(list2, [a.sid, 'wk'], a.text || '작업자', label(sc, a.sid), 'err', word(WORKER_WORD, a.state)); });
-      }
-      var desks = f ? arr(f.desks) : [], people = {};
+      var items = arr(ceo.items), alerts = arr(sc.alerts), desks = f ? arr(f.desks) : [], people = {};
+      txt(b.todo.count, ceo.count + '건');
+      note(b.todo, 'note', items.length ? '' : '지금 대표님을 기다리는 일은 없어요');
+      rows(v, 'todo', b.todo.list, keyed(items.slice(0, 6).map(function (it) {
+        return { act: [it.sid, it.sub], title: it.text || it.kind, meta: [it.kind, label(sc, it.sid)].filter(Boolean).join(' · ') };
+      }), function (it) { return it.act.join('|') + '|' + it.title; }), item);
+      note(b.todo, 'more', items.length > 6 ? '나머지 ' + (items.length - 6) + '건은 수신함에 있어요' : '', true);
+      txt(b.alert.count, alerts.length + '건');
+      note(b.alert, 'note', alerts.length ? '' : '오류나 끊긴 작업자가 없어요');
+      rows(v, 'alert', b.alert.list, keyed(alerts.map(function (a) {
+        return { act: [a.sid, 'wk'], title: a.text || '작업자', meta: label(sc, a.sid), tone: 'err', state: word(WORKER_WORD, a.state), id: a.worker };
+      }), function (it) { return it.act[0] + '|' + it.id; }), item);
       arr(sc.people).forEach(function (p) { if (f && p.sid === f.sid) people[p.id] = p; });
       var working = desks.filter(function (d) { return d.state === 'working'; }).length;
-      var pb = box(v.rail, '사무실 사람들', f ? desks.length + '명' + (working ? ' · 일하는 중 ' + working : '') : null);
-      if (!desks.length) h('p', 'of-empty', pb, '이 층에는 아직 아무도 없어요');
-      else {
-        var list3 = h('ul', 'of-list', pb);
-        desks.forEach(function (d) {
-          var p = people[d.id], name = deskLabel(d, people), lead = d.kind === 'lead';
-          var meta = [lead ? '' : p && p.name !== name ? p.name : '', pub ? '' : d.bubble].filter(Boolean).join(' · ');
-          item(list3, [f.sid, lead ? '' : 'wk'], name + ' · ' + (ROOM_NAME[d.room] || ''), meta, TONE[d.state] || 'rest', lead ? word(LEAD_WORD, d.state) : word(WORKER_WORD, d.state));
-        });
-      }
+      txt(b.people.count, f ? desks.length + '명' + (working ? ' · 일하는 중 ' + working : '') : '');
+      note(b.people, 'note', desks.length ? '' : '이 층에는 아직 아무도 없어요');
+      rows(v, 'people', b.people.list, keyed(desks.map(function (d) {
+        var p = people[d.id], name = deskLabel(d, people), lead = d.kind === 'lead';
+        return { act: [f.sid, lead ? '' : 'wk'], title: name + ' · ' + (ROOM_NAME[d.room] || ''), meta: [lead ? '' : p && p.name !== name ? p.name : '', pub ? '' : d.bubble].filter(Boolean).join(' · '),
+          tone: TONE[d.state] || 'rest', state: lead ? word(LEAD_WORD, d.state) : word(WORKER_WORD, d.state), id: d.id };
+      }), function (it) { return it.act[0] + '|' + it.id; }), item);
       var log = f ? arr(sc.log).filter(function (l) { return l.sid === f.sid; }) : [];
-      var lb = box(v.rail, '활동 로그', null);
-      if (!log.length) h('p', 'of-empty', lb, '이 층의 기록이 아직 없어요');
-      else {
-        var ms = function (l) { var t = typeof l.at === 'number' ? l.at : Date.parse(str(l.at)); return isFinite(t) ? t : 0; };
-        var list4 = h('ol', 'of-log', lb);
-        log.map(function (l, i) { return { l: l, i: i }; }).sort(function (a, b) { return (ms(b.l) - ms(a.l)) || (a.i - b.i); }).slice(0, 8).forEach(function (x) {
-          var li = h('li', '', list4), t = clock(x.l.at);
-          if (t) h('b', '', li, t);
-          h('span', '', li, x.l.kind === 'worker' ? (x.l.text || '작업자') + ' · ' + word(WORKER_WORD, x.l.state) : x.l.text);
-        });
-      }
+      var ms = function (l) { var t = typeof l.at === 'number' ? l.at : Date.parse(str(l.at)); return isFinite(t) ? t : 0; };
+      note(b.log, 'note', log.length ? '' : '이 층의 기록이 아직 없어요');
+      rows(v, 'log', b.log.list, keyed(log.map(function (l, i) { return { l: l, i: i }; }).sort(function (x, y) { return (ms(y.l) - ms(x.l)) || (x.i - y.i); }).slice(0, 8).map(function (x) {
+        return { time: clock(x.l.at), text: x.l.kind === 'worker' ? (x.l.text || '작업자') + ' · ' + word(WORKER_WORD, x.l.state) : x.l.text };
+      }), function (it) { return it.time + '|' + it.text; }), logRow);
     });
   }
 
   // ---- mount and draw --------------------------------------------------------------------------------------------------
   function mount(root) {
     root.textContent = '';
-    var v = { root: root, sid: null, keys: {} };
+    var v = { root: root, sid: null, keys: {}, units: {}, pills: {}, boxes: [], rows: {}, pass: 0, floor: undefined, dim: null, noFloor: null, cardParts: null };
     var body = h('div', 'of-body', root), stage = h('div', 'of-stage', body);
     v.svg = el('svg', { class: 'of-scene', viewBox: '30 0 1000 700', preserveAspectRatio: 'xMidYMid meet', role: 'group' }, stage);
     set(base(v.svg), 'aria-hidden', 'true');
     v.dyn = el('g', { class: 'of-l-belt', 'aria-hidden': 'true' }, v.svg);
+    var c0 = iso(4, 0, 100);
+    v.wall = [0, 1, 2].map(function (i) { return el('text', { transform: 'translate(' + r1(c0[0] + 10) + ',' + r1(c0[1] + 20 + i * 15) + ') skewY(30)', 'font-size': 11, fill: i ? '#8fb0ff' : '#ffcf5a' }, v.dyn); });
     v.depth = el('g', { class: 'of-l-depth' }, v.svg);
+    // the props and the boss's desk are drawn once, where the mockup drew them; the desks are sorted in between
+    v.props = FURN.map(function (fu) { return { x: fu[1], y: fu[2], n: art(fu[0], v.depth, fu.length > 3 ? move(fu[3], fu[4]) : null) }; });
+    var boss = el('g', { class: 'of-boss', transform: move(BOSS[0], BOSS[1]) }, v.depth);
+    art('desk', boss);
+    v.boss = {};
+    monitor(v.boss, boss);
+    v.props.push({ x: BOSS[0], y: BOSS[1], n: boss });
     v.top = el('g', { class: 'of-l-top', 'aria-hidden': 'true' }, v.svg);
-    v.head = h('h2', 'of-head', stage, '사무실');
+    v.head = h('div', 'of-head', stage);
+    h('h2', 'of-title', v.head, '사무실');
+    v.pub = el('button', { type: 'button', class: 'of-pub', role: 'switch', 'aria-checked': 'false', 'data-act': 'office-public', title: '말풍선, 탭 이름, 작업 폴더를 숨겨요' }, v.head, true);
+    el('span', { class: 'of-sw', 'aria-hidden': 'true' }, v.pub, true);
+    h('span', '', v.pub, '공개 모드');
     v.picker = el('nav', { class: 'of-floors', 'aria-label': '층 고르기' }, stage, true);
+    h('h3', '', v.picker, '층 고르기 · 대화 1개 = 1층');
+    v.flist = h('div', 'of-flist', v.picker);
     v.card = h('div', 'of-card', stage);
     v.rail = h('div', 'of-rail', body);
+    v.box = { todo: section(v.rail, '대표님 할 일', 'ul', true), alert: section(v.rail, '알림', 'ul', true), people: section(v.rail, '사무실 사람들', 'ul', true), log: section(v.rail, '활동 로그', 'ol', false) };
     // the overlays keep their CSS size while the scene scales, so a new stage size settles the labels again
     if (typeof g.ResizeObserver === 'function') new g.ResizeObserver(function () { if (v.labels) settle(v.labels, shade(v)); }).observe(stage);
     root.addEventListener('click', function (ev) {
@@ -517,19 +712,28 @@
     v.keys[name] = key;
     fn();
   }
+  // the live desk and cat nodes for QA (node identity across publishes)
+  function refs(v) {
+    var desks = {}, cats = {};
+    for (var id in v.units) { desks[id] = v.units[id].g; cats[id] = v.units[id].cat; }
+    g.__office = { sid: v.sid, desks: desks, cats: cats };
+  }
   function draw(v) {
     var sc = v.scene, f = null;
     for (var i = 0; i < sc.floors.length; i++) if (sc.floors[i].sid === v.sid) f = sc.floors[i];
     f = f || sc.floors[0] || null;
     v.sid = f ? f.sid : null;
     var floors = JSON.stringify(sc.floors.map(function (x) { return [x.sid, x.label, x.live, x.dark, decisionsOf(sc, x.sid)]; }));
-    var pub = v.ui.publicMode === true;
+    var pub = v.ui.publicMode === true, place = f && !pub ? placeOf(v.vm, f.sid) : '';
+    put(v.pub, 'aria-checked', pub ? 'true' : 'false');
     part(v, 'picker', floors + '|' + v.sid, function () { drawPicker(v, f); });
-    part(v, 'card', JSON.stringify([f, floors]), function () { drawCard(v, f); });
+    part(v, 'card', JSON.stringify([f, floors, place]), function () { drawCard(v, f, place); });
     part(v, 'floor', JSON.stringify([f, sc.people.filter(function (p) { return f && p.sid === f.sid; }), sc.ceo && sc.ceo.count, pub, floors]), function () {
       keepFocus(v.depth, 'data-desk', function () { drawFloor(v, f); });
     });
     part(v, 'rail', JSON.stringify([f, sc.ceo, sc.alerts, sc.people, sc.log, pub, floors]), function () { drawRail(v, f); });
+    refs(v);
+    motion(v);
   }
   var views = new WeakMap();
   // a missing region or module throws here, so page.js shows its fatal notice instead of an empty office
@@ -537,8 +741,13 @@
     var v = views.get(root);
     if (!v) { v = mount(root); views.set(root, v); }
     v.ui = ui || {};
-    v.scene = g.BriefOffice.scene(vm || {}, v.ui, vm && vm.generatedAt);
+    v.vm = vm || {};
+    v.scene = g.BriefOffice.scene(v.vm, v.ui, v.vm.generatedAt);
     draw(v);
   }
-  g.BriefOfficeView = { render: render, layout: layout };
+  function visibility() {
+    var root = doc.getElementById('office'), v = root && views.get(root);
+    if (v) motion(v);
+  }
+  g.BriefOfficeView = { render: render, layout: layout, visibility: visibility };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

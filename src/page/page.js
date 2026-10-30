@@ -939,6 +939,9 @@
       focusTab(t.getAttribute('data-session'));
     } else if (act === 'fold-retry') {
       foldRetry();
+    } else if (act === 'office-public') {
+      state.ui.publicMode = state.ui.publicMode !== true;
+      render();
     }
   }
 
@@ -1361,8 +1364,9 @@
     state.transport = http ? 'http' : 'file';
     state.ui.live = http && !!boardToken();
     g.addEventListener('focus', guard('memento focus', refreshMemento));
-    doc.addEventListener('visibilitychange', guard('memento visible', function () {
+    doc.addEventListener('visibilitychange', guard('visible', function () {
       if (doc.visibilityState === 'visible') refreshMemento();
+      if (g.BriefOfficeView) g.BriefOfficeView.visibility();
     }));
     if (!state.model) render();
     if (http) { connectLive(); return; }

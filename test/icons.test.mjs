@@ -150,13 +150,14 @@ test('no pictographic emoji left in the rail, the sidebar or the tab bar, in tex
 // for the todo-8 WinForms layout work; the baseline itself is not moved again.
 const BASELINE_TREE = '0683a8e4415daa8684776f475a56d47fabfd43ea';
 const BASELINE_PAGE_BYTES = 563709;
-// Office allowance (plan omo-office-view Must have 11), owner decision #521 2026-10-29: "퀄리티 좋아지는거면 제한 올려도됨 대신에
-// 마지막엔 최적화 렉 안걸리는 정도로 검수해서 마무리만 하자". OFFICE_ALLOWANCE_BYTES records the measured bytes of the office files (art,
-// model, view, css) as they sit in this page (each script in its 20 B <script>\n...\n</script>\n wrapper, the sheet with its
-// join newline), measured when the office view was added; it is taken out of the growth and the 32 KB budget still holds
+// Office allowance (plan omo-office-view Must have 11), owner decision #521 2026-10-29:
+// "퀄리티 좋아지는거면 제한 올려도됨 대신에 마지막엔 최적화 렉 안걸리는 정도로 검수해서 마무리만 하자".
+// OFFICE_ALLOWANCE_BYTES records the measured bytes of the office files (art, model, view, css) as they sit in this page
+// (each script in its 20 B <script>\n...\n</script>\n wrapper, the sheet with its join newline), measured when the office
+// files last changed (plan todo 6, live updates and motion); it is taken out of the growth and the 32 KB budget still holds
 // for everything else. No further size cap: lag is judged by todo 7 (CPU budget) and F3. The diagnostic prints the
 // current office bytes; re-record the constant under the same decision when the office files change.
-const OFFICE_ALLOWANCE_BYTES = 68231;
+const OFFICE_ALLOWANCE_BYTES = 86430;
 const OFFICE_FILES = ['office-assets.js', 'office-model.js', 'office-view.js', 'office.css'];
 function officeChunks() {
   return OFFICE_FILES.map((f) => {
