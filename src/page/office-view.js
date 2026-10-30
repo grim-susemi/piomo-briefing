@@ -314,18 +314,27 @@
   // what the labels settle around: the overlays and the wall screens' text (hard), the boss cat and the other cats' faces
   // (soft), and the other desks' and lounge cats' hit rects (soft, kept off longest)
   function obstacles(v) { return shade(v).concat(wallBoxes(v), v.faces || []); }
-  // the labels settle four ways: around the boss and the other desks' and cats' hit rects, around the hit rects only,
-  // around the boss only, around neither; the first way that places the most labels wins, so neither the boss nor a hit
-  // rect ever costs a label. A label left over another desk's or cat's hit rect lets the pointer through to it
+  // the labels settle two ways, both keeping off the boss's drawing (hard, as the overlays): around the other desks' and
+  // cats' hit rects too, and without them; the way that places the most labels wins, so a hit rect never costs a label.
+  // A label left over another desk's or cat's hit rect lets the pointer through to it
   function placeLabels(v) {
-    var list = v.labels, base = obstacles(v).concat(homeBox(v)), hit = v.hitBoxes || [], me = meBox(v), best = null, most = -1;
+    var list = v.labels, me = meBox(v).map(function (b) { return { x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1 }; });
+    var base = obstacles(v).concat(homeBox(v), me), hit = v.hitBoxes || [], best = null, most = -1;
     if (!list) return;
-    [base.concat(hit, me), base.concat(hit), base.concat(me), base].forEach(function (o) {
-      settle(list, o);
-      var n = list.filter(function (p) { return !!p.g.parentNode; }).length;
-      if (n > most) { most = n; best = o; }
-    });
-    settle(list, best);
+    var order = list, bestOrder = list, shown = function () { return list.filter(function (p) { return !!p.g.parentNode; }).length; };
+    // a label left out goes first next time (up to 7 rounds), so the others take their other places around it
+    for (var round = 0; round < 8; round++) {
+      [base.concat(hit), base].forEach(function (o) {
+        settle(order, o);
+        var n = shown();
+        if (n > most) { most = n; best = o; bestOrder = order; }
+      });
+      if (most === list.length) break;
+      settle(bestOrder, best);
+      var out = bestOrder.filter(function (p) { return !p.g.parentNode; });
+      order = out.concat(bestOrder.filter(function (p) { return !!p.g.parentNode; }));
+    }
+    settle(bestOrder, best);
     list.forEach(function (p) { if (p.g.parentNode) put(p.g, 'data-pass', hit.some(function (q) { return q.face !== p.o.key && cross(p.box, q); }) ? '1' : '0'); });
   }
   // the labels settle again around the boss where it stopped
@@ -344,7 +353,12 @@
     list.forEach(function (p) {
       // a label that would cover another tries its other places first: a bubble higher or to a side (its tail stays on
       // the cat), a belt label along the belt or under it
-      var tries = p.o.alts || [[0, 0]], pick = null, b = null;
+      var pick = null, b = null;
+      // its own places first; a label with none free there tries further ones (twice the offsets, a row or more higher, a row lower),
+      // a belt label only inside its own wave's slot (span), so no label is left out while a place is free
+      var near = (p.o.alts || [[0, 0]]).filter(function (c) { return !p.o.span || Math.abs(c[0]) < p.o.span; }), far = [];
+      near.forEach(function (a) { [[a[0] * 2, a[1] * 2], [a[0], a[1] - 24], [a[0], a[1] + 24], [a[0] * 2, a[1] * 2 - 24], [a[0], a[1] - 48], [a[0], a[1] - 72], [a[0], a[1] - 96], [a[0], a[1] + 48]].forEach(function (c) { if (!p.o.span || Math.abs(c[0]) < p.o.span) far.push(c); }); });
+      [near, far].forEach(function (tries) { if (pick !== null) return;
       var least = Infinity;
       for (var k = 0; k < 3 && pick === null; k++) for (var i = 0; i < tries.length && (k === 2 || pick === null); i++) {
         var dx = tries[i][0], dy = tries[i][1];
@@ -357,6 +371,7 @@
         var lap = placed.reduce(function (n, q) { return q.face === p.o.key || !cross(c, q) ? n : n + (Math.min(c.x1, q.x1) - Math.max(c.x0, q.x0)) * (Math.min(c.y1, q.y1) - Math.max(c.y0, q.y0)); }, 0);
         if (lap < least) { least = lap; pick = tries[i]; b = c; }
       }
+      });
       if (pick === null) { drop(p.g); return; }
       if (!p.g.parentNode) p.parent.appendChild(p.g);
       p.box = b;
@@ -1056,7 +1071,7 @@
       if (b.tone !== tone) { b.g.textContent = ''; build(boxes[tone], b.g); b.tone = tone; }
       var p = iso(x + step / 2, 5.6, 8);
       belt.push({ id: i, x: p[0], y: p[1] - 26, label: (w.n || i + 1) + '단계' + (tone === 0 ? ' ✓' : tone === 1 ? ' ●' : ''), rank: tone === 1 ? 2 : tone === 0 ? 1 : 0,
-        o: { cls: tone ? 'of-wave' : 'of-wave of-done', alts: BELT_AT, h: 18, rx: 9, fs: 11.5, fill: '#0e1528', stroke: ink, color: ink } });
+        o: { cls: tone ? 'of-wave' : 'of-wave of-done', alts: BELT_AT, span: 29.5 * step / 2, h: 18, rx: 9, fs: 11.5, fill: '#0e1528', stroke: ink, color: ink } });
     });
     v.boxes.splice(waves.length).forEach(function (b) { drop(b.g); });
     var cur = conv && conv.current >= 0 ? waves[conv.current] : null;

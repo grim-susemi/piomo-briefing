@@ -481,12 +481,14 @@ test('the boss cat stopping never removes a label: the labels drawn after a stop
   while (steps(anims, office).some((a) => a.playState === 'running')) await finishStep(anims, office);
   assert.deepEqual(bossAt(office), target);
   assert.deepEqual(names(), before);
+  assert.deepEqual(covered(target), [], 'no label on the boss at the stop');
   reduceMotion(env, true);
   const again = reachOrder(floor).find((t) => covered(t).length && shortest(floor, target, t) > 0);
   assert.ok(again, 'another reachable tile under a label');
   clickTile(e, office, ...again);
   assert.deepEqual(bossAt(office), again);
   assert.deepEqual(names(), before);
+  assert.deepEqual(covered(again), [], 'no label on the boss at the stop');
 });
 
 test('on a phone the pan frame keeps the boss in view: scrolled to it when its floor is drawn, again when it stops near an edge; a hand pan stays', async () => {
@@ -653,6 +655,9 @@ test('labels stay when the boss walks: after 5 steps up the hall the same labels
   for (let i = 1; i <= 5; i++) { press(e, 'ArrowUp', 'ArrowUp'); await finishStep(anims, office); }
   assert.deepEqual(bossAt(office), upHall(floor, 5));
   assert.deepEqual(names(), spawn);
+  // and none of them lies on the boss's drawing (the rooms' names are fixed and never move)
+  const onBoss = () => { const b = bossBox(...bossAt(office)); return labelBoxes(office).filter((l) => !/^of-room:/.test(l.name) && overlap(l, b)).map((l) => l.name); };
+  assert.deepEqual(onBoss(), []);
   const waves = labelBoxes(office).filter((b) => /of-wave/.test(b.name)).map((b) => [parseInt(b.name.split(':')[1], 10), (b.x0 + b.x1) / 2]).sort((a, b) => a[0] - b[0]);
   for (let i = 1; i < waves.length; i++) assert.ok(waves[i][1] > waves[i - 1][1], 'belt labels in wave order: ' + JSON.stringify(waves));
 });
