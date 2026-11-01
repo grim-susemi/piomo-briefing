@@ -1094,6 +1094,25 @@ test('fold expand: decisions come from the full card after hydration; notes stay
   assert.deepEqual(e.errors, []);
 });
 
+test('fold expand: the expanded card shows the full decision options, consequence, reason and answer', async () => {
+  const e = makeController();
+  e.page.receive(model(1, foldedRow(), { gen: 9 })); e.page.open('f1', 'ov');
+  const decisions = [{
+    id: 8, question: 'SERVER QUESTION', recommend: 'B', reason: 'FULL REASON', answered: false, closed: false,
+    options: { A: { text: 'FULL OPTION A', consequence: 'FULL CONSEQUENCE' }, B: { text: 'FULL OPTION B' } },
+  }, {
+    id: 9, question: 'ANSWERED QUESTION', answered: true, closed: false, options: { A: { text: 'FULL ANSWERED OPTION' } },
+    answer: { option: 'A', text: '', at: 3 }, receipt: null, delivery: '전달됨 ⏱11:57',
+  }];
+  sendConvo(convoCalls(e)[0], 200, { schema: 1, gen: 9, key: FOLD_KEY, session: fullCard({ decisions }) });
+  await flushTwice();
+  e.page.open('f1', 'ov');
+  const text = e.byId.main.textContent;
+  for (const s of ['FULL OPTION A', 'FULL OPTION B', 'FULL CONSEQUENCE', 'FULL REASON', 'FULL ANSWERED OPTION']) assert.ok(text.includes(s), `the expanded card shows ${s} from the full card`);
+  assert.doesNotMatch(text, /BASE QUESTION/);
+  assert.deepEqual(e.errors, []);
+});
+
 test('fold render: overview, convo view, sidebar, search and inbox render a model with folded rows without a thrown error', () => {
   const e = makeController();
   const folded = foldedRow();

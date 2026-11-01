@@ -1572,6 +1572,11 @@ test('fold parity: settled decisions render the same from their SLIM form on a f
   assert.equal(strip(S.rail(folded, st)), S.rail(full, st), 'rail matches');
   assert.ok(S.inbox(full, st).held.some((i) => i.id === 96), 'the held decision is listed on the full card');
   assert.ok(S.inbox(folded, st).held.some((i) => i.id === 96), 'the held decision stays whole on the folded row');
+  const withoutSession = (list) => list.map(({ s: _s, ...rest }) => rest);
+  for (const key of ['wait', 'done', 'ans', 'held']) {
+    assert.deepEqual(withoutSession(S.inbox(folded, st)[key]), withoutSession(S.inbox(full, st)[key]), `inbox ${key} items match the full card`);
+    assert.deepEqual(S.inbox(folded, st)[key].map((i) => i.s.id), S.inbox(full, st)[key].map((i) => i.s.id), `inbox ${key} items point at the same session`);
+  }
 });
 
 test('fold parity: the overview decision areas match with folding on and off', () => {

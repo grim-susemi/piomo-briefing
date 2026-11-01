@@ -1335,6 +1335,7 @@ test('fold: predicate folds an idle closed conversation and keeps each exempt on
     assert.ok(rowOf(model, 'runner-b').planLink, 'the second runner carries the plan link');
     assert.equal(rowOf(model, 'runner-b').tab, '끝남');
     assert.ok(rowOf(model, 'runner-b').folded, 'a finished plan link folds on the 끝남 tab');
+    assert.ok(rowOf(model, 'runner-a').folded, 'the plan holder folds on the 끝남 tab once its plan is finished (planFinished: no open task here)');
   });
 
   await t.test('plan signal: workName folds on the 끝남 tab and keeps the card whole on any other tab', (t) => {
