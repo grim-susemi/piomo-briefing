@@ -1439,12 +1439,12 @@ test('brief: own folded, cut and overCap entries add 경고 lines and details.bo
   });
 
   // A caller that cannot fold (mirror unavailable) loses old reports and their blocks to the cap.
-  let cutDir;
+  // Its brief is the newest activity, so the board is read at TRIM_BASE (not idle): a plan-signal card folds only after
+  // FOLD_AFTER_MS idle, and the delayed clock would fold it under the plan-card rule.
   const cut = lead(t, {
-    now: () => (cutDir ? delayedBoard(cutDir)() : TRIM_BASE),
+    now: () => TRIM_BASE,
     renderOpts: { sleep: () => {}, isAlive: () => false },
   });
-  cutDir = cut.stateDir;
   cut.host.pi.events = { on: () => () => {} };
   seedJson(cut.stateDir, 'sessions/sess-A/meta.json', {
     sessionId: 'sess-A', cwd: 'C:/work/proj', title: 'A', lastActivityAt: TRIM_BASE - 10 * TRIM_DAY,
@@ -1473,12 +1473,11 @@ test('brief: own folded, cut and overCap entries add 경고 lines and details.bo
   });
 
   // A report that stays on the board loses only its blocks: the block line is the sole cut line.
-  let blocksDir;
+  // Same caller shape as above: read the board at TRIM_BASE so the card is not idle and cannot fold under the plan-card rule.
   const blocks = lead(t, {
-    now: () => (blocksDir ? delayedBoard(blocksDir)() : TRIM_BASE),
+    now: () => TRIM_BASE,
     renderOpts: { sleep: () => {}, isAlive: () => false },
   });
-  blocksDir = blocks.stateDir;
   blocks.host.pi.events = { on: () => () => {} };
   seedJson(blocks.stateDir, 'sessions/sess-A/meta.json', {
     sessionId: 'sess-A', cwd: 'C:/work/proj', title: 'A', lastActivityAt: TRIM_BASE - 10 * TRIM_DAY,
