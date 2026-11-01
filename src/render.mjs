@@ -730,10 +730,25 @@ export function isFoldable(view, waitingSids, now) {
   return arr(view.reports).every((r) => isObj(r) && isNum(r.at) && r.at < now - DAY_MS);
 }
 
-// The folded row: the full row minus HEAVY_KEYS, plus the counts/key of the full card and the fold chip.
+// A settled decision (answered or closed, not held) keeps what a reader still sees on a folded row: the answer, the
+// receipt, the fields and the one chosen option. The full card (folded.js) carries the rest when the row is expanded.
+export function slimDecision(d) {
+  if (!isObj(d) || isObj(d.held) || !(d.answered === true || d.closed === true)) return d;
+  const slim = { id: d.id, sessionId: d.sessionId, question: d.question, answered: d.answered, closed: d.closed, createdAt: d.createdAt, answer: d.answer };
+  if (d.delivery !== undefined) slim.delivery = d.delivery;
+  if (isObj(d.receipt)) slim.receipt = d.receipt;
+  if (d.questionPrompt === true) slim.questionPrompt = true;
+  if (isObj(d.answer) && isObj(d.answer.values) && d.fields !== undefined) slim.fields = d.fields;
+  const chosen = isObj(d.answer) ? str(d.answer.option) : '';
+  if (chosen && isObj(d.options) && isObj(d.options[chosen])) slim.options = { [chosen]: { text: str(d.options[chosen].text) } };
+  return slim;
+}
+
+// The folded row: the full row minus HEAVY_KEYS, plus the SLIM decisions, the counts/key of the full card and the fold chip.
 function foldRow(full) {
   const row = structuredClone(full);
   for (const k of HEAVY_KEYS) delete row[k];
+  row.decisions = arr(full.decisions).map(slimDecision);
   row.folded = { reports: arr(full.reports).length, decisions: arr(full.decisions).length, key: sha20(full) };
   row.chips = [...arr(full.chips), FOLDED_CHIP];
   return row;

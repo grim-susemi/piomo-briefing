@@ -11,7 +11,7 @@ import { openStore } from '../src/store.mjs';
 import { validateBrief } from '../src/schema.mjs';
 import {
   buildViewModel, renderPage, renderPageMaybe, renderPageAsync, pageHtml, withReports, realKey, realCacheFor, MAX_VM_BYTES, OMITTED_CHIP,
-  isFoldable, projectBoardModel, FOLD_AFTER_MS, FOLDED_CHIP,
+  isFoldable, projectBoardModel, slimDecision, FOLD_AFTER_MS, FOLDED_CHIP,
 } from '../src/render.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -1418,14 +1418,43 @@ test('fold: a folded row is the full row minus exactly the heavy fields plus fol
   for (const k of HEAVY) delete expected[k];
   expected.folded = { reports: 2, decisions: 1, key: sha20(full) };
   expected.chips = [...full.chips, FOLDED_CHIP];
+  expected.decisions = after.decisions; // the decisions are checked on their own below
   assert.deepEqual(after, expected, 'the folded row is exactly the full row minus the heavy fields');
   assert.equal(FOLDED_CHIP, '접어 둠');
-  assert.deepEqual(after.decisions, full.decisions, 'decisions stay whole');
+  assert.deepEqual(Object.keys(after.decisions[0]), ['id', 'sessionId', 'question', 'answered', 'closed', 'createdAt', 'answer', 'delivery', 'receipt', 'options'], 'the settled decision is SLIM on the folded row');
+  assert.deepEqual(Object.keys(after.decisions[0].options), ['A'], 'only the chosen option stays');
+  assert.ok(Buffer.byteLength(JSON.stringify(after)) < Buffer.byteLength(JSON.stringify(full)), 'the folded row is strictly smaller');
   assert.deepEqual(after.notes, full.notes, 'notes stay whole');
   assert.equal(full.chips.includes(FOLDED_CHIP), false, 'the full row never carries the fold chip');
   for (const k of HEAVY) assert.equal(k in after, false, `${k} is gone from the folded row`);
   assert.equal(after.tab, full.tab, 'the tab keeps its pre-fold value');
   assert.equal(after.statusKey, full.statusKey, 'statusKey keeps its pre-fold value');
+});
+
+test('fold slim: a settled decision keeps its answer, receipt and fields and only the chosen option', () => {
+  const settled = {
+    id: 9, sessionId: 'idle', question: '고를 것', options: { A: { text: '가', consequence: '결과 A', reason: '이유' }, B: { text: '나' } },
+    recommend: 'B', reason: '이유', blocks: false, createdAt: 1, source: 'brief', answered: true, closed: false, questionPrompt: false,
+    answer: { option: 'A', text: '', at: 2, values: { size: '큼' } }, receipt: { kind: 'started', mode: 'immediate', deliveredAt: 3, proven: true },
+    delivery: '전달됨 · 3', fields: [{ key: 'size', label: '크기' }],
+  };
+  const slim = slimDecision(settled);
+  assert.deepEqual(Object.keys(slim), ['id', 'sessionId', 'question', 'answered', 'closed', 'createdAt', 'answer', 'delivery', 'receipt', 'fields', 'options']);
+  assert.deepEqual(slim.options, { A: { text: '가' } });
+  assert.deepEqual(slim.receipt, settled.receipt);
+  assert.deepEqual(slim.fields, settled.fields);
+});
+
+test('fold slim: a reply-answered decision has no options key', () => {
+  const reply = { id: 10, sessionId: 'idle', question: 'q', options: { A: { text: '가' } }, answered: true, closed: false, createdAt: 1, answer: { option: '', text: '답글', at: 2 }, receipt: null, delivery: '대기: 전달 전' };
+  assert.equal('options' in slimDecision(reply), false);
+});
+
+test('fold slim: a held decision and an open decision pass through whole', () => {
+  const held = { id: 11, sessionId: 'idle', question: 'h', options: { A: { text: '가', consequence: 'c' } }, answered: false, closed: true, createdAt: 1, answer: null, receipt: null, held: { at: 4 } };
+  const { held: _held, ...open } = { ...held, closed: false };
+  assert.deepEqual(slimDecision(held), held);
+  assert.deepEqual(slimDecision(open), open);
 });
 
 test('fold: a row that would not get smaller stays unfolded', (t) => {

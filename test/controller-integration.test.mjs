@@ -1068,7 +1068,17 @@ test('fold expand: file retry uses a fresh safe numeric cache-buster', () => {
   assert.equal(foldedScripts(unsafe.e)[0], 'folded.js?v=agg%201%26x&r=1', 'the numeric suffix cannot be injected by the key');
 });
 
-test('fold expand: decisions and notes come from the base row after hydration', async () => {
+test('fold expand: an unfolded row keeps its own decisions', () => {
+  const e = makeController();
+  const plain = { ...foldedRow() };
+  delete plain.folded;
+  e.page.receive(model(1, plain, { gen: 9 }));
+  e.page.open('f1', 'ov');
+  assert.match(e.byId.main.textContent, /BASE QUESTION/);
+  assert.deepEqual(e.errors, []);
+});
+
+test('fold expand: decisions come from the full card after hydration; notes stay from the base row', async () => {
   const e = makeController();
   e.page.receive(model(1, foldedRow(), { gen: 9 })); e.page.open('f1', 'ov');
   sendConvo(convoCalls(e)[0], 200, { schema: 1, gen: 9, key: FOLD_KEY, session: fullCard() });
@@ -1077,9 +1087,9 @@ test('fold expand: decisions and notes come from the base row after hydration', 
   e.page.open('f1', 'rep');
   assert.equal(main.querySelectorAll('.rep').length, 3, 'the full report history is rendered');
   e.page.open('f1', 'ov');
-  assert.match(main.textContent, /BASE QUESTION/);
+  assert.match(main.textContent, /SERVER QUESTION/);
+  assert.doesNotMatch(main.textContent, /BASE QUESTION/);
   assert.match(main.textContent, /BASE NOTE/);
-  assert.doesNotMatch(main.textContent, /SERVER QUESTION/);
   assert.doesNotMatch(main.textContent, /SERVER NOTE/);
   assert.deepEqual(e.errors, []);
 });

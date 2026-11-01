@@ -253,12 +253,13 @@
     var hit = state.full.get(fullCacheKey(s.id, key));
     return hit && obj(hit.card) ? hit.card : null;
   }
-  // The base row stays authoritative for decisions and notes; the cached full card supplies the heavy fields it left out.
+  // The cached full card supplies the heavy fields and, for a folded base row, the whole decisions (its own are SLIM).
   function mergeFull(base, full) {
     var out = {}, k;
     for (k in full) if (has(full, k)) out[k] = full[k];
     for (k in base) if (has(base, k)) out[k] = base[k];
-    if (has(base, 'decisions')) out.decisions = base.decisions; else delete out.decisions;
+    if (has(base, 'folded') && has(full, 'decisions')) out.decisions = full.decisions;
+    else if (has(base, 'decisions')) out.decisions = base.decisions; else delete out.decisions;
     if (has(base, 'notes')) out.notes = base.notes; else delete out.notes;
     return out;
   }

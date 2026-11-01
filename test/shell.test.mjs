@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { projectBoardModel, slimDecision } from '../src/render.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
@@ -1550,6 +1551,61 @@ test('fold parity: side, rail, tabs, search and inbox render identically with fo
   const markedRecent = S.side({ generatedAt: NOW, sessions: [recentFolded] }, openRecent);
   assert.equal((markedRecent.match(/<span class="sh-fold">접힘<\/span>/g) || []).length, 2, 'favourite and recent rows each carry the marker');
   assert.equal(normalize(markedRecent), plainRecent, 'empty grey subtext containers differ only by the marker');
+});
+
+test('fold parity: settled decisions render the same from their SLIM form on a folded row', () => {
+  const S = load().BriefShell;
+  const strip = (html) => html.replace(/<span class="sh-fold">접힘<\/span>/g, '').replace(/<span class="sh-sub"><\/span>/g, '');
+  const settled = [
+    { id: 90, sessionId: 'p185', question: '사이드바 기본 폭?', options: { A: { text: '260px' }, B: { text: '300px' } }, recommend: 'B', reason: '이유', answered: true, closed: true, answer: { option: 'A', at: NOW - 5 * 60e3 }, receipt: { kind: 'started', mode: 'immediate', deliveredAt: NOW - 4 * 60e3, proven: true }, delivery: '전달됨 ⏱11:58' },
+    { id: 91, sessionId: 'p185', question: '답글로 답한 질문', options: { A: { text: 'a' } }, answered: true, closed: false, answer: { option: '', text: '답글 본문', at: NOW - 3 * 60e3 }, receipt: null, delivery: '전달됨 ⏱11:59' },
+    { id: 96, sessionId: 'p185', question: '보류한 질문', options: { A: { text: 'x' } }, answered: false, closed: true, held: { at: NOW - 60e3 } },
+  ];
+  const full = fixture(), folded = fixture();
+  full.sessions.find((s) => s.id === 'p185').decisions = settled;
+  const row = folded.sessions.find((s) => s.id === 'p185');
+  row.decisions = settled.map(slimDecision);
+  row.folded = { reports: 0, decisions: settled.length, key: 'c'.repeat(20) };
+  const st = S.reduce(base(S), { type: 'expand', sid: 'p185' });
+  const views = [st, S.reduce(st, { type: 'view', key: 'inbox' }), S.reduce(st, { type: 'search', text: '사이드바' })];
+  for (const v of views) assert.equal(strip(S.side(folded, v)), S.side(full, v), 'side matches with the SLIM decisions');
+  assert.equal(strip(S.rail(folded, st)), S.rail(full, st), 'rail matches');
+  assert.ok(S.inbox(full, st).held.some((i) => i.id === 96), 'the held decision is listed on the full card');
+  assert.ok(S.inbox(folded, st).held.some((i) => i.id === 96), 'the held decision stays whole on the folded row');
+});
+
+test('fold parity: the overview decision areas match with folding on and off', () => {
+  const V = load({}, ['src/page/icons.js', 'src/page/shell.js', 'src/page/view.js']).BriefView;
+  const receipt = { kind: 'started', mode: 'immediate', deliveredAt: NOW - 3 * 60e3, proven: true };
+  const answered = { at: NOW - 4 * 60e3 };
+  const decisions = [
+    { id: 201, sessionId: 'ov1', question: '옵션 답', options: { A: { text: '가', consequence: '결과' }, B: { text: '나' } }, recommend: 'B', reason: '이유', answered: true, closed: false, questionPrompt: true, answer: { option: 'A', text: '', ...answered }, receipt, delivery: '전달됨 ⏱11:57' },
+    { id: 202, sessionId: 'ov1', question: '답글 답', options: { A: { text: '가' } }, answered: true, closed: false, answer: { option: '', text: '답글 본문', ...answered }, receipt, delivery: '전달됨 ⏱11:57' },
+    { id: 203, sessionId: 'ov1', question: '입력 답', options: {}, fields: [{ id: 'size', label: '크기' }], answered: true, closed: false, answer: { option: '', text: '', values: { size: '크' }, ...answered }, receipt, delivery: '전달됨 ⏱11:57' },
+    { id: 204, sessionId: 'ov1', question: '닫힌 결정', options: { A: { text: '가' } }, answered: true, closed: true, answer: { option: 'A', text: '', ...answered }, receipt, delivery: '전달됨 ⏱11:57' },
+    { id: 205, sessionId: 'ov1', question: '보류한 결정', options: { A: { text: '가' } }, answered: false, closed: true, answer: null, held: { at: NOW - 60e3 } },
+  ];
+  const full = { schema: 1, seq: 1, gen: null, generatedAt: NOW, summary: { openDecisions: 0, blocked: 0, stale: 0 }, readErrors: [], server: null, waiting: [],
+    sessions: [{ id: 'ov1', title: '개요 카드', alive: false, status: 'done', statusKey: 'done', tab: '끝남', headline: 'h', lastActivityAt: NOW - 3 * DAY, decisions, notes: [], reports: [], chips: [] }] };
+  const foldOn = projectBoardModel(full, NOW);
+  const foldOff = projectBoardModel(full, NOW, { fold: false });
+  const row = foldOn.sessions[0];
+  assert.ok(row.folded, 'precondition: the card folds');
+  assert.equal(foldOff.sessions[0].folded, undefined, 'precondition: folding off keeps the card whole');
+  assert.deepEqual(row.decisions.find((d) => d.id === 203).fields, [{ id: 'size', label: '크기' }], 'the input-values answer keeps its fields');
+  assert.deepEqual(row.decisions.find((d) => d.id === 205), decisions[4], 'the held decision stays whole');
+  const ui = { live: true, answers: Object.fromEntries([201, 202, 203, 204].map((id) => [String(id), { phase: 'sent' }])) };
+  const htmlOn = V.renderOverview(foldOn, ui), htmlOff = V.renderOverview(foldOff, ui);
+  const areas = (html) => ({
+    sent: html.match(/<p class="dsent">[\s\S]*?<\/p>/g) || [],
+    held: html.match(/<details class="held-decs"[\s\S]*?<\/details>/g) || [],
+    prompt: html.match(/질문창으로 옮김[^<]*/g) || [],
+  });
+  assert.equal(areas(htmlOff).sent.length, 4, 'the four settled answers show their sent line');
+  assert.equal(areas(htmlOff).held.length, 1, 'the held decision is listed');
+  assert.equal(areas(htmlOff).prompt.length, 1, 'the questionPrompt line is shown');
+  assert.deepEqual(areas(htmlOn), areas(htmlOff), 'decision areas match with folding on and off');
+  assert.equal(htmlOn.includes('전달 기다림'), false, 'the folded row adds no waiting-for-delivery line');
 });
 
 test('fold marker placement: 접힘 is a shrink-0 sibling outside the ellipsized .sh-t for every row caller', () => {
