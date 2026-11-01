@@ -19,7 +19,7 @@
 // replay it automatically.
 import * as nodeFs from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parseJsonc } from './contract/jsonc.mjs';
@@ -92,8 +92,9 @@ function refusal(code, message = '', extra = {}) {
   return { ok: false, code, status, message, ...extra };
 }
 
+// Resolves without touching the filesystem, so every spelling of one home compares equal.
 function homeKey(home) {
-  return String(home).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  return win32.resolve(String(home)).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
 
 export function sha256(bytes) {
@@ -472,15 +473,21 @@ export function openProfilesStore(options = {}) {
     throw Object.assign(new Error(`openProfilesStore does not read ${unknownKeys.join(', ')}; `
       + `its options are ${[...STORE_OPTION_KEYS].join(', ')}`), { code: 'UNKNOWN_OPTION', keys: unknownKeys });
   }
+  // The app home is never a root, however it is spelled or nested. Pure: this runs before any file is touched.
+  const guardedRoots = [options.primaryHome ?? PRIMARY_HOME_DEFAULT, options.stableHome ?? STABLE_HOME_DEFAULT,
+    ...(options.mirrorHomes ?? MIRROR_HOME_DEFAULTS)];
+  const appKey = homeKey(APP_HOME_NEVER_WRITE);
+  if (guardedRoots.some((home) => {
+    const key = homeKey(home);
+    return key === appKey || key.startsWith(`${appKey}/`);
+  })) {
+    throw Object.assign(new Error(`openProfilesStore refuses ${APP_HOME_NEVER_WRITE}: the board never writes the app home`),
+      { code: 'APP_HOME_REFUSED' });
+  }
   const missingHomes = HOME_OPTION_KEYS.filter((key) => options[key] === undefined || options[key] === null);
   if (missingHomes.length > 0 && missingHomes.length < HOME_OPTION_KEYS.length) {
     throw Object.assign(new Error(`openProfilesStore: ${missingHomes.join(', ')} missing; name every home or none `
       + '(none = the live homes)'), { code: 'PARTIAL_HOMES', missing: missingHomes });
-  }
-  const requestedHomes = [options.primaryHome, options.stableHome, ...(options.mirrorHomes ?? [])];
-  if (requestedHomes.some((home) => home != null && homeKey(home) === homeKey(APP_HOME_NEVER_WRITE))) {
-    throw Object.assign(new Error(`openProfilesStore refuses ${APP_HOME_NEVER_WRITE}: the board never writes the app home`),
-      { code: 'APP_HOME_REFUSED' });
   }
   const fs = options.fs ?? nodeFs;
   const nowFn = options.now ?? Date.now;

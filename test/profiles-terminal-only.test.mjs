@@ -1,5 +1,6 @@
 // Board profile store, terminal home only: the default home, the single-home target
-// list, and the refusal of the app home. Every test runs against temporary homes.
+// list, and the refusal of the app home in every spelling. Every test runs against
+// temporary homes or against an fs stand-in that fails on any access.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -17,13 +18,48 @@ const GOLDEN = path.join(here, 'fixtures', 'profiles', 'goldens', 'apply-gpt-kim
 const REAL_INVENTORY = JSON.parse(fs.readFileSync(path.join(here, '..', 'src', 'profiles', 'inventory.json'), 'utf8'));
 const PS_STYLE = { bom: true, eol: '\r\n', indent: '    ', keySep: ':  ', trailingNewline: true };
 const APP_HOME = 'C:/Users/USER/.omo';
+const TERMINAL_HOME = 'C:/Users/USER/.omo-stable-500/home/.omo';
+
+// Every spelling of the app home, as the board could receive it from a command line.
+const APP_HOME_SPELLINGS = [
+  APP_HOME,
+  'C://Users//USER//.omo',
+  'C:/Users/USER/.omo/../.omo',
+  'C:/Users/USER/./.omo',
+  'C:/Users/USER/.omo/.',
+  'c:\\users\\user\\.omo\\',
+  'C:/Users/USER/.omo/runtime',
+];
 
 const readGolden = (name) => JSON.parse(fs.readFileSync(path.join(GOLDEN, name), 'utf8'));
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const hashFile = (file) => sha(fs.readFileSync(file));
 
+// An fs stand-in: any access is counted, and throws, so a path that reads the disk fails.
+function failingFs() {
+  const calls = [];
+  const stub = new Proxy({}, {
+    get(_, key) {
+      calls.push(String(key));
+      throw new Error(`fs touched: ${String(key)}`);
+    },
+  });
+  return { stub, calls };
+}
+
+// What openProfilesStore does with these options: the error code (or NO_THROW) and the fs accesses.
+function openOutcome(options) {
+  const { stub, calls } = failingFs();
+  try {
+    openProfilesStore({ ...options, fs: stub });
+    return { code: 'NO_THROW', fsCalls: calls.length };
+  } catch (error) {
+    return { code: error.code ?? error.message, fsCalls: calls.length };
+  }
+}
+
 // One home that is both the primary and the stable root (the terminal lane).
-function makeSameHome(t) {
+function makeSameHome(t, stableSpelling = (home) => home) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piomo-terminal-only-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const home = path.join(root, 'home', '.omo');
@@ -43,7 +79,7 @@ function makeSameHome(t) {
     sources: { ...REAL_INVENTORY.sources, omo: { ...REAL_INVENTORY.sources.omo, sha256: sha(Buffer.from('plugin-body')) } },
   };
   const store = openProfilesStore({
-    primaryHome: home, stableHome: home, mirrorHomes: [], pluginPath: plugin, inventory,
+    primaryHome: home, stableHome: stableSpelling(home), mirrorHomes: [], pluginPath: plugin, inventory,
     now: () => Date.parse('2026-10-20T12:00:00Z'),
   });
   return { root, home, sentinel, store };
@@ -63,6 +99,14 @@ test('one home for both roles: the target list has no stable copy of omo.jsonc',
   const ids = Object.keys(fx.store.state().targets);
   assert.ok(ids.includes('omo.jsonc'));
   assert.ok(ids.includes('agent/primary-agents/roster.json'));
+  assert.ok(!ids.includes('stable/omo.jsonc'));
+  assert.ok(!ids.includes('stable/agent/models.json'));
+});
+
+test('one home spelled two ways (stable with ./ and a trailing slash) is still one home', (t) => {
+  const fx = makeSameHome(t, (home) => `${home}${path.sep}.${path.sep}`);
+  const ids = Object.keys(fx.store.state().targets);
+  assert.ok(ids.includes('omo.jsonc'));
   assert.ok(!ids.includes('stable/omo.jsonc'));
   assert.ok(!ids.includes('stable/agent/models.json'));
 });
@@ -90,19 +134,41 @@ test('a memory row change lands in the primary omo.jsonc and never in a stable c
   assert.notEqual(hashFile(path.join(fx.home, 'omo.jsonc')), omoBefore);
 });
 
-test('an app-home primary is refused before any file is read', () => {
-  const calls = [];
-  const countingFs = new Proxy(fs, {
-    get(target, key) { calls.push(key); return target[key]; },
-  });
-  assert.throws(() => openProfilesStore({
-    primaryHome: APP_HOME, stableHome: 'C:/Users/USER/.omo-stable-500/home/.omo', mirrorHomes: [], fs: countingFs,
-  }), (error) => error.code === 'APP_HOME_REFUSED');
-  assert.equal(calls.length, 0);
+test('every spelling of the app home is refused as the primary root, before any fs access', () => {
+  for (const spelling of APP_HOME_SPELLINGS) {
+    const outcome = openOutcome({ primaryHome: spelling, stableHome: TERMINAL_HOME, mirrorHomes: [] });
+    assert.deepEqual({ spelling, ...outcome }, { spelling, code: 'APP_HOME_REFUSED', fsCalls: 0 });
+  }
 });
 
-test('an app-home stable root is refused too, with the separator and case normalized', () => {
-  assert.throws(() => openProfilesStore({
-    primaryHome: 'C:/Users/USER/.omo-stable-500/home/.omo', stableHome: 'c:\\users\\user\\.omo\\', mirrorHomes: [],
-  }), (error) => error.code === 'APP_HOME_REFUSED');
+test('every spelling of the app home is refused as the stable root, before any fs access', () => {
+  for (const spelling of APP_HOME_SPELLINGS) {
+    const outcome = openOutcome({ primaryHome: TERMINAL_HOME, stableHome: spelling, mirrorHomes: [] });
+    assert.deepEqual({ spelling, ...outcome }, { spelling, code: 'APP_HOME_REFUSED', fsCalls: 0 });
+  }
+});
+
+test('the app home as a mirror root is refused before any fs access', () => {
+  const outcome = openOutcome({ primaryHome: TERMINAL_HOME, stableHome: TERMINAL_HOME, mirrorHomes: [APP_HOME] });
+  assert.deepEqual(outcome, { code: 'APP_HOME_REFUSED', fsCalls: 0 });
+});
+
+test('a stable root at the app home is refused even when the primary is omitted', () => {
+  const outcome = openOutcome({ stableHome: APP_HOME });
+  assert.deepEqual(outcome, { code: 'APP_HOME_REFUSED', fsCalls: 0 });
+});
+
+test('a relative spelling that resolves to the app home from its parent is refused', (t) => {
+  const before = process.cwd();
+  process.chdir('C:/Users/USER');
+  t.after(() => process.chdir(before));
+  const outcome = openOutcome({ primaryHome: '.omo', stableHome: TERMINAL_HOME, mirrorHomes: [] });
+  assert.deepEqual(outcome, { code: 'APP_HOME_REFUSED', fsCalls: 0 });
+});
+
+test('homes that only share the app home prefix are not refused', () => {
+  for (const home of [TERMINAL_HOME, 'C:/Users/USER/.omo-stable-500/home', 'C:/Users/USER/.omo2']) {
+    const outcome = openOutcome({ primaryHome: home, stableHome: home, mirrorHomes: [] });
+    assert.deepEqual({ home, ...outcome }, { home, code: 'NO_THROW', fsCalls: 0 });
+  }
 });
