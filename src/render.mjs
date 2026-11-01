@@ -456,6 +456,9 @@ function skeletonPlan(planId, files, status, ownerMeta) {
 // 1. blockSources of finished conversations -> {} (parent rule, no chip);
 // 1b. non-live finished conversations' report blocks -> one "표·그래프 생략 n개" card chip with the total omitted count,
 //     oldest first, only when smaller; keep report metadata/links; alive or unfinished cards wait for existing drops.
+// 1c. settled decisions of unprotected cards -> the SLIM form, finished cards first then oldest first, before any report
+//     drops (stage U only; a decision a remaining report links to via report.decisionId or a compare block's decision stays
+//     whole; applied to a card only when it gets smaller);
 // 2. the existing drops: live/plan details, then reports (with their rep/* sources), each marked by OMITTED_CHIP - a drop is
 //    applied to a card only when it saves more bytes than the chip it adds, so no pass ever makes a card bigger;
 // 3. todo.items -> [] (count added to todo.more; their plan/todo/* sources go too); 4. remaining blockSources -> {};
@@ -464,13 +467,12 @@ function skeletonPlan(planId, files, status, ownerMeta) {
 // 8. delete askLive and builtin question flags; this loses only the optional page notes, never live-call state.
 // 9. held decisions (todo 12): delete heldCount and shorten every held {at} to {} - a card then spends no more on holds
 //    than the accepted renderer's held:true/false; the page loses only the hold time (and recounts held ones itself).
-// Passes 3-9 add no per-card bytes: vm.trimmed = {cards: n} counts the distinct cards they touched (each once).
+// Passes 1c and 3-9 add no per-card bytes: vm.trimmed = {cards: n} counts the distinct cards they touched (each once).
 // Every pass only shrinks the model, and with every todo-3 key, question flag and counter gone what is left is the pre-todo-3 model
 // minus some of its legacy details: it fits whenever the accepted renderer's output fits.
 // Paths are dropped whole, never cut. Every pass tracks the size exactly (value and key bytes); every stop is confirmed
 // on the real text. Measured on the escaped data.js text (every '<' is six bytes there), never smaller than /data.json.
 // Report blocks and decision fields are included in that exact count; OPEN decision fields are never trimmed.
-// Stage U slims the settled decisions of unprotected cards (pass 1c) before any report is dropped; linked decisions stay whole.
 function capSize(vm) {
   const exact = () => Buffer.byteLength(dataJsText(vm));
   let size = exact();
