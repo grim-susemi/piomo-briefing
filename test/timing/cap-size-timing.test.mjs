@@ -62,6 +62,7 @@ const CASES = [
   { name: 'server, default screen, 20 publishes in 60 s', mode: 'server', screen: 'default', kind: 'publish' },
   { name: 'server, default screen, idle 60 s', mode: 'server', screen: 'default', kind: 'idle' },
   { name: 'file, default screen, idle 60 s', mode: 'file', screen: 'default', kind: 'idle' },
+  { name: 'file, office screen, idle 60 s', mode: 'file', screen: 'office', kind: 'idle' },
   { name: 'server, office screen, idle 60 s', mode: 'server', screen: 'office', kind: 'idle' },
   { name: 'server, office screen, 20 publishes in 60 s', mode: 'server', screen: 'office', kind: 'publish' },
 ];
