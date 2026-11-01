@@ -469,6 +469,7 @@ function skeletonPlan(planId, files, status, ownerMeta) {
 // Paths are dropped whole, never cut. Every pass tracks the size exactly (value and key bytes); every stop is confirmed
 // on the real text. Measured on the escaped data.js text (every '<' is six bytes there), never smaller than /data.json.
 // Report blocks and decision fields are included in that exact count; OPEN decision fields are never trimmed.
+// Stage U slims the settled decisions of unprotected cards (pass 1c) before any report is dropped; linked decisions stay whole.
 function capSize(vm) {
   const exact = () => Buffer.byteLength(dataJsText(vm));
   let size = exact();
@@ -545,6 +546,28 @@ function capSize(vm) {
           capState(r, CAP_BLOCKS, blockCount);
           cutOf(s).blocks += blockCount;
           size += cost;
+        }
+      }
+      // pass 1c (stage U only): settled decisions of an unprotected card slim to the SLIM form, oldest finished card first,
+      // before any report drops. A decision that a report still on the card links to (report.decisionId, or a compare
+      // block's decision) stays whole: that report reads its options and consequence. A card changes only when its decisions shrink.
+      if (protectReports) {
+        const linkedIds = (s) => {
+          const ids = new Set();
+          for (const r of arr(s.reports)) {
+            if (!isObj(r)) continue;
+            if (r.decisionId !== null && r.decisionId !== undefined) ids.add(String(r.decisionId));
+            for (const b of arr(r.blocks)) if (isObj(b) && b.decision !== undefined) ids.add(String(b.decision));
+          }
+          return ids;
+        };
+        for (const s of rows.filter((x) => arr(x.decisions).length > 0).sort(byAge)) {
+          if (fit()) return;
+          const linked = linkedIds(s);
+          const slimmed = s.decisions.map((d) => (isObj(d) && linked.has(String(d.id)) ? d : slimDecision(d)));
+          if (bytes(slimmed) >= bytes(s.decisions)) continue;
+          replace(s, 'decisions', slimmed);
+          touch(s);
         }
       }
       // pass 2: the existing drops with their chip. A drop is applied to a card only when it saves more bytes than the chip

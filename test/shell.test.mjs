@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { projectBoardModel, slimDecision } from '../src/render.mjs';
+import { projectBoardModel, slimDecision, MAX_VM_BYTES } from '../src/render.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
@@ -1606,6 +1606,37 @@ test('fold parity: the overview decision areas match with folding on and off', (
   assert.equal(areas(htmlOff).prompt.length, 1, 'the questionPrompt line is shown');
   assert.deepEqual(areas(htmlOn), areas(htmlOff), 'decision areas match with folding on and off');
   assert.equal(htmlOn.includes('전달 기다림'), false, 'the folded row adds no waiting-for-delivery line');
+});
+
+test('C-SLIM overview parity: a card that the cap slims shows the same decision areas as the unslimmed card', () => {
+  // Given the same settled card once with a short reason and once with a reason so big that the cap slims it,
+  // When the overview draws both, Then the decision areas match, and only the slimmed decisions lost their reason.
+  const V = load({}, ['src/page/icons.js', 'src/page/shell.js', 'src/page/view.js']).BriefView;
+  const receipt = { kind: 'started', mode: 'immediate', deliveredAt: NOW - 3 * 60e3, proven: true };
+  const answered = { at: NOW - 4 * 60e3 };
+  const decisions = (reason) => [
+    { id: 301, sessionId: 'cs1', question: '옵션 답', options: { A: { text: '가', consequence: '결과' }, B: { text: '나' } }, recommend: 'B', reason, answered: true, closed: false, questionPrompt: true, answer: { option: 'A', text: '', ...answered }, receipt, delivery: '전달됨 ⏱11:57' },
+    { id: 302, sessionId: 'cs1', question: '답글 답', options: { A: { text: '가' } }, answered: true, closed: false, answer: { option: '', text: '답글 본문', ...answered }, receipt, delivery: '전달됨 ⏱11:57' },
+    { id: 303, sessionId: 'cs1', question: '입력 답', options: {}, fields: [{ id: 'size', label: '크기' }], answered: true, closed: false, answer: { option: '', text: '', values: { size: '크' }, ...answered }, receipt, delivery: '전달됨 ⏱11:57' },
+    { id: 305, sessionId: 'cs1', question: '보류한 결정', options: { A: { text: '가' } }, answered: false, closed: true, answer: null, held: { at: NOW - 60e3 } },
+  ];
+  const model = (reason) => ({ generatedAt: NOW, seq: 1, gen: null, summary: { openDecisions: 0, blocked: 0, stale: 0 }, readErrors: [], server: null, waiting: [],
+    sessions: [{ id: 'cs1', title: '상황판 카드', alive: false, status: 'done', statusKey: 'done', tab: '끝남', headline: 'h', lastActivityAt: NOW - 60e3, decisions: decisions(reason), notes: [], reports: [], chips: [] }] });
+  const small = projectBoardModel(model(''), NOW, { fold: false });
+  const big = projectBoardModel(model('r'.repeat(MAX_VM_BYTES + 1000)), NOW, { fold: false });
+  assert.equal(small.sessions[0].decisions[0].reason, '', 'precondition: the short reason is kept');
+  assert.equal(big.sessions[0].decisions[0].reason, undefined, 'precondition: the cap slimmed the settled decision');
+  const ui = { live: true, answers: Object.fromEntries([301, 302, 303].map((id) => [String(id), { phase: 'sent' }])) };
+  const areas = (html) => ({
+    sent: html.match(/<p class="dsent">[\s\S]*?<\/p>/g) || [],
+    held: html.match(/<details class="held-decs"[\s\S]*?<\/details>/g) || [],
+    prompt: html.match(/질문창으로 옮김[^<]*/g) || [],
+  });
+  const before = areas(V.renderOverview(small, ui)), after = areas(V.renderOverview(big, ui));
+  assert.equal(before.sent.length, 3, 'the three settled answers show their sent line');
+  assert.equal(before.held.length, 1, 'the held decision is listed');
+  assert.equal(before.prompt.length, 1, 'the questionPrompt line is shown');
+  assert.deepEqual(after, before, 'the decision areas match before and after slimming');
 });
 
 test('fold marker placement: 접힘 is a shrink-0 sibling outside the ellipsized .sh-t for every row caller', () => {

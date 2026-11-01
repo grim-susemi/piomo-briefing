@@ -1942,3 +1942,134 @@ test('200 cards irreducible: open decisions alone exceed the cap; data.js is sti
   assert.equal(result.presentation.overCap, true);
   assert.deepEqual(openDecisions200(model), decisions);
 });
+
+// ------------------------------------------------------------------ C-SLIM cap (todo 4)
+// Over the cap, the settled decisions (answered or closed, not held) of an unprotected card slim to the SLIM form before a
+// report is dropped. Folding is off in these tests so that only the capSize pass is measured.
+const slimWire4 = (m) => Buffer.byteLength(`/* seq:${m.seq} */\nwindow.__briefData && window.__briefData(${JSON.stringify(m)
+  .replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')});\n`);
+const presentationOf4 = (vm) => vm[Object.getOwnPropertySymbols(vm).find((k) => k.description === 'presentation')];
+const cutDetails4 = (vm, sid) => presentationOf4(vm).sessions.find((x) => x.sessionId === sid)?.cut.details === true;
+const settledDec4 = (id, sid, reasonLen) => ({ id, sessionId: sid, question: `q${id}`, options: { A: { text: 'a', consequence: `c${id}` }, B: { text: 'b' } },
+  recommend: 'A', reason: 'r'.repeat(reasonLen), answered: true, closed: true, answer: { option: 'A', at: NOW - 5000 }, createdAt: NOW - 9000 });
+// sized so that the card's one decision is about perCard bytes
+const sized4 = (id, sid, perCard) => settledDec4(id, sid, Math.max(0, perCard - Buffer.byteLength(JSON.stringify(settledDec4(id, sid, 0)))));
+const cid4 = (n) => `c${String(n).padStart(3, '0')}`;
+const card4 = (n, decisions, reports = [], extra = {}) => ({ id: cid4(n), alive: false, status: 'done', statusKey: 'done', tab: '끝남',
+  title: `t${n}`, headline: 'h', lastActivityAt: NOW - (n + 1) * 60e3, decisions, notes: [], reports, chips: [], ...extra });
+const report4 = (n, extra = {}) => ({ id: `r${n}`, title: 'r', summary: 's', images: [], at: NOW - (n + 1) * 60e3, ...extra });
+const full4 = (sessions) => ({ schema: 1, seq: 1, gen: null, generatedAt: NOW, summary: { openDecisions: 0, blocked: 0, stale: 0 }, readErrors: [], server: null, waiting: [], sessions });
+const slimmedIds4 = (vm, input) => vm.sessions.filter((s, i) => JSON.stringify(s.decisions) !== JSON.stringify(input.sessions[i].decisions)).map((s) => s.id);
+
+test('C-SLIM: settled decisions alone over the cap slim before any report drops (happy path)', () => {
+  // Given 120 finished cards whose settled decisions total MAX_VM_BYTES + 100000 B, and 30 reports,
+  // When the model is projected over the cap, Then it fits, all 30 reports stay, and only the slimmed cards are counted and marked.
+  const perCard = Math.ceil((MAX_VM_BYTES + 100_000) / 120);
+  const full = full4(Array.from({ length: 120 }, (_, n) => card4(n, [sized4(n + 1, cid4(n), perCard)], n < 30 ? [report4(n)] : [])));
+  const input = structuredClone(full);
+  assert.ok(full.sessions.reduce((a, s) => a + Buffer.byteLength(JSON.stringify(s.decisions)), 0) >= MAX_VM_BYTES + 100_000, 'precondition: the settled decisions total MAX + 100000 B');
+  assert.ok(slimWire4(full) > MAX_VM_BYTES, 'precondition: the uncapped model is over the cap');
+  const vm = projectBoardModel(full, NOW, { fold: false });
+  assert.ok(slimWire4(vm) <= MAX_VM_BYTES, `model is ${slimWire4(vm)} bytes`);
+  assert.equal(vm.sessions.reduce((a, s) => a + s.reports.length, 0), 30, 'all 30 reports stay');
+  assert.ok(vm.sessions.every((s) => !s.chips.includes(OMITTED_CHIP)), 'no per-card chip');
+  const slimmed = slimmedIds4(vm, input);
+  assert.ok(slimmed.length > 0 && slimmed.length < 120, 'some, not all, cards are slimmed');
+  assert.deepEqual(vm.trimmed, { cards: slimmed.length }, 'vm.trimmed counts the slimmed cards');
+  for (const s of vm.sessions) assert.equal(cutDetails4(vm, s.id), slimmed.includes(s.id), `cut.details of ${s.id}`);
+  for (const id of slimmed) {
+    const d = vm.sessions.find((s) => s.id === id).decisions[0];
+    assert.equal(d.reason, undefined, 'the slimmed decision drops its reason');
+    assert.equal(d.answered, true, 'the slimmed decision keeps its answered flag');
+  }
+});
+
+test('C-SLIM: open and held decisions are byte-identical after the pass', () => {
+  // Given 100 settled cards over the cap and 20 cards that hold an open and a held decision,
+  // When the model is projected over the cap, Then the open and held decisions are deep-equal to their input.
+  const perCard = Math.ceil((MAX_VM_BYTES + 100_000) / 100);
+  const settled = Array.from({ length: 100 }, (_, n) => card4(n, [sized4(n + 1, cid4(n), perCard)]));
+  const others = Array.from({ length: 20 }, (_, k) => {
+    const n = 100 + k;
+    return card4(n, [
+      { id: 1000 + n, sessionId: cid4(n), question: 'open', options: { A: { text: 'a' } }, answered: false, closed: false, createdAt: NOW - 9000 },
+      { id: 2000 + n, sessionId: cid4(n), question: 'held', options: { A: { text: 'a' } }, answered: false, closed: true, held: { at: NOW - 1000 }, createdAt: NOW - 9000 },
+    ]);
+  });
+  const full = full4([...settled, ...others]);
+  const input = structuredClone(full);
+  assert.ok(slimWire4(full) > MAX_VM_BYTES, 'precondition: the uncapped model is over the cap');
+  const vm = projectBoardModel(full, NOW, { fold: false });
+  assert.ok(slimWire4(vm) <= MAX_VM_BYTES, 'model fits');
+  const pick = (ds) => ds.filter((d) => d.held !== undefined || (d.answered !== true && d.closed !== true));
+  assert.deepEqual(vm.sessions.map((s) => pick(s.decisions)), input.sessions.map((s) => pick(s.decisions)), 'open and held decisions are unchanged');
+});
+
+test('C-SLIM: when settled decisions cannot cover the overflow, the reports drop oldest first as before', () => {
+  // Given an open decision that leaves the model over the cap by about 130 KB and 30 reports of 5 KB each,
+  // When the model is projected over the cap, Then the open decision is unchanged and every dropped report is older than every kept one.
+  const reports = Array.from({ length: 30 }, (_, n) => report4(n, { summary: 'p'.repeat(5000) }));
+  const full = full4([
+    card4(0, [{ id: 1, sessionId: cid4(0), question: 'open', options: { A: { text: 'a' } }, answered: false, closed: false, reason: 'r'.repeat(MAX_VM_BYTES - 20_000), createdAt: NOW - 9000 }]),
+    card4(1, [settledDec4(2, cid4(1), 10)], reports),
+  ]);
+  const input = structuredClone(full);
+  assert.ok(slimWire4(full) > MAX_VM_BYTES, 'precondition: over the cap');
+  const vm = projectBoardModel(full, NOW, { fold: false });
+  assert.deepEqual(vm.sessions[0].decisions, input.sessions[0].decisions, 'the open decision is unchanged');
+  const keptIds = new Set(vm.sessions.flatMap((s) => s.reports.map((r) => r.id)));
+  const dropped = reports.filter((r) => !keptIds.has(r.id));
+  const kept = reports.filter((r) => keptIds.has(r.id));
+  assert.ok(dropped.length > 0 && kept.length > 0, 'the overflow drops some reports and keeps others');
+  assert.ok(Math.min(...kept.map((r) => r.at)) >= Math.max(...dropped.map((r) => r.at)), 'the oldest reports drop first');
+});
+
+test('C-SLIM: a folded row whose decisions are already SLIM is neither touched nor counted', () => {
+  // Given a folded row with SLIM decisions among 100 settled cards over the cap,
+  // When the model is projected, Then the folded row keeps its decisions, has no cut details, and vm.trimmed counts only the other cards.
+  const perCard = Math.ceil((MAX_VM_BYTES + 100_000) / 100);
+  const settled = Array.from({ length: 100 }, (_, n) => card4(n, [sized4(n + 1, cid4(n), perCard)]));
+  const folded = card4(200, [{ id: 900, sessionId: 'fold-row', question: 'q', options: { A: { text: 'a' } }, answered: true, closed: true, answer: { option: 'A', at: NOW - 5000 }, createdAt: NOW - 9000 }],
+    [], { id: 'fold-row', folded: { reports: 0, decisions: 1, key: 'd'.repeat(20) }, chips: ['접어 둠'] });
+  delete folded.alive; // the pre-existing alive-key pass would touch any row that still carries the key; this isolates the new pass
+  const full = full4([...settled, folded]);
+  const input = structuredClone(full);
+  const vm = projectBoardModel(full, NOW, { fold: false });
+  assert.deepEqual(vm.sessions.find((s) => s.id === 'fold-row').decisions, input.sessions[100].decisions, 'the folded row keeps its decisions');
+  assert.equal(cutDetails4(vm, 'fold-row'), false, 'the folded row has no cut details');
+  const slimmed = slimmedIds4(vm, input);
+  assert.ok(slimmed.length > 0, 'the other cards are slimmed');
+  assert.ok(!slimmed.includes('fold-row'));
+  assert.deepEqual(vm.trimmed, { cards: slimmed.length }, 'the folded row is not counted');
+});
+
+test('C-SLIM: cards with no decisions and cards with only settled decisions mix without an exception', () => {
+  // Given 60 cards with decisions: [] and 60 finished cards whose settled decisions alone overrun the cap,
+  // When the model is projected over the cap, Then nothing throws, the model fits, and every decisions is still an array.
+  const perCard = Math.ceil((MAX_VM_BYTES + 100_000) / 60);
+  const empty = Array.from({ length: 60 }, (_, n) => card4(n, []));
+  const settled = Array.from({ length: 60 }, (_, k) => card4(60 + k, [sized4(k + 1000, cid4(60 + k), perCard)]));
+  const full = full4([...empty, ...settled]);
+  assert.ok(slimWire4(full) > MAX_VM_BYTES, 'precondition: over the cap');
+  const vm = projectBoardModel(full, NOW, { fold: false });
+  assert.ok(slimWire4(vm) <= MAX_VM_BYTES, 'model fits');
+  assert.ok(vm.sessions.every((s) => Array.isArray(s.decisions)), 'decisions stay arrays on every card');
+});
+
+test('C-SLIM: a settled decision that a remaining report links keeps its options and consequence (decisionId and compare block)', () => {
+  // Given two settled decisions linked by a remaining report (report.decisionId on a finished card, a compare block on a running card)
+  // among 100 settled cards over the cap, When the model is projected, Then both linked decisions are deep-equal to their input.
+  const perCard = Math.ceil((MAX_VM_BYTES + 100_000) / 102);
+  const byId = card4(0, [sized4(1, cid4(0), perCard)], [report4(0, { decisionId: 1 })]);
+  const byBlock = card4(1, [sized4(2, cid4(1), perCard)], [report4(1, { blocks: [{ kind: 'compare', decision: 2, rows: [] }] })],
+    { tab: '진행 중', status: 'in_progress', statusKey: 'in_progress' });
+  const others = Array.from({ length: 100 }, (_, k) => card4(k + 2, [sized4(k + 10, cid4(k + 2), perCard)]));
+  const full = full4([byId, byBlock, ...others]);
+  const input = structuredClone(full);
+  assert.ok(slimWire4(full) > MAX_VM_BYTES, 'precondition: over the cap');
+  const vm = projectBoardModel(full, NOW, { fold: false });
+  assert.ok(slimWire4(vm) <= MAX_VM_BYTES, 'model fits');
+  assert.deepEqual(vm.sessions[0].decisions, input.sessions[0].decisions, 'the decisionId link keeps its decision whole');
+  assert.deepEqual(vm.sessions[1].decisions, input.sessions[1].decisions, 'the compare-block link keeps its decision whole');
+  assert.ok(slimmedIds4(vm, input).length > 0, 'the unlinked decisions are slimmed');
+});
