@@ -696,13 +696,29 @@ function presentationOf(vm, exactBytes) {
 // ---- C-FOLD: the compact row for an idle closed conversation --------------------------------------------------------
 // A row may fold only when ALL hold (the page's own plan test plus the owner's rules): not alive, not blocked or on the
 // waiting tab, no open decision or question, nothing waiting for an answer, every decision and note delivered or without a
-// delivery line, no plan signal, no read error or unavailable mirror, idle for FOLD_AFTER_MS, and every visible report
-// older than a day. Folding keeps the whole row except the heavy fields; the full card stays one click away.
+// delivery line, no read error or unavailable mirror, idle for FOLD_AFTER_MS, every visible report older than a day, and
+// a plan-signal card (hasPlanSignal) only when its plan is finished (planFinished). Folding keeps the whole row except the
+// heavy fields; the full card stays one click away.
 const HEAVY_KEYS = ['reports', 'changes', 'done', 'flow', 'todo', 'attachments', 'blockSources', 'briefPath', 'sessionFile', 'autoSummaryText'];
 const READ_ERROR_CHIP = '기록 읽기 실패';
 const MIRROR_UNAVAILABLE_CHIP = '질문 미러 사용 불가';
 const jsonBytes = (v) => Buffer.byteLength(scriptJson(v));
 const sha20 = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 20);
+
+// the page's hasPlan test (src/page/shell.js): plan, planLink, workName, auto.work, auto.stage
+export function hasPlanSignal(view) {
+  const auto = isObj(view.auto) ? view.auto : null;
+  return Boolean(view.plan || view.planLink || str(view.workName) || (auto && (auto.work || str(auto.stage))));
+}
+
+// a plan-signal card folds only on the 끝남 tab with its plan finished: every task done or stopped (planModel sets each
+// state with planTaskState), no open question
+function planFinished(view) {
+  if (view.tab !== '끝남') return false;
+  if (!view.plan) return true;
+  return arr(view.plan.tasks).every((t) => isObj(t) && (t.state === 'done' || t.state === 'stopped'))
+    && !arr(view.plan.questions).some((q) => isObj(q) && q.state === 'open');
+}
 
 function foldableExceptTime(view, waitingSids) {
   if (!isObj(view) || view.alive === true) return false;
@@ -715,9 +731,7 @@ function foldableExceptTime(view, waitingSids) {
   // a delivery still pending ('대기: …', '전달 중', '질문창에서 답 받음') loses information when the card folds
   const delivered = (x) => isObj(x) && (x.delivery === undefined || (typeof x.delivery === 'string' && x.delivery.startsWith('전달됨')));
   if (!decisions.every(delivered) || !arr(view.notes).every(delivered)) return false;
-  // the page's hasPlan test (src/page/shell.js): plan, planLink, workName, auto.work, auto.stage
-  const auto = isObj(view.auto) ? view.auto : null;
-  if (view.plan || view.planLink || str(view.workName) || (auto && (auto.work || str(auto.stage)))) return false;
+  if (hasPlanSignal(view) && !planFinished(view)) return false;
   const chips = arr(view.chips); // truth.mjs renders readError / mirrorUnavailable as these chips
   if (chips.includes(READ_ERROR_CHIP) || chips.includes(MIRROR_UNAVAILABLE_CHIP)) return false;
   return true;
@@ -787,7 +801,7 @@ export function projectBoardModel(fullVm, now = Date.now(), opts = {}) {
     // predicate except its two time rules; report-less rows fold first, then rows with a report under 24 h, oldest first.
     if (Buffer.byteLength(dataJsText(vm)) > MAX_VM_BYTES) {
       const recentReport = (s) => arr(s.reports).some((r) => isObj(r) && isNum(r.at) && r.at >= now - DAY_MS);
-      const candidates = arr(vm.sessions).filter((s) => isObj(s) && !s.folded && foldableExceptTime(s, waitingSids));
+      const candidates = arr(vm.sessions).filter((s) => isObj(s) && !s.folded && !hasPlanSignal(s) && foldableExceptTime(s, waitingSids));
       candidates.sort((a, b) => (Number(recentReport(a)) - Number(recentReport(b)))
         || ((isNum(a.lastActivityAt) ? a.lastActivityAt : 0) - (isNum(b.lastActivityAt) ? b.lastActivityAt : 0))
         || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

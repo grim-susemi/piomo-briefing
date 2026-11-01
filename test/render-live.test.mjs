@@ -1842,13 +1842,13 @@ test('200 cards: folding keeps every alive report and alive within the data.js c
   }
 });
 
-test('200 cards: exempt conversations stay unfolded and every folded one expands to its full card', async (t) => {
+test('200 cards: exempt conversations stay unfolded (finished plans fold) and every folded one expands to its full card', async (t) => {
   // Given actual state and the actual host driver, When requesting each folded route, Then HTTP and offline entries agree.
   const f = make200(fresh(t).root);
   const source = fixtureFull(f);
   const { model } = publish200(f);
   assert.deepEqual(model.sessions.filter((s) => !s.folded).map((s) => s.id).sort(), [...expectedUnfoldedIds].sort());
-  for (const id of [...decisionIds, ...mirrorIds, ...blockedIds, ...planIds, ...recentIds, 'boundary-exact']) {
+  for (const id of [...decisionIds, ...mirrorIds, ...blockedIds, ...recentIds, 'boundary-exact']) {
     assert.equal(fixtureRow(model, id).folded, undefined, id);
   }
   assert.ok(fixtureRow(model, 'boundary-plus').folded);

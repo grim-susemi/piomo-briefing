@@ -20,8 +20,9 @@ export const recentIds = names('recent', 4);
 export const boundaryIds = ['boundary-exact', 'boundary-plus'];
 export const exemptIds = [...decisionIds, ...mirrorIds, ...blockedIds, ...planIds, ...recentIds, ...boundaryIds];
 // The +1 ms boundary folds in stage A; exact 48 h and recent reports can fold in stage B.
-export const expectedFoldedIds = [...deadIds, 'boundary-plus'];
-export const expectedUnfoldedIds = [...aliveIds, ...exemptIds.filter((id) => id !== 'boundary-plus')];
+// The four plan cards are finished (every task done, the 끝남 tab), so stage A folds them; their plan stays on the row.
+export const expectedFoldedIds = [...deadIds, ...planIds, 'boundary-plus'];
+export const expectedUnfoldedIds = [...aliveIds, ...exemptIds.filter((id) => id !== 'boundary-plus' && !planIds.includes(id))];
 export const isAlive = (pid) => pid === 20261022;
 export const renderOptions = { isAlive };
 

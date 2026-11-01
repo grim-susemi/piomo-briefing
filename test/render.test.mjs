@@ -1295,12 +1295,31 @@ test('fold: predicate folds an idle closed conversation and keeps each exempt on
     assert.equal(rowOf(model, 'idle').folded, undefined, 'a note still waiting for delivery never folds');
   });
 
-  await t.test('plan signal: plan', (t) => {
+  await t.test('plan signal: plan with a todo task keeps the card whole', (t) => {
     const store = idle(t);
-    store.writePlanRev('p0123456789ab', { at: NOW - 3 * DAY, ownerSessionId: 'idle', plan: { goal: 'g', tasks: [] }, source: { slug: 's' } });
+    store.writePlanRev('p0123456789ab', { at: NOW - 3 * DAY, ownerSessionId: 'idle', plan: { goal: 'g', tasks: [{ id: '1', title: '남은 작업' }] }, source: { slug: 's' } });
     const model = built(store);
+    assert.equal(rowOf(model, 'idle').tab, '끝남');
     assert.ok(rowOf(model, 'idle').plan, 'the plan reaches the card');
-    assert.equal(rowOf(model, 'idle').folded, undefined, 'a card holding a plan never folds');
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'a todo task keeps the plan card whole');
+  });
+
+  await t.test('plan signal: plan with an open question keeps the card whole', (t) => {
+    const store = idle(t);
+    store.writePlanRev('p0123456789ab', { at: NOW - 3 * DAY, ownerSessionId: 'idle', plan: { goal: 'g', tasks: [], questions: [{ id: 'q1', question: '남은 질문', state: 'open' }] }, source: { slug: 's' } });
+    const model = built(store);
+    assert.equal(rowOf(model, 'idle').tab, '끝남');
+    assert.equal(rowOf(model, 'idle').folded, undefined, 'an open plan question keeps the card whole');
+  });
+
+  await t.test('plan signal: a finished plan on the 끝남 tab folds and keeps its plan', (t) => {
+    const store = idle(t);
+    store.writePlanRev('p0123456789ab', { at: NOW - 3 * DAY, ownerSessionId: 'idle', plan: { goal: 'g', tasks: [{ id: '1', title: 'a' }, { id: '2', title: 'b' }] }, source: { slug: 's' } });
+    store.writePlanStatus('p0123456789ab', { schema: 'omo-plan-status/1', planId: 'p0123456789ab', at: NOW - 3 * DAY, boxes: { 1: 'x', 2: '~' } });
+    const whole = rowOf(built(store, { fold: false }), 'idle');
+    const folded = rowOf(built(store), 'idle');
+    assert.ok(folded.folded, 'a finished plan card folds');
+    assert.deepEqual(folded.plan, whole.plan, 'the folded row keeps the plan list');
   });
 
   await t.test('plan signal: planLink', (t) => {
@@ -1313,30 +1332,35 @@ test('fold: predicate folds an idle closed conversation and keeps each exempt on
     store.writePlanStatus('p0123456789ab', { at: NOW - 3 * DAY, work: { status: 'running', sessionIds: ['runner-a', 'runner-b'] } });
     const model = built(store);
     assert.ok(rowOf(model, 'runner-a').plan, 'the first runner (ties by id) is the holder and carries the plan');
-    assert.equal(rowOf(model, 'runner-a').folded, undefined, 'a card holding a plan never folds');
     assert.ok(rowOf(model, 'runner-b').planLink, 'the second runner carries the plan link');
-    assert.equal(rowOf(model, 'runner-b').folded, undefined, 'a card linking another plan never folds');
+    assert.equal(rowOf(model, 'runner-b').tab, '끝남');
+    assert.ok(rowOf(model, 'runner-b').folded, 'a finished plan link folds on the 끝남 tab');
   });
 
-  await t.test('plan signal: workName', (t) => {
+  await t.test('plan signal: workName folds on the 끝남 tab and keeps the card whole on any other tab', (t) => {
     const store = idle(t, { m: { auto: { work: { name: '작업 이름' } } } });
     const model = built(store);
     assert.equal(rowOf(model, 'idle').workName, '작업 이름');
-    assert.equal(rowOf(model, 'idle').folded, undefined, 'workName alone keeps the card whole');
+    assert.ok(rowOf(model, 'idle').folded, 'a finished card with workName folds');
+    const whole = rowOf(built(store, { fold: false }), 'idle');
+    assert.equal(isFoldable({ ...whole, tab: '진행 중' }, new Set(), NOW), false, 'workName off the 끝남 tab keeps the card whole');
   });
 
-  await t.test('plan signal: auto.stage', (t) => {
+  await t.test('plan signal: auto.stage folds on the 끝남 tab and keeps the card whole on any other tab', (t) => {
     const store = idle(t, { m: { auto: { work: { phase: '실행' } } } });
     const model = built(store);
     assert.equal(rowOf(model, 'idle').auto.stage, '실행');
-    assert.equal(rowOf(model, 'idle').folded, undefined, 'auto.stage alone keeps the card whole');
+    assert.ok(rowOf(model, 'idle').folded, 'a finished card with auto.stage folds');
+    const whole = rowOf(built(store, { fold: false }), 'idle');
+    assert.equal(isFoldable({ ...whole, tab: '진행 중' }, new Set(), NOW), false, 'auto.stage off the 끝남 tab keeps the card whole');
   });
 
-  await t.test('plan signal: auto.work', (t) => {
+  await t.test('plan signal: auto.work folds on the 끝남 tab and keeps the card whole on any other tab', (t) => {
     const whole = rowOf(built(foldStore(t), { fold: false }), 'idle');
     assert.equal(isFoldable(whole, new Set(), NOW), true, 'precondition: the same row is foldable');
-    assert.equal(isFoldable({ ...whole, auto: { ...(whole.auto ?? {}), work: { name: 'w' } } }, new Set(), NOW), false,
-      'an auto.work object is a plan signal even when stage and workName are empty');
+    const withWork = { ...whole, auto: { ...(whole.auto ?? {}), work: { name: 'w' } } };
+    assert.equal(isFoldable(withWork, new Set(), NOW), true, 'an auto.work object on the 끝남 tab folds');
+    assert.equal(isFoldable({ ...withWork, tab: '진행 중' }, new Set(), NOW), false, 'auto.work off the 끝남 tab keeps the card whole');
   });
 
   await t.test('readError', (t) => {
@@ -1369,6 +1393,32 @@ test('fold: predicate folds an idle closed conversation and keeps each exempt on
     const model = built(idle(t, { reports: [{ id: 'r3', title: '미래', summary: 's', at: NOW + DAY, images: [] }] }));
     assert.equal(rowOf(model, 'idle').folded, undefined, 'a report in the future keeps the card whole');
   });
+});
+
+test('fold: a finished plan card is not folded by stage B over the cap', (t) => {
+  // Stage B folds report-less rows while the model is over the cap; a plan-signal card is stage A only.
+  const store = openStore(tempRoot(t));
+  const text = (n) => '<'.repeat(n);
+  const blocks = Array.from({ length: 6 }, () => ({
+    kind: 'table', title: text(80), columns: Array(8).fill(text(40)),
+    rows: Array.from({ length: 30 }, () => Array(8).fill(text(120))),
+  }));
+  meta(store, 'planned', { cwd: 'C:/w/fold', title: '계획', lastActivityAt: NOW - HOUR });
+  brief(store, 'planned', 1, NOW - HOUR, { title: '계획', status: 'done', headline: 'h', done: [{ text: 'd', truth: 'reported', applied: 'none' }] });
+  store.writePlanRev('p0123456789ab', { at: NOW - HOUR, ownerSessionId: 'planned', plan: { goal: 'g', tasks: [] }, source: { slug: 's' } });
+  meta(store, 'busy', { cwd: 'C:/w/fold', title: 'busy', lastActivityAt: NOW - MIN });
+  brief(store, 'busy', 1, NOW - MIN, { title: 'busy', status: 'in_progress', headline: 'h' });
+  const perReport = 6 * 30 * 8 * 120 * 6;
+  const copies = Math.ceil((MAX_VM_BYTES + 100_000) / perReport);
+  store.replace('sessions/busy/reports.json', Array.from({ length: copies }, (_, i) => ({ id: `r${i + 1}`, title: 'r', summary: 'retained', images: [], blocks, at: NOW - MIN })));
+  const wire = (m) => Buffer.byteLength(`/* seq:${m.seq} */\nwindow.__briefData && window.__briefData(${JSON.stringify(m)
+    .replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')});\n`);
+  const snapshot = withReports(store, store.readSnapshot());
+  const opts = { isAlive: () => false, stateDir: store.root };
+  assert.ok(wire(buildViewModel(snapshot, NOW, { ...opts, full: true })) > MAX_VM_BYTES, 'precondition: the unfolded model is over the cap');
+  const model = buildViewModel(snapshot, NOW, opts);
+  assert.equal(rowOf(model, 'planned').tab, '끝남');
+  assert.equal(rowOf(model, 'planned').folded, undefined, 'stage B leaves a plan-signal card whole');
 });
 
 test('fold: 48 hours idle does not fold; 48 hours plus 1 ms folds', (t) => {
