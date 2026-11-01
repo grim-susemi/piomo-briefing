@@ -50,7 +50,7 @@ const MAX_CLIENTS = 16;
 const MAX_SOCKETS = 64;
 const PING_MS = 15000;
 const CLOSE_BOUND_MS = 500;
-const MAX_CLIENT_BACKLOG = 2 * 1024 * 1024; // a stalled SSE reader is dropped instead of buffering forever
+const MAX_CLIENT_BACKLOG = 8 * 1024 * 1024; // >= 3 full board frames (MAX_VM_BYTES is 2 MiB in src/render.mjs); a stalled SSE reader is dropped instead of buffering forever
 const GATED_PATHS = new Set(['/data.json', '/events', '/health', '/memento/state', '/profiles/state']);
 const ASSET_PREFIX = '/assets/';
 const CONVO_PREFIX = '/convo/';

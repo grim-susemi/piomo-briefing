@@ -8,6 +8,7 @@ import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { createBriefingExtension, isChildSessionFile, defaultStateDir } from '../extension.mjs';
 import { RULE_MARKER, RULE_TEXT, replyOverBudget } from '../src/rule.mjs';
+import { MAX_VM_BYTES } from '../src/render.mjs';
 import { makeFakePi, makeCtx, assistant, toolCall, lines } from './helpers/fake-pi.mjs';
 import { tempDir } from './helpers/temp.mjs';
 import { reportBlocks } from './fixtures/report-blocks.mjs';
@@ -1401,14 +1402,14 @@ const oldReport = (id, blocks) => ({
   decisionId: null, images: [], ...(blocks ? { blocks } : {}),
 });
 const bigOpenDecision = (stateDir, sid) => seedJson(stateDir, 'decisions/000001.json', {
-  id: 1, sessionId: sid, question: 'x'.repeat(700_000), options: {}, recommend: '', reason: '',
+  id: 1, sessionId: sid, question: 'x'.repeat(MAX_VM_BYTES + 300_000), options: {}, recommend: '', reason: '',
   blocks: false, createdAt: TRIM_BASE - 10 * TRIM_DAY, source: 'brief',
 });
 // lead() leaves the fake pi without an events bus, so the mirror module marks every session unavailable and no
 // caller row can fold. The bus exists once the session starts; the task-bus subscription is not needed here.
 
 
-// The caller's own row must be folded at the publish, while an open decision elsewhere keeps the model over 600KB.
+// The caller's own row must be folded at the publish, while an open decision elsewhere keeps the model over 2MB.
 test('brief: own folded, cut and overCap entries add 경고 lines and details.boardTrim while the first line is unchanged', async (t) => {
   let foldedDir;
   const folded = lead(t, {
@@ -1428,8 +1429,8 @@ test('brief: own folded, cut and overCap entries add 경고 lines and details.bo
   assert.equal(foldedLines[0], `상황판 갱신됨: ${folded.pagePath}`, 'the first line is byte-identical to today');
   assert.deepEqual(foldedLines.slice(1), [
     '경고: 이 대화는 상황판에서 접혀 있습니다(보고서 1개). 펼치면 전체 기록이 보입니다.',
-    '경고: 상황판 용량(600KB) 때문에 이 대화의 부가 정보 일부가 줄었습니다.',
-    '경고: 줄일 수 있는 것을 다 줄여도 상황판 데이터가 600KB를 넘었습니다(지금처럼 게시함).',
+    '경고: 상황판 용량(2MB) 때문에 이 대화의 부가 정보 일부가 줄었습니다.',
+    '경고: 줄일 수 있는 것을 다 줄여도 상황판 데이터가 2MB를 넘었습니다(지금처럼 게시함).',
   ]);
   assert.equal(foldedRes.details.boardTrim.overCap, true);
   assert.ok(Number.isInteger(foldedRes.details.boardTrim.seq));
@@ -1462,9 +1463,9 @@ test('brief: own folded, cut and overCap entries add 경고 lines and details.bo
   const cutLines = textOfResult(cutRes).split('\n');
   assert.equal(cutLines[0], `상황판 갱신됨: ${cut.pagePath}`);
   assert.deepEqual(cutLines.slice(1), [
-    '경고: 상황판 용량(600KB) 때문에 이 대화의 보고서 2개가 상황판에서 빠졌습니다. 원본은 그대로 있습니다.',
-    '경고: 상황판 용량(600KB) 때문에 이 대화의 부가 정보 일부가 줄었습니다.',
-    '경고: 줄일 수 있는 것을 다 줄여도 상황판 데이터가 600KB를 넘었습니다(지금처럼 게시함).',
+    '경고: 상황판 용량(2MB) 때문에 이 대화의 보고서 2개가 상황판에서 빠졌습니다. 원본은 그대로 있습니다.',
+    '경고: 상황판 용량(2MB) 때문에 이 대화의 부가 정보 일부가 줄었습니다.',
+    '경고: 줄일 수 있는 것을 다 줄여도 상황판 데이터가 2MB를 넘었습니다(지금처럼 게시함).',
   ]);
   assert.equal(cutRes.details.boardTrim.overCap, true);
   assert.deepEqual(cutRes.details.boardTrim.session, {
@@ -1484,15 +1485,15 @@ test('brief: own folded, cut and overCap entries add 경고 lines and details.bo
     hostPid: 1, workName: '진행 중 작업',
   });
   seedJson(blocks.stateDir, 'sessions/sess-A/reports.json', [
-    oldReport('r1', [{ kind: 'text', title: '큰 표', text: 'v'.repeat(650_000) }]),
+    oldReport('r1', [{ kind: 'text', title: '큰 표', text: 'v'.repeat(MAX_VM_BYTES + 100_000) }]),
   ]);
   await blocks.start();
   const blocksRes = await blocks.brief(goodBrief({ status: 'done' }));
   const blocksLines = textOfResult(blocksRes).split('\n');
   assert.equal(blocksLines[0], `상황판 갱신됨: ${blocks.pagePath}`);
   assert.deepEqual(blocksLines.slice(1), [
-    '경고: 상황판 용량(600KB) 때문에 이 대화 보고서의 표·그래프 1개가 빠졌습니다. 원본은 그대로 있습니다.',
-    '경고: 상황판 용량(600KB) 때문에 이 대화의 부가 정보 일부가 줄었습니다.',
+    '경고: 상황판 용량(2MB) 때문에 이 대화 보고서의 표·그래프 1개가 빠졌습니다. 원본은 그대로 있습니다.',
+    '경고: 상황판 용량(2MB) 때문에 이 대화의 부가 정보 일부가 줄었습니다.',
   ]);
   assert.equal(blocksRes.details.boardTrim.overCap, false);
   assert.deepEqual(blocksRes.details.boardTrim.session, {
@@ -1518,7 +1519,7 @@ test('brief: a cut of another conversation adds nothing', async (t) => {
     hostPid: 1, workName: '바쁜 작업',
   });
   seedJson(s.stateDir, 'sessions/sess-OTHER/reports.json', [
-    oldReport('big', [{ kind: 'text', title: '큰 표', text: 'w'.repeat(650_000) }]),
+    oldReport('big', [{ kind: 'text', title: '큰 표', text: 'w'.repeat(MAX_VM_BYTES + 100_000) }]),
   ]);
   await s.start();
   const res = await s.brief(goodBrief());

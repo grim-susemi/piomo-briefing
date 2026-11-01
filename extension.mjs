@@ -35,7 +35,7 @@ import { validateBrief, REPORT_BLOCK_SCHEMA, DECISION_FIELDS_SCHEMA } from './sr
 import { openStore } from './src/store.mjs';
 import { collectAuto } from './src/collect.mjs';
 import { applyDecide, applyBoardAnswer, applyBoardAnnotation, formatDecideResult } from './src/decide.mjs';
-import { renderPageMaybe, buildViewModel, projectBoardModel, pageHtml, serverInfoOf, withReports, OWN_GENERATION } from './src/render.mjs';
+import { renderPageMaybe, buildViewModel, projectBoardModel, pageHtml, serverInfoOf, withReports, OWN_GENERATION, MAX_VM_BYTES } from './src/render.mjs';
 import { importImage, gcAssets } from './src/assets.mjs';
 import { createServerHost, readInstalledGeneration } from './src/server-host.mjs';
 import { openProfilesStore } from './src/profiles/store.mjs';
@@ -66,6 +66,7 @@ const WORKERS_MAX = 200;
 const SOFT_RETRY_MS = 1000; // a soft publish that found render.lock busy tries again after this
 const SOFT_FAIL_MS = 30_000; // ... and only after failing this long is it a `render` error
 const SHUTDOWN_STEP_MS = 1200; // bound of each awaited step of session_shutdown (the host allows 2s)
+const BOARD_CAP_LABEL = `${MAX_VM_BYTES / (1024 * 1024)}MB`; // the board data cap named in the warnings below
 const RPC_CHANNEL = 'senpi:extension-rpc-event';
 const pad6 = (n) => String(n).padStart(6, '0');
 const slashed = (p) => String(p).replace(/\\/g, '/');
@@ -836,10 +837,10 @@ export function createBriefingExtension(opts = {}) {
       const own = presentation ? presentation.sessions.find((e) => e.sessionId === sid) ?? null : null;
       if (own) {
         if (own.folded) lines.push(`경고: 이 대화는 상황판에서 접혀 있습니다(보고서 ${own.folded.reports}개). 펼치면 전체 기록이 보입니다.`);
-        if (own.cut.reports > 0) lines.push(`경고: 상황판 용량(600KB) 때문에 이 대화의 보고서 ${own.cut.reports}개가 상황판에서 빠졌습니다. 원본은 그대로 있습니다.`);
-        if (own.cut.blocks > 0) lines.push(`경고: 상황판 용량(600KB) 때문에 이 대화 보고서의 표·그래프 ${own.cut.blocks}개가 빠졌습니다. 원본은 그대로 있습니다.`);
-        if (own.cut.details) lines.push('경고: 상황판 용량(600KB) 때문에 이 대화의 부가 정보 일부가 줄었습니다.');
-        if (presentation.overCap) lines.push('경고: 줄일 수 있는 것을 다 줄여도 상황판 데이터가 600KB를 넘었습니다(지금처럼 게시함).');
+        if (own.cut.reports > 0) lines.push(`경고: 상황판 용량(${BOARD_CAP_LABEL}) 때문에 이 대화의 보고서 ${own.cut.reports}개가 상황판에서 빠졌습니다. 원본은 그대로 있습니다.`);
+        if (own.cut.blocks > 0) lines.push(`경고: 상황판 용량(${BOARD_CAP_LABEL}) 때문에 이 대화 보고서의 표·그래프 ${own.cut.blocks}개가 빠졌습니다. 원본은 그대로 있습니다.`);
+        if (own.cut.details) lines.push(`경고: 상황판 용량(${BOARD_CAP_LABEL}) 때문에 이 대화의 부가 정보 일부가 줄었습니다.`);
+        if (presentation.overCap) lines.push(`경고: 줄일 수 있는 것을 다 줄여도 상황판 데이터가 ${BOARD_CAP_LABEL}를 넘었습니다(지금처럼 게시함).`);
       }
       return { content: [{ type: 'text', text: lines.join('\n') }], details: {
         seq, newDecisionIds: created.map((d) => d.id), pagePath,

@@ -58,6 +58,11 @@ function escapedBlocks(link) {
   };
   return replace(maxReportBlocks(link));
 }
+// The big card's three kept reports at schema maxima: five full 8x30 tables (120-char '<' cells) and the compare with the link.
+const bigBlocks = (link) => {
+  const [table, , , , , compare] = escapedBlocks(link);
+  return [table, table, table, table, table, compare];
+};
 const mediumBlocks = (i) => [
   { kind: 'kv', title: '항목', items: Array.from({ length: 3 }, (_, n) => ({ key: `값${n}`, value: text(60, i + n) })) },
   { kind: 'flow', title: '흐름', steps: [{ label: '확인', state: 'done' }, { label: '다음', state: 'todo' }] },
@@ -87,7 +92,7 @@ export function make(dir) {
     const list = Array.from({ length: big ? 25 : 3 }, (_, i) => ({
       id: `r${i}`, title: `${id} 보고 ${i}`, summary: text(600, i, '< \u2028 \u2029 '), at: at - i,
       images: [{ sha: assetName.slice(0, 64), ext: 'png', path: assetPath, alt: '시험 그림', w: 1, h: 1 }],
-      blocks: big ? escapedBlocks(link) : mediumBlocks(i),
+      blocks: big && i < 3 ? bigBlocks(link) : mediumBlocks(i),
     }));
     // Historical report accumulation can exceed the per-brief maximum of three, but each brief remains schema-valid.
     for (let i = 0; i < list.length; i += 3) checked({ ...brief(id, 'done'), reports: list.slice(i, i + 3).map(({ at: _, images, ...r }) =>
@@ -172,12 +177,18 @@ export function makeOverCapacity(dir) {
   return fixture;
 }
 
+// Every decision string at its schema maximum, escaped: '<' costs 6 bytes once escaped.
+const maxDecision = () => ({
+  question: '<'.repeat(100), recommend: 'B', reason: '<'.repeat(100), blocks: false,
+  options: Object.fromEntries(['A', 'B', 'C'].map((k) => [k, { text: '<'.repeat(60), consequence: '<'.repeat(80) }])),
+});
+
 export function makeIrreducible(dir) {
   const fixture = make(dir);
-  // Four schema-limited decisions per conversation; 100 added conversations suffice without oversized fields.
-  for (let i = 0; i < 100; i++) {
+  // Four maximal decisions per conversation; 200 added conversations put the open decisions well past the cap.
+  for (let i = 0; i < 200; i++) {
     const id = `irreducible-${i}`;
-    const input = checked({ ...brief(id, 'needs_decision'), decisions: Array.from({ length: 4 }, decision) });
+    const input = checked({ ...brief(id, 'needs_decision'), decisions: Array.from({ length: 4 }, maxDecision) });
     fixture.store.replace(`sessions/${id}/meta.json`, { sessionId: id, cwd: 'C:/fixture', lastActivityAt: NOW - DAY });
     fixture.store.writeNew(`sessions/${id}/briefs/000001.json`, { at: NOW - DAY, brief: input });
     for (const d of input.decisions) fixture.store.allocDecisionId({ ...d, sessionId: id, source: 'brief', createdAt: NOW - DAY });

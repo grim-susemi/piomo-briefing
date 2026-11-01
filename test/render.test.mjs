@@ -1191,15 +1191,16 @@ test('fold publish: nothing folded leaves an existing folded.js untouched and un
     'no script element references folded.js');
 });
 
-test('fold publish: folded.js carries every folded card whole, including one larger than 614400 bytes', (t) => {
+test('fold publish: folded.js carries every folded card whole, including one larger than the cap', (t) => {
   const store = foldPublishStore(t);
   meta(store, 'big', { cwd: 'C:/w/fold', title: 'big', lastActivityAt: NOW - 3 * DAY });
   brief(store, 'big', 1, NOW - 3 * DAY, { title: 'big', status: 'done', headline: 'big' });
   store.replace('sessions/big/reports.json', Array.from({ length: 20 }, (_, i) => ({
     id: `r${i}`, title: `report ${i}`, summary: 'whole', at: NOW - 3 * DAY, images: [],
+    // control-character cells are schema-valid and cost 6 bytes each in JSON: 3 reports x 1440 cells x 720 B clear the cap
     blocks: Array.from({ length: 6 }, () => ({
       kind: 'table', columns: Array(8).fill('x'),
-      rows: Array.from({ length: 30 }, () => Array(8).fill('가'.repeat(120))),
+      rows: Array.from({ length: 30 }, () => Array(8).fill('\u0001'.repeat(120))),
     })),
   })));
   const full = built(store, { full: true, generation: 7 });
@@ -1540,7 +1541,12 @@ test('fold: a folded row on an over-cap board builds and publishes (B1 regressio
   brief(store, 'idle', 1, NOW - 3 * DAY, { title: '유휴', status: 'done', headline: 'h', done: [{ text: 'd', truth: 'reported', applied: 'none' }] });
   meta(store, 'busy', { cwd: 'C:/w/fold', title: 'busy', lastActivityAt: NOW - MIN, workName: 'B1 cap fixture' });
   brief(store, 'busy', 1, NOW - MIN, { title: 'busy', status: 'in_progress', headline: 'h' });
-  store.replace('sessions/busy/reports.json', payload.reports.map((r) => ({ ...r, at: NOW - MIN })));
+  // one schema-valid report is at most 6 blocks x 30 rows x 8 cells x 120 chars; each '<' is 6 bytes in data.js,
+  // so one report is 6 x 30 x 8 x 120 x 6 = 1,036,800 B. Reports per row are capped at 3 (reportsView), and the
+  // copy count follows from the cap and that measured per-report size.
+  const perReport = 6 * 30 * 8 * 120 * 6;
+  const copies = Math.ceil((MAX_VM_BYTES + 100_000) / perReport);
+  store.replace('sessions/busy/reports.json', Array.from({ length: copies }, (_, i) => ({ ...payload.reports[0], id: `r${i + 1}`, at: NOW - MIN })));
   const opts = { isAlive: () => false, stateDir: store.root };
   const wire = (m) => Buffer.byteLength(`/* seq:${m.seq} */\nwindow.__briefData && window.__briefData(${JSON.stringify(m)
     .replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')});\n`);
@@ -1569,7 +1575,8 @@ test('fold: a folded row on an over-cap board builds and publishes (B1 regressio
   assert.equal('reports' in pubIdle, false, 'the published folded row has no reports array');
   assert.match(published.foldedKey, /^[0-9a-f]{20}$/);
   const pubBusy = published.sessions.find((s) => s.id === 'busy');
-  assert.ok(pubBusy.chips.includes(OMITTED_CHIP) || pubBusy.reports.length === 1, 'the busy card is trimmed (chip) or whole');
+  const trimmed = pubBusy.chips.some((c) => c === OMITTED_CHIP || c.startsWith('표·그래프 생략 '));
+  assert.ok(trimmed || pubBusy.reports.length === 1, 'the busy card is trimmed (chip) or whole');
   t.diagnostic(`B1 ok=${res.ok} seqs=${JSON.stringify(res.seqs)} full=${wire(full)} capped=${wire(model)} data.js=${Buffer.byteLength(data)} foldedKey=${published.foldedKey} busyChips=${JSON.stringify(pubBusy.chips)}`);
 });
 

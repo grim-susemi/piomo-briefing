@@ -3,7 +3,7 @@
 // - buildViewModel(snapshot, now, opts?): pure-ish (re-hashes evidence files, probes pids).
 //   Output shape = test/fixtures/view-model.json (the contract src/page/view.js reads) plus, since generation 4:
 //   vm.gen, vm.waiting (src/waiting.mjs), vm.server ({url, generation} | null), sessions[].plan / .planLink / .live.
-//   The JSON is capped at 600KB: live/plan details of finished conversations go first, marked by a chip.
+//   The JSON is capped at 2MB: live/plan details of finished conversations go first, marked by a chip.
 // - renderPage(store, now?, opts?): publish under render.lock (wx; dead-pid lock reclaimed with
 //   store.reclaimStale, live lock never removed), seq = published.json seq + 1, replace-writes
 //   data.js, index.html, published.json, releases the lock and publishes once more if the store
@@ -44,7 +44,7 @@ const LARGE = 10 * 1024 * 1024;
 const LOCK = 'render.lock';
 const FIRST_DELAY_MS = 20;
 const MAX_RETRIES = 8;
-export const MAX_VM_BYTES = 600 * 1024;
+export const MAX_VM_BYTES = 2 * 1024 * 1024;
 const PAUSED = Symbol('paused'); // thrown inside the publish when opts.canPublish() turned false: nothing was written
 const PAUSED_ERROR = '브리핑이 꺼져 있어 게시하지 않았습니다';
 export const OMITTED_CHIP = '용량 때문에 일부 생략';

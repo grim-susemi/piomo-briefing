@@ -369,7 +369,7 @@ test('board answers: answerKinds passes through (known kinds only); a board repl
   assert.ok(html.includes('설치해 줘 &lt;b&gt;지금&lt;/b&gt;') && !html.includes('<b>지금</b>'), 'the reply is shown, escaped');
 });
 
-test('B3: the 600KB cap counts the ESCAPED data.js bytes: strings full of "<" (6 bytes each once escaped) still end at <= 614400', (t) => {
+test('B3: the 2MB cap counts the ESCAPED data.js bytes: strings full of "<" (6 bytes each once escaped) still end at <= MAX_VM_BYTES', (t) => {
   const store = fresh(t);
   const lt = (n) => '<'.repeat(n);
   const workers = (s) => Array.from({ length: 20 }, (_, i) => ({
@@ -382,13 +382,13 @@ test('B3: the 600KB cap counts the ESCAPED data.js bytes: strings full of "<" (6
   const res = renderPage(store, NOW, { isAlive: () => false });
   assert.equal(res.ok, true);
   const bytes = Buffer.byteLength(store.readText('data.js'));
-  assert.ok(bytes <= 614400, `data.js is ${bytes} bytes`);
-  assert.equal(MAX_VM_BYTES, 614400);
+  assert.ok(bytes <= MAX_VM_BYTES, `data.js is ${bytes} bytes`);
+  assert.equal(MAX_VM_BYTES, 2 * 1024 * 1024);
   const sessions = dataOf(store).sessions;
   assert.ok(sessions.some((s) => s.chips.includes(OMITTED_CHIP)), 'the omission chip is shown');
   assert.ok(sessions.some((s) => s.live !== undefined), 'what fits is kept');
   const json = Buffer.byteLength(JSON.stringify(buildViewModel(store.readSnapshot(), NOW, { isAlive: () => false })));
-  assert.ok(json <= 614400, `/data.json view model is ${json} bytes`);
+  assert.ok(json <= MAX_VM_BYTES, `/data.json view model is ${json} bytes`);
 });
 
 test('B4: no owner on the board and two executing conversations: the full plan sits on exactly one (deterministic), the other links to it; every data-anchor occurs once', (t) => {
@@ -662,7 +662,8 @@ test('C-VM alive: live hostPid while idle = true, dead hostPid = false, no hostP
 
 test('C-VM cap: blockSources of finished conversations go first, before live details, and the 600KB cap holds', (t) => {
   const store = fresh(t);
-  const ev = (s, i) => `C:/proj/${'e'.repeat(580)}/${s}-${i}.txt`;
+  const EV_LEN = 2048; // measured, not derived from MAX_VM_BYTES: an evidence-path length at which this 30-card model exceeds the 2 MiB cap (asserted below)
+  const ev = (s, i) => `C:/proj/${'e'.repeat(EV_LEN)}/${s}-${i}.txt`;
   for (let n = 0; n < 30; n++) {
     const sid = `s${String(n).padStart(2, '0')}`;
     const finished = n % 2 === 0;
@@ -709,11 +710,13 @@ test('C-VM: an unreadable meta.json is a readError of that session, never a thro
 test('C-VM cap B1: native todo items are trimmed under the cap and counted once in vm.trimmed (C-CAP2: no per-card chip)', (t) => {
   const store = fresh(t);
   const items = (n) => Array.from({ length: 40 }, (_, i) => ({ text: `${n}-${i} `.padEnd(207, '가'), status: 'pending' }));
-  for (let n = 0; n < 30; n++) session(store, `s${String(n).padStart(2, '0')}`, { at: NOW - (n + 1) * 1000, status: n % 2 ? 'done' : 'in_progress', auto: { todoItems: { items: items(n), more: 3 } } });
+  const N = Math.ceil(MAX_VM_BYTES / 20000); // ~26 KB of todo text per session: N sessions overrun the cap
+  for (let n = 0; n < N; n++) session(store, `s${String(n).padStart(2, '0')}`, { at: NOW - (n + 1) * 1000, status: n % 2 ? 'done' : 'in_progress', auto: { todoItems: { items: items(n), more: 3 } } });
+  assert.ok(Buffer.byteLength(JSON.stringify(buildViewModel(store.readSnapshot(), NOW, { isAlive: () => false, stateDir: store.root, fold: false, full: true }))) > MAX_VM_BYTES, 'the uncapped model really is too big');
   const vm = buildViewModel(store.readSnapshot(), NOW, { isAlive: () => false, stateDir: store.root, fold: false });
   assert.ok(Buffer.byteLength(JSON.stringify(vm)) <= MAX_VM_BYTES, `model is ${Buffer.byteLength(JSON.stringify(vm))} bytes`);
   const cut = vm.sessions.filter((s) => s.todo.items.length === 0);
-  assert.ok(cut.length > 0 && cut.length < 30, 'some, not all, todo lists dropped');
+  assert.ok(cut.length > 0 && cut.length < N, 'some, not all, todo lists dropped');
   for (const s of cut) {
     assert.equal(s.todo.more, 43, 'dropped items are counted in more');
     assert.ok(!s.chips.includes(OMITTED_CHIP), 'C-CAP2 passes 3-7 add no per-card chip');
@@ -732,12 +735,12 @@ test('C-VM cap B1: native todo items are trimmed under the cap and counted once 
 test('C-VM cap B1: distinct report image paths still fit after the reports are dropped', (t) => {
   const store = fresh(t);
   const H = 'b'.repeat(64);
-  // 540 distinct paths of <= 1024 code points (the report limit), 3 UTF-8 bytes each: the attachments alone exceed the cap
+  // 540 distinct paths (30 cards x 3 reports x 6 images; src/render.mjs keeps 6 images per report) of 1000 code points (<= the 1024 report limit), 4 UTF-8 bytes each: the attachments alone exceed the cap
   for (let n = 0; n < 30; n++) {
     const sid = `s${String(n).padStart(2, '0')}`;
     session(store, sid, { at: NOW - (n + 1) * 1000 });
     store.replace(`sessions/${sid}/reports.json`, Array.from({ length: 3 }, (_, r) => ({ id: `r${r}`, title: 't', summary: '', decisionId: null, at: NOW - 2 * DAY,
-      images: Array.from({ length: 6 }, (_, i) => ({ sha: H, ext: 'png', alt: 'a', w: 1, h: 1, path: `C:/shots/${'가'.repeat(950)}/${sid}-${r}-${i}.png` })) })));
+      images: Array.from({ length: 6 }, (_, i) => ({ sha: H, ext: 'png', alt: 'a', w: 1, h: 1, path: `C:/shots/${'𝄞'.repeat(1000)}/${sid}-${r}-${i}.png` })) })));
   }
   const vm = buildViewModel(withReports(store, store.readSnapshot()), NOW, { isAlive: () => false, stateDir: store.root, fold: false });
   assert.ok(Buffer.byteLength(JSON.stringify(vm)) <= MAX_VM_BYTES, `model is ${Buffer.byteLength(JSON.stringify(vm))} bytes`);
@@ -795,12 +798,13 @@ test('C-VM cap property: every todo-3 field at its maximum across many sessions 
   const H = 'c'.repeat(64);
   const big = (n, tag) => `C:/${tag}/${'가'.repeat(n)}`; // 3 UTF-8 bytes per code point
   const N = 60;
+  const SF = Math.ceil(MAX_VM_BYTES / N / 3); // code points per sessionFile: the N of them alone overrun the cap
   for (let n = 0; n < N; n++) {
     const sid = `s${String(n).padStart(3, '0')}-${'i'.repeat(100)}`; // long ids make briefPath long too
     const at = NOW - (n + 1) * 1000;
     const changes = Array.from({ length: 10 }, (_, i) => ({ text: 'c', truth: 'reported', applied: 'none', evidence: big(60, `ev/${sid}/${i}`) })); // the rows themselves predate todo 3: kept small
     store.replace(`sessions/${sid}/meta.json`, {
-      sessionId: sid, cwd: 'C:/p', title: sid, lastActivityAt: at, hostPid: 1, sessionFile: big(4000, `sf/${sid}`),
+      sessionId: sid, cwd: 'C:/p', title: sid, lastActivityAt: at, hostPid: 1, sessionFile: big(SF, `sf/${sid}`),
       auto: { work: { name: 'w' }, ledgerPath: big(1000, `led/${sid}`),
         todoItems: { items: Array.from({ length: 40 }, (_, i) => ({ text: `${i}`.padEnd(300, '나'), status: 'pending' })), more: 9 } },
     });
@@ -813,7 +817,7 @@ test('C-VM cap property: every todo-3 field at its maximum across many sessions 
   assert.ok(bytes <= MAX_VM_BYTES, `model is ${bytes} bytes`);
   for (const s of vm.sessions) {
     // a todo-3 field is either whole or its key is gone (C-CAP2 pass 6/7)
-    assert.ok(!('sessionFile' in s) || s.sessionFile.length === 4000 + `C:/sf/${s.id}/`.length, 'sessionFile never shortened');
+    assert.ok(!('sessionFile' in s) || s.sessionFile.length === SF + `C:/sf/${s.id}/`.length, 'sessionFile never shortened');
     if ('alive' in s) assert.equal(typeof s.alive, 'boolean');
     if ('briefSeq' in s) assert.ok(Number.isInteger(s.briefSeq));
   }
@@ -851,6 +855,12 @@ async function oracle(tree = ORACLE_TREE) {
     nodeFs.mkdirSync(join(oracleDir, dirname(f)), { recursive: true });
     nodeFs.writeFileSync(join(oracleDir, f), git('cat-file', 'blob', `${tree}:${f}`));
   }
+  // the older trees still carry the 600 KB cap: run them at the current cap so both renderers trim alike
+  const renderPath = join(oracleDir, 'src', 'render.mjs');
+  const capLine = 'export const MAX_VM_BYTES = 600 * 1024;';
+  const renderSrc = nodeFs.readFileSync(renderPath, 'utf8');
+  assert.equal(renderSrc.split(capLine).length - 1, 1, `${tree}: exactly one 600 KB cap line in render.mjs`);
+  nodeFs.writeFileSync(renderPath, renderSrc.replace(capLine, `export const MAX_VM_BYTES = ${MAX_VM_BYTES};`));
   const url = (n) => pathToFileURL(join(oracleDir, 'src', n)).href;
   const [render, store] = await Promise.all([import(url('render.mjs')), import(url('store.mjs'))]);
   const mods = { render, store };
@@ -931,7 +941,8 @@ async function boundaryN(t) {
   return Math.floor((MAX_VM_BYTES - (sizes[0] - per)) / per);
 }
 
-for (const N of [300, 1200, 1448]) {
+// derived (E/measure-n.json): the 600 KB-era N 300 / 1200 / 1448 scaled by boundary2MB / boundary600 = 4945 / 1448
+for (const N of [1025, 4098, 4945]) {
   test(`C-CAP2 cardinality N=${N}: whenever the accepted renderer fits, the new model and data.js fit; trimmed counts affected cards`, async (t) => {
     const tpl = tmp(t, 'omo-cap2-tpl-');
     writeMinimal(tpl, N, { finishedEvery: 3 });
@@ -944,8 +955,8 @@ for (const N of [300, 1200, 1448]) {
     assertTrimOrder(n.vm, hit);
     assertKeptWhole(n.vm, newRoot);
     assert.deepEqual(strip(n.vm), strip(o.vm), 'apart from the todo-3 keys the model is the accepted one');
-    if (N === 300) assert.equal(hit.length, 0, '300 minimal cards fit with every field');
-    if (N === 1200) assert.ok(hit.length > 0, '1200 cards need trimming');
+    if (N === 1025) assert.equal(hit.length, 0, '1025 minimal cards fit with every field');
+    if (N === 4098) assert.ok(hit.length > 0, '4098 cards need trimming');
   });
 }
 
@@ -995,11 +1006,12 @@ test('C-CAP2 exact bytes: an accepted data.js of exactly 614400 B with escaped t
 test('C-CAP2 intermediate pass: trimming native todo items suffices; the counter counts those cards and their keys remain', async (t) => {
   const tpl = tmp(t, 'omo-cap2-tpl-');
   const items = Array.from({ length: 40 }, (_, i) => ({ text: `${i} `.padEnd(300, '가'), status: 'pending' }));
-  writeMinimal(tpl, 30, { finishedEvery: 2, meta: () => ({ auto: { todoItems: { items, more: 0 } } }) });
+  const N = Math.ceil(MAX_VM_BYTES / 30000); // ~37 KB of todo text per session
+  writeMinimal(tpl, N, { finishedEvery: 2, meta: () => ({ auto: { todoItems: { items, more: 0 } } }) });
   const { o, n } = await publishBoth(t, tpl);
   assert.ok(fits(o) && fits(n), `new ${n.dataBytes}`);
   const cut = n.vm.sessions.filter((s) => s.todo.items.length === 0);
-  assert.ok(cut.length > 0 && cut.length < 30, `cut ${cut.length}`);
+  assert.ok(cut.length > 0 && cut.length < N, `cut ${cut.length}`);
   assert.deepEqual(n.vm.trimmed, { cards: cut.length });
   for (const s of n.vm.sessions) {
     assert.ok(CVM_KEYS.every((k) => k in s), 'no key deleted in an intermediate pass');
@@ -1038,7 +1050,8 @@ test('C-CAP2 verifier repro: 30 sessions with 8999-code-point session files fit;
   const sessions = Array.from({ length: 30 }, (_, i) => ({ sid: `sf${i}`, meta: { sessionId: `sf${i}`, cwd: 'C:/project', lastActivityAt: NOW,
     sessionFile: `C:/sessions/${Array.from({ length: 47 }, () => '가'.repeat(190)).join('/')}/sf${i}.jsonl` },
     briefs: [{ seq: 1, data: { at: NOW, brief: { title: `sf${i}`, status: i % 2 ? 'done' : 'in_progress', headline: 'h', changes: [], done: [], next: '', decisions: [] } } }] }));
-  const vm = buildViewModel({ sessions }, NOW, { stateDir: 'C:/board/state', isAlive: () => false, fold: false });
+  const PAD = Math.ceil(MAX_VM_BYTES / 1.3); // measured: inert readErrors bytes at this size clear the keys of 13 of the 30 cards
+  const vm = buildViewModel({ sessions, readErrors: [{ rel: 'p'.repeat(PAD) }] }, NOW, { stateDir: 'C:/board/state', isAlive: () => false, fold: false });
   assert.ok(Buffer.byteLength(JSON.stringify(vm)) <= MAX_VM_BYTES);
   const cleared = vm.sessions.filter((s) => !('sessionFile' in s));
   assert.ok(cleared.length > 0 && cleared.length < 30);
@@ -1119,7 +1132,8 @@ test('C-CAP2 legacy tiny live through the real publish: data.js fits at the orac
 
 // Todo 11 must not spend bytes on false question flags at todo 14's decision-bearing boundaries.
 const TODO14_TREE = 'bf120f6059f0afb47b6d018e7deeff65001693f8';
-for (const [K, N] of [[1, 655], [12, 93]]) {
+// derived (E/measure-n.json): the 600 KB-era N 655 and 93 are the oracle boundaries at 600 KB; at 2 MB they are 2233 and 319
+for (const [K, N] of [[1, 2233], [12, 319]]) {
   test(`C-CAP2 decision boundary K=${K} N=${N}: sparse question flags keep the oracle and todo-14 guarantee`, async (t) => {
     const tpl = tmp(t, 'omo-ask-cap-tpl-');
     writeMinimal(tpl, N);
@@ -1156,10 +1170,11 @@ for (const [K, N] of [[1, 655], [12, 93]]) {
   });
 }
 
+// derived (E/measure-n.json): the 600 KB oracle boundaries 860 / 502 / 655 scale to the 2 MB boundaries 2936 / 1714 / 2233
 const QUESTION_FLAG_CASES = [
-  { name: 'mirror', N: 860, k: 0, mirror: true },
-  { name: 'dec1mirror', N: 502, k: 1, mirror: true },
-  { name: 'liveask', N: 655, k: 1, liveAsk: true },
+  { name: 'mirror', N: 2936, k: 0, mirror: true },
+  { name: 'dec1mirror', N: 1714, k: 1, mirror: true },
+  { name: 'liveask', N: 2233, k: 1, liveAsk: true },
 ];
 for (const family of QUESTION_FLAG_CASES) {
   test(`C-CAP2 question flag boundary ${family.name} N=${family.N}: pass 8 preserves the oracle and todo-14 guarantee`, async (t) => {
@@ -1531,7 +1546,7 @@ test('cap priority: an alive card\'s alive is deleted only by stage P2\'s pass 7
   assert.equal(before.res.ok, true, JSON.stringify(before.res));
   assert.equal(capRow(before.vm, 'live-a').alive, true, 'pass 2 trimming does not touch alive');
   assert.equal(capRow(before.vm, 'live-a').live, undefined);
-  const cold = capSnap([capSession('live-a', { at: NOW - MIN, status: 'done', meta: { hostPid: 777 }, brief: { headline: 'h'.repeat(700000) } })]);
+  const cold = capSnap([capSession('live-a', { at: NOW - MIN, status: 'done', meta: { hostPid: 777 }, brief: { headline: 'h'.repeat(MAX_VM_BYTES) } })]);
   const after = capPublish(t, cold, { isAlive: alive });
   assert.equal(after.res.ok, true, JSON.stringify(after.res));
   const row = capRow(after.vm, 'live-a');
