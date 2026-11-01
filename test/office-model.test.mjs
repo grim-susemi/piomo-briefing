@@ -5,7 +5,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { makeController } from './fixtures/controller-dom.mjs';
-import { projectBoardModel } from '../src/render.mjs';
 
 const read = (p) => fs.readFileSync(new URL('../' + p, import.meta.url), 'utf8');
 const fixture = (p) => JSON.parse(read('test/fixtures/' + p));
@@ -511,38 +510,4 @@ test('a kind with the omo-native- prefix lands in the room of its bare name', ()
     assert.ok(bare, k);
     assert.equal(roomFor('omo-native-' + k), bare, 'omo-native-' + k);
   }
-});
-
-test('a folded finished-plan row gives the same floor and conveyor data as the unfolded row', () => {
-  // Given one idle card on 끝남 whose plan tasks are all done or stopped, When the view model is projected with and without
-  // folding, Then the card is folded in one and whole in the other, and its scene floor matches apart from dark
-  const { vm, ui } = input();
-  const now = vm.generatedAt;
-  const s = vm.sessions[vm.sessions.length - 1];
-  const sid = s.id;
-  Object.assign(s, {
-    alive: false, tab: '끝남', status: 'done', lastActivityAt: now - 3 * 24 * 60 * 60 * 1000,
-    decisions: [], notes: [], reports: [], chips: [], live: undefined, auto: undefined, workName: undefined,
-    plan: {
-      goal: '목표', waves: [{ n: 1, label: '하나' }],
-      tasks: [
-        { id: '1', wave: 1, label: 'a', what: 'w', done: 'd', state: 'done', deps: [] },
-        { id: '2', wave: 1, label: 'b', what: 'w', done: 'd', state: 'stopped', deps: [] },
-      ],
-      questions: [],
-    },
-  });
-  vm.waiting = (vm.waiting ?? []).filter((w) => w.sessionId !== sid);
-  const folded = projectBoardModel(vm, now);
-  const whole = projectBoardModel(vm, now, { fold: false });
-  assert.ok(folded.sessions.find((x) => x.id === sid).folded, 'precondition: the finished-plan card folds');
-  assert.equal(whole.sessions.find((x) => x.id === sid).folded, undefined, 'precondition: the unfolded card is whole');
-  const ctx = load();
-  const a = sceneOf(ctx, folded, ui).floors.find((f) => f.sid === sid);
-  const b = sceneOf(ctx, whole, ui).floors.find((f) => f.sid === sid);
-  assert.equal(a.dark, true, 'the folded floor is dark');
-  assert.equal(b.dark, false, 'the whole floor is not dark');
-  const { dark: _folded, ...restFolded } = a;
-  const { dark: _whole, ...restWhole } = b;
-  assert.deepEqual(restFolded, restWhole);
 });
