@@ -1,4 +1,4 @@
-// Generation-4 parts of src/render.mjs: the 600KB cap, the plan / worker / waiting / server parts of the view model,
+// Generation-4 parts of src/render.mjs: the 2MB cap, the plan / worker / waiting / server parts of the view model,
 // the page template, and the async publish (free lock = finished inside the call; busy lock = awaited timers, soft = once).
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -34,9 +34,9 @@ const dataOf = (store) => {
   return JSON.parse(src.slice(src.lastIndexOf('window.__briefData(') + 'window.__briefData('.length, src.lastIndexOf(');')));
 };
 
-// ------------------------------------------------------------------ 600KB cap
+// ------------------------------------------------------------------ 2MB cap
 
-test('30 conversations x 20 workers x 30 todos: data.js stays under 600KB, finished conversations lose live details first and carry the chip', (t) => {
+test('30 conversations x 20 workers x 30 todos: data.js stays under the 2MB cap, finished conversations lose live details first and carry the chip', (t) => {
   const store = fresh(t);
   const todo = (i) => Array.from({ length: 30 }, (_, k) => ({ text: `할 일 ${i}-${k} `.padEnd(70, '가'), status: k < 10 ? 'completed' : 'pending' }));
   const workers = (s) => Array.from({ length: 20 }, (_, i) => ({
@@ -660,7 +660,7 @@ test('C-VM alive: live hostPid while idle = true, dead hostPid = false, no hostP
   assert.ok(!probed.includes('101'), 'a hostPid of the wrong type is never probed');
 });
 
-test('C-VM cap: blockSources of finished conversations go first, before live details, and the 600KB cap holds', (t) => {
+test('C-VM cap: blockSources of finished conversations go first, before live details, and the 2MB cap holds', (t) => {
   const store = fresh(t);
   const EV_LEN = 2048; // measured, not derived from MAX_VM_BYTES: an evidence-path length at which this 30-card model exceeds the 2 MiB cap (asserted below)
   const ev = (s, i) => `C:/proj/${'e'.repeat(EV_LEN)}/${s}-${i}.txt`;
@@ -979,7 +979,7 @@ test('C-CAP2 exact boundary: the largest fitting N fits; at N+1 the new output i
 
 // cost of a string inside data.js (JSON + script escaping), without its quotes
 const escapedCost = (s) => Buffer.byteLength(JSON.stringify(s).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')) - 2;
-test('C-CAP2 exact bytes: an accepted data.js of exactly 614400 B with escaped text, and a counter-only overflow, both fit with no counter', async (t) => {
+test('C-CAP2 exact bytes: an accepted data.js of exactly the cap with escaped text, and a counter-only overflow, both fit with no counter', async (t) => {
   const N = await boundaryN(t);
   const probe = tmp(t, 'omo-cap2-tpl-');
   writeMinimal(probe, N);

@@ -11,7 +11,7 @@ import { openStore } from '../src/store.mjs';
 import { validateBrief } from '../src/schema.mjs';
 import {
   buildViewModel, renderPage, renderPageMaybe, renderPageAsync, pageHtml, withReports, realKey, realCacheFor, MAX_VM_BYTES, OMITTED_CHIP,
-  isFoldable, projectBoardModel, slimDecision, FOLD_AFTER_MS, FOLDED_CHIP,
+  isFoldable, projectBoardModel, slimDecision, FOLD_AFTER_MS, FOLDED_CHIP, capLabel,
 } from '../src/render.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -808,7 +808,7 @@ describe('sessions[].reports', () => {
     assert.ok(fs.readFileSync(join(store.root, 'data.js'), 'utf8').includes(`assets/${H('a')}.png`));
   });
 
-  test('reports stay inside the 600 KB cap: finished, then oldest cards lose their reports first, marked by the chip', (t) => {
+  test('reports stay inside the 2MB cap: finished, then oldest cards lose their reports first, marked by the chip', (t) => {
     const store = openStore(join(tempRoot(t), 'state'));
     const full = (n) => Array.from({ length: 3 }, (_, k) => ({
       id: `r${k}`, title: '가'.repeat(80), summary: '<'.repeat(1000), decisionId: null, at: NOW - 2 * DAY - n * MIN,
@@ -1604,7 +1604,7 @@ test('fold: nothing folded leaves no foldedKey and the key changes when a folded
 
 test('fold: a folded row on an over-cap board builds and publishes (B1 regression)', (t) => {
   // The acceptance case is the real builder and its cap, not a hand-built model: a closed idle row folds while another
-  // row's schema-valid report pushes the MODEL over 600KB. Before the pass-1b guard this threw `s.reports is not iterable`.
+  // row's schema-valid report pushes the MODEL over the cap. Before the pass-1b guard this threw `s.reports is not iterable`.
   const store = openStore(tempRoot(t));
   const text = (n) => '<'.repeat(n);
   const blocks = Array.from({ length: 6 }, () => ({
@@ -1774,4 +1774,12 @@ test('publish: repeated pause and resume never reuse the previous invocation pre
       assert.equal(store.readText('data.js'), text);
     }
   }
+});
+
+test('capLabel: whole MiB values use MB, the rest use rounded KB', () => {
+  assert.equal(capLabel(2097152), '2MB');
+  assert.equal(capLabel(1048576), '1MB');
+  assert.equal(capLabel(917504), '896KB');
+  assert.equal(capLabel(786432), '768KB');
+  assert.equal(capLabel(614400), '600KB');
 });

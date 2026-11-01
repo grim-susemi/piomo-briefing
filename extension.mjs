@@ -35,7 +35,7 @@ import { validateBrief, REPORT_BLOCK_SCHEMA, DECISION_FIELDS_SCHEMA } from './sr
 import { openStore } from './src/store.mjs';
 import { collectAuto } from './src/collect.mjs';
 import { applyDecide, applyBoardAnswer, applyBoardAnnotation, formatDecideResult } from './src/decide.mjs';
-import { renderPageMaybe, buildViewModel, projectBoardModel, pageHtml, serverInfoOf, withReports, OWN_GENERATION, MAX_VM_BYTES } from './src/render.mjs';
+import { renderPageMaybe, buildViewModel, projectBoardModel, pageHtml, serverInfoOf, withReports, OWN_GENERATION, MAX_VM_BYTES, capLabel } from './src/render.mjs';
 import { importImage, gcAssets } from './src/assets.mjs';
 import { createServerHost, readInstalledGeneration } from './src/server-host.mjs';
 import { openProfilesStore } from './src/profiles/store.mjs';
@@ -66,7 +66,7 @@ const WORKERS_MAX = 200;
 const SOFT_RETRY_MS = 1000; // a soft publish that found render.lock busy tries again after this
 const SOFT_FAIL_MS = 30_000; // ... and only after failing this long is it a `render` error
 const SHUTDOWN_STEP_MS = 1200; // bound of each awaited step of session_shutdown (the host allows 2s)
-const BOARD_CAP_LABEL = `${MAX_VM_BYTES / (1024 * 1024)}MB`; // the board data cap named in the warnings below
+const BOARD_CAP_LABEL = capLabel(MAX_VM_BYTES); // the board data cap named in the warnings below
 const RPC_CHANNEL = 'senpi:extension-rpc-event';
 const pad6 = (n) => String(n).padStart(6, '0');
 const slashed = (p) => String(p).replace(/\\/g, '/');

@@ -45,6 +45,7 @@ const LOCK = 'render.lock';
 const FIRST_DELAY_MS = 20;
 const MAX_RETRIES = 8;
 export const MAX_VM_BYTES = 2 * 1024 * 1024;
+export const capLabel = (bytes) => (bytes % (1024 * 1024) === 0 ? `${bytes / (1024 * 1024)}MB` : `${Math.round(bytes / 1024)}KB`);
 const PAUSED = Symbol('paused'); // thrown inside the publish when opts.canPublish() turned false: nothing was written
 const PAUSED_ERROR = '브리핑이 꺼져 있어 게시하지 않았습니다';
 export const OMITTED_CHIP = '용량 때문에 일부 생략';
