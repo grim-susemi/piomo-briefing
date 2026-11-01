@@ -44,12 +44,12 @@ import { composeHomeRegistry, getCommonServedModels, supportStatusFor, validateS
 import { chatGptPickerModels, recommendationGuide, refreshRoutingRows } from './refresh.mjs';
 import { compareRecommendation, getRecommendationManifestShape } from './recommend.mjs';
 
-export const PRIMARY_HOME_DEFAULT = 'C:/Users/USER/.omo';
-export const MIRROR_HOME_DEFAULTS = [
-  'C:/Users/USER/.omo-original/home/.omo',
-  'C:/Users/USER/.somo/home/.omo',
-];
+export const PRIMARY_HOME_DEFAULT = 'C:/Users/USER/.omo-stable-500/home/.omo';
+// Both mirror homes are absent on disk (2026-10-30), so the board has no mirror default.
+export const MIRROR_HOME_DEFAULTS = [];
 export const STABLE_HOME_DEFAULT = 'C:/Users/USER/.omo-stable-500/home/.omo';
+// The app home. The board never writes it: openProfilesStore refuses any home that resolves here.
+export const APP_HOME_NEVER_WRITE = 'C:/Users/USER/.omo';
 // The switcher's recommendation table is read-only reference data; the board never
 // writes it and tests inject their own object instead of touching the desktop app.
 export const RECOMMENDATION_MANIFEST_DEFAULT = 'C:/Users/USER/Desktop/OpenCode_Modes/OMO_Native_Recommendation.json';
@@ -90,6 +90,10 @@ function refusal(code, message = '', extra = {}) {
   const status = extra.status ?? (code === 'STALE' || code === 'COMMENTS_PRESENT' || code === 'INVENTORY_STALE'
     || code === 'MISSING_CONFIG' ? 409 : 400);
   return { ok: false, code, status, message, ...extra };
+}
+
+function homeKey(home) {
+  return String(home).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
 
 export function sha256(bytes) {
@@ -229,7 +233,7 @@ function mirrorLabel(root, index) {
 
 // ── target specs ───────────────────────────────────────────────────────────────
 function targetSpecs(roots, fs) {
-  const specs = [
+  let specs = [
     { id: 'omo.jsonc', root: 'primary', rel: 'omo.jsonc', kind: 'jsonc', backup: 'omo', optional: false },
     { id: 'agent/settings.json', root: 'primary', rel: 'agent/settings.json', kind: 'json', backup: 'senpi-settings', optional: false },
     { id: 'agent/models.json', root: 'primary', rel: 'agent/models.json', kind: 'json', backup: 'models', optional: true, neverWrite: true },
@@ -240,6 +244,10 @@ function targetSpecs(roots, fs) {
     { id: 'stable/agent/models.json', root: 'stable', rel: 'agent/models.json', kind: 'json', backup: 'stable-models', optional: true, neverWrite: true },
     { id: 'agent/primary-agents/roster.json', root: 'stable', rel: 'agent/primary-agents/roster.json', kind: 'roster', backup: 'roster', optional: true },
   ];
+  // One home for both roles: its omo.jsonc is already the primary target, so a stable copy would write the same file twice.
+  if (homeKey(roots.primaryHome) === homeKey(roots.stableHome)) {
+    specs = specs.filter((spec) => spec.id !== 'stable/omo.jsonc' && spec.id !== 'stable/agent/models.json');
+  }
   for (const [index, root] of roots.mirrorHomes.entries()) {
     const label = mirrorLabel(root, index);
     let exists = false;
@@ -468,6 +476,11 @@ export function openProfilesStore(options = {}) {
   if (missingHomes.length > 0 && missingHomes.length < HOME_OPTION_KEYS.length) {
     throw Object.assign(new Error(`openProfilesStore: ${missingHomes.join(', ')} missing; name every home or none `
       + '(none = the live homes)'), { code: 'PARTIAL_HOMES', missing: missingHomes });
+  }
+  const requestedHomes = [options.primaryHome, options.stableHome, ...(options.mirrorHomes ?? [])];
+  if (requestedHomes.some((home) => home != null && homeKey(home) === homeKey(APP_HOME_NEVER_WRITE))) {
+    throw Object.assign(new Error(`openProfilesStore refuses ${APP_HOME_NEVER_WRITE}: the board never writes the app home`),
+      { code: 'APP_HOME_REFUSED' });
   }
   const fs = options.fs ?? nodeFs;
   const nowFn = options.now ?? Date.now;
