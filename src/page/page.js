@@ -579,7 +579,16 @@
           : '<p class="empty">프로필 화면 모듈이 없어요</p>';
       } else html = cards ? CARDS_REGION : office ? OFFICE_REGION : s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision, checked: isChecked, fold: foldStatus(s), windowLive: g.BriefShell.windowLiveOf(model, state.ui) })
         : state.ui.active ? '<p class="empty">(지금 안 보임)</p>' : g.BriefView.renderOverview(model, state.ui);
+      var openGuide = state.ui.view === 'profiles' && main.querySelector('#pf-guide-dlg[open]');
+      var guideScroll = openGuide ? openGuide.scrollTop : 0;
       if (region('main', main, html)) {
+        if (openGuide) {
+          var nextGuide = main.querySelector('#pf-guide-dlg');
+          if (nextGuide && typeof nextGuide.showModal === 'function') {
+            nextGuide.showModal();
+            nextGuide.scrollTop = guideScroll;
+          }
+        }
         g.BriefAnnotate.decorate();
         // a #main drawn later than the apply shows the current elapsed times at once, not the apply's (the 1 s ticker goes on)
         if (g.BriefWorkersView) g.BriefWorkersView.tick(main, state.now());

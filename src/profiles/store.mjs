@@ -7,24 +7,26 @@
 // Write pipeline (preview performs only the first four steps):
 //   parse body -> read targets -> apply the change kinds to parsed values ->
 //   validate (todo-7 merge layer + 5.1.44 key allowlist + protected settings) ->
-//   compare-and-swap every read target's sha256 against `expected` -> back up the
-//   bytes under <primaryHome>/runtime/native-profile-switcher-backups -> atomic text
+//   compare-and-swap every read target's sha256 against `expected` -> durable
+//   interruption journal with pre-hashes and before-images -> roster CAS ->
+//   backups under <primaryHome>/runtime/native-profile-switcher-backups -> atomic text
 //   write (same-directory wx tmp -> fsync -> rename with the contract's retry ladder)
 //   -> re-parse and re-validate -> on any failure restore the backups and report
 //   ROLLED_BACK.
 //
 // The journal (<stableHome>/agent/primary-agents/apply-journal.json) is written as
 // `running` before the first write and as `completed`/`rolled-back` afterwards. A
-// process that dies leaves `running` behind; callers show it as 중단된 적용 and never
-// replay it automatically.
+// process that dies leaves `running` behind; callers show it as 중단된 적용. Explicit
+// reapply resumes the recorded plan and skips published targets; reads never replay it.
 import * as nodeFs from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { basename, dirname, join, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { parseJsonc } from './contract/jsonc.mjs';
+import { parseJsonc, readLaneOverrides } from './contract/jsonc.mjs';
 import { atomicWriteJson, writeRoster as contractWriteRoster } from './contract/atomic.mjs';
 import { readMemory, readRoster, validateRoster } from './contract/schema.mjs';
+import { resolve } from './contract/resolve.mjs';
 import { AGENT_IDS, LANES, THINKING } from './contract/constants.mjs';
 import {
   assertMemoryRouteWritable, clone, commandCodeWarning, deepEqual, getEffectiveMemoryCatalog, getMemorySelectionFromConfig,
@@ -36,12 +38,12 @@ import {
   syncStable500RoleModels,
 } from './merge.mjs';
 import {
-  CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE, ENGINE_SURFACED_MODELS, PROFILE_META, ROLE_INVENTORY, buildRoutingRows,
+  BUILTIN_ROLE_CATEGORIES, CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE, ENGINE_SURFACED_MODELS, PROFILE_META, ROLE_INVENTORY, buildRoutingRows,
   expandLayerRoles, getFullModelId, getMemoryReasoning, getModelIdWithoutProvider, getProfile,
   getProviderChoiceForModel, newRouteRow,
 } from './model.mjs';
 import { composeHomeRegistry, getCommonServedModels, supportStatusFor, validateSelection } from './registry.mjs';
-import { chatGptPickerModels, recommendationGuide, refreshRoutingRows } from './refresh.mjs';
+import { allocationGuideRows, chatGptPickerModels, recommendationGuide, refreshRoutingRows } from './refresh.mjs';
 import { compareRecommendation, getRecommendationManifestShape } from './recommend.mjs';
 
 export const PRIMARY_HOME_DEFAULT = 'C:/Users/USER/.omo-stable-500/home/.omo';
@@ -512,8 +514,8 @@ export function openProfilesStore(options = {}) {
   }
 
   function readRecommendationManifest() {
-    if (isPlainObject(options.recommendationManifest)) {
-      return { manifest: options.recommendationManifest, warning: null };
+    if (Object.hasOwn(options, 'recommendationManifest')) {
+      return { manifest: isPlainObject(options.recommendationManifest) ? clone(options.recommendationManifest) : null, warning: null };
     }
     let text;
     try {
@@ -528,6 +530,22 @@ export function openProfilesStore(options = {}) {
       return { manifest: parsed, warning: null };
     } catch (error) {
       return { manifest: null, warning: `recommendation manifest ignored: ${error.message}` };
+    }
+  }
+
+  function readExternalMemorySelector() {
+    const sourceFile = join(roots.primaryHome, 'memory-model-selection.json');
+    const view = {
+      sourceFile, sourcePath: '$.modelAlias', storedValue: null,
+      runtimeEffect: 'unproven', label: '별도 저장값 · runtime 효력 미입증',
+    };
+    try {
+      const value = JSON.parse(String(fs.readFileSync(sourceFile, UTF8)).replace(/^\uFEFF/, ''));
+      return typeof value?.modelAlias === 'string'
+        ? { ...view, storedValue: value.modelAlias, reason: null }
+        : { ...view, reason: 'invalid-selector' };
+    } catch (error) {
+      return { ...view, reason: error?.code === 'ENOENT' ? 'missing-selector' : 'unreadable-selector' };
     }
   }
 
@@ -612,10 +630,12 @@ export function openProfilesStore(options = {}) {
     }
   }
 
-  function attachRecommendations(rows, catalog, layer, manifest) {
+  function attachRecommendations(rows, catalog, layer, manifest, sourcePath) {
     // expandLayerRoles resolves inherited category routes exactly like the switcher's
     // comparison; compareRecommendation then reports the real status per route.
-    const comparison = compareRecommendation(expandLayerRoles({ catalog, layer }).map(newRouteRow), manifest);
+    const expanded = expandLayerRoles({ catalog, layer }).map(newRouteRow);
+    const routes = new Map(expanded.map((row) => [`${row.Section}/${row.Role}`, row]));
+    const comparison = compareRecommendation(expanded, manifest);
     const byKey = new Map(comparison.Items.map((item) => [`${item.Section}/${item.Role}`, item]));
     for (const row of rows) {
       const key = `${row.section}/${row.role}`;
@@ -640,6 +660,50 @@ export function openProfilesStore(options = {}) {
         }], manifest).Items[0];
       }
       row.recommendation = item;
+      const route = routes.get(key);
+      const alias = route?.ModelKey ?? '';
+      const entry = alias ? catalog?.[alias] : null;
+      const effectiveAlias = route?.EffectiveAlias ?? '';
+      const effectiveCategory = route?.EffectiveCategory ?? '';
+      row.current = {
+        sourceFile: join(roots.primaryHome, 'omo.jsonc'),
+        sourcePath: `${sourcePath}.${row.section}[${JSON.stringify(row.role)}].model`,
+        alias,
+        modelId: route?.ModelId ?? '',
+        thinking: route?.Variant ?? '',
+        effective: Boolean(route?.ModelId),
+        unresolved: Boolean(route?.Unresolved),
+        reason: route?.Unresolved ? `unresolved-alias: ${alias}` : alias ? null : 'no-explicit-alias',
+        ...(typeof entry?.description === 'string' ? { description: entry.description } : {}),
+      };
+      const coverage = manifest?.coverage?.find((entry) => entry?.route
+        && entry.section === row.section && entry.role === row.role);
+      row.recommended = {
+        ...item, status: item.Status,
+        provenance: {
+          manifestPath: recommendationManifestPath,
+          available: manifest !== null,
+          snapshotDate: manifest?.snapshotDate ?? null,
+          // Its web URLs can name an older release; provenance identifies the
+          // comparison input while guide.sources keeps the installed pins.
+          sources: (manifest?.sources ?? []).map(({ path, blobSha }) => ({ path, blobSha })),
+          expectationRole: coverage?.expectationRole ?? null,
+        },
+      };
+      const linkedEntry = effectiveAlias ? catalog?.[effectiveAlias] : null;
+      const candidates = row.section === 'agents' ? [...(BUILTIN_ROLE_CATEGORIES[row.role] ?? [])] : [];
+      row.linked = {
+        candidates,
+        active: !alias && candidates.length > 0,
+        EffectiveCategory: effectiveCategory,
+        EffectiveAlias: effectiveAlias,
+        effective: Boolean(effectiveCategory && effectiveAlias),
+        modelId: linkedEntry?.model ?? '',
+        thinking: linkedEntry ? getMemoryReasoning(linkedEntry) : '',
+        reason: alias ? 'explicit-alias' : candidates.length === 0 ? 'no-linked-category'
+          : effectiveAlias ? null : 'no-registered-category-model',
+        ...(typeof linkedEntry?.description === 'string' ? { description: linkedEntry.description } : {}),
+      };
     }
     return comparison;
   }
@@ -678,10 +742,15 @@ export function openProfilesStore(options = {}) {
     };
   }
 
-  function readAll() {
+  function readAll({ tolerateUnreadableRoster = false } = {}) {
     const files = new Map();
     for (const [id, spec] of targets()) {
-      files.set(id, { ...spec, ...readTarget(spec, spec.path, fs, spec.kind) });
+      try {
+        files.set(id, { ...spec, ...readTarget(spec, spec.path, fs, spec.kind) });
+      } catch (error) {
+        if (!tolerateUnreadableRoster || spec.kind !== 'roster') throw error;
+        files.set(id, { ...spec, exists: true, bytes: null, value: null, error });
+      }
     }
     return files;
   }
@@ -700,21 +769,24 @@ export function openProfilesStore(options = {}) {
   function journalView() {
     const { raw, warning } = readJournal();
     if (!raw) return warning ? { status: 'unknown', label: warning, action: null } : null;
+    const visible = { ...raw };
+    // Before-images stay on disk; the page needs only status, hashes and the request.
+    delete visible.plan;
     if (raw.status === 'running') {
       const request = isPlainObject(raw.request) ? raw.request : null;
       const changes = Array.isArray(request?.changes) ? clone(request.changes) : null;
       return {
-        ...raw, status: 'interrupted', sourceStatus: 'running', label: INTERRUPTED_LABEL, action: REAPPLY_LABEL,
+        ...visible, status: 'interrupted', sourceStatus: 'running', label: INTERRUPTED_LABEL, action: REAPPLY_LABEL,
         // The explicit 다시 적용 control resubmits exactly these changes through the same
-        // protected apply path with the page's fresh expected hashes. The store itself
-        // never calls this on state(), startup or a normal apply.
+        // protected apply path with fresh expected hashes, resuming its recorded plan.
+        // Neither state() nor startup submits it.
         reapply: changes ? {
           changes,
           rosterRevision: Number.isInteger(request.rosterRevision) ? request.rosterRevision : 0,
         } : null,
       };
     }
-    return raw;
+    return visible;
   }
 
   function activeProfile(files) {
@@ -735,8 +807,14 @@ export function openProfilesStore(options = {}) {
     return entry?.['[senpi]'] ?? entry?.['[native]'] ?? null;
   }
 
+  function layerPath(config, profile) {
+    const entry = profile ? config?.profiles?.[profile.omoProfile] : null;
+    const section = entry?.['[senpi]'] ? '[senpi]' : '[native]';
+    return `$.profiles[${JSON.stringify(profile?.omoProfile ?? '')}][${JSON.stringify(section)}]`;
+  }
+
   function state() {
-    const files = readAll();
+    const files = readAll({ tolerateUnreadableRoster: true });
     const inventoryView = inventoryStatus();
     const inventoryRaw = loadInventory();
     const configFile = files.get('omo.jsonc');
@@ -804,7 +882,7 @@ export function openProfilesStore(options = {}) {
     });
     const manifestRead = readRecommendationManifest();
     if (manifestRead.warning) warnings.push(manifestRead.warning);
-    const recommendation = attachRecommendations(rows, catalog, layer, manifestRead.manifest);
+    const recommendation = attachRecommendations(rows, catalog, layer, manifestRead.manifest, layerPath(config, profile));
     let guide = null;
     if (inventoryRaw) {
       try {
@@ -820,12 +898,87 @@ export function openProfilesStore(options = {}) {
         warnings.push(`recommendation guide: ${error.message}`);
       }
     }
+    // Use the host's find/getAvailable semantics, just as the extension adapter
+    // does. A catalog or composed home registry cannot prove host availability.
+    let hostRegistry;
+    let registryReason = 'no-registry';
+    let available = [];
+    try {
+      hostRegistry = typeof options.registry === 'function' ? options.registry() : options.registry;
+      if (hostRegistry) {
+        available = typeof hostRegistry.getAvailable === 'function' ? hostRegistry.getAvailable() : [];
+      }
+    } catch {
+      hostRegistry = null;
+      registryReason = 'registry-unreadable';
+    }
+    const providerOf = (model) => model?.provider ?? model?.providerId ?? null;
+    const modelIdOf = (model) => model?.id ?? model?.modelId ?? null;
+    const adapter = {
+      find(provider, modelId) {
+        if (typeof provider === 'string' && provider.length > 0) {
+          if (typeof hostRegistry?.find === 'function') return hostRegistry.find(provider, modelId);
+          return available.find((model) => providerOf(model) === provider && modelIdOf(model) === modelId);
+        }
+        return available.filter((model) => modelIdOf(model) === modelId);
+      },
+      hasAuth(provider) {
+        return available.some((model) => providerOf(model) === provider);
+      },
+    };
+    const lanes = readLaneOverrides(roots.stableHome, { fs });
     // The extension owns these files; the board only projects them for display.
     const rosterAgents = {};
     for (const id of AGENT_IDS) {
       const memoryRead = readMemory(agentDir, id, { fs });
       if (memoryRead.warning) warnings.push(memoryRead.warning.message);
-      rosterAgents[id] = { ...rosterRead.roster.agents[id] };
+      const agent = rosterRead.roster.agents[id];
+      let effective = {
+        provider: null, modelId: null, thinking: null, origin: 'unknown',
+        reason: rosterRead.warning?.code ?? registryReason,
+      };
+      if (hostRegistry && !rosterRead.warning) {
+        const rawMain = id === 'sisyphus' && !agent.pin && typeof settings?.defaultModel === 'string'
+          && settings.defaultModel.length > 0 ? settings.defaultModel : null;
+        const slash = rawMain?.indexOf('/') ?? -1;
+        const mainPin = rawMain === null ? null : {
+          provider: slash > 0 ? rawMain.slice(0, slash) : settings.defaultProvider ?? null,
+          modelId: slash > 0 ? rawMain.slice(slash + 1) : rawMain,
+          thinking: settings.defaultThinkingLevel ?? null,
+        };
+        const roster = rosterRead.roster;
+        const withPin = (pin) => ({
+          ...roster, agents: { ...roster.agents, [id]: { ...agent, pin } },
+        });
+        try {
+          // Suppress lanes on the first pass, so the lane policy never filters
+          // an explicit pin, a matching memory or the settings main.
+          let result = resolve({
+            agentId: id, roster: mainPin ? withPin(mainPin) : roster, memory: memoryRead.memory,
+            laneOverrides: { [agent.lane]: { models: [{ model: '\0piomo-no-lane' }] } }, registry: adapter,
+          });
+          if (mainPin && result.origin === 'pin') result = { ...result, origin: 'main' };
+          if (result.unavailable) {
+            result = resolve({
+              agentId: id, roster: withPin(null), memory: null, laneOverrides: lanes.overrides,
+              registry: {
+                ...adapter,
+                find(provider, modelId) {
+                  const found = adapter.find(provider, modelId);
+                  const allowed = (model) => providerOf(model) !== 'opencode-go' || /^muse(?:-|$)/i.test(modelId);
+                  return Array.isArray(found) ? found.filter(allowed) : found && allowed(found) ? found : null;
+                },
+              },
+            });
+          }
+          effective = result.unavailable
+            ? { provider: null, modelId: null, thinking: null, origin: 'unavailable', reason: result.reason }
+            : { ...result, reason: null };
+        } catch {
+          effective.reason = 'registry-unreadable';
+        }
+      }
+      rosterAgents[id] = { ...agent, effective };
       if (memoryRead.memory) {
         rosterAgents[id].remembered = {
           provider: memoryRead.memory.model.provider,
@@ -841,6 +994,87 @@ export function openProfilesStore(options = {}) {
       effective: resolveMainDefaults(profile, sidecar),
       override: mainOverride,
     }) : { effective: null, override: null };
+    const summarizer = settings ? readCompactionSummarizer(settings) : null;
+    const externalSelector = readExternalMemorySelector();
+    const guideFact = (section, role, current) => ({
+      role, current,
+      recommended: {
+        ...compareRecommendation([{
+          Section: section, Role: role, ModelKey: current.alias,
+          ModelId: current.modelId, Variant: current.thinking, Unresolved: current.unresolved,
+        }], null).Items[0],
+        status: current.unresolved ? 'unresolved' : 'untracked',
+        provenance: null,
+      },
+      linked: {
+        candidates: [], active: false, effective: false,
+        EffectiveCategory: '', EffectiveAlias: '', reason: 'not-applicable',
+      },
+    });
+    const primaryGuide = AGENT_IDS.map((id) => {
+      const agent = rosterAgents[id];
+      const effective = agent.effective;
+      const origin = effective.origin;
+      const sourceFile = origin === 'main' ? join(roots.primaryHome, 'agent/settings.json')
+        : origin === 'memory' ? join(agentDir, 'primary-agents', 'memory', `${id}.json`)
+          : origin === 'pin' ? join(agentDir, 'primary-agents', 'roster.json')
+            : origin === 'lane' && lanes.overrides[agent.lane] ? join(roots.stableHome, 'omo.jsonc') : null;
+      const stableConfig = files.get('stable/omo.jsonc')?.value ?? config;
+      const laneSection = stableConfig?.['[native]']?.model_profiles?.[agent.lane] ? '["[native]"]'
+        : stableConfig?.native?.model_profiles?.[agent.lane] ? '.native' : '';
+      const sourcePath = origin === 'main' ? '$.defaultModel' : origin === 'memory' ? '$.model'
+        : origin === 'pin' ? `$.agents[${JSON.stringify(id)}].pin`
+          : sourceFile ? `$${laneSection}.model_profiles[${JSON.stringify(agent.lane)}]` : null;
+      return guideFact('primary', id, {
+        ...effective, sourceFile, sourcePath, alias: '',
+        modelId: effective.modelId ? getFullModelId(effective.provider, effective.modelId) : '',
+        effective: Boolean(effective.modelId), unresolved: false,
+      });
+    });
+    const summaryGuide = guideFact('summary', 'summary', {
+      sourceFile: join(roots.primaryHome, 'agent/settings.json'),
+      sourcePath: settings?.compaction?.model ? '$.compaction.model' : '$.compactionSummarizer',
+      alias: '', modelId: summarizer ? getFullModelId(summarizer.provider, summarizer.model) : '',
+      thinking: null, effective: Boolean(summarizer), unresolved: false,
+      reason: summarizer ? null : 'no-summary-model',
+    });
+    function memoryFor(pProfile) {
+      return config ? {
+        kibitzer: getMemorySelectionFromConfig(config, pProfile?.omoProfile ?? ''),
+        reflection: getReflectionMemorySelectionFromConfig(config, pProfile?.omoProfile ?? ''),
+        externalSelector,
+        candidates: getCommonServedModels(homeRegistries, requiredHomes),
+      } : null;
+    }
+    function guideFor(pRows, pProfile, memory) {
+      const memoryRows = ['kibitzer', 'reflection'].map((role) => {
+        const selection = memory?.[role];
+        const pointer = role === 'reflection' ? 'reflection' : 'recall';
+        const scopes = [
+          ['$', config], ['$["[native]"]', config?.['[native]']],
+          [`$.profiles[${JSON.stringify(pProfile?.omoProfile ?? '')}]`, config?.profiles?.[pProfile?.omoProfile]],
+          [layerPath(config, pProfile), layerOf(config, pProfile)],
+        ];
+        const source = scopes.findLast(([, value]) => value?.memory?.[pointer]?.category !== undefined);
+        const categorySource = scopes.findLast(([, value]) => value?.categories?.[selection?.category]?.model !== undefined);
+        const entry = selection?.alias ? getEffectiveMemoryCatalog(config)[selection.alias] : null;
+        return guideFact('memory', role, {
+          sourceFile: join(roots.primaryHome, 'omo.jsonc'),
+          sourcePath: source ? `${source[0]}.memory.${pointer}.category` : null,
+          categorySourcePath: categorySource ? `${categorySource[0]}.categories[${JSON.stringify(selection.category)}].model` : null,
+          category: selection?.category ?? '', alias: selection?.alias ?? '',
+          modelId: selection?.model ?? '', thinking: selection?.reasoning ?? '',
+          effective: Boolean(selection?.model), unresolved: Boolean(selection?.alias && selection?.unresolved),
+          reason: selection?.unresolved ? 'unresolved-memory-model' : null,
+          ...(typeof entry?.description === 'string' ? { description: entry.description } : {}),
+        });
+      });
+      return {
+        ...guide,
+        rows: allocationGuideRows({ primary: primaryGuide, routing: pRows, memory: memoryRows, summary: summaryGuide }),
+      };
+    }
+    const memory = memoryFor(profile);
     const buildProfileDetail = (pMeta) => {
       const pProfile = getProfile(pMeta.key);
       const pLayer = layerOf(config, pProfile);
@@ -851,17 +1085,21 @@ export function openProfilesStore(options = {}) {
         const canonical = model && catalog?.[model]?.model ? catalog[model].model : model;
         return withSupport({ ...row, model, reasoning }, canonical);
       });
-      const pRec = attachRecommendations(pRows, catalog, pLayer, manifestRead.manifest);
+      const pRec = attachRecommendations(pRows, catalog, pLayer, manifestRead.manifest, layerPath(config, pProfile));
       const pMainOverride = pProfile ? readMainOverride(sidecar, pProfile.omoProfile) : null;
       const pMain = pProfile ? withMainServed({
         effective: resolveMainDefaults(pProfile, sidecar),
         override: pMainOverride,
       }) : { effective: null, override: null };
       const pModelProfile = settings ? getModelProfileSettings(config ?? {}, pProfile?.omoProfile ?? '') : null;
+      const pMemory = memoryFor(pProfile);
       return {
         routing: { rows: pRows, layer: pLayer, recommendation: pRec },
         main: pMain,
         modelProfile: pModelProfile,
+        memory: pMemory,
+        guide: guideFor(pRows, pProfile, pMemory),
+        summarizer,
       };
     };
 
@@ -878,7 +1116,7 @@ export function openProfilesStore(options = {}) {
         : !configFile?.exists || !settingsFile?.exists ? 'MISSING_CONFIG'
           : configFile?.error || settingsFile?.error ? 'INVALID_CONFIG' : null;
     const targetsView = {};
-    for (const [id, file] of files) targetsView[id] = file.exists ? sha256(file.bytes) : null;
+    for (const [id, file] of files) targetsView[id] = file.bytes ? sha256(file.bytes) : null;
     const surfacedModels = [];
     for (const [provider, surfacedIds] of Object.entries(ENGINE_SURFACED_MODELS)) {
       for (const surfacedId of surfacedIds) {
@@ -914,17 +1152,12 @@ export function openProfilesStore(options = {}) {
       })),
       routing: { rows, layer, recommendation },
       details,
-      guide,
+      guide: guideFor(rows, profile, memory),
       main,
+      mainSettingsThinking: settings?.defaultThinkingLevel ?? null,
       modelProfile: settings ? getModelProfileSettings(config ?? {}, profile?.omoProfile ?? '') : null,
-      summarizer: settings ? readCompactionSummarizer(settings) : null,
-      memory: config ? {
-        kibitzer: getMemorySelectionFromConfig(config, profile?.omoProfile ?? ''),
-        reflection: getReflectionMemorySelectionFromConfig(config, profile?.omoProfile ?? ''),
-        // What a custom memory row offers (PS Get-MemoryCandidates): every model all required homes serve, from the
-        // registries its write is validated against, so a served model without a catalog alias is offered too.
-        candidates: getCommonServedModels(homeRegistries, requiredHomes),
-      } : null,
+      summarizer,
+      memory,
       catalog,
       registry: { unknownHomes, surfacedModels },
       registryModels: registryPickerModels().map((item) => withSupport(item, item.model)),
@@ -1453,6 +1686,23 @@ export function openProfilesStore(options = {}) {
       const result = applyChange(context, change);
       if (!result.ok) return result;
     }
+    const mainApplied = body.changes.some((change) => change.kind === 'setMain' || change.kind === 'selectProfile')
+      || settings.value.defaultProvider !== settingsFile.value.defaultProvider
+      || settings.value.defaultModel !== settingsFile.value.defaultModel;
+    if (mainApplied) {
+      const agent = context.roster.value.agents.sisyphus;
+      context.roster.value = {
+        ...context.roster.value,
+        updatedAt: new Date(nowFn()).toISOString(),
+        agents: {
+          ...context.roster.value.agents,
+          sisyphus: { ...agent, pin: null, rev: rosterRead.roster.agents.sisyphus.rev + 1 },
+        },
+      };
+      context.roster.touched = true;
+      context.warnings.push('The main model apply clears the Sisyphus pin and resets its memory revision '
+        + '(rev + 1 once), so the next start uses the applied main instead of the legacy pin or remembered model.');
+    }
     const finalConfig = context.config;
     const savedConfig = saveConfig(finalConfig);
     const allow = assertAllowedConfig(savedConfig, loadInventory());
@@ -1734,6 +1984,42 @@ export function openProfilesStore(options = {}) {
   function apply(body) {
     const result = prepare(body);
     if (!result.ok) return result;
+    const prior = readJournal().raw;
+    const interrupted = prior?.status === 'running' && Array.isArray(prior.plan) ? prior : null;
+    const alreadyWritten = [];
+    if (interrupted) {
+      if (!deepEqual(interrupted.request?.changes, result.body.changes)) {
+        return refusal('STALE', 'An interrupted apply must be recovered before submitting different changes', { writes: [] });
+      }
+      const planned = [];
+      for (const entry of interrupted.plan) {
+        const disk = result.files.get(entry.id);
+        if (!disk || disk.neverWrite || typeof entry.after !== 'string'
+          || !(entry.before === null || typeof entry.before === 'string')
+          || !Object.hasOwn(interrupted.preHashes ?? {}, entry.id)) {
+          return refusal('STALE', 'The interrupted apply plan is not usable', { writes: [] });
+        }
+        const before = entry.before === null ? null : Buffer.from(entry.before, 'base64');
+        if ((before === null ? null : sha256(before)) !== interrupted.preHashes[entry.id]) {
+          return refusal('STALE', `The interrupted before-image for ${entry.id} is not usable`, { writes: [] });
+        }
+        const write = {
+          id: entry.id, kind: entry.kind, value: entry.value, bytes: Buffer.from(entry.after, 'base64'),
+          spec: { ...disk, exists: before !== null, bytes: before },
+        };
+        const published = disk.exists && !disk.error && (entry.kind === 'roster'
+          ? deepEqual(disk.value, {
+            ...entry.value, revision: interrupted.request.rosterRevision + 1, updatedAt: disk.value.updatedAt,
+          })
+          : disk.bytes.equals(write.bytes));
+        if (published) alreadyWritten.push({ ...write, value: entry.kind === 'roster' ? disk.value : write.value });
+        else if ((disk.exists ? sha256(disk.bytes) : null) !== interrupted.preHashes[entry.id]) {
+          return refusal('STALE', `${entry.id} changed after the interrupted apply`, { writes: [] });
+        }
+        planned.push(write);
+      }
+      result.writes = planned;
+    }
     if (result.writes.length === 0) {
       const at = new Date(nowFn()).toISOString();
       writeJournal({
@@ -1747,7 +2033,7 @@ export function openProfilesStore(options = {}) {
     const startedAt = new Date(nowFn()).toISOString();
     const stamp = stampOf(nowFn());
     const journalId = `${startedAt}-${randomBytes(4).toString('hex')}`;
-    const journal = {
+    const journal = interrupted ?? {
       v: 1,
       id: journalId,
       action: 'apply',
@@ -1759,18 +2045,52 @@ export function openProfilesStore(options = {}) {
       ],
       changes: result.body.changes.map((change) => change.kind),
       targets: result.writes.map((write) => write.id),
+      preHashes: Object.fromEntries([...result.files].map(([id, file]) => [id, file.exists ? sha256(file.bytes) : null])),
+      // Durable before-images and intended values let explicit reapply resume this
+      // exact transaction, including a target published just before an interruption.
+      plan: result.writes.map((write) => ({
+        id: write.id, kind: write.kind, value: clone(write.value),
+        before: write.spec.exists ? write.spec.bytes.toString('base64') : null,
+        after: write.bytes.toString('base64'),
+      })),
       // A process that dies before `completed` leaves this behind; the view exposes it as
       // the explicit 다시 적용 payload. Storing the payload (not a server-side replay
       // hook) keeps the reapply owner-triggered and CAS-checked like every other write.
       request: { changes: clone(result.body.changes), rosterRevision: result.body.rosterRevision },
     };
     let journalWritten = false;
+    let priorJournalBytes = null;
     const backups = new Map();
-    const written = [];
+    const written = [...alreadyWritten];
+    const published = [];
+    const pendingWrites = result.writes.filter((write) => !alreadyWritten.some((done) => done.id === write.id));
+    const rosterWrite = pendingWrites.find((write) => write.kind === 'roster');
+    let appliedRoster = alreadyWritten.find((write) => write.kind === 'roster')?.value ?? null;
     try {
+      // Run the roster admission hook and recheck every target before creating any
+      // artifact. The actual CAS still runs first among targets, after the journal.
+      if (rosterWrite && typeof hooks.beforeWrite === 'function') hooks.beforeWrite(rosterWrite.id, { backup: null });
+      for (const [id, file] of result.files) {
+        let current = null;
+        try { current = sha256(fs.readFileSync(file.path)); } catch (error) {
+          if (error?.code !== 'ENOENT') throw error;
+        }
+        if (current !== result.body.expected[id]) return refusal('STALE', `${id} changed before publication`, { writes: [], backups: [] });
+      }
+      try { priorJournalBytes = fs.readFileSync(journalPath); } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
       writeJournal(journal);
-      journalWritten = true;
-      for (const write of result.writes) {
+      journalWritten = journalEnabled;
+      if (rosterWrite) {
+        appliedRoster = contractWriteRoster(agentDir, rosterWrite.value,
+          interrupted?.request.rosterRevision ?? result.body.rosterRevision, { fs });
+        written.push({ ...rosterWrite, value: appliedRoster });
+        published.push(rosterWrite);
+        journal.steps.push({ step: 'write', target: rosterWrite.id, status: 'ok', at: new Date(nowFn()).toISOString() });
+        writeJournal(journal);
+      }
+      for (const write of pendingWrites) {
         if (write.spec.exists) {
           const file = writeBackup(write.spec, write.spec.bytes, stamp);
           backups.set(write.id, file);
@@ -1778,16 +2098,14 @@ export function openProfilesStore(options = {}) {
         }
       }
       writeJournal(journal);
-      for (const write of result.writes) {
+      for (const write of pendingWrites) {
+        if (write.kind === 'roster') continue;
         if (typeof hooks.beforeWrite === 'function') hooks.beforeWrite(write.id, { backup: backups.get(write.id) ?? null });
-        if (write.kind === 'roster') {
-          const writtenRoster = contractWriteRoster(agentDir, write.value, result.body.rosterRevision, { fs });
-          written.push({ ...write, value: writtenRoster });
-        } else {
-          atomicWriteText(write.spec.path, write.bytes, { fs });
-          written.push(write);
-        }
+        atomicWriteText(write.spec.path, write.bytes, { fs });
+        written.push(write);
+        published.push(write);
         journal.steps.push({ step: 'write', target: write.id, status: 'ok', at: new Date(nowFn()).toISOString() });
+        writeJournal(journal);
       }
       // Re-parse and re-validate every target this apply wrote.
       for (const write of written) {
@@ -1827,17 +2145,26 @@ export function openProfilesStore(options = {}) {
         backups: [...backups.values()].sort(),
         hashes,
         warnings: result.warnings,
-        writes: result.writes.map((write) => write.id),
-        rosterRevision: contextRevision(result),
+        writes: result.writes.filter((write) => published.some((done) => done.id === write.id)).map((write) => write.id),
+        rosterRevision: appliedRoster?.revision ?? contextRevision(result),
+        ...(interrupted ? { recoveredFrom: interrupted.id } : {}),
       };
     } catch (error) {
+      if (published.length === 0 && error.code === 'CONFLICT') {
+        if (journalWritten) {
+          if (priorJournalBytes !== null) atomicWriteText(journalPath, priorJournalBytes, { fs });
+          else fs.unlinkSync(journalPath);
+        }
+        return refusal('STALE', error.message, { writes: [], backups: [] });
+      }
       const rollbackFailures = [];
       for (const write of [...written].reverse()) {
         try {
           const backup = backups.get(write.id);
-          if (backup) {
-            atomicWriteText(write.spec.path, fs.readFileSync(backup), { fs });
-            if (sha256(fs.readFileSync(write.spec.path)) !== sha256(fs.readFileSync(backup))) {
+          if (write.spec.exists) {
+            const original = backup ? fs.readFileSync(backup) : write.spec.bytes;
+            atomicWriteText(write.spec.path, original, { fs });
+            if (sha256(fs.readFileSync(write.spec.path)) !== sha256(original)) {
               rollbackFailures.push(`${write.id}: restore hash mismatch`);
             }
           } else {

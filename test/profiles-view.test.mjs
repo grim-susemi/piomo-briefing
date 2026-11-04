@@ -11,6 +11,11 @@ import { makeController } from './fixtures/controller-dom.mjs';
 import { launch, listProfilePids } from '../scripts/cdp.mjs';
 import { createBoardServer } from '../src/server.mjs';
 import { pageHtml } from '../src/render.mjs';
+import { measurePurposeGrid, assertPurposeGrid } from '../scripts/profiles-grid.mjs';
+import { comparisonSections } from '../scripts/flow-map-f8.mjs';
+import { buildRoutingRows } from '../src/profiles/model.mjs';
+import { RAW_NAME_COPY, RAW_CONDITIONAL_NAME_COPY, RAW_STATUS_COPY } from '../scripts/profiles-copy.mjs';
+import { assertGuideIdentity } from './helpers/profiles-identity.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
@@ -30,6 +35,543 @@ function load() {
 }
 const live = (extra = {}) => ({ live: true, pending: [], draft: {}, preview: null, conflict: false, error: '', status: '', result: null, busy: false, loading: false, ...extra });
 const tick = () => new Promise((resolve) => setImmediate(resolve));
+const purposeState = () => {
+  const state = clone(STATE);
+  state.routing.rows = buildRoutingRows().map(row => ({ ...row, model: 'fable', reasoning: 'medium' }));
+  return state;
+};
+
+test('purpose groups: metadata order, empty groups, unknown ids and extras stay on the role surface', () => {
+  const state = clone(STATE);
+  const rows = state.routing.rows.filter(r => r.section === 'categories');
+  state.routing.rows = [
+    { ...rows[0], role: 'extra-probe', group: 'extras' },
+    { ...rows[0], role: 'unknown-probe', group: 'unknown-group' },
+    ...rows.filter(r => r.group !== 'general'),
+  ];
+  const before = JSON.stringify(state);
+  const html = load().render(state, live({ tab: 'categories' }));
+  const groups = all(html, /data-flow-sec="(categories:[^"]+)"/g);
+  assert.deepEqual(groups, ['categories:deep', 'categories:specialist', 'categories:unknown-group', 'categories:extras']);
+  assert.equal(JSON.stringify(state), before, 'render never reorders source keys or models');
+  assert.match(html, /pf-tab-panel pf-groups/);
+});
+
+test('preview: reproduced lexical mismatch uses routing order only in display, pending keeps change time', () => {
+  const roles = ['deep-high', 'deep-low', 'ultrabrain'];
+  const preview = { diffs: [{ file: 'omo.jsonc', changes: roles.map(role => ({
+    path: '$.[native].categories.' + role + '.model', before: 'old', after: 'new',
+  })) }] };
+  const pending = ['ultrabrain', 'deep-high', 'deep-low'].map(role => ({
+    kind: 'setRoute', section: 'categories', role, provider: 'fixture', model: 'fixture/new', thinking: 'high',
+  }));
+  const before = JSON.stringify({ preview, pending });
+  const html = load().render(purposeState(), live({ pending, preview }));
+  assert.deepEqual(all(html, /class="pf-diff-path">[^<]*categories\.([^.]+)\.model/g),
+    ['deep-low', 'deep-high', 'ultrabrain']);
+  const labels = all(html, /class="pf-pending-t">([^<]+)/g);
+  assert.deepEqual(labels.map(label => /categories\/([^ ]+)/.exec(label)[1]), ['ultrabrain', 'deep-high', 'deep-low']);
+  assert.equal(JSON.stringify({ preview, pending }), before);
+});
+
+async function primaryPage(state = STATE) {
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'profiles-view', 'annotate'] });
+  e.page.receive({ seq: 1, generatedAt: 0, sessions: [] });
+  e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
+  e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => clone(state) });
+  await tick();
+  return e;
+}
+
+test('routing tabs: real rendered counts, Primary default, roving arrows/Home/End and sidebar selection', async () => {
+  const e = await primaryPage();
+  const tabs = () => [...e.byId.main.querySelectorAll('[role="tab"]')];
+  assert.deepEqual(tabs().map((tab) => tab.getAttribute('data-tab')), ['primary', 'agents', 'categories', 'memory']);
+  const checkCounts = () => {
+    for (const tab of tabs()) {
+      const panel = e.byId.main.querySelector('#' + tab.getAttribute('aria-controls'));
+      assert.equal(Number(tab.querySelector('.pf-count').textContent), panel.querySelectorAll('.pf-row-sum').length);
+      assert.equal(tab.getAttribute('aria-selected'), String(tab.getAttribute('data-tab') === e.page.state.ui.profilesState.tab));
+      assert.equal(tab.getAttribute('tabindex'), tab.getAttribute('aria-selected') === 'true' ? '0' : '-1');
+    }
+  };
+  checkCounts();
+  assert.equal(e.page.state.ui.profilesState.tab, 'primary');
+  assert.equal(e.byId.main.querySelector('#pf-panel-primary').hasAttribute('hidden'), false);
+  for (const [key, wanted] of [['ArrowRight', 'agents'], ['ArrowDown', 'categories'], ['End', 'memory'],
+    ['ArrowRight', 'primary'], ['ArrowLeft', 'memory'], ['Home', 'primary'], ['ArrowUp', 'memory']]) {
+    const current = tabs().find((tab) => tab.getAttribute('aria-selected') === 'true');
+    assert.equal(e.fire(current, 'keydown', { key }).defaultPrevented, true);
+    assert.equal(e.page.state.ui.profilesState.tab, wanted);
+    assert.equal(e.document.activeElement.getAttribute('data-tab'), wanted);
+    checkCounts();
+  }
+  for (const [jump, tab] of [['routing', 'agents'], ['memory', 'memory'], ['agents', 'primary']]) {
+    const input = e.byId.main.querySelector('#pf-routing-search');
+    input.value = 'unknown-alias-no-rows';
+    e.fire(input, 'input');
+    e.fire(e.byId.side.querySelector('[data-pf="jump"][data-target="' + jump + '"]'), 'click');
+    assert.equal(e.page.state.ui.profilesState.tab, tab);
+    assert.equal(e.page.state.ui.profilesState.query, '');
+    assert.equal(e.byId.main.querySelector('#pf-panel-' + tab).hasAttribute('hidden'), false);
+    checkCounts();
+  }
+  assert.deepEqual(e.errors, []);
+});
+
+test('original identity: profiles, role names, roleids, lane options and status badges remain raw', async () => {
+  const e = await primaryPage();
+  for (const [index, card] of [...e.byId.main.querySelectorAll('.pf-card')].entries()) {
+    assert.equal(card.querySelector('.pf-card-name').textContent, STATE.profiles[index].name);
+  }
+  for (const badge of e.byId.main.querySelectorAll('.pf-chip')) {
+    assert.equal(badge.getAttribute('title'), badge.textContent.trim());
+    assert.equal(badge.getAttribute('aria-label'), badge.textContent.trim());
+  }
+  const placeholders = e.byId.main.querySelectorAll('.pf-dash');
+  assert.ok(placeholders.length > 0);
+  for (const placeholder of placeholders) {
+    assert.equal(placeholder.getAttribute('aria-label'), 'none');
+    assert.equal(placeholder.getAttribute('title'), 'none');
+  }
+  const absentHomes = load().render({ ...STATE, homes: {} }, live());
+  assert.equal((absentHomes.match(/<code title="none">none<\/code>/g) || []).length, 2);
+  assert.match(absentHomes, /aria-label="대상 홈"/);
+  for (const row of STATE.routing.rows) {
+    const dom = e.byId.main.querySelector(`[data-pf-route="${row.section}/${row.role}"]`);
+    assert.equal(dom.querySelector('.pf-route-ko').textContent, row.labelEn || row.role);
+    assert.equal(dom.querySelector('.pf-route-en').textContent, row.labelEn || row.role);
+    assert.equal(dom.querySelector('.pf-route-id .pf-chip[class*="pf-st-"]').textContent, row.recommendation.Status);
+    assert.ok(dom.querySelector('.pf-row-sum-r').textContent.startsWith(row.role));
+  }
+  for (const option of e.byId.main.querySelectorAll('[data-pf="agent-lane"] option')) {
+    assert.equal(option.textContent, option.getAttribute('value'));
+  }
+  for (const [key, name] of [['kibitzer', 'Kibitzer'], ['reflection', 'Reflection']]) {
+    const group = e.byId.main.querySelector('[data-flow-sec="' + key + '"]');
+    assert.equal(group.querySelector('h3').textContent, 'shared-memory · ' + name);
+    assert.ok(group.querySelector('.pf-row-sum-r').textContent.includes('shared-memory · ' + name));
+  }
+  assert.match(e.byId.main.querySelector('[data-pf-memory-placement]').textContent, /Kibitzer와 Reflection.*Memory.*Summary.*compaction\.model/);
+  const source = [{ id: 'agents/explore', role: 'explore', name: 'Explore', status: 'recommended' }];
+  assert.throws(() => assertGuideIdentity([{ ...source[0], name: '탐색' }], source), /role identity/);
+  assert.throws(() => assertGuideIdentity([{ ...source[0], status: '권장' }], source), /status identity/);
+});
+
+test('routing search: all five fields across every tab, real filtered counts and stable group/document order', async () => {
+  const state = clone(STATE);
+  // Use distinct fields so matching an available option or another row cannot fake a successful match.
+  state.catalog['probe-alias'] = { model: 'probe-provider/probe-model', variant: 'medium' };
+  state.roster.agents.atlas.effective = { provider: 'probe-provider', modelId: 'probe-model', origin: 'lane' };
+  const agent = state.routing.rows.find((r) => r.section === 'agents');
+  const category = state.routing.rows.find((r) => r.section === 'categories');
+  for (const row of [agent, category]) {
+    row.model = 'probe-alias';
+    row.labelEn = 'Original Probe Name';
+  }
+  state.memory.kibitzer = { mode: 'custom', model: 'probe-provider/probe-model', alias: 'probe-alias', reasoning: 'medium' };
+  state.memory.reflection.mode = 'custom';
+  const e = await primaryPage(state);
+  const baselineRows = [...e.byId.main.querySelectorAll('.pf-row-sum')].map((r) => r.getAttribute('data-row'));
+  const baselineGroups = [...e.byId.main.querySelectorAll('[data-flow-sec]')].map((g) => g.getAttribute('data-flow-sec'));
+  const query = (value) => {
+    const input = e.byId.main.querySelector('#pf-routing-search');
+    input.value = value;
+    e.fire(input, 'input');
+    const rows = [...e.byId.main.querySelectorAll('.pf-row-sum')].map((r) => r.getAttribute('data-row'));
+    assert.deepEqual(rows, baselineRows.filter((id) => rows.includes(id)), 'row document order is a stable subsequence');
+    const groups = [...e.byId.main.querySelectorAll('[data-flow-sec]')].map((g) => g.getAttribute('data-flow-sec'));
+    assert.deepEqual(groups, baselineGroups.filter((id) => groups.includes(id)), 'group order is stable');
+    for (const tab of e.byId.main.querySelectorAll('[role="tab"]')) {
+      const panel = e.byId.main.querySelector('#' + tab.getAttribute('aria-controls'));
+      assert.equal(Number(tab.querySelector('.pf-count').textContent), panel.querySelectorAll('.pf-row-sum').length);
+    }
+    return rows;
+  };
+  for (const value of ['PROBE-PROVIDER', 'probe-model', 'PrObE-AlIaS']) {
+    assert.deepEqual(query(value), ['agent:atlas', 'route:' + agent.section + '/' + agent.role,
+      'route:' + category.section + '/' + category.role, 'memory:kibitzer']);
+    for (const panel of e.byId.main.querySelectorAll('[data-pf-panel]')) assert.equal(panel.hasAttribute('hidden'), false);
+  }
+  assert.deepEqual(query('Original Probe Name'), ['route:' + agent.section + '/' + agent.role, 'route:' + category.section + '/' + category.role]);
+  for (const [value, row] of [['AtLaS', 'agent:atlas'], ['Kibitzer', 'memory:kibitzer'],
+    [agent.role, 'route:' + agent.section + '/' + agent.role], [category.role, 'route:' + category.section + '/' + category.role]]) {
+    assert.ok(query(value).includes(row), value);
+  }
+  assert.deepEqual(query('alias-that-does-not-exist'), []);
+  assert.match(e.byId.main.textContent, /검색 결과 없음/);
+  assert.equal(e.fire(e.byId.main.querySelector('#pf-routing-search'), 'keydown', { key: 'Escape' }).defaultPrevented, true);
+  assert.equal(e.page.state.ui.profilesState.query, '');
+  assert.deepEqual([...e.byId.main.querySelectorAll('.pf-row-sum')].map((r) => r.getAttribute('data-row')), baselineRows);
+  assert.deepEqual(e.errors, []);
+});
+
+test('routing navigation: pending and drafts survive tab/query changes; only filtering the open row closes it', async () => {
+  const e = await primaryPage();
+  const sum = () => e.byId.main.querySelector('[data-row="agent:atlas"]');
+  e.fire(sum(), 'click');
+  const lane = e.byId.main.querySelector('[data-pf="agent-lane"][data-agent="atlas"]');
+  lane.value = 'daily-heavy';
+  e.fire(lane, 'change');
+  const before = plain(e.page.state.ui.profilesState.pending);
+  const routeProvider = e.byId.main.querySelector('[data-pf-route="agents/explore"] [data-pf="route-provider"]');
+  routeProvider.value = 'anthropic';
+  e.fire(routeProvider, 'change');
+  const drafts = plain(e.page.state.ui.profilesState.draft);
+  const pending = plain(e.page.state.ui.profilesState.pending);
+  assert.ok(before.length);
+  for (const tab of ['agents', 'categories', 'memory', 'primary']) {
+    e.fire(e.byId.main.querySelector('[role="tab"][data-tab="' + tab + '"]'), 'click');
+    assert.equal(e.page.state.ui.profilesState.openRow, 'agent:atlas');
+    assert.deepEqual(plain(e.page.state.ui.profilesState.pending), pending);
+    assert.deepEqual(plain(e.page.state.ui.profilesState.draft), drafts);
+  }
+  for (const value of ['AtLaS', '', 'no-such-role']) {
+    const input = e.byId.main.querySelector('#pf-routing-search');
+    input.value = value;
+    e.fire(input, 'input');
+    assert.equal(e.page.state.ui.profilesState.openRow, value === 'no-such-role' ? '' : 'agent:atlas');
+    assert.deepEqual(plain(e.page.state.ui.profilesState.pending), pending);
+    assert.deepEqual(plain(e.page.state.ui.profilesState.draft), drafts);
+  }
+  e.fire(e.byId.main.querySelector('#pf-routing-search'), 'keydown', { key: 'Escape' });
+  assert.equal(e.page.state.ui.profilesState.openRow, '', 'clearing does not reopen a filtered row');
+  assert.deepEqual(plain(e.page.state.ui.profilesState.pending), pending);
+  e.fire(sum(), 'click');
+  let input = e.byId.main.querySelector('#pf-routing-search');
+  input.value = 'Atlas'; e.fire(input, 'input');
+  e.fire(e.byId.main.querySelector('#pf-routing-search'), 'keydown', { key: 'Escape' });
+  assert.equal(e.page.state.ui.profilesState.openRow, 'agent:atlas', 'Esc clearing a matching query preserves disclosure');
+  assert.deepEqual(e.errors, []);
+});
+
+test('primary rows: first routing section has four ordered compact rows and the agents jump targets it', async () => {
+  const P = load();
+  const html = P.render(STATE, live());
+  const first = /data-pf-sec="routing"[^>]*>([\s\S]*?)data-pf-sec="memory"/.exec(html)[1];
+  assert.deepEqual(all(first, /data-pf-agent="([^"]+)"/g), ['sisyphus', 'hephaestus', 'prometheus', 'atlas']);
+  assert.match(first, /data-flow-sec="primary"/);
+  assert.doesNotMatch(html, /pf-agents-card|<details[^>]*id="pf-sec-agents"/);
+  const e = await primaryPage();
+  assert.equal('agentsOpen' in e.page.state.ui.profilesState, false);
+  e.fire(e.byId.side.querySelector('[data-pf="jump"][data-target="agents"]'), 'click');
+  assert.ok(e.byId.main.querySelector('#pf-sec-routing #pf-sec-agents'));
+  e.fire(e.byId.main.querySelector('[data-row="agent:sisyphus"]'), 'click');
+  assert.equal(e.byId.main.querySelector('#pf-agent-sisyphus-editor').hasAttribute('hidden'), false);
+  e.fire(e.byId.main.querySelector('[data-row="agent:atlas"]'), 'click');
+  assert.equal(e.byId.main.querySelector('[data-row="agent:sisyphus"]').getAttribute('aria-expanded'), 'false');
+  assert.equal(e.byId.main.querySelector('[data-row="agent:atlas"]').getAttribute('aria-expanded'), 'true');
+});
+
+test('primary Sisyphus: the three-stage row and main block share the main draft in both directions', async () => {
+  const e = await primaryPage();
+  const set = (id, value) => {
+    const control = e.byId.main.querySelector('#' + id);
+    assert.ok(control, id);
+    control.value = value;
+    e.fire(control, 'change');
+  };
+  const same = (part, expected) => {
+    assert.equal(selectedValueOf(e.byId.main.querySelector('#pf-sisyphus-' + part)), expected);
+    assert.equal(selectedValueOf(e.byId.main.querySelector('#pf-main-' + part)), expected);
+  };
+  set('pf-sisyphus-provider', 'chatgpt-subscription');
+  same('provider', 'chatgpt-subscription');
+  same('model', '');
+  set('pf-sisyphus-model', 'gpt-6.1-sol');
+  set('pf-sisyphus-thinking', 'high');
+  same('model', 'gpt-6.1-sol');
+  same('thinking', 'high');
+  set('pf-main-thinking', 'medium');
+  same('thinking', 'medium');
+  set('pf-main-provider', 'anthropic');
+  same('provider', 'anthropic');
+  same('model', '');
+  set('pf-main-model', 'claude-opus-5-5');
+  same('model', 'claude-opus-5-5');
+  const changes = plain(e.page.state.ui.profilesState.pending);
+  assert.equal(changes.length, 1);
+  assert.equal(changes[0].kind, 'setMain');
+  assert.equal(changes[0].model, 'claude-opus-5-5');
+  assert.equal(changes.some((change) => change.kind === 'setAgentPin'), false);
+  assert.deepEqual(e.errors, []);
+});
+
+test('primary staged summaries: Sisyphus and Atlas retain edits through close, reopen and discard', async () => {
+  for (const id of ['sisyphus', 'atlas']) {
+    const state = clone(STATE);
+    state.roster.agents[id].effective = {
+      provider: 'saved-provider', modelId: 'saved-model', thinking: 'low', origin: 'memory',
+    };
+    const e = await primaryPage(state);
+    const summary = () => e.byId.main.querySelector('[data-row="agent:' + id + '"]');
+    const set = (selector, value) => {
+      const control = e.byId.main.querySelector(selector);
+      control.value = value;
+      e.fire(control, 'change');
+    };
+    e.fire(summary(), 'click');
+    if (id === 'sisyphus') {
+      set('#pf-sisyphus-provider', 'anthropic');
+      set('#pf-sisyphus-model', 'claude-opus-5-5');
+      set('#pf-sisyphus-thinking', 'medium');
+    } else {
+      set('#pf-agent-provider-atlas', 'anthropic');
+      set('#pf-agent-pin-atlas', 'anthropic|claude-opus-5-5');
+      set('#pf-agent-pin-thinking-atlas', 'medium');
+    }
+    const staged = plain(e.page.state.ui.profilesState.pending);
+    e.fire(summary(), 'click');
+    assert.equal(summary().getAttribute('aria-expanded'), 'false');
+    assert.match(summary().querySelector('.pf-row-sum-m').textContent, /anthropic · claude-opus-5-5 \/ medium/);
+    assert.match(summary().querySelector('.pf-row-sum-o').textContent, /pending/);
+    assert.match(summary().querySelector('[data-pf-saved]').textContent, /saved-provider · saved-model \/ low.*Memory/);
+    e.fire(summary(), 'click');
+    assert.equal(summary().getAttribute('aria-expanded'), 'true');
+    assert.equal(selectedValueOf(e.byId.main.querySelector(id === 'sisyphus' ? '#pf-sisyphus-model' : '#pf-agent-pin-atlas')),
+      id === 'sisyphus' ? 'claude-opus-5-5' : 'anthropic|claude-opus-5-5');
+    assert.deepEqual(plain(e.page.state.ui.profilesState.pending), staged);
+    e.fire(e.byId.main.querySelector('[data-pf="clear"]'), 'click');
+    e.fire(e.byId.main.querySelector('[data-pf="clear-confirm"]'), 'click');
+    if (summary().getAttribute('aria-expanded') === 'true') e.fire(summary(), 'click');
+    assert.match(summary().querySelector('.pf-row-sum-m').textContent, /saved-provider · saved-model \/ low/);
+    assert.doesNotMatch(summary().querySelector('.pf-row-sum-o').textContent, /pending/);
+    assert.deepEqual(plain(e.page.state.ui.profilesState.pending), []);
+    assert.deepEqual(e.errors, []);
+  }
+});
+
+test('primary closed summaries mark staged lanes, pin removal and memory reset', () => {
+  for (const change of [
+    { kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' },
+    { kind: 'setAgentPin', agentId: 'atlas', pin: null },
+    { kind: 'resetAgentMemory', agentId: 'atlas' },
+  ]) {
+    const html = load().render(STATE, live({ pending: [change] }));
+    const summary = /data-pf-agent="atlas"[\s\S]*?<\/button>/.exec(html)[0];
+    assert.match(summary, />pending</);
+    assert.match(summary, /data-pf-saved/);
+    if (change.kind === 'setAgentLane') assert.match(summary, /daily-heavy/);
+  }
+});
+
+test('guide held main edits follow the shown profile while agent edits remain shared', () => {
+  const state = clone(STATE);
+  state.guide.rows = [{ id: 'primary/sisyphus', group: 'primary', role: 'sisyphus', current: {} }];
+  const pending = [
+    { kind: 'setMain', profileKey: 'gpt-kimi-deepseek', provider: 'probe', model: 'same-profile-model', thinking: 'high' },
+    { kind: 'setMain', profileKey: 'gpt-deepseek', provider: 'probe', model: 'other-profile-model', thinking: 'low' },
+    { kind: 'setAgentLane', agentId: 'sisyphus', lane: 'daily-heavy' },
+  ];
+  for (const [profileKey, included, excluded] of [
+    ['gpt-kimi-deepseek', 'same-profile-model', 'other-profile-model'],
+    ['gpt-deepseek', 'other-profile-model', 'same-profile-model'],
+  ]) {
+    const html = load().render(state, live({ shown: profileKey, pending }));
+    const row = /data-guide-row="primary\/sisyphus"[\s\S]*?<\/tr>/.exec(html)[0];
+    const held = /data-guide-field="HELD"[\s\S]*?<\/td>/.exec(row)[0];
+    assert.ok(held.includes(included), held);
+    assert.ok(!held.includes(excluded), held);
+    assert.match(held, /daily-heavy/);
+  }
+});
+
+test('primary rows: store origins and unavailable reasons remain explicit, and thinking mismatch is amber', () => {
+  const state = clone(STATE);
+  for (const [id, origin, modelId] of [
+    ['sisyphus', 'main', 'k3'], ['hephaestus', 'pin', 'gpt-6.1-sol'],
+    ['prometheus', 'memory', 'remembered'], ['atlas', 'lane', 'lane-model'],
+  ]) state.roster.agents[id].effective = { provider: 'fixture', modelId, thinking: 'high', origin, reason: null };
+  state.main.effective.thinking = 'max';
+  state.mainSettingsThinking = 'high';
+  let html = load().render(state, live());
+  for (const [id, label] of [['sisyphus', 'Main'], ['hephaestus', 'Pin'], ['prometheus', 'Memory'], ['atlas', 'Lane']]) {
+    const row = new RegExp('data-pf-agent="' + id + '"[\\s\\S]*?<\\/button>').exec(html)[0];
+    assert.match(row, new RegExp('>' + label + '<'));
+    assert.match(row, /pf-row-sum-m">fixture · /);
+  }
+  assert.match(html, /pf-c-amber"[^>]*>thinking-mismatch · settings: high \/ sidecar: max/);
+  state.mainSettingsThinking = 'low';
+  state.roster.agents.sisyphus.effective.origin = 'memory';
+  state.roster.agents.sisyphus.pin = { provider: 'legacy', modelId: 'legacy-model', thinking: 'medium' };
+  html = load().render(state, live());
+  const legacy = /data-pf-agent="sisyphus"[\s\S]*?<\/button>/.exec(html)[0];
+  assert.match(legacy, />Memory</);
+  assert.match(legacy, /title="Pin" aria-label="Pin">Pin</);
+  assert.match(legacy, /pf-c-amber"[^>]*>thinking-mismatch · settings: low \/ sidecar: max/);
+  state.mainSettingsThinking = null;
+  assert.match(load().render(state, live()), /pf-c-amber"[^>]*>thinking-mismatch · settings: none \/ sidecar: max/);
+  delete state.mainSettingsThinking;
+  assert.doesNotMatch(load().render(state, live()), /thinking-mismatch/);
+  state.roster.agents.atlas.effective = { provider: null, modelId: null, thinking: null, origin: 'unavailable', reason: 'not-found' };
+  html = load().render(state, live({ openRow: 'agent:atlas' }));
+  const unavailable = /data-pf-agent="atlas"[\s\S]*?<\/article>/.exec(html)[0];
+  assert.match(unavailable, /pf-row-sum-m">not-found/);
+  assert.match(unavailable, />Unavailable</);
+  assert.match(unavailable, />not-found</);
+  assert.match(unavailable, /공통 설정/);
+  assert.match(unavailable, /기억 시각 없음/);
+});
+
+test('primary rows: every lane and reset action fires; clearing each secondary pin sends null', async () => {
+  const e = await primaryPage();
+  for (const agent of ['sisyphus', 'hephaestus', 'prometheus', 'atlas']) {
+    const lane = e.byId.main.querySelector('[data-pf="agent-lane"][data-agent="' + agent + '"]');
+    lane.value = 'geeky-heavy';
+    e.fire(lane, 'change');
+    assert.deepEqual(plain(e.page.state.ui.profilesState.pending).find((c) => c.agentId === agent),
+      { kind: 'setAgentLane', agentId: agent, lane: 'geeky-heavy' });
+    e.fire(e.byId.main.querySelector('[data-pf="reset-memory"][data-agent="' + agent + '"]'), 'click');
+    assert.deepEqual(plain(e.page.state.ui.profilesState.pending).find((c) => c.agentId === agent),
+      { kind: 'resetAgentMemory', agentId: agent });
+    if (agent === 'sisyphus') continue;
+    const pin = e.byId.main.querySelector('[data-pf="agent-pin"][data-agent="' + agent + '"]');
+    pin.value = '';
+    e.fire(pin, 'change');
+    assert.deepEqual(plain(e.page.state.ui.profilesState.pending).find((c) => c.agentId === agent),
+      { kind: 'setAgentPin', agentId: agent, pin: null });
+  }
+  e.fire(e.byId.main.querySelector('[data-pf="preview"]'), 'click');
+  const changes = JSON.parse(e.fetches.at(-1).opts.body).changes;
+  assert.equal(changes.filter((c) => c.kind === 'setAgentPin' && c.pin === null).length, 3);
+  assert.deepEqual(e.errors, []);
+});
+
+test('primary pin cascade: service changes repopulate without picking and Hephaestus rejects non-gpt input', async () => {
+  const e = await primaryPage();
+  let service = e.byId.main.querySelector('[data-pf="agent-provider"][data-agent="atlas"]');
+  service.value = 'anthropic';
+  e.fire(service, 'change');
+  let pin = e.byId.main.querySelector('[data-pf="agent-pin"][data-agent="atlas"]');
+  assert.equal(pin.value, '');
+  assert.ok(pin.querySelector('option[value="anthropic|claude-opus-5-5"]'));
+  assert.equal(pin.querySelector('option[value="chatgpt-subscription|gpt-6.1-sol"]'), null);
+  pin.value = 'anthropic|claude-opus-5-5';
+  e.fire(pin, 'change');
+  assert.deepEqual(plain(e.page.state.ui.profilesState.pending).find((c) => c.agentId === 'atlas').pin,
+    { provider: 'anthropic', modelId: 'claude-opus-5-5', thinking: 'medium' });
+  service = e.byId.main.querySelector('[data-pf="agent-provider"][data-agent="atlas"]');
+  service.value = 'chatgpt-subscription';
+  e.fire(service, 'change');
+  pin = e.byId.main.querySelector('[data-pf="agent-pin"][data-agent="atlas"]');
+  assert.equal(pin.value, '', 'the old model cannot survive the service change');
+  assert.ok(pin.querySelector('option[value="chatgpt-subscription|gpt-6.1-sol"]'));
+  const before = plain(e.page.state.ui.profilesState.pending);
+  const hephaestus = e.byId.main.querySelector('[data-pf="agent-pin"][data-agent="hephaestus"]');
+  assert.equal(hephaestus.querySelector('option[value="anthropic|claude-opus-5-5"]'), null);
+  hephaestus.value = 'anthropic|claude-opus-5-5';
+  e.fire(hephaestus, 'change');
+  assert.deepEqual(plain(e.page.state.ui.profilesState.pending), before);
+  assert.deepEqual(e.errors, []);
+});
+
+test('compact rows: every route and memory summary controls its editor, including readonly and unresolved rows', () => {
+  const P = load();
+  for (const ui of [live(), { live: false }]) {
+    const html = P.render(STATE, ui);
+    const summaries = [...html.matchAll(/<button type="button" class="pf-row-sum"([^>]*)>([\s\S]*?)<\/button>/g)];
+    assert.equal(summaries.length, STATE.routing.rows.length + 6);
+    for (const [, attrs, body] of summaries) {
+      assert.match(attrs, /aria-expanded="false"/);
+      const editorId = /aria-controls="([^"]+)"/.exec(attrs)?.[1];
+      assert.ok(editorId);
+      assert.match(html, new RegExp('id="' + editorId + '"[^>]* hidden'));
+      assert.match(body, /pf-row-sum-r/);
+      assert.match(body, /pf-row-sum-m/);
+      assert.match(body, /pf-row-sum-o/);
+    }
+  }
+  const malformed = clone(STATE);
+  malformed.routing.rows[0].model = 'missing-model';
+  malformed.memory.kibitzer.unresolved = true;
+  const html = P.render(malformed, live());
+  assert.match(html, /skipped · unresolved/);
+  assert.equal((html.match(/title="skipped · unresolved" aria-label="skipped · unresolved"/g) || []).length >= 2, true);
+});
+
+test('original identity: extras group and unresolved Memory badges reject Korean characters', async () => {
+  const state = clone(STATE);
+  state.routing.rows.push({ ...state.routing.rows[0], role: 'copy-fix-extra', group: 'extras', labelEn: 'copy-fix-extra' });
+  state.routing.rows[0].model = 'missing-alias';
+  for (const key of ['kibitzer', 'reflection']) {
+    state.memory[key].alias = 'missing-alias';
+    state.memory[key].mode = 'custom';
+    state.memory[key].unresolved = true;
+    state.memory[key].external = true;
+    state.memory[key].owned = true;
+    state.memory[key].hasDedicated = true;
+  }
+  state.memory.kibitzer.model = 'missing-provider/missing-model';
+  state.memory.reflection.model = state.catalog[Object.keys(state.catalog)[0]].model;
+  state.memory.reflection.reasoning = 'future-thinking';
+  const e = await primaryPage(state);
+  const heading = e.byId.main.querySelector('[data-flow-sec="agents:extras"] .pf-group-h');
+  assert.equal(heading.textContent.trim(), 'extras 1');
+  assert.doesNotMatch(heading.textContent, /\p{Script=Hangul}/u);
+  for (const key of ['kibitzer', 'reflection']) {
+    const row = e.byId.main.querySelector(`[data-pf-memory-row="${key}"]`);
+    const status = row.querySelector('.pf-mem-id .pf-c-red').textContent;
+    const summary = row.querySelector('.pf-row-sum-o .pf-chip').textContent;
+    assert.equal(status, 'unresolved');
+    assert.equal(summary, 'skipped · unresolved');
+    assert.doesNotMatch(status, /\p{Script=Hangul}/u);
+    assert.doesNotMatch(summary, /\p{Script=Hangul}/u);
+    const current = row.querySelector('[data-pf-memory-current]').textContent;
+    const pending = row.querySelector('[data-pf-memory-pending]').textContent;
+    assert.match(current, /^current: /);
+    assert.match(current, /\(external \/ unresolved\)$/);
+    assert.doesNotMatch(current, /\p{Script=Hangul}/u);
+    assert.match(pending, /^pending: none · /);
+  }
+  for (const label of e.byId.main.querySelectorAll('.pf-group-h, .pf-chip')) {
+    assert.doesNotMatch(label.textContent, /\p{Script=Hangul}/u);
+  }
+  const model = e.byId.main.querySelector('[data-pf="memory-model"][data-memory="kibitzer"] option[selected]');
+  const thinking = e.byId.main.querySelector('[data-pf="memory-thinking"][data-memory="reflection"] option[selected]');
+  assert.equal(model.textContent, 'unresolved: missing-provider/missing-model');
+  assert.equal(thinking.textContent, 'unresolved: future-thinking');
+  assert.equal(e.byId.main.querySelector('[data-pf-route="agents/explore"] .pf-row-sum-o .pf-chip').textContent, 'skipped · unresolved');
+});
+
+test('original identity: loading, error, readonly, pending and saved status badges reject Korean characters', () => {
+  const P = load();
+  for (const edit of [
+    live({ loading: true }),
+    live({ error: '상태를 불러오지 못했습니다.', errorKind: 'network' }),
+    { live: false },
+    live({ pending: [{ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' }] }),
+    live({ memorySaved: { kibitzer: true } }),
+    live({ busy: true, status: 'applying' }),
+    live({ conflict: true, status: 'conflict', error: P.CONFLICT_TEXT }),
+  ]) {
+    const html = P.render(STATE, edit) + P.side(STATE, edit);
+    const badges = [...html.matchAll(/<span class="pf-chip\b[^"]*"[^>]*>([\s\S]*?)<\/span>/g)];
+    assert.ok(badges.length);
+    for (const badge of badges) assert.doesNotMatch(textOf(badge[1]), /\p{Script=Hangul}/u);
+  }
+});
+
+test('compact rows: opening a second row closes the first and closing restores summary focus', async () => {
+  const e = makeController({ modules: ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'profiles-view', 'annotate'] });
+  e.page.receive({ seq: 1, generatedAt: 0, sessions: [] });
+  e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
+  e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => clone(STATE) });
+  await tick();
+  const summary = (key) => e.byId.main.querySelector('.pf-row-sum[data-row="' + key + '"]');
+  e.fire(summary('route:agents/explore'), 'click');
+  assert.equal(summary('route:agents/explore').getAttribute('aria-expanded'), 'true');
+  e.fire(summary('memory:kibitzer'), 'click');
+  assert.equal(summary('route:agents/explore').getAttribute('aria-expanded'), 'false');
+  assert.equal(summary('memory:kibitzer').getAttribute('aria-expanded'), 'true');
+  assert.equal(e.byId.main.querySelectorAll('.pf-row-sum[aria-expanded="true"]').length, 1);
+  e.fire(summary('memory:kibitzer'), 'click');
+  assert.equal(e.document.activeElement, summary('memory:kibitzer'));
+  assert.equal(summary('memory:kibitzer').getAttribute('aria-expanded'), 'false');
+  e.fire(summary('route:agents/explore'), 'click');
+  e.fire(e.document.body, 'keydown', { key: 'Escape' });
+  assert.equal(e.document.activeElement, summary('route:agents/explore'));
+  assert.equal(summary('route:agents/explore').getAttribute('aria-expanded'), 'false');
+});
 
 test('render: header, target homes and every section in order', () => {
   const P = load();
@@ -44,8 +586,9 @@ test('render: header, target homes and every section in order', () => {
   assert.match(html, /\[primary\]/);
   assert.match(html, /\[stable-500\]/);
   assert.match(html, /\[omo-original\]|\[mirror 1\]/);
-  assert.deepEqual(all(html, /data-pf-sec="([^"]+)"/g), ['guide', 'profiles', 'routing', 'memory', 'lanes', 'main', 'summarizer', 'tray', 'agents']);
-  for (const title of ['메인 에이전트', '프로필', '모델 라우팅 · 전담 에이전트 / 작업 카테고리', '메인 모델 설정', 'model_profile', '요약 담당 모델', '공통 설정 · Kibitzer 회상', '권장 가이드']) {
+  assert.equal(/<span class="pf-off">([^<]*)<\/span>/.exec(html)?.[1], '[none]');
+  assert.deepEqual(all(html, /data-pf-sec="([^"]+)"/g), ['guide', 'profiles', 'routing', 'agents', 'memory', 'lanes', 'main', 'summarizer', 'tray']);
+  for (const title of ['Primary', '프로필', '모델 라우팅 · 전담 에이전트 / 작업 카테고리', '메인 모델 설정', 'model_profile', '요약 담당 모델', 'shared-memory · Kibitzer', '권장 가이드']) {
     assert.ok(text.includes(title), title);
   }
   assert.ok(text.includes(STATE.inventory.path), 'guide source path');
@@ -59,7 +602,10 @@ test('render: header, target homes and every section in order', () => {
 
 test('render: 4 agent rows (lane, pin, remembered model, reset), 6 profile cards and grouped routing rows', () => {
   const P = load();
-  const html = P.render(STATE, live());
+  let html = P.render(STATE, live());
+  if (process.env.OMO_PROFILE_ASSERTION_MUTATION === 'remove-review-heading') {
+    html = html.replace(/(<section class="pf-group" data-flow-sec="agents:review-qa">)<h4 class="pf-group-h">[\s\S]*?<\/h4>/, '$1');
+  }
   assert.equal((html.match(/data-pf-agent="/g) || []).length, 4);
   assert.deepEqual(all(html, /data-pf-agent="([^"]+)"/g), ['sisyphus', 'hephaestus', 'prometheus', 'atlas']);
   for (const id of ['sisyphus', 'hephaestus', 'prometheus', 'atlas']) {
@@ -70,16 +616,19 @@ test('render: 4 agent rows (lane, pin, remembered model, reset), 6 profile cards
   assert.match(textOf(html), /anthropic-subscription · claude-opus-5-5 \/ medium/, 'remembered model is read-only text');
   assert.equal((html.match(/class="pf-card(?: on)?"/g) || []).length, 6, 'six profile cards');
   assert.equal((html.match(/class="pf-card on"/g) || []).length, 1, 'the current card is marked');
-  assert.match(textOf(html), /탐색 · 자료 조사/);
-  assert.match(textOf(html), /검토 · QA/);
-  assert.match(textOf(html), /전문 작업/);
+  assert.match(textOf(html), /discovery/);
+  const reviewHeading = /<section class="pf-group" data-flow-sec="agents:review-qa"><h4 class="pf-group-h">([^<]+) <span class="pf-count">(\d+)<\/span><\/h4>/.exec(html);
+  assert.ok(reviewHeading, 'the review group must contain its own heading element');
+  assert.equal(reviewHeading[1], 'review');
+  assert.equal(Number(reviewHeading[2]), STATE.routing.rows.filter(row => row.section === 'agents' && row.group === 'review').length);
+  assert.match(textOf(html), /specialism/);
   assert.match(html, /pf-st-recommended/);
   assert.match(html, /pf-st-fallback/);
   assert.match(html, /pf-st-different/);
   assert.match(html, /pf-st-variant-different/);
   assert.match(html, /pf-st-unresolved/);
   assert.match(html, /pf-st-untracked/);
-  assert.match(html, /<option value="chatgpt-subscription\|gpt-6\.1-sol" selected>/, 'a pin is provider + bare gpt-* model id');
+  assert.match(html, /<option value="chatgpt-subscription\|gpt-6\.1-sol"[^>]* selected>/, 'a pin is provider + bare gpt-* model id');
   assert.equal((html.match(/data-pf="route-provider"/g) || []).length, STATE.routing.rows.length);
 });
 
@@ -123,8 +672,9 @@ test('a11y: every select and input has a visible label and an accessible name', 
   const html = P.render(STATE, live());
   const { labels, controls } = labelledControls(html);
   const selects = controls.filter((c) => c.tag === 'select');
-  assert.equal(selects.length, 47, 'the fixture renders 47 selects');
-  assert.equal(controls.length, 48, '47 selects + 1 text input');
+  assert.equal(selects.length, 51, 'the fixture renders 51 selects');
+  assert.equal(controls.length, 53, '51 selects + 1 text input + the global search');
+  assert.equal(controls.filter((c) => c.pf === 'routing-search').length, 1);
   for (const c of controls) {
     const name = c.aria || c.ref || labels.get(c.id) || '';
     assert.ok(name.trim(), `${c.tag} [data-pf=${c.pf || '?'}] has no accessible name`);
@@ -136,16 +686,16 @@ test('a11y: every select and input has a visible label and an accessible name', 
     for (const c of byPf(pre + '-model')) assert.equal(labels.get(c.id), '2. AI 모델');
     for (const c of byPf(pre + '-thinking')) assert.equal(labels.get(c.id), '3. 추론 강도');
   }
-  assert.equal(byPf('main-provider').length, 1);
+  assert.equal(byPf('main-provider').length, 2);
   for (const c of byPf('summarizer-provider')) assert.equal(labels.get(c.id), '1. 제공사');
   for (const c of byPf('summarizer-model')) assert.equal(labels.get(c.id), '2. AI 모델');
   for (const c of byPf('memory-mode')) assert.equal(labels.get(c.id), '모드');
   for (const c of byPf('memory-service')) assert.equal(labels.get(c.id), '1. 구독 서비스');
   for (const c of byPf('memory-model')) assert.equal(labels.get(c.id), '2. AI 모델');
   for (const c of byPf('memory-thinking')) assert.equal(labels.get(c.id), '3. 추론 강도');
-  for (const c of byPf('agent-pin-thinking')) assert.equal(labels.get(c.id), '추론');
+  for (const c of byPf('agent-pin-thinking')) assert.equal(labels.get(c.id), '3. 추론 강도');
   assert.equal(byPf('route-provider').length, STATE.routing.rows.length);
-  assert.equal(byPf('agent-pin-thinking').length, 4);
+  assert.equal(byPf('agent-pin-thinking').length, 3);
   assert.equal(byPf('summarizer-provider').length, 1);
   assert.equal(byPf('summarizer-model').length, 1);
   assert.equal(byPf('memory-mode').length, 2);
@@ -164,6 +714,8 @@ test('phone: the view raises its local control token to the 44 px --hit target',
   assert.match(phone, /\.pf-nav-b,\s*\.pf-diff summary\s*\{\s*min-height:\s*var\(--hit\);\s*\}/);
   assert.match(css, /\.pf select, \.pf input\[type="text"\] \{[\s\S]*?height: var\(--ctl-h\);/);
   assert.match(css, /\.pf-btn \{[\s\S]*?min-height: var\(--ctl-h\);/);
+  const touch = css.slice(css.indexOf('@media (max-width: 899px)'), css.indexOf('@media (max-width: 760px)'));
+  assert.match(touch, /\.pf-routing-tools > input,\s*\.pf-routing-tabs \[role="tab"\] \{ min-height: var\(--hit\); \}/);
 });
 
 test('header: the memory-row phrase stays together with its predicate', () => {
@@ -229,6 +781,19 @@ test('loading and error expose explicit states, never a read-only view', () => {
   assert.doesNotMatch(html, /data-pf-loading/);
 });
 
+test('programmatic status focus targets use their visible text as accessible names', () => {
+  const P = load();
+  const loading = P.render(null, live({ loading: true }));
+  assert.match(loading, /data-pf-loading role="status"/);
+  assert.match(loading, /id="pf-focus-status" tabindex="-1" role="group" aria-labelledby="pf-focus-status"/);
+  assert.equal((loading.match(/role="status"/g) || []).length, 1, 'loading keeps its single live region');
+  const error = P.render(null, live({ error: 'Server <error> & retry' }));
+  assert.match(error, /role="alert"><p class="pf-err" id="pf-focus-status" tabindex="-1" role="group" aria-labelledby="pf-focus-status">Server &lt;error&gt; &amp; retry<\/p>/);
+  const conflict = P.render(STATE, live({ conflict: true, status: 'conflict' }));
+  assert.match(conflict, /id="pf-focus-status" tabindex="-1" role="status" aria-labelledby="pf-focus-status">conflict<\/span>/);
+  assert.match(conflict, /class="pf-conflict" role="alert"/);
+});
+
 test('loading reuses the homes, tray and section-header primitives and pulses one glyph', () => {
   const P = load();
   const html = P.render(null, live({ loading: true }));
@@ -241,9 +806,13 @@ test('loading reuses the homes, tray and section-header primitives and pulses on
   assert.match(html, /class="pf-tray pf-tray-compact" data-pf-skel="tray"/);
   assert.match(html, /class="pf-sec-h"/);
   const loaded = P.render(STATE, live());
-  const loadedHead = /<details class="pf-sec pf-agents-card" id="pf-sec-agents"[\s\S]*?<summary class="pf-sec-h">([\s\S]*?)<\/summary>/.exec(loaded)[1];
-  const loadingHead = /<section class="pf-skel-sec" data-pf-skel="agents"[\s\S]*?<header class="pf-sec-h">([\s\S]*?)<\/header>/.exec(html)[1];
+  const loadedHead = /<section class="pf-group" id="pf-sec-agents"[\s\S]*?<h3 class="pf-group-h">([\s\S]*?)<\/h3>/.exec(loaded)[1];
+  const loadingHeader = /<section class="pf-skel-sec" data-pf-skel="agents"[\s\S]*?<header class="pf-sec-h">([\s\S]*?)<\/header>/.exec(html)[1];
+  const loadingHead = /<h2>([\s\S]*?)<\/h2>/.exec(loadingHeader)[1] + ' ' +
+    /<span class="pf-count">[\s\S]*?<\/span>/.exec(loadingHeader)[0];
   assert.equal(textOf(loadingHead), textOf(loadedHead));
+  assert.match(textOf(loadingHead), /Primary/);
+  assert.match(textOf(loadedHead), /Primary/);
   assert.equal((html.match(/data-pf-skel="route"/g) || []).length, 20, 'routing placeholders');
   assert.doesNotMatch(html, /data-pf-sec=/, 'the loading frame must not claim loaded sections');
   assert.doesNotMatch(html, /class="pf-skeleton" aria-hidden="true"/, 'the live loading status must not sit inside aria-hidden');
@@ -287,7 +856,7 @@ test('selects: every control titles its selected label and declares an ellipsis'
   const P = load();
   const html = P.render(STATE, live());
   const tags = [...html.matchAll(/<select\b([^>]*)>/g)].map((m) => m[1]);
-  assert.equal(tags.length, 47);
+  assert.equal(tags.length, 51);
   for (const attrs of tags) assert.match(attrs, /\btitle="[^"]+"/, 'select without a full-value title');
   const model = /<select[^>]*data-pf="route-model"[^>]*>/.exec(html)[0];
   assert.match(model, /title="[^"]*·[^"]*\/[^"]*"/, 'model title carries alias and full id');
@@ -364,11 +933,13 @@ test('read-only without a token: no selects and no preview/apply controls', () =
   const html = P.render(STATE, { live: false });
   assert.match(html, /data-readonly="true"/);
   assert.doesNotMatch(html, /<select/);
-  assert.doesNotMatch(html, /<input/);
+  assert.match(html, /<input type="search"[^>]*data-pf="routing-search"/);
+  assert.doesNotMatch(html.replace(/<input type="search"[^>]*data-pf="routing-search"[^>]*>/, ''), /<input/,
+    'the read-only view has no editable setting inputs');
   assert.doesNotMatch(html, /data-pf="preview"/);
   assert.doesNotMatch(html, /data-pf="apply"/);
   assert.match(html, /이 페이지는 보기 전용입니다/);
-  assert.match(P.side(STATE, { live: false }), /읽기 전용/);
+  assert.match(P.side(STATE, { live: false }), /read-only/);
 });
 
 test('inventory stale: the banner is shown and the view is read-only even with a token', () => {
@@ -470,6 +1041,8 @@ test('journal: reapply mirrors apply disabled state under conflict and busy, nev
   const readonlyHtml = P.render(interrupted, { ...live(), live: false });
   assert.doesNotMatch(readonlyHtml, /data-pf="reapply"/);
   assert.match(readonlyHtml, /data-pf-journal="interrupted"/);
+  const readonlyJournal = /<div[^>]*data-pf-journal="interrupted"[^>]*>([\s\S]*?)<\/div>/.exec(readonlyHtml)[1];
+  assert.equal(/<span class="pf-muted">([^<]*)<\/span>/.exec(readonlyJournal)?.[1], 'read-only');
   const legacy = clone(interrupted);
   legacy.applyJournal.reapply = null;
   const legacyHtml = P.render(legacy, live());
@@ -564,7 +1137,7 @@ test('controller: a non-200 preview is shown, never reported as success, and pen
   c.add({ kind: 'setRoute', section: 'agents', role: 'explore', provider: 'a', model: 'a/m', thinking: 'low' });
   const snap = await c.preview();
   assert.equal(snap.preview, null);
-  assert.equal(snap.status, '실패');
+  assert.equal(snap.status, 'failure');
   assert.match(snap.error, /omo\.jsonc keys are not allowed/);
   assert.equal(snap.pending.length, 1, 'edits survive a refusal');
 });
@@ -580,7 +1153,7 @@ test('controller: a refused apply (UNSUPPORTED_MODEL) reads as one Korean senten
   await c.load();
   c.add({ kind: 'setRoute', section: 'agents', role: 'explore', provider: 'opencode', model: 'opencode/gemini-4-argon', thinking: 'high' });
   const snap = await c.apply();
-  assert.equal(snap.status, '실패');
+  assert.equal(snap.status, 'failure');
   assert.equal(snap.pending.length, 1, 'the refused edit stays pending');
   const edit = { ...snap, live: true };
   const shown = '설치 엔진이 이 모델을 지원하지 않아 적용하지 않았으니 다른 모델을 고르십시오. <code class="pf-err-code">UNSUPPORTED_MODEL</code>';
@@ -736,7 +1309,9 @@ test('page wiring: the profiles rail click loads GET /profiles/state and a previ
   lane.value = 'daily-heavy';
   e.fire(lane, 'change');
   assert.match(e.byId.main.querySelector('.pf-pending').textContent, /atlas 레인 → daily-heavy/);
-  assert.match(e.byId.side.textContent, /변경 보류 1건/, 'the sidebar tray chip follows the pending edits');
+  const pendingBadge = e.byId.side.querySelectorAll('.pf-nav-state .pf-chip')[1];
+  if (process.env.OMO_PROFILE_ASSERTION_MUTATION === 'pending-10') pendingBadge.textContent = 'pending 10';
+  assert.equal(pendingBadge?.textContent.trim(), 'pending 1', 'the sidebar tray chip has the exact pending count');
   e.fire(e.byId.main.querySelector('[data-pf="preview"]'), 'click');
   const post = e.fetches[e.fetches.length - 1];
   assert.equal(post.url, '/profiles');
@@ -929,7 +1504,7 @@ test('busy: a held apply rejects controller mutations and disables every editor 
 test('pin hint: GPT 계열만 sits inside the pin label before the thinking control', () => {
   const P = load();
   const html = P.render(STATE, live());
-  const agent = /<article class="pf-agent" data-pf-agent="hephaestus">[\s\S]*?<\/article>/.exec(html)[0];
+  const agent = /<article class="pf-agent pf-route" data-pf-agent="hephaestus">[\s\S]*?<\/article>/.exec(html)[0];
   const label = /<label class="pf-sel"[^>]*for="pf-agent-pin-hephaestus"[^>]*>[\s\S]*?<\/label>/.exec(agent)[0];
   assert.match(label, /<span class="pf-hint">GPT 계열만<\/span>/);
   const pin = agent.indexOf('id="pf-agent-pin-hephaestus"');
@@ -960,14 +1535,14 @@ test('tray: empty is compact and visibly names the next action', () => {
   const strip = /<section class="pf-tray pf-tray-compact"[\s\S]*?<\/section>/.exec(html)[0];
   assert.doesNotMatch(strip, /data-pf="(?:preview|apply)"/, 'the empty message strip carries no action; apply lives in the detail');
   assert.match(html, /class="pf-count">0</);
-  assert.match(strip, /<span class="pf-tag">\[대기\]<\/span>/, 'nothing is on hold while the count is 0');
+  assert.match(strip, /<span class="pf-tag">\[idle\]<\/span>/, 'nothing is on hold while the count is 0');
   const next = /<span class="pf-tray-next">([^<]+)<\/span>/.exec(html);
   assert.ok(next && textOf(next[1]).trim().length >= 8, 'the compact tray needs a visible next action');
   assert.doesNotMatch(html, /pf-tray-note/, 'the loaded page names its next action in the strip; the muted note is the loading skeleton\'s');
   const pending = [{ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' }];
   html = P.render(STATE, live({ pending }));
   assert.doesNotMatch(html, /pf-tray-compact/);
-  assert.match(/<section class="pf-tray"[\s\S]*?<\/header>/.exec(html)[0], /<span class="pf-tag">\[보류\]<\/span>/, 'a staged change is on hold');
+  assert.match(/<section class="pf-tray"[\s\S]*?<\/header>/.exec(html)[0], /<span class="pf-tag">\[pending\]<\/span>/, 'a staged change is on hold');
   assert.match(html, /data-pf="preview"/);
   const clear = /<button[^>]*data-pf="clear"[^>]*>/.exec(html)[0];
   assert.match(clear, /pf-btn-danger/);
@@ -1067,17 +1642,17 @@ test('identity: the four fixed colours keep distinct labelled shapes, not status
   assert.doesNotMatch(css, /\.pf-shape-(circle|square|triangle|diamond) \{ background:/);
 });
 
-test('selected card: a green wash marks the shown card; a check glyph joins 적용 중 on the active one', () => {
+test('selected card: a green wash marks the shown card; a check glyph joins current on the active one', () => {
   const P = load();
   const html = P.render(STATE, live());
   const on = /<article class="pf-card on">[\s\S]*?<\/article>/.exec(html)[0];
   assert.match(on, /aria-pressed="true"/);
   assert.match(on, /class="pf-chip pf-c-green pf-current"/);
   assert.match(on, /href="#i-check"/);
-  assert.match(on, /적용 중/);
+  assert.match(on, /current/);
   const other = P.render(STATE, live({ shown: 'experimental-custom' }));
   assert.match(/<article class="pf-card on">[\s\S]*?<\/article>/.exec(other)[0], /data-profile="experimental-custom"/, 'the wash follows the shown card');
-  assert.equal((other.match(/pf-current/g) || []).length, 1, '적용 중 stays on the active card only');
+  assert.equal((other.match(/pf-current/g) || []).length, 1, 'current stays on the active card only');
   const css = read('src/page/profiles-view.css');
   assert.match(css, /\.pf-card\.on \{[^}]*background: var\(--c-green-tint\)/);
   assert.match(css, /\.pf-card\.on \{[^}]*box-shadow: inset 0 0 0 1px var\(--c-green\)/);
@@ -1102,14 +1677,14 @@ test('cards: the main line shows the saved override, then that profile\'s pendin
     const main = /<span class="pf-card-main( pf-card-off)?"(?: title="([^"]*)")?>([\s\S]*?)<\/span><span class="pf-card-svc">([^<]*)<\/span>/.exec(body);
     const glyph = /<span class="pf-card-flag" role="img" aria-label="([^"]*)">/.exec(main[3]);
     assert.equal(Boolean(main[1]), Boolean(glyph), key + ': the flag colour and glyph go together');
-    if (glyph) assert.equal(main[2], glyph[1] + ' · ' + main[2].split(' · ').pop(), key + ': the glyph is named by the reason');
+    if (glyph) assert.equal(main[2], glyph[1], key + ': the glyph is named by the reason');
     return [textOf(main[3]).replace(/\s+/g, ' ').trim(), textOf(main[4]), main[1] ? main[2] : null];
   };
 
   let html = P.render(state, live());
   assert.deepEqual(card(html, 'gpt-kimi-deepseek'), ['메인: k3 / max', '서비스: kimi-coding', null], 'no override: the profile default');
   assert.deepEqual(card(html, 'gpt-deepseek'), ['메인: gpt-6-sol / high', '서비스: openai', null], 'the saved override, not the default');
-  assert.deepEqual(card(html, 'kimi-deepseek'), ['메인: k3-legacy / max', '서비스: kimi-coding', '설치 엔진 미지원 · primary 홈 · UNSUPPORTED_MODEL'],
+  assert.deepEqual(card(html, 'kimi-deepseek'), ['메인: k3-legacy / max', '서비스: kimi-coding', 'UNSUPPORTED_MODEL · primary'],
     'a saved unsupported main stays on the card with the store\'s flag');
 
   const pending = [{ kind: 'setMain', profileKey: 'kimi-deepseek', provider: 'kimi-coding', model: 'k3-turbo', thinking: 'high' }];
@@ -1122,7 +1697,7 @@ test('cards: the main line shows the saved override, then that profile\'s pendin
   // A refused catalog model carries the catalog verdict, so the flag follows the shown value, pending included.
   Object.assign(state.catalog['k3-turbo'], { unsupported: true, unsupportedReason: 'REGISTRY_UNKNOWN', unsupportedHome: 'stable' });
   html = P.render(state, live({ pending }));
-  assert.equal(card(html, 'kimi-deepseek')[2], '설치 엔진 미확인 · stable 홈 · REGISTRY_UNKNOWN');
+  assert.equal(card(html, 'kimi-deepseek')[2], 'REGISTRY_UNKNOWN · stable');
   assert.equal((html.match(/pf-card-off/g) || []).length, 1, 'only the refused value is flagged');
 });
 
@@ -1189,8 +1764,8 @@ test('memory rows: quick shows the effective quick tuple read-only; custom start
     assert.equal(selectedValueOf(eff), 'high');
     const curText = e.byId.main.querySelector('[data-pf-memory-current="' + key + '"]').textContent;
     const pendText = e.byId.main.querySelector('[data-pf-memory-pending="' + key + '"]').textContent;
-    assert.match(curText, /^현재: quick · opencode-go\/deepseek-v4-flash \/ high/);
-    assert.match(pendText, /^보류: /);
+    assert.match(curText, /^current: quick · opencode-go\/deepseek-v4-flash \/ high/);
+    assert.match(pendText, /^pending: /);
   }
   assert.doesNotMatch(e.byId.main.innerHTML, /<input[^>]*data-pf="memory-model"/, 'free-text memory input is replaced');
   assert.doesNotMatch(e.byId.main.innerHTML, /<option(?![^>]*\bdisabled\b)[^>]*value="opencode\/gemini-4-argon"/, 'unserved model is never an enabled option');
@@ -1294,21 +1869,21 @@ test('memory rows: kibitzer and reflection are independent and render Must-have-
     '1. 제공사',
     '원본 기본 컴팩션',
   ]) {
-    assert.ok(html.includes(required), 'missing Must-have-4 string: ' + required);
+    assert.ok(html.includes(RAW_NAME_COPY[required] || RAW_STATUS_COPY[required] || required), 'missing Must-have-4 string: ' + required);
   }
   const savedHtml = P.render(state, live({ memorySaved: { kibitzer: true } }));
-  assert.ok(savedHtml.includes('저장됨 · 다음 대화부터 반영'), 'missing saved state string');
+  assert.ok(savedHtml.includes('saved · 다음 대화부터 반영'), 'missing saved state string');
   assert.doesNotMatch(
     /<p[^>]*data-pf-memory-pending="reflection"[^>]*>([\s\S]*?)<\/p>/.exec(savedHtml)[1],
-    /저장됨 · 다음 대화부터 반영/,
+    /saved · 다음 대화부터 반영/,
     'reflection pending state stays independent of kibitzer saved state'
   );
 
   const errHtml = P.render(state, live({ memoryErrors: { reflection: '외부 카테고리 충돌' } }));
-  assert.ok(errHtml.includes('실패 · 보류 유지: 외부 카테고리 충돌'), 'missing failure state string');
+  assert.ok(errHtml.includes('failure · pending retained: 외부 카테고리 충돌'), 'missing failure state string');
   assert.doesNotMatch(
     /<p[^>]*data-pf-memory-pending="kibitzer"[^>]*>([\s\S]*?)<\/p>/.exec(errHtml)[1],
-    /실패 · 보류 유지:/,
+    /failure · pending retained:/,
     'kibitzer pending state stays independent of reflection error'
   );
 });
@@ -1405,13 +1980,13 @@ test('support: an unserved model stays listed in role, main, summarizer, Kibitze
     const off = options.find((o) => o.value === argon);
     assert.ok(off, name + ': the unserved model is filtered out of the list');
     assert.equal(off.disabled, true, name + ': the unserved model is selectable');
-    assert.equal(off.title, '설치 엔진 미지원 · stable 홈 · UNSUPPORTED_MODEL', name);
-    assert.match(off.text, /gemini-4-argon · 설치 엔진 미지원$/, name);
+    assert.equal(off.title, 'UNSUPPORTED_MODEL · stable', name);
+    assert.match(off.text, /gemini-4-argon · UNSUPPORTED_MODEL$/, name);
     const served = options.find((o) => o.value.endsWith('served-pro'));
     assert.equal(served.disabled, false, name + ': a served model stays selectable');
     assert.equal(served.selected, true, name);
   }
-  assert.doesNotMatch(html, /pf-c-amber" title="UNSUPPORTED_MODEL"/, 'a served saved value carries no flag');
+  assert.doesNotMatch(html, /pf-c-amber" title="UNSUPPORTED_MODEL(?: · [^"]*)?"/, 'a served saved value carries no flag');
 });
 
 test('support: a saved unsupported value stays selected and flagged with its reason and home in every editor', () => {
@@ -1422,7 +1997,7 @@ test('support: a saved unsupported value stays selected and flagged with its rea
   state.summarizer.model = 'gemini-4-argon';
   for (const key of ['kibitzer', 'reflection']) state.memory[key].model = 'opencode/gemini-4-argon';
   const html = load().render(state, live());
-  const flag = '<span class="pf-chip pf-c-amber" title="UNSUPPORTED_MODEL">설치 엔진 미지원 · stable 홈</span>';
+  const flag = '<span class="pf-chip pf-c-amber" title="UNSUPPORTED_MODEL · stable" aria-label="UNSUPPORTED_MODEL · stable">UNSUPPORTED_MODEL · stable</span>';
   const regions = {
     role: sliceFrom(html, 'data-pf-route="agents/explore"', 'data-pf-route="'),
     main: sliceFrom(html, 'id="pf-sec-main"', 'id="pf-sec-summarizer"'),
@@ -1435,7 +2010,7 @@ test('support: a saved unsupported value stays selected and flagged with its rea
     assert.equal(shown.length, 1, name);
     assert.equal(shown[0].value, argon, name + ': the saved value is replaced');
     assert.equal(shown[0].disabled, true, name);
-    assert.match(shown[0].text, /gemini-4-argon · 설치 엔진 미지원$/, name);
+    assert.match(shown[0].text, /gemini-4-argon · UNSUPPORTED_MODEL$/, name);
     assert.ok(regions[name].includes(flag), name + ': no flag with reason and home');
   }
   // The role row shows the saved tuple itself: its service and the alias's effort, not the first served choice.
@@ -1443,7 +2018,7 @@ test('support: a saved unsupported value stays selected and flagged with its rea
   assert.equal(optionsOf(html, 'data-flow="role:agents/explore:effort"').find((o) => o.selected)?.value, 'high');
 });
 
-test('support: an unread registry keeps every model listed but disabled as 설치 엔진 미확인 (REGISTRY_UNKNOWN)', () => {
+test('support: an unread registry keeps every model listed but disabled as REGISTRY_UNKNOWN', () => {
   const state = supportState();
   state.registry = { unknownHomes: ['stable'] };
   // What the store sends then (registry.mjs supportStatusFor): every model refused as REGISTRY_UNKNOWN in that home.
@@ -1456,7 +2031,7 @@ test('support: an unread registry keeps every model listed but disabled as 설�
     assert.equal(options.length, 2, name);
     for (const o of options) {
       assert.equal(o.disabled, true, name + ' ' + o.value);
-      assert.equal(o.title, '설치 엔진 미확인 · stable 홈 · REGISTRY_UNKNOWN', name + ' ' + o.value);
+      assert.equal(o.title, 'REGISTRY_UNKNOWN · stable', name + ' ' + o.value);
     }
   }
 });
@@ -1480,7 +2055,7 @@ test('memory rows: a served model without a catalog alias is offered from the st
   const opencode = optionsOf(html, 'data-flow="memory:reflection:model"').filter((o) => o.value);
   assert.deepEqual(opencode.map((o) => [o.value, o.text, o.disabled]), [
     ['opencode/served-pro', 'oc-pro · opencode/served-pro', false],
-    ['opencode/gemini-4-argon', 'oc-argon · opencode/gemini-4-argon · 설치 엔진 미지원', true]
+    ['opencode/gemini-4-argon', 'oc-argon · opencode/gemini-4-argon · UNSUPPORTED_MODEL', true]
   ]);
 });
 
@@ -1561,12 +2136,12 @@ test("per-profile: the detail shows only the shown profile's pending role and ma
   let html = P.render(STATE, live({ pending, shown: 'experimental-custom' }));
   assert.deepEqual(detail(html).role, saved.role, 'another profile\'s role edit leaves the shown detail alone');
   assert.deepEqual(detail(html).main, saved.main, 'another profile\'s main edit leaves the shown detail alone');
-  assert.equal(detail(html).heading, '프로필·에이전트 · 변경 보류 2건', 'the heading still counts the edits of every profile');
+  assert.equal(detail(html).heading, '프로필·에이전트 · pending 2', 'the heading still counts the edits of every profile');
 
   html = P.render(STATE, live({ pending, shown: 'kimi-deepseek' }));
   assert.deepEqual(detail(html).role, ['chatgpt-subscription', 'chatgpt-subscription/gpt-6.1-sol', 'high'], 'its own role edit, named by the omo layer');
   assert.deepEqual(detail(html).main, ['kimi-coding', 'k3-turbo', 'high'], 'its own main edit, named by the card key');
-  assert.equal(detail(html).heading, '프로필·에이전트 · 변경 보류 2건');
+  assert.equal(detail(html).heading, '프로필·에이전트 · pending 2');
   assert.match(textOf(/<button[^>]*data-flow="card:kimi-deepseek"[^>]*>([\s\S]*?)<\/button>/.exec(html)[1]), /메인: k3-turbo \/ high/,
     'the card line agrees with its detail');
 });
@@ -1584,7 +2159,7 @@ test("per-profile: switching the shown card keeps each profile's role and main e
   const pick = (sel, value) => { const el = q(sel); el.value = value; e.fire(el, 'change'); };
   const counts = () => {
     const n = e.page.state.ui.profilesState.pending.length;
-    assert.equal(q('.pf-title').textContent, '프로필·에이전트 · 변경 보류 ' + n + '건', 'the heading counts every profile');
+    assert.equal(q('.pf-title').textContent, '프로필·에이전트 · pending ' + n, 'the heading counts every profile');
     assert.equal(q('#pf-sec-tray .pf-count').textContent, String(n), 'the tray lists every profile');
     return n;
   };
@@ -1638,7 +2213,7 @@ test("per-profile: the lane row shows only the shown profile's pending lane edit
 
   const html = P.render(STATE, live({ pending, shown: 'gpt-deepseek' }));
   assert.deepEqual(lane(html), saved, 'another profile\'s lane edit leaves the shown lane row alone');
-  assert.equal(heading(html), '프로필·에이전트 · 변경 보류 2건', 'the heading still counts the lane edits of every profile');
+  assert.equal(heading(html), '프로필·에이전트 · pending 2', 'the heading still counts the lane edits of every profile');
   assert.deepEqual(lane(P.render(STATE, live({ pending, shown: 'experimental-custom' }))), { select: 'geeky-heavy', literal: '' },
     'its own lane edit, named by the card key');
   assert.deepEqual(lane(P.render(STATE, live({ pending, shown: 'kimi-deepseek' }))), { select: 'custom-literal', literal: 'openai/gpt-x' },
@@ -1670,7 +2245,7 @@ test("per-profile: switching the shown card keeps each profile's lane edit and l
   const lanes = () => plain(e.page.state.ui.profilesState.pending.filter((c) => c.kind === 'setModelProfile').map((c) => [c.profileKey, c.selection, c.literal]));
   const counts = () => {
     const n = e.page.state.ui.profilesState.pending.length;
-    assert.equal(q('.pf-title').textContent, '프로필·에이전트 · 변경 보류 ' + n + '건', 'the heading counts every profile');
+    assert.equal(q('.pf-title').textContent, '프로필·에이전트 · pending ' + n, 'the heading counts every profile');
     assert.equal(q('#pf-sec-tray .pf-count').textContent, String(n), 'the tray lists every profile');
     return n;
   };
@@ -1731,7 +2306,7 @@ test("per-profile: applying a profile sends only its own lane edit; another prof
   assert.deepEqual(plain(e.page.state.ui.profilesState.pending), [
     { kind: 'setModelProfile', profileKey: 'experimental-custom', selection: 'geeky-heavy', literal: '' },
   ], 'experimental-custom\'s lane edit stays pending for its own apply');
-  assert.equal(q('.pf-title').textContent, '프로필·에이전트 · 변경 보류 1건');
+  assert.equal(q('.pf-title').textContent, '프로필·에이전트 · pending 1');
   assert.deepEqual(e.errors, []);
 });
 
@@ -1886,6 +2461,7 @@ test('cascade role: service change clears model and effort; model change picks t
   e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => state });
   await tick();
 
+  e.fire(e.byId.main.querySelector('[data-pf-route="agents/explore"] .pf-row-sum'), 'click');
   const row = e.byId.main.querySelector('[data-pf-route="agents/explore"]');
   assert.ok(row, 'agents/explore row exists');
   const provSel = row.querySelector('[data-pf="route-provider"]');
@@ -1902,8 +2478,10 @@ test('cascade role: service change clears model and effort; model change picks t
   const thinkSelAfter = rowAfterSvc.querySelector('[data-pf="route-thinking"]');
 
   // Cascade: service change clears model and effort
+  assert.equal(rowAfterSvc.querySelector('.pf-row-sum').getAttribute('aria-expanded'), 'true');
   assert.equal(selectedValueOf(mdlSelAfter), '');
   assert.equal(selectedValueOf(thinkSelAfter), '');
+  assert.doesNotMatch(rowAfterSvc.querySelector('.pf-row-sum-m').textContent, /muse-spark|gpt-5\.6/);
   // Row does not stage when incomplete
   assert.ok(!e.page.state.ui.profilesState.pending.some((c) => c.kind === 'setRoute' && c.role === 'explore'));
 
@@ -2191,7 +2769,7 @@ test('support: an unserved saved main model keeps the seven-level list, disabled
   assert.equal(effort.hasAttribute('disabled'), true, 'the effort select can stage the unserved model');
   assert.deepEqual(mainEffortValues(e), ['', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
   assert.equal(selectedValueOf(effort), 'max');
-  assert.match(e.byId['pf-sec-main'].querySelector('.pf-blk-h').textContent, /설치 엔진 미지원 · stable 홈/);
+  assert.match(e.byId['pf-sec-main'].querySelector('.pf-blk-h').textContent, /UNSUPPORTED_MODEL · stable/);
   assert.equal(stagedMain(e), null);
 
   // the way out stays open: a served model enables the effort select on its own levels and stages the clamped effort
@@ -2215,14 +2793,15 @@ test('support: a saved main model outside the catalog keeps the store\'s flag, d
   assert.equal(effort.hasAttribute('disabled'), true, 'the effort select can stage the model outside the catalog');
   assert.deepEqual(mainEffortValues(e), ['', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
   assert.equal(selectedValueOf(effort), 'max');
-  assert.match(heading().textContent, /설치 엔진 미지원 · stable 홈/, 'the model outside the catalog has no flag');
-  assert.equal(heading().querySelector('.pf-c-amber').getAttribute('title'), 'UNSUPPORTED_MODEL');
+  assert.match(heading().textContent, /UNSUPPORTED_MODEL · stable/, 'the model outside the catalog has no flag');
+  assert.equal(heading().querySelector('.pf-c-amber').getAttribute('title'), 'UNSUPPORTED_MODEL · stable');
+  assert.equal(heading().querySelector('.pf-c-amber').getAttribute('aria-label'), 'UNSUPPORTED_MODEL · stable');
   assert.equal(stagedMain(e), null);
 
   // the way out stays open: a served model clears the flag, enables the effort select on its levels and stages it
   assert.equal(mainControl(e, 'main-model').hasAttribute('disabled'), false);
   await changeMain(e, 'main-model', 'k3-turbo');
-  assert.doesNotMatch(heading().textContent, /설치 엔진 미지원/);
+  assert.doesNotMatch(heading().textContent, /UNSUPPORTED_MODEL/);
   assert.equal(mainControl(e, 'main-thinking').hasAttribute('disabled'), false);
   assert.deepEqual(mainEffortValues(e), ['low', 'high']);
   assert.deepEqual(stagedMain(e), ['kimi-coding', 'k3-turbo', 'high']);
@@ -2237,7 +2816,7 @@ test('support: no model selected keeps the main effort select enabled and stages
   await changeMain(e, 'main-provider', 'ollama');
   assert.equal(selectedValueOf(mainControl(e, 'main-model')), '');
   assert.equal(mainControl(e, 'main-thinking').hasAttribute('disabled'), false, 'no model selected disables the effort select');
-  assert.doesNotMatch(e.byId['pf-sec-main'].querySelector('.pf-blk-h').textContent, /설치 엔진 미지원/);
+  assert.doesNotMatch(e.byId['pf-sec-main'].querySelector('.pf-blk-h').textContent, /UNSUPPORTED_MODEL/);
   assert.deepEqual(stagedMain(e), ['', '', '']);
   await changeMain(e, 'main-thinking', 'high');
   assert.equal(mainControl(e, 'main-thinking').hasAttribute('disabled'), false);
@@ -2282,7 +2861,7 @@ test('reapply: re-applying the active profile with nothing pending equals golden
 });
 
 // ---- todo 8: the WinForms layout in the board look ---------------------------------------------------------------------
-const FLOW_SECTIONS = ['kibitzer', 'reflection', 'agents:explore-research', 'agents:plan-advice', 'agents:review-qa',
+const FLOW_SECTIONS = ['primary', 'kibitzer', 'reflection', 'agents:explore-research', 'agents:plan-advice', 'agents:review-qa',
   'categories:quick-general', 'categories:deep', 'categories:specialist', 'lane', 'main', 'summarizer', 'apply'];
 const extraRow = (section, role) => ({ section, role, group: 'extras', groupLabel: '추가 역할 · Extras', labelKo: role, labelEn: role, model: 'fable', reasoning: 'medium' });
 async function openProfilesPage(state = STATE) {
@@ -2298,14 +2877,17 @@ test('layout: sections keep the WinForms order whatever order the rows arrive in
   const P = load();
   const html = P.render(STATE, live());
   // The fixture lists review before planning; the board still draws plan-advice first, as PS RoutingGroups does.
-  assert.deepEqual(all(html, /data-flow-sec="([^"]+)"/g), FLOW_SECTIONS);
+  const sections = all(html, /data-flow-sec="([^"]+)"/g);
+  assert.equal(sections[0], 'primary');
+  assert.deepEqual(['primary', ...comparisonSections(sections)], FLOW_SECTIONS);
+  assert.deepEqual(all(html, /data-pf-panel="([^"]+)"/g), ['primary', 'agents', 'categories', 'memory']);
   assert.deepEqual(all(html, /data-flow="([a-z]+)"/g), ['status', 'guide', 'cards', 'detail', 'roles', 'lane', 'main', 'summarizer', 'apply', 'message']);
   const state = clone(STATE);
   state.routing.rows.push(extraRow('agents', 'qa-extra'));
   const extra = P.render(state, live());
-  assert.deepEqual(all(extra, /data-flow-sec="([^"]+)"/g).slice(2, 7),
+  assert.deepEqual(['primary', ...comparisonSections(all(extra, /data-flow-sec="([^"]+)"/g))].slice(3, 8),
     ['agents:explore-research', 'agents:plan-advice', 'agents:review-qa', 'agents:extras', 'categories:quick-general']);
-  assert.ok(textOf(extra).includes('추가 설정'));
+  assert.match(extra, /class="pf-group-h">extras <span class="pf-count">1<\/span>/);
   assert.doesNotMatch(extra, /추가 역할 · Extras/);
   for (const part of ['service', 'model', 'effort']) assert.match(html, new RegExp('data-flow="role:agents/explore:' + part + '"'));
   for (const part of ['mode', 'service', 'model', 'effort']) assert.match(html, new RegExp('data-flow="memory:kibitzer:' + part + '"'));
@@ -2324,10 +2906,10 @@ test('layout: every Must have 4 string is on the board word for word', () => {
   for (const copy of ['현재 전역 적용', '전역 적용 중', '권장 배치 가이드', '적용 중', '적용', '메인: ', '서비스: ',
     '모델 라우팅 · 전담 에이전트 / 작업 카테고리', '공통 설정 · Kibitzer 회상', '공통 설정 · Reflection 성찰', '전담 에이전트 · Agents',
     '탐색 · 자료 조사', '계획 · 조언', '검토 · QA', '작업 카테고리 · Categories', '빠른 작업 · 일반 작업', '심층 추론', '전문 작업',
-    '추가 설정', '메인 모델 설정', '요약 담당 모델', '이 프로필 적용하기', '1. 구독 서비스', '2. AI 모델', '3. 추론 강도',
+    'extras', '메인 모델 설정', '요약 담당 모델', '이 프로필 적용하기', '1. 구독 서비스', '2. AI 모델', '3. 추론 강도',
     '공통 / 전체 · Kibitzer 회상', '공통 / 전체 · Reflection 성찰', 'quick 공유 (기본)', '직접 선택', '현재: ', '보류: ',
     '저장됨 · 다음 대화부터 반영', '실패 · 보류 유지: ', '1. 제공사', '원본 기본 컴팩션', ' · 변경 보류 1건']) {
-    assert.ok(text.includes(copy), 'missing Must have 4 copy: ' + JSON.stringify(copy));
+    assert.ok(text.includes(RAW_NAME_COPY[copy] || RAW_CONDITIONAL_NAME_COPY[copy] || RAW_STATUS_COPY[copy] || copy), 'missing Must have 4 copy: ' + JSON.stringify(copy));
   }
 });
 
@@ -2389,8 +2971,11 @@ test('pending: the heading suffix counts pending edits over every profile and le
   ];
   const heading = (html) => textOf(/<h1 class="pf-title">([\s\S]*?)<\/h1>/.exec(html)[1]).replace(/\s+/g, ' ').trim();
   const html = P.render(STATE, live({ pending, shown: 'experimental-custom' }));
-  assert.equal(heading(html), '프로필·에이전트 · 변경 보류 3건');
-  assert.match(textOf(/<div class="pf-apply"[\s\S]*?<\/div>/.exec(html)[0]), /변경 보류 3건/);
+  assert.equal(heading(html), '프로필·에이전트 · pending 3');
+  let applyMarkup = /<div class="pf-apply"[\s\S]*?<\/div>/.exec(html)[0];
+  if (process.env.OMO_PROFILE_ASSERTION_MUTATION === 'pending-30') applyMarkup = applyMarkup.replace('pending 3', 'pending 30');
+  const pendingBadge = /<span class="pf-chip [^"]*"[^>]*>([^<]*)<\/span>/.exec(applyMarkup);
+  assert.equal(pendingBadge?.[1].trim(), 'pending 3', 'the apply badge has the exact pending count');
   assert.equal(heading(P.render(STATE, live())), '프로필·에이전트', 'no suffix without pending');
 
   const e = await openProfilesPage();
@@ -2404,7 +2989,7 @@ test('pending: the heading suffix counts pending edits over every profile and le
   const staged = e.page.state.ui.profilesState.pending;
   // A role edit names the omo layer the store writes (store.mjs routeChange); the card key would be refused.
   assert.deepEqual(plain(staged.map((c) => c.kind + ':' + (c.profileKey || ''))), ['setRoute:native-gpt-kimi-deepseek', 'setAgentLane:']);
-  assert.equal(e.byId.main.querySelector('.pf-title').textContent, '프로필·에이전트 · 변경 보류 2건', 'the hidden profile still counts');
+  assert.equal(e.byId.main.querySelector('.pf-title').textContent, '프로필·에이전트 · pending 2', 'the hidden profile still counts');
   assert.equal(e.document.title, 'board');
   e.fire(e.byId.main.querySelector('[data-flow="apply:detail"]'), 'click');
   const body = JSON.parse(e.fetches[e.fetches.length - 1].opts.body);
@@ -2419,7 +3004,7 @@ test('page wiring: 권장 배치 가이드 opens the in-page dialog over the gui
   const dlg = e.byId.main.querySelector('#pf-guide-dlg');
   assert.equal(dlg.tagName, 'DIALOG');
   assert.ok(dlg.querySelector('#pf-sec-guide'), 'the existing guide section lives in the dialog');
-  assert.equal(dlg.querySelectorAll('.pf-rec tbody tr').length, STATE.routing.rows.length, 'one recommendation row per role');
+  assert.equal(dlg.querySelectorAll('.pf-rec tbody tr').length, (STATE.guide.rows || []).length, 'guide follows the supplied source rows');
   let opened = 0;
   dlg.showModal = () => { opened += 1; dlg.open = true; };
   dlg.close = () => { dlg.open = false; };
@@ -2469,6 +3054,169 @@ test('page wiring: the cards panel keeps its scroll when a card is shown by clic
 // Review A round 2, D3: a staged change grows the message strip. The strip is a bottom row under both panes, so after
 // the owner's scroll the detail's 이 프로필 적용하기, the role effort select and the row's drop are each the topmost
 // element where they are clicked. Real Chrome over the fixture state; the board has no profiles write route.
+test('compact rows: desktop geometry, mobile visibility and native Enter/Space disclosure (Chrome)', { timeout: 90000 }, async () => {
+  const model = JSON.parse(read('test/fixtures/view-model-board.json'));
+  const token = 'profiles-compact-geometry';
+  const server = createBoardServer({ portBase: 50100 + (process.pid % 25) * 8, portCount: 8, generation: 7, token,
+    getPage: ({ nonce } = {}) => pageHtml(model, 7, { mode: 'server', token, nonce }), getViewModel: () => model, profilesState: purposeState });
+  const { port } = await server.start();
+  let page, profileDir;
+  const measurements = [];
+  const evidence = process.env.OMO_PROFILE_ROW_EVIDENCE;
+  try {
+    page = await launch({ width: 1440, height: 900 });
+    profileDir = page.profileDir;
+    await page.goto(`http://127.0.0.1:${port}/`);
+    await page.eval(`new Promise((resolve, reject) => {
+      const check = () => {
+        const tab = document.querySelector('[data-sh="view"][data-key="profiles"]');
+        if (!tab) return false;
+        tab.click(); return true;
+      };
+      if (check()) return resolve(true);
+      const observer = new MutationObserver(() => { if (check()) { observer.disconnect(); clearTimeout(timer); resolve(true); } });
+      const timer = setTimeout(() => { observer.disconnect(); reject(new Error('profiles tab deadline')); }, 10000);
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    })`);
+    await page.eval(`new Promise((resolve, reject) => {
+      const check = () => !!document.querySelector('.pf-row-sum');
+      if (check()) return resolve(true);
+      const observer = new MutationObserver(() => { if (check()) { observer.disconnect(); clearTimeout(timer); resolve(true); } });
+      const timer = setTimeout(() => { observer.disconnect(); reject(new Error('profiles state deadline')); }, 10000);
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    })`);
+    for (const width of [1440, 1600, 1000, 900]) {
+      await page.client.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false });
+      const grid = await measurePurposeGrid(page, { boundary: width === 1440 });
+      assertPurposeGrid(grid, `${width}x900`, width >= 1440 ? 2 : 1);
+      if (evidence) {
+        fs.mkdirSync(evidence, { recursive: true });
+        fs.writeFileSync(path.join(evidence, `grid-${width}.json`), JSON.stringify(grid, null, 2) + '\n');
+      }
+    }
+    for (const [width, height] of [[1440, 900], [390, 844]]) {
+      await page.client.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 600 });
+      for (const tab of ['primary', 'agents', 'categories', 'memory']) {
+      await page.eval(`document.querySelector('[role="tab"][data-tab="${tab}"]').click()`);
+      if (width < 600) await page.eval(`document.querySelector('#pf-sec-routing').scrollIntoView({ block: 'start' })`);
+      await page.eval('document.fonts.ready.then(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))');
+      const metrics = await page.eval(`(() => {
+        const sums = [...document.querySelectorAll('.pf-tab-panel:not([hidden]) .pf-row-sum')];
+        return {
+          width: innerWidth,
+          rowHeights: sums.map((s) => s.parentElement.getBoundingClientRect().height),
+          panesTop: document.querySelector('.pf-panes').getBoundingClientRect().top,
+          hiddenEditors: sums.every((s) => s.getAttribute('aria-expanded') === 'false' &&
+            getComputedStyle(document.getElementById(s.getAttribute('aria-controls'))).display === 'none'),
+          visibleSummaries: sums.every((s) => getComputedStyle(s).display !== 'none' && s.getBoundingClientRect().height > 0),
+          badges: sums.flatMap(s => [...s.querySelectorAll('.pf-row-sum-o > .pf-chip')].map(e => ({
+            text: e.textContent, title: e.title, ariaLabel: e.getAttribute('aria-label'), width: e.getBoundingClientRect().width,
+            right: e.getBoundingClientRect().right, parentRight: e.parentElement.getBoundingClientRect().right,
+            clipped: e.scrollWidth > e.clientWidth, ellipsis: getComputedStyle(e).textOverflow,
+            overflow: getComputedStyle(e).overflow,
+          }))),
+          descriptions: [...document.querySelectorAll('.pf-card-sum')].map(e => ({
+            text: e.textContent, height: e.clientHeight, fullHeight: e.scrollHeight, clamp: getComputedStyle(e).webkitLineClamp,
+          })),
+          overflow: document.documentElement.scrollWidth > innerWidth,
+        };
+      })()`);
+      assert.equal(metrics.hiddenEditors, true);
+      assert.equal(metrics.visibleSummaries, true);
+      assert.equal(metrics.overflow, false);
+      for (const badge of metrics.badges) {
+        assert.ok(badge.width > 0 && badge.right <= badge.parentRight + 1, JSON.stringify(badge));
+        if (badge.clipped) {
+          assert.equal(badge.ellipsis, 'ellipsis', JSON.stringify(badge));
+          assert.equal(badge.overflow, 'hidden', JSON.stringify(badge));
+          assert.equal(badge.title, badge.text, JSON.stringify(badge));
+          assert.equal(badge.ariaLabel, badge.text, JSON.stringify(badge));
+        }
+        if (width === 390) assert.equal(badge.clipped, false, JSON.stringify(badge));
+      }
+      assert.ok(metrics.descriptions.every(d => d.clamp === 'none' && d.height >= d.fullHeight), JSON.stringify(metrics.descriptions));
+      if (width === 1440) {
+        assert.ok(Math.max(...metrics.rowHeights) <= 32, JSON.stringify(metrics));
+        assert.ok(metrics.panesTop <= 190, JSON.stringify(metrics));
+      } else {
+        assert.ok(Math.min(...metrics.rowHeights) >= 44, JSON.stringify(metrics));
+      }
+      measurements.push(metrics);
+      if (evidence) await page.screenshot(path.join(evidence, `compact-${tab}-${width}x${height}.png`));
+      }
+    }
+    for (const width of [1440, 390]) {
+      await page.client.send('Emulation.setDeviceMetricsOverride', {
+        width, height: 900, deviceScaleFactor: 1, mobile: width < 600,
+      });
+      await page.eval(`(() => {
+        document.querySelector('[data-tab="primary"]').click();
+        const set = (id, value) => {
+          const control = document.getElementById(id);
+          control.value = value; control.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        set('pf-sisyphus-provider', 'anthropic');
+        set('pf-sisyphus-model', 'claude-opus-5-5');
+        set('pf-sisyphus-thinking', 'medium');
+        set('pf-agent-provider-atlas', 'anthropic');
+        set('pf-agent-pin-atlas', 'anthropic|claude-opus-5-5');
+        document.querySelector('#pf-sec-routing').scrollIntoView({ block: 'start' });
+      })()`);
+      await page.eval('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+      const staged = await page.eval(`['sisyphus', 'atlas'].map(id => {
+        const summary = document.querySelector('[data-row="agent:' + id + '"]');
+        const saved = summary.querySelector('[data-pf-saved]');
+        const model = summary.querySelector('.pf-row-sum-m');
+        const box = saved.getBoundingClientRect(), container = model.getBoundingClientRect();
+        return { id, text: model.textContent, pending: summary.querySelector('.pf-row-sum-o').textContent.includes('pending'),
+          separateSavedLine: box.top > container.top, savedFits: box.right <= container.right + 1,
+          height: summary.getBoundingClientRect().height,
+          overflow: document.documentElement.scrollWidth > innerWidth };
+      })`);
+      for (const row of staged) {
+        assert.match(row.text, /anthropic · claude-opus-5-5/);
+        assert.equal(row.pending, true);
+        assert.equal(row.separateSavedLine, true, JSON.stringify(row));
+        assert.equal(row.savedFits, true, JSON.stringify(row));
+        assert.equal(row.overflow, false);
+        if (width === 1440) assert.ok(row.height <= 32, JSON.stringify(row));
+      }
+      if (evidence) await page.screenshot(path.join(evidence, `staged-primary-${width}.png`));
+    }
+    assert.equal(await page.eval(`(() => {
+      document.querySelector('[role="tab"][data-tab="agents"]').click();
+      const sum = document.querySelector('.pf-row-sum[data-row="route:agents/explore"]');
+      sum.focus();
+      return document.activeElement === sum;
+    })()`), true, 'the route summary receives native keyboard focus');
+    await page.client.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 });
+    await page.client.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    assert.equal(await page.eval(`document.querySelector('.pf-row-sum[data-row="route:agents/explore"]').getAttribute('aria-expanded')`), 'true');
+    await page.eval(`(() => {
+      document.querySelector('[role="tab"][data-tab="memory"]').click();
+      document.querySelector('.pf-row-sum[data-row="memory:kibitzer"]').focus();
+    })()`);
+    await page.client.send('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', text: ' ', windowsVirtualKeyCode: 32 });
+    await page.client.send('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 });
+    assert.equal(await page.eval(`document.querySelectorAll('.pf-row-sum[aria-expanded="true"]').length`), 1);
+    assert.equal(await page.eval(`document.querySelector('.pf-row-sum[data-row="memory:kibitzer"]').getAttribute('aria-expanded')`), 'true');
+    await page.eval(`document.querySelector('.pf-row-sum[data-row="memory:kibitzer"]').focus()`);
+    await page.client.send('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', text: ' ', windowsVirtualKeyCode: 32 });
+    await page.client.send('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 });
+    assert.equal(await page.eval(`document.activeElement?.getAttribute('data-row')`), 'memory:kibitzer');
+    assert.equal(await page.eval(`document.querySelectorAll('.pf-row-sum[aria-expanded="true"]').length`), 0);
+    if (evidence) {
+      await page.screenshot(path.join(evidence, 'compact-mobile-rows.png'));
+      fs.mkdirSync(evidence, { recursive: true });
+      fs.writeFileSync(path.join(evidence, 'compact-metrics.json'), JSON.stringify(measurements, null, 2) + '\n');
+    }
+  } finally {
+    try { if (page) await page.close(); } finally { await server.close(); }
+  }
+  assert.deepEqual(listProfilePids(profileDir), []);
+  await assert.rejects(fetch(`http://127.0.0.1:${port}/`));
+});
+
 test('layout: with one pending change the message strip covers neither 이 프로필 적용하기, the effort select nor the drop (Chrome, 1180x700 and 1600x900)', { timeout: 90000 }, async () => {
   const vm = JSON.parse(read('test/fixtures/view-model-board.json'));
   const token = 'profiles-view-geometry';
@@ -2501,6 +3249,9 @@ test('layout: with one pending change the message strip covers neither 이 프�
       await page.eval(`(document.querySelector('[data-sh="view"][data-key="profiles"]').click(), true)`);
       await until(`document.querySelector('[data-pf-root][data-pf-state="view"] [data-flow="apply:detail"]')`, 'profiles view');
       await page.eval(`(() => {
+        document.querySelector('[role="tab"][data-tab="agents"]').click();
+        const sum = document.querySelector('[data-pf-route="agents/explore"] .pf-row-sum[aria-expanded="false"]');
+        if (sum) sum.click();
         const s = document.querySelector('[data-flow="role:agents/explore:effort"]');
         s.value = [...s.options].map((o) => o.value).filter((v) => v && v !== s.value).pop();
         s.dispatchEvent(new Event('change', { bubbles: true }));
@@ -2519,8 +3270,7 @@ test('layout: with one pending change the message strip covers neither 이 프�
       }
     }
   } finally {
-    if (page) await page.close();
-    await server.close();
+    try { if (page) await page.close(); } finally { await server.close(); }
   }
   assert.equal(seen.length, 6);
   assert.deepEqual(seen.filter((s) => !s.onTop), [], 'each control is the topmost element at its centre');

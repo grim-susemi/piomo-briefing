@@ -7,11 +7,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 import {
   atomicWriteText, detectStyle, formatJsonText, hasComments, openProfilesStore, redact,
 } from '../src/profiles/store.mjs';
 import { pinnedOmoPath } from './helpers/pinned-plugin.mjs';
+import { defaultRoster } from '../src/profiles/contract/schema.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const GOLDEN = path.join(here, 'fixtures', 'profiles', 'goldens', 'apply-gpt-kimi-deepseek', 'files');
@@ -86,10 +88,130 @@ function makeFixture(t, options = {}) {
     pluginPath: plugin,
     inventory,
     hooks: options.hooks,
+    fs: options.fs,
+    registry: options.registry,
+    recommendationManifest: options.recommendationManifest ?? null,
+    ...(options.recommendationManifestPath ? { recommendationManifestPath: options.recommendationManifestPath } : {}),
     now: options.now ?? (() => Date.parse('2026-10-20T12:00:00Z')),
   });
-  return { root, primary, stable, store, settings, style, plugin, mirrors, mirrorHomes };
+  return { root, primary, stable, store, settings, style, plugin, mirrors, mirrorHomes, inventory };
 }
+
+test('selected gate current, untracked recommendation and inactive link coexist without inventing a description', (t) => {
+  const omo = readGolden('primary/omo.jsonc.json');
+  const profileKey = 'native-gpt-kimi-deepseek';
+  omo.profiles[profileKey]['[native]'].agents['omo-native-gate-reviewer'] = { model: 'sol-61-high' };
+  const fx = makeFixture(t, { omo });
+  const state = fx.store.state();
+  const row = state.routing.rows.find((row) => row.role === 'omo-native-gate-reviewer');
+  assert.deepEqual(row.current, {
+    sourceFile: path.join(fx.primary, 'omo.jsonc'),
+    sourcePath: '$.profiles["native-gpt-kimi-deepseek"]["[native]"].agents["omo-native-gate-reviewer"].model',
+    alias: 'sol-61-high', modelId: 'chatgpt-subscription/gpt-6.1-sol', thinking: 'high',
+    effective: true, unresolved: false, reason: null,
+  });
+  assert.equal(row.recommended.status, 'untracked');
+  assert.equal(row.recommended.HasRecommendation, false);
+  assert.equal(row.recommended.provenance.available, false);
+  assert.equal(row.linked.active, false);
+  assert.equal(row.linked.reason, 'explicit-alias');
+  assert.deepEqual(row.linked.candidates, ['deep-high', 'unspecified-high']);
+  assert.equal(row.linked.EffectiveCategory, '');
+  assert.equal(Object.hasOwn(row.current, 'description'), false);
+  const detail = state.details['gpt-kimi-deepseek'].routing.rows.find((row) => row.role === 'omo-native-gate-reviewer');
+  assert.deepEqual(detail.current, row.current);
+  assert.deepEqual(detail.recommended, row.recommended);
+  assert.deepEqual(detail.linked, row.linked);
+});
+
+test('alias-less gate uses registered deep-high but never treats an unregistered category as effective', (t) => {
+  for (const category of [undefined, { model: 'not-registered' }, { model: 'empty' }, { model: 'numeric' }, { model: 'sol-61-high' }]) {
+    const omo = readGolden('primary/omo.jsonc.json');
+    const layer = omo.profiles['native-gpt-kimi-deepseek']['[native]'];
+    delete layer.agents['omo-native-gate-reviewer'];
+    delete layer.categories['unspecified-high'];
+    if (category) layer.categories['deep-high'] = category;
+    else delete layer.categories['deep-high'];
+    omo['[native]'].models.empty = { model: '   ' };
+    omo['[native]'].models.numeric = { model: 7 };
+    const fx = makeFixture(t, { omo });
+    const row = fx.store.state().routing.rows.find((row) => row.role === 'omo-native-gate-reviewer');
+    const registered = category?.model === 'sol-61-high';
+    assert.equal(row.current.alias, '');
+    assert.equal(row.current.effective, false);
+    assert.equal(row.linked.active, true);
+    assert.equal(row.linked.effective, registered);
+    assert.equal(row.linked.EffectiveCategory, registered ? 'deep-high' : '');
+    assert.equal(row.linked.EffectiveAlias, registered ? 'sol-61-high' : '');
+    assert.equal(row.linked.reason, registered ? null : 'no-registered-category-model');
+  }
+});
+
+test('an unresolved explicit alias stays unresolved even with a registered linked category', (t) => {
+  const omo = readGolden('primary/omo.jsonc.json');
+  const layer = omo.profiles['native-gpt-kimi-deepseek']['[native]'];
+  layer.agents['omo-native-gate-reviewer'] = { model: 'unknown-explicit' };
+  layer.categories['deep-high'] = { model: 'sol-61-high' };
+  const row = makeFixture(t, { omo }).store.state().routing.rows.find((row) => row.role === 'omo-native-gate-reviewer');
+  assert.equal(row.current.alias, 'unknown-explicit');
+  assert.equal(row.current.modelId, '');
+  assert.equal(row.current.effective, false);
+  assert.equal(row.current.unresolved, true);
+  assert.match(row.current.reason, /unresolved-alias: unknown-explicit/);
+  assert.equal(row.recommended.status, 'unresolved');
+  assert.equal(row.linked.active, false);
+  assert.equal(row.linked.effective, false);
+  assert.equal(row.linked.EffectiveCategory, '');
+});
+
+test('guide base set has 27 unique ids and summary; inventory and layer extras append once by id', (t) => {
+  const fx = makeFixture(t);
+  const base = fx.store.state().guide.rows;
+  assert.equal(base.length, 27);
+  assert.equal(new Set(base.map((row) => row.id)).size, base.length);
+  assert.deepEqual(Object.fromEntries(['primary', 'routing', 'memory', 'summary']
+    .map((group) => [group, base.filter((row) => row.group === group).length])),
+  { primary: 4, routing: 20, memory: 2, summary: 1 });
+  assert.equal(base.at(-1).id, 'summary');
+  assert.ok(base.every((row) => row.applyScope && row.current && row.recommended && row.linked));
+  const omo = readGolden('primary/omo.jsonc.json');
+  const layer = omo.profiles['native-gpt-kimi-deepseek']['[native]'];
+  layer.agents.extra = { model: 'sol' };
+  layer.categories.extra = { model: 'flash' };
+  const inventory = { ...REAL_INVENTORY, agents: [...REAL_INVENTORY.agents, 'extra', 'new-agent', 'new-agent'] };
+  const extra = makeFixture(t, { omo, inventory }).store.state().guide.rows;
+  assert.deepEqual(extra.slice(0, base.length).map((row) => row.id), base.map((row) => row.id));
+  assert.deepEqual(extra.slice(base.length).map((row) => row.id), ['agents/extra', 'categories/extra', 'agents/new-agent']);
+  assert.equal(new Set(extra.map((row) => row.id)).size, extra.length);
+});
+
+test('a missing summary keeps an explained guide row and previews preserve current bytes', (t) => {
+  const fx = makeFixture(t, { mutateSettings(settings) {
+    delete settings.compaction;
+    delete settings.compactionSummarizer;
+  } });
+  const before = fx.store.state();
+  const summary = before.guide.rows.find((row) => row.id === 'summary');
+  assert.equal(summary.current.modelId, '');
+  assert.equal(summary.current.reason, 'no-summary-model');
+  assert.equal(summary.current.effective, false);
+  const result = fx.store.preview(body('preview', [{ kind: 'setSummarizer', modelId: 'openai/gpt-6-sol' }], fx.store));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(fx.store.state().targets, before.targets);
+  assert.equal(fx.store.journal(), null);
+});
+
+test('model descriptions pass through only when present in the source catalog', (t) => {
+  const omo = readGolden('primary/omo.jsonc.json');
+  omo['[native]'].models['sol-61-high'].description = 'Source description, unchanged.';
+  const layer = omo.profiles['native-gpt-kimi-deepseek']['[native]'];
+  layer.agents['omo-native-code-reviewer'] = { model: 'sol-61-high' };
+  layer.categories['deep-high'] = { model: 'sol-61-high' };
+  const rows = makeFixture(t, { omo }).store.state().routing.rows;
+  assert.equal(rows.find((row) => row.role === 'omo-native-code-reviewer').current.description, 'Source description, unchanged.');
+  assert.equal(rows.find((row) => row.role === 'omo-native-gate-reviewer').linked.description, 'Source description, unchanged.');
+  assert.equal(Object.hasOwn(rows.find((row) => row.role === 'explore').current, 'description'), false);
+});
 
 function expectedOf(store) {
   return store.state().targets;
@@ -98,6 +220,363 @@ function expectedOf(store) {
 function body(action, changes, store, expected = expectedOf(store), rosterRevision = store.state().roster.revision) {
   return { action, changes, expected, rosterRevision };
 }
+
+function seedLegacyRoster(fx, rev = 0) {
+  const roster = defaultRoster(new Date('2026-10-20T12:00:00Z'));
+  roster.revision = 7;
+  roster.agents.sisyphus = {
+    ...roster.agents.sisyphus, rev,
+    pin: { provider: 'legacy', modelId: 'legacy-model', thinking: 'low' },
+  };
+  roster.agents.atlas.rev = 9;
+  const file = path.join(fx.stable, 'agent', 'primary-agents', 'roster.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(roster));
+  return { file, roster };
+}
+
+test('main apply replaces matching Sisyphus memory with main without changing memory bytes', (t) => {
+  const models = [
+    { provider: 'anthropic', id: 'remembered-model' },
+    { provider: 'openai', id: 'gpt-6-sol' },
+  ];
+  const fx = makeFixture(t, { registry: { getAvailable: () => models } });
+  const { file, roster } = seedLegacyRoster(fx, 4);
+  const memoryFile = path.join(fx.stable, 'agent', 'primary-agents', 'memory', 'sisyphus.json');
+  fs.mkdirSync(path.dirname(memoryFile), { recursive: true });
+  fs.writeFileSync(memoryFile, JSON.stringify({
+    v: 1, agentId: 'sisyphus', model: { provider: 'anthropic', modelId: 'remembered-model' },
+    thinking: 'high', rosterRev: roster.agents.sisyphus.rev, updatedAt: '2026-10-20T12:00:00Z',
+  }, null, 2));
+  const memoryBefore = fs.readFileSync(memoryFile);
+  assert.deepEqual(fx.store.state().roster.agents.sisyphus.effective, {
+    provider: 'anthropic', modelId: 'remembered-model', thinking: 'high', origin: 'memory', reason: null,
+  });
+
+  const result = fx.store.apply(body('apply', [
+    { kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' },
+  ], fx.store));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const after = fx.store.state().roster.agents.sisyphus;
+  assert.deepEqual(after.effective, {
+    provider: 'openai', modelId: 'gpt-6-sol', thinking: fx.settings.defaultThinkingLevel, origin: 'main', reason: null,
+  });
+  assert.equal(after.pin, null);
+  assert.equal(after.rev, 5);
+  assert.equal(readJsonFile(file).revision, roster.revision + 1);
+  assert.deepEqual(fs.readFileSync(memoryFile), memoryBefore);
+});
+
+test('final settings difference alone clears the Sisyphus pin and bumps its revision once', (t) => {
+  const fx = makeFixture(t);
+  const { file, roster } = seedLegacyRoster(fx, 4);
+  const settingsFile = path.join(fx.primary, 'agent', 'settings.json');
+  const settingsBefore = readJsonFile(settingsFile);
+  const changes = [
+    { kind: 'setAgentPin', agentId: 'hephaestus', pin: { provider: 'openai', modelId: 'gpt-6-sol', thinking: 'high' } },
+    { kind: 'setAgentLane', agentId: 'hephaestus', lane: 'geeky-heavy' },
+  ];
+  const request = body('apply', changes, fx.store);
+  assert.equal(changes.some((change) => change.kind === 'setMain' || change.kind === 'selectProfile'), false);
+
+  // Only explicit main changes currently alter these fields. Inject a prepared
+  // settings difference at the clone boundary to exercise the defensive branch
+  // without introducing another public change kind or changing store code.
+  const clone = globalThis.structuredClone;
+  let injectSettings = true;
+  const cloneMock = t.mock.method(globalThis, 'structuredClone', (value, ...args) => {
+    const next = clone(value, ...args);
+    if (injectSettings && value?.defaultProvider === settingsBefore.defaultProvider
+      && value?.defaultModel === settingsBefore.defaultModel) {
+      injectSettings = false;
+      next.defaultProvider = 'openai';
+      next.defaultModel = 'gpt-6-sol';
+    }
+    return next;
+  });
+  let result;
+  try {
+    result = fx.store.apply(request);
+  } finally {
+    cloneMock.mock.restore();
+  }
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(readJsonFile(settingsFile), {
+    ...settingsBefore, defaultProvider: 'openai', defaultModel: 'gpt-6-sol',
+  });
+  const after = readJsonFile(file);
+  assert.equal(after.agents.sisyphus.pin, null);
+  assert.equal(after.agents.sisyphus.rev, roster.agents.sisyphus.rev + 1);
+  assert.equal(after.revision, roster.revision + 1);
+  assert.equal(after.agents.hephaestus.rev, 2);
+  assert.deepEqual(after.agents.atlas, roster.agents.atlas);
+});
+
+test('equal final settings with only another role changed leave Sisyphus untouched', (t) => {
+  const fx = makeFixture(t);
+  const { file, roster } = seedLegacyRoster(fx, 4);
+  const settingsFile = path.join(fx.primary, 'agent', 'settings.json');
+  const settingsBefore = fs.readFileSync(settingsFile);
+  const result = fx.store.apply(body('apply', [
+    { kind: 'setAgentPin', agentId: 'hephaestus', pin: { provider: 'openai', modelId: 'gpt-6-sol', thinking: 'high' } },
+    { kind: 'setAgentLane', agentId: 'hephaestus', lane: 'geeky-heavy' },
+  ], fx.store));
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(fs.readFileSync(settingsFile), settingsBefore);
+  const after = readJsonFile(file);
+  assert.deepEqual(after.agents.sisyphus, roster.agents.sisyphus);
+  assert.equal(after.agents.hephaestus.rev, 2);
+  assert.equal(after.agents.hephaestus.lane, 'geeky-heavy');
+  assert.deepEqual(after.agents.hephaestus.pin, {
+    provider: 'openai', modelId: 'gpt-6-sol', thinking: 'high',
+  });
+  assert.equal(after.revision, roster.revision + 1);
+  assert.deepEqual(result.writes, ['agent/primary-agents/roster.json']);
+});
+
+test('setMain and selectProfile clear the legacy pin and invalidate memory in one roster CAS', (t) => {
+  for (const change of [
+    { kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' },
+    { kind: 'selectProfile', profileKey: 'gpt-deepseek' },
+  ]) {
+    const fx = makeFixture(t);
+    const { file, roster } = seedLegacyRoster(fx);
+    const request = body('apply', [change], fx.store);
+    const before = fx.store.state().targets;
+    const preview = fx.store.preview({ ...request, action: 'preview' });
+    assert.equal(preview.ok, true, JSON.stringify(preview));
+    assert.match(preview.warnings.join('\n'), /clears the Sisyphus pin.*resets its memory revision/);
+    assert.match(preview.warnings.join('\n'), /next start uses the applied main/);
+    assert.deepEqual(fx.store.state().targets, before, 'preview performs zero writes');
+    assert.equal(fx.store.journal(), null);
+    const result = fx.store.apply(request);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.writes.filter((id) => id === 'agent/primary-agents/roster.json').length, 1);
+    const after = readJsonFile(file);
+    assert.equal(after.revision, roster.revision + 1, 'one CAS advances the roster once');
+    assert.equal(after.agents.sisyphus.pin, null);
+    assert.equal(after.agents.sisyphus.rev, 1);
+    assert.deepEqual(after.agents.atlas, roster.agents.atlas);
+  }
+});
+
+test('identical main re-apply still clears the pin and advances the memory revision once', (t) => {
+  const fx = makeFixture(t, { mutateSettings(settings) {
+    settings.defaultProvider = 'openai';
+    settings.defaultModel = 'gpt-6-sol';
+  } });
+  const { file } = seedLegacyRoster(fx, 4);
+  const settingsFile = path.join(fx.primary, 'agent', 'settings.json');
+  const settingsBefore = fs.readFileSync(settingsFile);
+  const result = fx.store.apply(body('apply', [
+    { kind: 'resetAgentMemory', agentId: 'sisyphus' },
+    { kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' },
+    { kind: 'resetAgentMemory', agentId: 'sisyphus' },
+    { kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' },
+  ], fx.store));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(fs.readFileSync(settingsFile), settingsBefore);
+  assert.equal(readJsonFile(file).agents.sisyphus.pin, null);
+  assert.equal(readJsonFile(file).agents.sisyphus.rev, 5, 'duplicate resets invalidate one revision, never revive revision 1');
+  assert.equal(readJsonFile(file).revision, 8);
+});
+
+test('a batch without main apply leaves every unedited role revision and pin untouched', (t) => {
+  const fx = makeFixture(t);
+  const { file, roster } = seedLegacyRoster(fx, 4);
+  const result = fx.store.apply(body('apply', [
+    { kind: 'setSummarizer', modelId: 'openai/gpt-6-sol' },
+    { kind: 'setAgentPin', agentId: 'hephaestus', pin: { provider: 'openai', modelId: 'gpt-6-sol', thinking: 'high' } },
+  ], fx.store));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const after = readJsonFile(file);
+  assert.deepEqual(after.agents.sisyphus, roster.agents.sisyphus);
+  assert.deepEqual(after.agents.atlas, roster.agents.atlas);
+  assert.equal(after.agents.hephaestus.rev, 1);
+  assert.equal(after.revision, 8);
+});
+
+test('a concurrent roster or config edit after state makes main apply STALE with zero writes', (t) => {
+  for (const target of ['roster', 'omo.jsonc']) {
+    const fx = makeFixture(t);
+    const { file } = seedLegacyRoster(fx);
+    const request = body('apply', [
+      { kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' },
+    ], fx.store);
+    if (target === 'roster') {
+      const concurrent = readJsonFile(file);
+      concurrent.revision += 1;
+      fs.writeFileSync(file, JSON.stringify(concurrent));
+    } else {
+      fs.appendFileSync(path.join(fx.primary, 'omo.jsonc'), '\n');
+    }
+    const beforeApply = fx.store.state().targets;
+    const result = fx.store.apply(request);
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'STALE');
+    assert.deepEqual(fx.store.state().targets, beforeApply, 'zero target bytes written after the concurrent change');
+    assert.equal(fx.store.journal(), null, 'STALE creates no journal');
+    assert.equal(fs.existsSync(fx.store.backupDir), false, 'STALE creates no backups');
+  }
+});
+
+test('late roster CAS conflict is STALE 409 before any target write or transaction artifact', (t) => {
+  const writes = [];
+  let rosterFile;
+  let concurrentBytes;
+  const fx = makeFixture(t, {
+    fs: {
+      ...fs,
+      renameSync(from, to) {
+        writes.push(to);
+        return fs.renameSync(from, to);
+      },
+    },
+    hooks: {
+      beforeWrite(id) {
+        if (id !== 'agent/primary-agents/roster.json') return;
+        const concurrent = readJsonFile(rosterFile);
+        concurrent.revision += 1;
+        concurrentBytes = Buffer.from(JSON.stringify(concurrent));
+        fs.writeFileSync(rosterFile, concurrentBytes);
+      },
+    },
+  });
+  rosterFile = seedLegacyRoster(fx).file;
+  const files = () => Object.fromEntries(fs.readdirSync(fx.root, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile()).map((entry) => {
+      const file = path.join(entry.parentPath, entry.name);
+      return [path.relative(fx.root, file), hashFile(file)];
+    }));
+  const before = files();
+  const result = fx.store.apply(body('apply', [
+    { kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' },
+  ], fx.store));
+  assert.equal(result.status, 409, JSON.stringify(result));
+  assert.equal(result.code, 'STALE');
+  assert.deepEqual(result.writes, []);
+  assert.deepEqual(writes, [], 'no target, backup, or journal rename occurred');
+  assert.deepEqual(files(), { ...before, [path.relative(fx.root, rosterFile)]: sha(concurrentBytes) },
+    'only the external roster edit survives; the file set is unchanged');
+  assert.equal(fx.store.journal(), null);
+  assert.equal(fs.existsSync(fx.store.backupDir), false);
+  assert.equal(fs.existsSync(path.join(path.dirname(rosterFile), 'backups')), false);
+});
+
+for (const point of ['before-first', 'between-targets', 'after-last']) {
+  test(`durable apply interruption ${point} is reported and explicitly resumes without double revisions`, (t) => {
+    const fx = makeFixture(t);
+    const { file: rosterFile, roster } = seedLegacyRoster(fx, 4);
+    const request = body('apply', [
+      { kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' },
+    ], fx.store);
+    const intended = fx.store.preview({ ...request, action: 'preview' }).writes;
+    assert.deepEqual(intended, ['agent/settings.json', 'runtime/native-profile-switcher-main.json', 'agent/primary-agents/roster.json']);
+    const targetPaths = {
+      'agent/settings.json': path.join(fx.primary, 'agent', 'settings.json'),
+      'runtime/native-profile-switcher-main.json': path.join(fx.primary, 'runtime', 'native-profile-switcher-main.json'),
+      'agent/primary-agents/roster.json': rosterFile,
+    };
+    const child = spawnSync(process.execPath, [path.join(here, 'helpers', 'profiles-apply-interrupt.mjs')], {
+      input: JSON.stringify({
+        point, request, targetPaths, journalPath: fx.store.journalPath,
+        options: {
+          primaryHome: fx.primary, stableHome: fx.stable, mirrorHomes: [],
+          pluginPath: fx.plugin, inventory: fx.inventory, recommendationManifest: null,
+        },
+      }),
+      encoding: 'utf8',
+      timeout: 30000,
+    });
+    assert.equal(child.error, undefined);
+    assert.equal(child.status, 91, child.stdout + child.stderr);
+    const stopped = JSON.parse(child.stdout);
+    assert.equal(stopped.point, point);
+    assert.equal(stopped.published.length, point === 'before-first' ? 0 : point === 'between-targets' ? 1 : 3);
+    const raw = readJsonFile(fx.store.journalPath);
+    assert.equal(raw.status, 'running');
+    assert.deepEqual(raw.targets, intended);
+    assert.deepEqual(raw.preHashes, request.expected);
+    const left = fx.store.state().targets;
+    const leftRoster = readJsonFile(rosterFile);
+    assert.equal(leftRoster.revision, roster.revision + (point === 'before-first' ? 0 : 1));
+    assert.equal(left['agent/settings.json'] !== request.expected['agent/settings.json'], point === 'after-last');
+    const recoveredWrites = [];
+    const reopened = openProfilesStore({
+      primaryHome: fx.primary, stableHome: fx.stable, mirrorHomes: [],
+      pluginPath: fx.plugin, inventory: fx.inventory, recommendationManifest: null,
+      now: () => Date.parse('2026-10-20T12:00:00Z'),
+      fs: {
+        ...fs,
+        renameSync(from, to) {
+          if (Object.values(targetPaths).includes(to)) recoveredWrites.push(to);
+          return fs.renameSync(from, to);
+        },
+      },
+    });
+    const journalHash = hashFile(reopened.journalPath);
+    const state = reopened.state();
+    assert.equal(state.applyJournal.status, 'interrupted');
+    assert.equal(state.applyJournal.action, '다시 적용');
+    assert.equal(Object.hasOwn(state.applyJournal, 'plan'), false, 'before-images are not exposed to the page');
+    assert.deepEqual(reopened.state().targets, left, 'reporting the interruption never replays it');
+    assert.equal(hashFile(reopened.journalPath), journalHash);
+    const recovered = reopened.apply(body('apply', state.applyJournal.reapply.changes, reopened));
+    assert.equal(recovered.ok, true, JSON.stringify(recovered));
+    assert.equal(recovered.recoveredFrom, raw.id);
+    assert.equal(reopened.journal().id, raw.id);
+    assert.equal(reopened.journal().status, 'completed');
+    const after = readJsonFile(rosterFile);
+    assert.equal(after.revision, roster.revision + 1);
+    assert.equal(after.agents.sisyphus.rev, roster.agents.sisyphus.rev + 1);
+    assert.equal(after.agents.sisyphus.pin, null);
+    assert.equal(readJsonFile(targetPaths['agent/settings.json']).defaultModel, 'gpt-6-sol');
+    if (point === 'after-last') {
+      assert.deepEqual(recovered.writes, []);
+      assert.deepEqual(recoveredWrites, [], 'completion of fully published targets only completes the journal');
+      assert.deepEqual(reopened.state().targets, left);
+    }
+    t.diagnostic(JSON.stringify({
+      point, left: { journal: raw.status, published: stopped.published, rosterRevision: leftRoster.revision },
+      recovery: { status: reopened.journal().status, writes: recovered.writes, rosterRevision: after.revision },
+    }));
+  });
+}
+
+test('a roster conflict after durable journal admission is STALE with no target writes or leftover artifacts', (t) => {
+  let rosterFile;
+  let journalFile;
+  let bumped = false;
+  const targetWrites = [];
+  const fx = makeFixture(t, {
+    fs: {
+      ...fs,
+      renameSync(from, to) {
+        fs.renameSync(from, to);
+        if (to === journalFile && !bumped) {
+          bumped = true;
+          const concurrent = readJsonFile(rosterFile);
+          concurrent.revision += 1;
+          fs.writeFileSync(rosterFile, JSON.stringify(concurrent));
+        } else if (to !== journalFile) targetWrites.push(to);
+      },
+    },
+  });
+  rosterFile = seedLegacyRoster(fx).file;
+  journalFile = fx.store.journalPath;
+  const result = fx.store.apply(body('apply', [
+    { kind: 'setMain', provider: 'openai', model: 'gpt-6-sol', thinking: 'high' },
+  ], fx.store));
+  assert.equal(result.code, 'STALE', JSON.stringify(result));
+  assert.equal(result.status, 409);
+  assert.deepEqual(result.writes, []);
+  assert.deepEqual(targetWrites, []);
+  assert.equal(fx.store.journal(), null);
+  assert.equal(fs.existsSync(fx.store.backupDir), false);
+  assert.equal(fs.existsSync(path.join(path.dirname(rosterFile), 'backups')), false);
+});
 
 test('preview returns path-level diffs and writes nothing', (t) => {
   const fx = makeFixture(t);

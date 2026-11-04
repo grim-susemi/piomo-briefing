@@ -99,6 +99,30 @@ export function recommendationGuide({ inventory, manifest = null }) {
   };
 }
 
+// Keep the familiar base set first; newly discovered routes follow it. Identity
+// includes the section because an agent and a category may share the same name.
+export function allocationGuideRows({ primary = [], routing = [], memory = [], summary }) {
+  const base = new Set(Object.entries(ROLE_INVENTORY)
+    .flatMap(([section, roles]) => roles.map((role) => `${section}/${role}`)));
+  const routes = routing.map((row) => ({
+    ...row, id: `${row.section}/${row.role}`, group: 'routing', purposeGroup: row.group,
+    applyScope: 'profile',
+  }));
+  const rows = [
+    ...primary.map((row) => ({ ...row, id: `primary/${row.role}`, group: 'primary', applyScope: 'primary-agent' })),
+    ...routes.filter((row) => base.has(row.id)),
+    ...memory.map((row) => ({ ...row, id: `memory/${row.role}`, group: 'memory', applyScope: 'shared-memory' })),
+    { ...summary, id: 'summary', group: 'summary', applyScope: 'compaction' },
+    ...routes.filter((row) => !base.has(row.id)),
+  ];
+  const seen = new Set();
+  return rows.filter((row) => {
+    if (seen.has(row.id)) return false;
+    seen.add(row.id);
+    return true;
+  });
+}
+
 export function buildRoster({ now, agents = {} } = {}) {
   if (typeof now !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(now)) throw new Error('buildRoster requires an ISO updatedAt');
   for (const id of Object.keys(agents)) {

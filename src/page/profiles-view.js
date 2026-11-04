@@ -33,6 +33,11 @@
     ['prometheus', 'Prometheus'],
     ['atlas', 'Atlas']
   ];
+  var ROUTING_TABS = [['primary', 'Primary'], ['agents', 'Agents'], ['categories', 'Categories'], ['memory', 'Memory']];
+  function searchMatch(edit, fields) {
+    var query = str(edit && edit.query).trim().toLowerCase();
+    return !query || fields.map(str).join(' ').toLowerCase().indexOf(query) >= 0;
+  }
   var LANES = ['daily-normal', 'daily-heavy', 'geeky-normal', 'geeky-heavy'];
   var THINKING = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
   // The sidebar jumps follow the screen: the cards, the detail from top to bottom, then the board-only extras.
@@ -44,24 +49,37 @@
     ['main', '메인 모델', '세션을 여는 기본 모델'],
     ['summarizer', '요약 모델', '압축 요약 모델과 경고'],
     ['guide', '권장 가이드', '경로와 sha256'],
-    ['agents', '메인 에이전트', '에이전트별 레인·핀·기억']
+    ['agents', idOf(ROUTING_TABS, 'primary'), '에이전트별 레인·핀·기억']
   ];
   // WinForms copy (Must have 4) and the purpose groups of PS RoutingGroups (PS:346-358) in their order. A board
   // group id maps to the WinForms section id of the flow map; unknown groups follow and 추가 설정 closes a section.
   var CAPTIONS = ['1. 구독 서비스', '2. AI 모델', '3. 추론 강도'];
   // WinForms Format-ModelChoice (PS:566, 1569) labels a model the installed engine does not serve.
-  var UNSERVED = '설치 엔진 미지원';
+  var UNSERVED = 'UNSUPPORTED_MODEL';
   var ROLE_SECTIONS = [
-    ['agents', '전담 에이전트 · Agents', ['discovery', 'planning', 'review']],
-    ['categories', '작업 카테고리 · Categories', ['general', 'reasoning', 'specialism']]
+    ['agents', 'Agents', ['discovery', 'planning', 'review']],
+    ['categories', 'Categories', ['general', 'reasoning', 'specialism']]
   ];
   var FLOW_GROUP = { discovery: 'explore-research', planning: 'plan-advice', review: 'review-qa', general: 'quick-general', reasoning: 'deep', specialism: 'specialist' };
   // Identity marks are shapes as well as colours, so the fixed roster palette is never the only cue.
   var SHAPES = { sisyphus: 'circle', hephaestus: 'square', prometheus: 'triangle', atlas: 'diamond' };
   var SHAPE_KO = { circle: '원형', square: '사각형', triangle: '삼각형', diamond: '마름모' };
   var STATUS_LABEL = {
-    recommended: '권장', fallback: '차선', 'variant-different': '변형 다름', different: '다름',
-    unresolved: '미해결', unassigned: '미지정', untracked: '추적 안 됨', unknown: '미확인', unset: '미설정'
+    recommended: 'recommended', fallback: 'fallback', 'variant-different': 'variant-different', different: 'different',
+    unresolved: 'unresolved', unassigned: 'unassigned', untracked: 'untracked', unknown: 'unknown', unset: 'unset'
+  };
+  var MEMORY_STATUS_LABEL = {
+    unresolved: STATUS_LABEL.unresolved, skippedUnresolved: 'skipped · unresolved'
+  };
+  var STATUS_TEXT = {
+    current: 'current', pending: 'pending', saved: 'saved', failure: 'failure', none: 'none',
+    external: 'external', owned: 'owned', dedicated: 'dedicated', loading: 'loading', error: 'error',
+    file: 'file', readOnly: 'read-only', editable: 'editable', processing: 'processing',
+    applied: 'applied', idle: 'idle', override: 'override', profile: 'profile',
+    customLiteral: 'custom-literal', thinkingMismatch: 'thinking-mismatch', rosterWarning: 'roster.warning',
+    absent: 'absent', failurePendingRetained: 'failure · pending retained',
+    applying: 'applying', previewing: 'previewing', reapplying: 'reapplying',
+    previewReady: 'preview ready', reapplied: 'reapplied', conflict: 'conflict'
   };
   var CHANGE_LABEL = {
     selectProfile: '프로필', setRoute: '역할', setMain: '메인 모델', setModelProfile: '모델 레인',
@@ -100,8 +118,8 @@
   }
   function attr(name, value) { return ' ' + name + '="' + esc(value) + '"'; }
   function boolAttr(name, on) { return on ? ' ' + name : ''; }
-  function chip(cls, label, title) {
-    return '<span class="pf-chip ' + cls + '"' + (title ? attr('title', title) : '') + '>' + esc(label) + '</span>';
+  function chip(cls, label) {
+    return '<span class="pf-chip ' + cls + '"' + attr('title', label) + attr('aria-label', label) + '>' + esc(label) + '</span>';
   }
   function tag(label, title) {
     return '<span class="pf-tag"' + (title ? attr('title', title) : '') + '>[' + esc(label) + ']</span>';
@@ -169,7 +187,7 @@
     return '<button type="button" class="' + (cls || 'pf-btn') + '"' + attr('data-pf', name) + (attrs || '') +
       boolAttr('disabled', disabled) + '>' + text + '</button>';
   }
-  function valueOrDash(v) { return str(v) ? esc(v) : '<span class="pf-dash" aria-label="없음">—</span>'; }
+  function valueOrDash(v) { return str(v) ? esc(v) : '<span class="pf-dash" aria-label="none" title="none">—</span>'; }
   // The model copy is data, not markup: escape it first, then wrap the phrases that must not split across
   // lines. One combined pass keeps product names, interpunct compounds and modifier + noun phrases together;
   // the surrounding text stays selectable and no rendered word is changed.
@@ -178,7 +196,7 @@
     return esc(v).replace(KEEP_PHRASES, function (m) { return '<span class="pf-keep">' + m + '</span>'; });
   }
   function currentChip() {
-    return '<span class="pf-chip pf-c-green pf-current">' + ic('check', 'ic-sm') + ' ' + esc('적용 중') + '</span>';
+    return '<span class="pf-chip pf-c-green pf-current" title="current" aria-label="current">' + ic('check', 'ic-sm') + ' current</span>';
   }
 
   // ---- model helpers -----------------------------------------------------------------------------------------------
@@ -302,13 +320,13 @@
   function unservedOf(item) {
     if (!obj(item) || item.unsupported !== true) return null;
     var code = str(item.unsupportedReason);
-    return { label: code === 'REGISTRY_UNKNOWN' ? '설치 엔진 미확인' : UNSERVED, code: code, home: str(item.unsupportedHome) };
+    return { label: code || UNSERVED, code: code, home: str(item.unsupportedHome) };
   }
-  function offText(off) { return off.label + (off.home ? ' · ' + off.home + ' 홈' : ''); }
-  function offTitle(off) { return offText(off) + ' · ' + off.code; }
+  function offText(off) { return off.label + (off.home ? ' · ' + off.home : ''); }
+  function offTitle(off) { return offText(off); }
   // The flag on a shown value the engine refuses: reason and home, with the refusal code as its title. It is a lasting
   // configuration state, so it takes the warning colour; red stays for failures.
-  function offChip(off) { return off ? chip('pf-c-amber', offText(off), off.code) : ''; }
+  function offChip(off) { return off ? chip('pf-c-amber', offText(off)) : ''; }
   function servedEntries(view) {
     return catalogEntries(view).filter(function (e) { return !e.off; });
   }
@@ -398,7 +416,7 @@
       opts += modelOption(c.model, c.alias + ' · ' + c.model, c.model, c.model === model, c.off);
     });
     if (model && !found) {
-      opts += '<option value="' + esc(model) + '"' + attr('data-provider', providerOf(model)) + ' selected>' + esc('미해결: ' + model) + '</option>';
+      opts += '<option value="' + esc(model) + '"' + attr('data-provider', providerOf(model)) + ' selected>' + esc(STATUS_LABEL.unresolved + ': ' + model) + '</option>';
     }
     return opts;
   }
@@ -414,7 +432,7 @@
       opts += '<option value="' + esc(level) + '"' + (level === reasoning ? ' selected' : '') + '>' + esc(level) + '</option>';
     });
     if (reasoning && !found) {
-      opts += '<option value="' + esc(reasoning) + '" selected>' + esc(cand ? '미해결: ' + reasoning : reasoning) + '</option>';
+      opts += '<option value="' + esc(reasoning) + '" selected>' + esc(cand ? STATUS_LABEL.unresolved + ': ' + reasoning : reasoning) + '</option>';
     }
     return opts;
   }
@@ -423,9 +441,9 @@
     var status = str(rec && (rec.Status || rec.status)) || str(row && row.recommendationStatus) || '';
     if (!status) status = str(row && row.model) ? 'unknown' : 'unset';
     return {
-      status: knownStatus(status),
+      status: status,
       official: str(rec && (rec.Official || rec.official)),
-      label: STATUS_LABEL[knownStatus(status)]
+      label: status
     };
   }
   function summarizerWarnings(modelId) {
@@ -518,8 +536,8 @@
     var busy = !!(edit && edit.busy === true);
     var conflict = !!(edit && edit.conflict === true);
     var head = '<div class="pf-banner pf-banner-warn" data-pf-journal="interrupted" role="status">' +
-      ic('info', 'ic-sm') + ' <b>' + esc('중단된 적용') + '</b>';
-    if (ro) return head + ' <span class="pf-muted">' + esc('읽기 전용') + '</span></div>';
+      ic('info', 'ic-sm') + ' <b>' + esc(journal.status) + '</b>';
+    if (ro) return head + ' <span class="pf-muted">' + esc(STATUS_TEXT.readOnly) + '</span></div>';
     if (!changes.length) return head + ' <span class="pf-muted">' + esc('다시 적용할 변경 기록이 없습니다.') + '</span></div>';
     // The reapply button is a real apply: it must mirror apply's disabled state. A latched 409
     // needs the reload hand-off first; an in-flight request must settle before another write.
@@ -579,9 +597,9 @@
     return '<div class="pf-loading" data-pf-loading role="status">' +
       '<div class="pf-skeleton">' +
       '<section class="pf-tray pf-tray-compact" data-pf-skel="tray" aria-label="바꿀 값"><div class="pf-tray-c">' +
-      tag('대기') + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
+      tag(STATUS_TEXT.idle) + ' <b>바꿀 값</b> <span class="pf-count">0</span>' +
       '<span class="pf-muted pf-tray-note">바꾼 값 없음</span>' +
-      '<span class="pf-tray-next" id="pf-focus-status" tabindex="-1"><span class="pf-pulse" aria-hidden="true">' +
+      '<span class="pf-tray-next" id="pf-focus-status" tabindex="-1" role="group" aria-labelledby="pf-focus-status"><span class="pf-pulse" aria-hidden="true">' +
       ic('refresh-cw', 'ic-sm') + '</span> 프로필 상태를 불러오는 중…</span></div></section>' +
       '<div class="pf-panes">' + loadingSection('profiles', '<div class="pf-cards">' + cards + '</div>', null) +
       loadingSection('routing', '<div class="pf-routes">' + routes + '</div>', null) + '</div>' +
@@ -591,7 +609,7 @@
       '</div></div>';
   }
   function errorBlock(edit) {
-    return '<div class="pf-error" role="alert"><p class="pf-err" id="pf-focus-status" tabindex="-1">' + esc(edit && edit.error) + '</p>' +
+    return '<div class="pf-error" role="alert"><p class="pf-err" id="pf-focus-status" tabindex="-1" role="group" aria-labelledby="pf-focus-status">' + esc(edit && edit.error) + '</p>' +
       button('reload', ' aria-label="다시 시도"', ic('refresh-cw', 'ic-sm') + ' 다시 시도', false, 'pf-btn') + '</div>';
   }
 
@@ -599,15 +617,15 @@
     var live = edit && edit.live === true;
     var state = viewState(view, edit);
     var ro = state === 'view' && readonly(view, edit);
-    var badge = state === 'loading' ? chip('pf-c-gray', '불러오는 중')
-      : state === 'error' ? chip('pf-c-red', '불러오지 못함')
-      : !live ? chip('pf-c-gray', '파일 보기') : ro ? chip('pf-c-amber', '읽기 전용') : chip('pf-c-green', '편집 가능');
+    var badge = state === 'loading' ? chip('pf-c-gray', state)
+      : state === 'error' ? chip('pf-c-red', state)
+      : !live ? chip('pf-c-gray', STATUS_TEXT.file) : ro ? chip('pf-c-amber', STATUS_TEXT.readOnly) : chip('pf-c-green', STATUS_TEXT.editable);
     // WinForms Update-PendingIndicator (PS:4529-4535): the heading carries the pending count over every profile;
     // document.title stays the board's own.
     var n = state === 'view' ? pendingOf(edit).length : 0;
     return '<header class="pf-head">' +
       '<div class="pf-head-l"><p class="pf-kicker">[프로필·에이전트]</p><h1 class="pf-title">프로필·에이전트' +
-      (n ? '<span class="pf-title-n">' + esc(' · 변경 보류 ' + n + '건') + '</span>' : '') + '</h1>' +
+      (n ? '<span class="pf-title-n">' + esc(' · ' + STATUS_TEXT.pending + ' ' + n) + '</span>' : '') + '</h1>' +
       '<p class="pf-sub">WinForms 스위처의 역할 배치와 모델 레인, <span class="pf-keep">메모리 행을 확인하고</span>, <span class="pf-keep">실시간 상황판</span>에서 바로 적용합니다.</p></div>' +
       '<div class="pf-head-r">' + badge + '</div></header>';
   }
@@ -618,7 +636,7 @@
     var p = profileOf(view, str(obj(view.activeProfile) && view.activeProfile.key));
     return '<section class="pf-status" data-flow="status" aria-label="현재 전역 적용">' +
       '<div class="pf-status-l"><span class="pf-status-c">현재 전역 적용</span><b class="pf-status-v">' + esc(p ? cardTitle(p) : '선택 없음') + '</b></div>' +
-      '<div class="pf-status-m">' + (p ? chip('pf-c-green', '전역 적용 중') : '') +
+      '<div class="pf-status-m">' + (p ? chip('pf-c-green', 'current') : '') +
       (stale ? banner(STALE_BANNER, 'pf-banner-warn', 'alert') : ro ? readOnlyNote(edit, view) : '') + '</div>' +
       '<div class="pf-status-r"><span class="pf-status-c">공식 권장 기준</span>' +
       button('guide-open', attr('data-flow', 'guide') + ' aria-haspopup="dialog" aria-label="OMO 공식 권장 배치 가이드 열기"', '권장 배치 가이드', false, 'pf-btn') +
@@ -632,17 +650,17 @@
     arr(view && view.profiles).forEach(function (p) { if (obj(p) && p.key === key) found = p; });
     return found;
   }
-  function cardTitle(p) { return (num(p.num) === null ? '' : p.num + '. ') + str(p.nameKr || p.name || p.key); }
+  function cardTitle(p) { return (num(p.num) === null ? '' : p.num + '. ') + str(p.name || p.key); }
 
   function homes(view) {
     var h = obj(view && view.homes) || {};
     var line = function (tagName, value, cls) {
-      return '<span class="pf-home ' + (cls || '') + '">' + tag(tagName) + ' <code title="' + esc(value || '(없음)') + '">' + esc(value || '(없음)') + '</code></span>';
+      return '<span class="pf-home ' + (cls || '') + '">' + tag(tagName) + ' <code title="' + esc(value || STATUS_TEXT.none) + '">' + esc(value || STATUS_TEXT.none) + '</code></span>';
     };
     var mirrors = arr(h.mirrors).map(function (m, i) {
       var label = 'mirror ' + (i + 1);
       return '<span class="pf-home' + (m && m.exists === false ? ' pf-home-off' : '') + '">' + tag(label, m && m.exists === false ? '이 미러의 omo.jsonc가 없음' : str(m && m.label)) +
-        ' <code title="' + esc(m && m.root) + '">' + esc(m && m.root) + '</code>' + (m && m.exists === false ? ' <span class="pf-off">[없음]</span>' : '') + '</span>';
+        ' <code title="' + esc(m && m.root) + '">' + esc(m && m.root) + '</code>' + (m && m.exists === false ? ' <span class="pf-off">[' + esc(STATUS_TEXT.none) + ']</span>' : '') + '</span>';
     }).join('');
     return '<div class="pf-homes" aria-label="대상 홈">' +
       line('primary', h.primary) + (mirrors || line('mirror', '(설정 없음)')) + line('stable-500', h.stable) + '</div>';
@@ -680,7 +698,7 @@
   function agentRows(view, edit, ro) {
     var roster = obj(view && view.roster) || {};
     var agents = obj(roster.agents) || {};
-    var entries = servedEntries(view);
+    var entries = catalogEntries(view);
     var pending = pendingOf(edit);
     var busy = !!(edit && edit.busy === true);
     var rows = AGENTS.map(function (pair) {
@@ -689,25 +707,25 @@
       var laneChange = agentChange(pending, id, 'setAgentLane');
       var pinChange = agentChange(pending, id, 'setAgentPin');
       var reset = agentChange(pending, id, 'resetAgentMemory');
+      var draft = draftOf(edit, 'agent:' + id);
       var lane = laneChange ? str(laneChange.lane) : str(agent.lane) || (id === 'hephaestus' ? 'geeky-normal' : id === 'prometheus' ? 'daily-heavy' : 'daily-normal');
       var pin = pinChange ? pinChange.pin : agent.pin;
       pin = obj(pin) ? pin : null;
       var remembered = obj(agent.remembered) || obj(agent.memory) || null;
-      var pinEntry = pin ? entryOf(entries, '', str(pin.modelId)) : null;
-      if (pin && !pinEntry) pinEntry = entries.filter(function (e) { return bareModel(e.model) === bareModel(pin.modelId); })[0] || null;
-      var pinProvider = pin ? pinEntry ? providerOf(pinEntry.model) : str(pin.provider) : '';
+      var pinEntry = pin ? entryOf(entries, '', str(pin.provider) + '/' + bareModel(pin.modelId)) : null;
+      var pinProvider = draft && has(draft, 'provider') ? str(draft.provider) : pin ? pinEntry ? providerOf(pinEntry.model) : str(pin.provider) : '';
       var pinModel = pin ? pinEntry ? bareModel(pinEntry.model) : bareModel(pin.modelId) : '';
-      var pinValue = pin ? pinProvider + '|' + pinModel : '';
-      var pinThinking = pin ? str(pin.thinking) : 'medium';
+      var pinValue = draft && has(draft, 'pin') ? str(draft.pin) : pin ? pinProvider + '|' + pinModel : '';
+      var pinThinking = draft && has(draft, 'thinking') ? str(draft.thinking) : pin ? str(pin.thinking) : 'medium';
       var pinEntries = id === 'hephaestus' ? entries.filter(function (e) { return bareModel(e.model).indexOf('gpt-') === 0; }) : entries;
-      var pinOpts = '<option value=""' + (pin ? '' : ' selected') + '>핀 없음 (레인 사용)</option>';
+      var pinOpts = '<option value=""' + (pinValue ? '' : ' selected') + '>핀 없음 (레인 사용)</option>';
       var pinSeen = map();
       pinEntries.forEach(function (e) {
+        if (pinProvider && providerOf(e.model) !== pinProvider) return;
         var value = providerOf(e.model) + '|' + bareModel(e.model);
         if (has(pinSeen, value)) return;
         pinSeen[value] = true;
-        pinOpts += '<option value="' + esc(value) + '"' + (value === pinValue ? ' selected' : '') + '>' +
-          esc(e.alias + ' · ' + e.model) + '</option>';
+        pinOpts += modelOption(value, e.alias + ' · ' + e.model, e.model, value === pinValue, e.off);
       });
       if (pinValue && !has(pinSeen, pinValue)) {
         pinOpts += '<option value="' + esc(pinValue) + '" selected>' + esc(pinValue) + '</option>';
@@ -721,26 +739,63 @@
       var pinHint = id === 'hephaestus' ? 'GPT 계열만' : '';
       var pinControls = ro
         ? '<span class="pf-lbl">핀</span><span class="pf-ro-val">' + (pin ? esc(pinProvider + ' · ' + pinModel + ' / ' + pinThinking) : '없음') + '</span>'
-        : '<div class="pf-pin-sels">' +
-          labelledHint('핀', pinHint, pinId, select('agent-pin', withId(pinId, ' data-agent="' + esc(id) + '"'), pinOpts, busy)) +
-          labelled('추론', pinThinkId, select('agent-pin-thinking', withId(pinThinkId, ' data-agent="' + esc(id) + '"'), thinkingOptions(pinThinking, false), busy || !pin)) +
+        : '<div class="pf-tri">' +
+          labelled(CAPTIONS[0], 'pf-agent-provider-' + id, providerSelect('agent-provider', withId('pf-agent-provider-' + id, attr('data-agent', id)), providersOf(pinEntries, pinProvider), pinProvider, busy)) +
+          labelledHint(CAPTIONS[1], pinHint, pinId, select('agent-pin', withId(pinId, ' data-agent="' + esc(id) + '"'), pinOpts, busy)) +
+          labelled(CAPTIONS[2], pinThinkId, select('agent-pin-thinking', withId(pinThinkId, ' data-agent="' + esc(id) + '"'), memoryThinkingOptions(memoryCandidates(view), pinValue.replace('|', '/'), pinThinking), busy || !pinValue)) +
           '</div>';
       var resetBtn = ro ? '<span class="pf-muted">기억은 확장이 관리</span>' : button('reset-memory', ' data-agent="' + esc(id) + '"', '기억 초기화', busy, 'pf-btn pf-btn-ghost');
-      if (reset && !ro) resetBtn = button('reset-memory', ' data-agent="' + esc(id) + '"', '초기화 대기', busy, 'pf-btn pf-btn-ghost on');
-      return '<article class="pf-agent" data-pf-agent="' + esc(id) + '">' +
-        '<div class="pf-agent-id"><span class="pf-dot pf-dot-' + esc(id) + ' pf-shape-' + esc(SHAPES[id]) + '" role="img" aria-label="' +
+      if (reset && !ro) resetBtn = button('reset-memory', ' data-agent="' + esc(id) + '"', STATUS_TEXT.pending, busy, 'pf-btn pf-btn-ghost on');
+      var effective = obj(agent.effective) || {};
+      var effectiveEntry = entryOf(entries, '', str(effective.provider) + '/' + str(effective.modelId));
+      if (!searchMatch(edit, [id, name, effective.provider, effective.modelId, effectiveEntry && effectiveEntry.alias,
+        pinProvider, pinModel, pinEntry && pinEntry.alias])) return '';
+      var origin = str(effective.origin) || 'unknown';
+      var originLabel = { main: 'Main', pin: 'Pin', memory: 'Memory', lane: 'Lane', unavailable: 'Unavailable', unknown: 'Unknown' }[origin] || origin;
+      var reason = str(effective.reason);
+      var savedText = str(effective.modelId) ? str(effective.provider) + ' · ' + effective.modelId +
+        (str(effective.thinking) ? ' / ' + effective.thinking : '') : reason || STATUS_LABEL.unknown;
+      var mainValues = id === 'sisyphus' ? mainValuesOf(view, edit) : null;
+      var staged = !!(laneChange || pinChange || reset || draft || (mainValues && (mainValues.pending || mainValues.draft)));
+      var summaryText = savedText;
+      if (mainValues && (mainValues.pending || mainValues.draft)) {
+        summaryText = mainValues.provider + ' · ' + (mainValues.model || STATUS_TEXT.none) + ' / ' + (mainValues.thinking || STATUS_TEXT.none);
+      } else if (id !== 'sisyphus' && (pinChange || draft)) {
+        summaryText = pinValue ? pinValue.replace('|', ' · ') + ' / ' + pinThinking : '핀 없음 (레인 사용) · ' + lane;
+      }
+      if (laneChange) summaryText += ' · ' + lane;
+      if (reset) summaryText += ' · 기억 초기화';
+      var editorId = 'pf-agent-' + id + '-editor';
+      var open = str(edit && edit.openRow) === 'agent:' + id;
+      var main = obj(view.main) || {};
+      var mainThinking = str(obj(main.effective) && main.effective.thinking);
+      var settingsThinking = str(view.mainSettingsThinking);
+      var mismatch = id === 'sisyphus' && has(view, 'mainSettingsThinking') && mainThinking && settingsThinking !== mainThinking
+        ? chip('pf-c-amber', STATUS_TEXT.thinkingMismatch + ' · settings: ' + (settingsThinking || STATUS_TEXT.none) + ' / sidecar: ' + mainThinking) : '';
+      return '<article class="pf-agent pf-route" data-pf-agent="' + esc(id) + '">' +
+        '<button type="button" class="pf-row-sum" data-pf="row-toggle"' + attr('data-row', 'agent:' + id) +
+        ' aria-expanded="' + open + '"' + attr('aria-controls', editorId) + '>' +
+        '<span class="pf-row-sum-r"><span class="pf-dot pf-dot-' + esc(id) + ' pf-shape-' + esc(SHAPES[id]) + '" role="img" aria-label="' +
         esc(name + ' · ' + SHAPE_KO[SHAPES[id]] + ' 표식') + '"></span>' +
-        '<span class="pf-agent-n">' + esc(name) + '</span><span class="pf-agent-k">[rev ' + esc(num(agent.rev) === null ? 0 : agent.rev) + ']</span></div>' +
+        ' <span class="pf-agent-n">' + esc(name) + '</span></span>' +
+        '<span class="pf-row-sum-m">' + esc(summaryText) +
+        (staged ? '<span data-pf-saved> · effective: ' + esc(savedText + ' · ' + originLabel) + '</span>' : '') + '</span>' +
+        '<span class="pf-row-sum-o">' + chip(reason ? 'pf-c-amber' : 'pf-c-gray', originLabel) +
+        (staged ? chip('pf-c-amber', STATUS_TEXT.pending) : '') +
+        (id === 'sisyphus' && obj(agent.pin) && origin !== 'pin' ? chip('pf-c-amber', 'Pin') : '') +
+        (reason ? chip('pf-c-amber', reason) : '') + mismatch + '</span></button>' +
+        '<div class="pf-agent-editor"' + withId(editorId, boolAttr('hidden', !open)) + '>' +
+        '<p class="pf-note">공통 설정 · 모든 프로필에 적용됩니다.' + (id === 'sisyphus' ? ' 메인 모델과 같은 설정을 편집합니다.' : '') + '</p>' +
+        (id === 'sisyphus' ? mainModel(view, edit, ro, 'pf-sisyphus') : pinControls) +
+        '<div class="pf-agent-fields">' +
         '<div class="pf-field">' + controls + '</div>' +
-        '<div class="pf-field">' + pinControls + '</div>' +
         '<div class="pf-field pf-mem-field"><span class="pf-lbl">기억</span><div class="pf-mem-line">' +
-        '<span class="pf-ro-val pf-mem">' + (mem ? esc(mem) : '<span class="pf-dash">—</span>') + '</span>' + resetBtn + '</div></div></article>';
+        '<span class="pf-ro-val pf-mem">' + valueOrDash(mem) + '</span>' + resetBtn + '</div>' +
+        '<span class="pf-muted">' + esc(remembered && remembered.updatedAt || '기억 시각 없음') + '</span></div></div></div></article>';
     }).join('');
-    // The board-only roster is a collapsed card below both panes; its open state survives re-renders.
-    return '<details class="pf-sec pf-agents-card" id="pf-sec-agents" data-pf-sec="agents"' + boolAttr('open', !!(edit && edit.agentsOpen === true)) + '>' +
-      secHead('agents', AGENTS.length, (roster.warning ? chip('pf-c-amber', 'roster 경고', str(roster.warning)) : '') +
-        ic('chevron-down', 'ic-sm pf-chev'), null, 'summary') +
-      '<div class="pf-sec-b"><div class="pf-agents">' + rows + '</div></div></details>';
+    return '<section class="pf-group" id="pf-sec-agents" data-pf-sec="agents" data-flow-sec="primary">' +
+      '<h3 class="pf-group-h">' + esc(idOf(ROUTING_TABS, 'primary')) + ' <span class="pf-count">' + (rows.match(/data-pf-agent=/g) || []).length + '</span>' +
+      (roster.warning ? chip('pf-c-amber', STATUS_TEXT.rosterWarning) : '') + '</h3>' + rows + '</section>';
   }
 
   // A card's main model as WinForms builds it for every card (Get-MainComboCurrentValues, PS:2489-2518, PS:6086-6094):
@@ -774,7 +829,7 @@
       var on = p.key === shown;
       var cardMain = cardMainOf(view, edit, p, entries);
       var body = '<span class="pf-card-top"><span class="pf-card-num">' + esc(num(p.num) === null ? '' : p.num) + '</span>' +
-        '<span class="pf-card-name">' + esc(p.nameKr || p.name || p.key) + '</span></span>' +
+        '<span class="pf-card-name">' + esc(p.name || p.key) + '</span></span>' +
         '<span class="pf-card-en">' + esc(p.name || '') + '</span>' +
         '<span class="pf-card-tag">' + tag(p.tag || 'profile') + '</span>' +
         '<span class="pf-card-sum">' + summaryText(p.summary || '') + '</span>' +
@@ -805,37 +860,59 @@
     var draft = draftOf(edit, 'route:' + key);
     var alias = str(r.model);
     var entry = entryOf(entries, alias);
-    var full = change ? str(change.model) : draft ? str(draft.model) : entry ? entry.model : alias;
-    var provider = change ? str(change.provider) : draft ? str(draft.provider) : entry ? providerOf(entry.model) : providerOf(alias);
-    var thinking = change ? str(change.thinking) : draft ? str(draft.thinking) : str(r.reasoning) || entry && entry.variant || '';
+    // The guide and the row show the same resolved category assignment. Selecting
+    // an override still creates an explicit alias; unresolved links remain empty.
+    var linked = !change && !draft && !alias && obj(r.linked) && r.linked.active && r.linked.effective && str(r.linked.modelId) ? r.linked : null;
+    var full = change ? str(change.model) : draft ? str(draft.model) : entry ? entry.model : linked ? str(linked.modelId) : alias;
+    var provider = change ? str(change.provider) : draft ? str(draft.provider) : providerOf(full);
+    var thinking = change ? str(change.thinking) : draft ? str(draft.thinking) : linked ? str(linked.thinking) : str(r.reasoning) || entry && entry.variant || '';
+    var searchEntry = entryOf(entries, '', full);
+    if (!searchMatch(edit, [r.role, r.labelEn, r.labelKo, provider, full, alias, searchEntry && searchEntry.alias])) return '';
     // The shown model's reason; a saved value outside the catalog keeps the row's own verdict from the store.
     var shownEntry = entryOf(entries, '', full);
     var off = shownEntry ? shownEntry.off : !change && !draft ? unservedOf(r) : null;
     var rec = recommendationOf(r);
     var rid = 'pf-route-' + slug(r.section + '-' + r.role);
+    var editId = rid + '-editor';
+    var open = str(edit && edit.openRow) === 'route:' + key;
     var on = function (part) { return attr('data-route', key) + attr('data-flow', 'role:' + key + ':' + part); };
     var fields = ro || r.readOnly === true || !!r.absentIn
-      ? '<span class="pf-ro-val">' + valueOrDash(provider) + ' · ' + valueOrDash(bareModel(full)) + ' / ' + valueOrDash(thinking) + '</span>'
-      : '<div class="pf-tri">' +
+      ? '<span class="pf-ro-val"' + withId(editId, boolAttr('hidden', !open)) + '>' + valueOrDash(provider) + ' · ' + valueOrDash(bareModel(full)) + ' / ' + valueOrDash(thinking) + '</span>'
+      : '<div class="pf-tri"' + withId(editId, boolAttr('hidden', !open)) + '>' +
         labelled(CAPTIONS[0], rid + '-provider', providerSelect('route-provider', withId(rid + '-provider', on('service')), providersOf(entries, provider), provider, busy)) +
         labelled(CAPTIONS[1], rid + '-model', modelSelect('route-model', withId(rid + '-model', on('model')), entries, provider, full, busy)) +
         labelled(CAPTIONS[2], rid + '-thinking', select('route-thinking', withId(rid + '-thinking', on('effort')), memoryThinkingOptions(candidates, full, thinking), busy)) +
         '</div>';
-    return '<div class="pf-route" data-pf-route="' + esc(key) + '">' +
+    var sumModel = valueOrDash(bareModel(full)) + (str(thinking) ? ' / ' + esc(thinking) : '');
+    var stateLabel = r.absentIn ? STATUS_TEXT.absent + ': ' + str(r.absentIn) : str(r.stateLabel);
+    var sumOrigin = !change && !draft && (rec.status === 'unresolved' || (alias && !entry))
+      ? chip('pf-c-amber', MEMORY_STATUS_LABEL.skippedUnresolved)
+      : (stateLabel ? chip('pf-c-amber', stateLabel) : linked ? chip('pf-c-gray', 'LINKED')
+        : !change && !draft && !alias && obj(r.linked) && r.linked.active
+          ? chip('pf-c-amber', 'Unavailable')
+          : chip('pf-c-gray', change || draft ? STATUS_TEXT.override : STATUS_TEXT.profile)) + offChip(off);
+    var sumBtn = '<button type="button" class="pf-row-sum" data-pf="row-toggle"' + attr('data-row', 'route:' + key) +
+        ' aria-expanded="' + (open ? 'true' : 'false') + '"' + attr('aria-controls', editId) + '>' +
+        '<span class="pf-row-sum-r">' + esc(r.role) + (r.labelEn && r.labelEn !== r.role ? ' · ' + esc(r.labelEn) : '') + '</span>' +
+        '<span class="pf-row-sum-m">' + sumModel + '</span>' +
+        '<span class="pf-row-sum-o">' + sumOrigin + '</span></button>';
+    return '<div class="pf-route" data-pf-route="' + esc(key) + '">' + sumBtn +
       '<div class="pf-route-id">' + tag(r.section === 'agents' ? 'agent' : 'category') +
-      '<span class="pf-route-ko">' + esc(r.labelKo || r.role) + '</span>' +
+      '<span class="pf-route-ko">' + esc(r.labelEn || r.role) + '</span>' +
       '<span class="pf-route-en">' + esc(r.labelEn || r.role) + '</span>' +
-      (r.stateLabel ? chip('pf-c-amber', r.stateLabel) : '') + offChip(off) + chip('pf-st-' + rec.status, rec.label, rec.official) +
+      (linked ? chip('pf-c-gray', 'LINKED') : '') +
+      (stateLabel ? chip('pf-c-amber', stateLabel) : '') + offChip(off) + chip('pf-st-' + knownStatus(rec.status), rec.label) +
       (rec.official ? '<span class="pf-rec-off">' + esc(rec.official) + '</span>' : '') + '</div>' + fields + '</div>';
   }
   // The role sections of the WinForms routing box (PS:6213-6260) in their fixed order, whatever order the rows arrive in.
-  function routingRows(view, edit, ro) {
+  function routingRows(view, edit, ro, sectionId) {
     var rows = arr(obj(view && view.routing) && view.routing.rows).filter(obj);
     var profile = profileOf(view, shownKeyOf(view, edit));
     var entries = catalogEntries(view);
     var candidates = memoryCandidates(view);
     var html = '';
     ROLE_SECTIONS.forEach(function (sec) {
+      if (sectionId && sec[0] !== sectionId) return;
       var mine = rows.filter(function (r) { return r.section === sec[0]; });
       if (!mine.length) return;
       var order = sec[2].slice();
@@ -845,24 +922,35 @@
       order.forEach(function (group) {
         var list = mine.filter(function (r) { return str(r.group) === group; });
         if (!list.length) return;
+        var rendered = list.map(function (r) { return routeRow(r, profile, entries, candidates, edit, ro); }).join('');
+        var count = (rendered.match(/data-pf-route=/g) || []).length;
+        if (!count) return;
         html += '<section class="pf-group"' + attr('data-flow-sec', sec[0] + ':' + (has(FLOW_GROUP, group) ? FLOW_GROUP[group] : group)) + '>' +
-          '<h4 class="pf-group-h">' + esc(group === 'extras' ? '추가 설정' : str(list[0].groupLabel) || group) +
-          ' <span class="pf-count">' + list.length + '</span></h4>' +
-          list.map(function (r) { return routeRow(r, profile, entries, candidates, edit, ro); }).join('') + '</section>';
+          '<h4 class="pf-group-h">' + esc(group) +
+          ' <span class="pf-count">' + count + '</span></h4>' + rendered + '</section>';
       });
     });
     return html || emptyState('배치할 역할이 없습니다. 프로필 설정을 확인한 뒤 상태를 다시 불러와 주십시오.', edit);
   }
-  function mainModel(view, edit, ro) {
+  function mainValuesOf(view, edit) {
     var pending = mainChangeOf(pendingOf(edit), profileOf(view, shownKeyOf(view, edit)));
-    var busy = !!(edit && edit.busy === true);
     var draft = draftOf(edit, 'main');
     var current = obj(view && view.main) || {};
     var effective = obj(current.effective) || {};
     var override = obj(current.override) || null;
-    var provider = pending ? str(pending.provider) : draft ? str(draft.provider) : str(override && override.provider) || str(effective.provider);
-    var model = pending ? str(pending.model) : draft ? str(draft.model) : str(override && override.model) || str(effective.model);
-    var thinking = pending ? str(pending.thinking) : draft ? str(draft.thinking) : str(override && override.thinking) || str(effective.thinking);
+    return {
+      pending: pending, draft: draft, current: current, effective: effective, override: override,
+      provider: draft ? str(draft.provider) : pending ? str(pending.provider) : str(override && override.provider) || str(effective.provider),
+      model: draft ? str(draft.model) : pending ? str(pending.model) : str(override && override.model) || str(effective.model),
+      thinking: draft ? str(draft.thinking) : pending ? str(pending.thinking) : str(override && override.thinking) || str(effective.thinking)
+    };
+  }
+  function mainModel(view, edit, ro, inlineId) {
+    var values = mainValuesOf(view, edit);
+    var pending = values.pending, draft = values.draft, current = values.current, effective = values.effective, override = values.override;
+    var provider = values.provider, model = values.model, thinking = values.thinking;
+    var busy = !!(edit && edit.busy === true);
+    var prefix = inlineId || 'pf-main';
     var entries = catalogEntries(view);
     var providers = providersOf(entries, provider);
     // WinForms Update-MainThinkingCombo: the effort list holds only the provider-qualified model's levels and shows
@@ -881,15 +969,16 @@
       body = '<span class="pf-main-v">' + valueOrDash(provider) + ' · ' + valueOrDash(model) + ' / ' + valueOrDash(thinking) + '</span>';
     } else {
       body = '<div class="pf-tri" data-pf-main' + attr('data-thinking', thinking) + '>' +
-        labelled(CAPTIONS[0], 'pf-main-provider', providerSelect('main-provider', withId('pf-main-provider', ' data-main="1"'), providers, provider, busy)) +
-        labelled(CAPTIONS[1], 'pf-main-model', mainModelSelect('main-model', withId('pf-main-model', ' data-main="1"'), entries, provider, model, busy)) +
-        labelled(CAPTIONS[2], 'pf-main-thinking', select('main-thinking', withId('pf-main-thinking', ' data-main="1"'),
+        labelled(CAPTIONS[0], prefix + '-provider', providerSelect('main-provider', withId(prefix + '-provider', ' data-main="1"'), providers, provider, busy)) +
+        labelled(CAPTIONS[1], prefix + '-model', mainModelSelect('main-model', withId(prefix + '-model', ' data-main="1"'), entries, provider, model, busy)) +
+        labelled(CAPTIONS[2], prefix + '-thinking', select('main-thinking', withId(prefix + '-thinking', ' data-main="1"'),
           levels ? thinkingOptions(clampedThinking(entry, thinking), false, levels) : thinkingOptions(thinking, true),
           busy || !!off)) +
         '</div>';
     }
+    if (inlineId) return body;
     return '<div class="pf-blk" id="pf-sec-main" data-pf-sec="main" data-flow="main" data-flow-sec="main"><h3 class="pf-blk-h">메인 모델 설정 ' +
-      (override ? chip('pf-c-green', '직접 지정') : chip('pf-c-gray', '프로필 기본')) + offChip(off) + '</h3>' + body + '</div>';
+      (override ? chip('pf-c-green', STATUS_TEXT.override) : chip('pf-c-gray', STATUS_TEXT.profile)) + offChip(off) + '</h3>' + body + '</div>';
   }
 
   function modelLane(view, edit, ro) {
@@ -911,7 +1000,7 @@
     options += '<option value="off"' + (selection === 'off' ? ' selected' : '') + '>끄기 (off)</option>';
     var body = ro
       ? '<div class="pf-lane-ro"><span class="pf-ro-val">' + valueOrDash(selection === 'custom-literal' ? literal : selection) + '</span>' +
-        (selection === 'custom-literal' ? chip('pf-c-amber', '직접 입력') : '') + '</div>'
+        (selection === 'custom-literal' ? chip('pf-c-amber', selection) : '') + '</div>'
       : '<div class="pf-lane" data-pf-lane>' +
         labelled('model_profile', 'pf-lane-select', select('lane-select', withId('pf-lane-select', ' data-lane="1"'), options, busy)) +
         labelled('직접 입력 값', 'pf-lane-literal', textInput('lane-literal', withId('pf-lane-literal', ' data-lane="1"'), literal, busy || selection !== 'custom-literal', '예: custom-literal-id'), 'pf-field-grow') + '</div>';
@@ -985,37 +1074,45 @@
         provider = providerOf(model);
         reasoning = str(m.reasoning);
       }
-      var rowTitle = key === 'kibitzer' ? '공통 / 전체 · Kibitzer 회상' : '공통 / 전체 · Reflection 성찰';
-      var secTitle = key === 'kibitzer' ? '공통 설정 · Kibitzer 회상' : '공통 설정 · Reflection 성찰';
+      var rowTitle = 'shared-memory · ' + (key === 'kibitzer' ? 'Kibitzer' : 'Reflection');
+      var searchChoice = entryOf(choices, '', model);
+      if (!searchMatch(edit, [key, rowTitle, provider, model, searchChoice && searchChoice.alias])) return '';
+      var secTitle = rowTitle;
       var curCat = str(m.category) || 'quick';
       var curModel = str(m.model) || quick.model;
       var curReasoning = str(m.reasoning) || quick.reasoning;
-      var curLine = '현재: ' + curCat + ' · ' + curModel + ' / ' + curReasoning + (m.external || m.unresolved ? ' (외부 / 미해결)' : '');
+      var currentFlags = [];
+      if (m.external) currentFlags.push(STATUS_TEXT.external);
+      if (m.unresolved) currentFlags.push(MEMORY_STATUS_LABEL.unresolved);
+      var curLine = STATUS_TEXT.current + ': ' + curCat + ' · ' + curModel + ' / ' + curReasoning +
+        (currentFlags.length ? ' (' + currentFlags.join(' / ') + ')' : '');
       var rowErr = str(memErrors[key]) || str(m.error);
       var rowSaved = !!(memSaved[key] || m.saved);
       var stateTag = rowErr ? 'failure' : (pending || hasDraft) ? 'pending' : rowSaved ? 'saved' : 'current';
       var pendLine;
       if (rowErr) {
-        pendLine = '실패 · 보류 유지: ' + rowErr;
+        pendLine = STATUS_TEXT.failurePendingRetained + ': ' + rowErr;
       } else if (pending || hasDraft) {
-        pendLine = '보류: ' + (mode === 'quick' ? 'quick 공유' : (model && reasoning ? model + ' / ' + reasoning : '서비스 / 모델 / 추론 강도를 직접 선택하십시오'));
+        pendLine = STATUS_TEXT.pending + ': ' + (mode === 'quick' ? mode : (model && reasoning ? model + ' / ' + reasoning : '서비스 / 모델 / 추론 강도를 직접 선택하십시오'));
       } else if (rowSaved) {
-        pendLine = '보류: 없음 · 저장됨 · 다음 대화부터 반영 (실행 중 대화는 그대로)';
+        pendLine = STATUS_TEXT.pending + ': ' + STATUS_TEXT.none + ' · ' + STATUS_TEXT.saved + ' · 다음 대화부터 반영 (실행 중 대화는 그대로)';
       } else {
-        pendLine = '보류: 없음 · ' + (key === 'kibitzer'
+        pendLine = STATUS_TEXT.pending + ': ' + STATUS_TEXT.none + ' · ' + (key === 'kibitzer'
           ? 'Kibitzer 회상만 변경 · 다른 역할 / 성찰 / Dream / 사실 추출은 그대로'
           : 'Reflection 성찰만 변경 · 다른 역할 / Kibitzer 회상 / Dream / 사실 추출은 그대로');
       }
+      var memId = 'pf-memory-' + slug(key);
+      var memEditId = memId + '-editor';
+      var memOpen = str(edit && edit.openRow) === 'memory:' + key;
       var controls;
       if (ro) {
-        controls = '<span class="pf-ro-val">' + valueOrDash(mode === 'quick' ? 'quick 공유 (기본)' : '직접 선택') + ' · ' +
+        controls = '<span class="pf-ro-val"' + withId(memEditId, boolAttr('hidden', !memOpen)) + '>' + valueOrDash(mode === 'quick' ? 'quick 공유 (기본)' : '직접 선택') + ' · ' +
           valueOrDash(provider) + ' · ' + valueOrDash(model) + (reasoning ? ' / ' + esc(reasoning) : '') + '</span>';
       } else {
-        var memId = 'pf-memory-' + slug(key);
         var dis = busy || mode !== 'custom';
         var on = function (part) { return ' data-memory="' + esc(key) + '"' + attr('data-flow', 'memory:' + key + ':' + part); };
         // WinForms memory row: the mode spans the row, then the three captions over three equal-width selects.
-        controls = '<div class="pf-mem-sels" data-pf-memory="' + esc(key) + '">' +
+        controls = '<div class="pf-mem-sels"' + withId(memEditId, ' data-pf-memory="' + esc(key) + '"' + boolAttr('hidden', !memOpen)) + '>' +
           labelled('모드', memId + '-mode', select('memory-mode', withId(memId + '-mode', on('mode')),
             '<option value="quick"' + (mode === 'quick' ? ' selected' : '') + '>quick 공유 (기본)</option>' +
             '<option value="custom"' + (mode === 'custom' ? ' selected' : '') + '>직접 선택</option>', busy)) +
@@ -1029,14 +1126,21 @@
           '</div></div>';
       }
       var chips = [];
-      if (m.owned) chips.push(chip('pf-c-green', '소유 행'));
-      if (m.external) chips.push(chip('pf-c-amber', '외부 행'));
-      if (m.unresolved) chips.push(chip('pf-c-red', '미해결'));
+      if (m.owned) chips.push(chip('pf-c-green', STATUS_TEXT.owned));
+      if (m.external) chips.push(chip('pf-c-amber', STATUS_TEXT.external));
+      if (m.unresolved) chips.push(chip('pf-c-red', MEMORY_STATUS_LABEL.unresolved));
       var shownChoice = entryOf(choices, '', model);
       if (shownChoice && shownChoice.off) chips.push(offChip(shownChoice.off));
-      if (m.hasDedicated) chips.push(chip('pf-c-gray', '전용 행'));
+      if (m.hasDedicated) chips.push(chip('pf-c-gray', STATUS_TEXT.dedicated));
+      var memSumOrigin = m.unresolved ? chip('pf-c-amber', MEMORY_STATUS_LABEL.skippedUnresolved)
+        : chips.length ? chips.join('') : chip('pf-c-gray', mode);
+      var memSumBtn = '<button type="button" class="pf-row-sum" data-pf="row-toggle"' + attr('data-row', 'memory:' + key) +
+          ' aria-expanded="' + (memOpen ? 'true' : 'false') + '"' + attr('aria-controls', memEditId) + '>' +
+          '<span class="pf-row-sum-r">' + esc(key) + ' · ' + esc(rowTitle) + '</span>' +
+          '<span class="pf-row-sum-m">' + valueOrDash(bareModel(model)) + (str(reasoning) ? ' / ' + esc(reasoning) : '') + '</span>' +
+          '<span class="pf-row-sum-o">' + memSumOrigin + '</span></button>';
       return '<section class="pf-group"' + attr('data-flow-sec', key) + '><h3 class="pf-rh">' + esc(secTitle) + '</h3>' +
-        '<article class="pf-mem-row" data-pf-memory-row="' + esc(key) + '">' +
+        '<article class="pf-mem-row" data-pf-memory-row="' + esc(key) + '">' + memSumBtn +
         '<div class="pf-mem-id"><b>' + esc(rowTitle) + '</b>' +
         '<span class="pf-mem-cat">' + esc(curCat) + '</span>' + chips.join('') + '</div>' + controls +
         '<p class="pf-note pf-mem-cur" data-pf-memory-current="' + esc(key) + '">' + esc(curLine) + '</p>' +
@@ -1078,24 +1182,81 @@
 
   // 권장 배치 가이드 (PS Show-RecommendationGuide :6380) as an in-page dialog over data the state already carries: the
   // guide sources and each shown role's official recommendation. Nothing is fetched.
-  function guideDialog(view) {
-    var rows = arr(obj(view && view.routing) && view.routing.rows).filter(obj).map(function (r) {
-      var rec = recommendationOf(r);
-      return '<tr><td>' + esc(r.labelKo || r.role) + '</td><td>' + valueOrDash(str(r.model) && str(r.model) + (str(r.reasoning) ? ' / ' + str(r.reasoning) : '')) +
-        '</td><td>' + valueOrDash(rec.official) + '</td><td>' + chip('pf-st-' + rec.status, rec.label) + '</td></tr>';
+  function guideDialog(view, edit) {
+    var profile = profileOf(view, shownKeyOf(view, edit));
+    var headers = ['GROUP / ROLE / SCOPE', 'CURRENT', 'HELD', 'RECOMMENDED', 'LINKED', 'EFFECTIVE', 'STATUS'];
+    var rows = arr(obj(view && view.guide) && view.guide.rows).filter(obj).map(function (r) {
+      var current = obj(r.current) || {}, rec = obj(r.recommended) || {}, linked = obj(r.linked) || {};
+      var status = str(rec.status || rec.Status) || 'untracked';
+      var held = pendingOf(edit).filter(function (c) {
+        if (r.group === 'routing') return c.kind === 'setRoute' && c.section === r.section && c.role === r.role && ofProfile(c, profile);
+        if (r.group === 'primary') return c.agentId === r.role ||
+          (r.role === 'sisyphus' && c.kind === 'setMain' && ofProfile(c, profile));
+        if (r.group === 'memory') return c.kind === 'setMemoryRow' && c.row === r.role;
+        return r.group === 'summary' && c.kind === 'setSummarizer';
+      });
+      var name = r.labelEn || (r.group === 'primary' ? idOf(AGENTS, r.role) :
+        r.group === 'memory' ? (r.role === 'kibitzer' ? 'Kibitzer' : 'Reflection') : r.role);
+      var model = str(current.modelId);
+      var effective = linked.active && linked.effective ? linked : current;
+      var linkedText = arr(linked.candidates).join(' → ');
+      var cells = [
+        '<span data-guide-name>' + esc(name) + '</span><code data-guide-role>' + esc(r.role) + '</code>' +
+          '<span data-guide-group>' + esc(r.group) + (r.purposeGroup ? ' / ' + esc(r.purposeGroup) : '') +
+          '</span><code data-guide-scope>' + esc(r.applyScope) + '</code>',
+        '<code>' + valueOrDash(current.alias) + '</code><code>' + valueOrDash(model) + '</code>' +
+          '<span>' + valueOrDash(current.thinking) + '</span>' +
+          (current.origin ? '<span>' + esc(current.origin) + '</span>' : '') +
+          (current.sourceFile ? '<code>' + esc(current.sourceFile) + '</code>' : '') +
+          (current.sourcePath ? '<code>' + esc(current.sourcePath) + '</code>' : '') +
+          (current.reason ? '<span>' + esc(current.reason) + '</span>' : ''),
+        held.length ? held.map(function (c) { return '<code>' + esc(JSON.stringify(c)) + '</code>'; }).join('') : '—',
+        esc(rec.Official || rec.official || '공식 권장 없음'),
+        linkedText ? '<span>' + esc(linkedText) + '</span><span>' +
+          (linked.active ? 'active' : '별칭이 없는 경우 (the case when there is no alias)') + '</span>' +
+          (linked.active ? '<code>' + esc(linked.EffectiveCategory) + ' / ' + esc(linked.EffectiveAlias) + '</code>' : '') : '—',
+        '<code>' + valueOrDash(effective.modelId) + '</code><span>' + valueOrDash(effective.thinking) + '</span>' +
+          '<span>' + esc(effective === linked ? 'LINKED' : current.origin || 'CURRENT') + '</span>',
+        chip('pf-st-' + knownStatus(status), status)
+      ];
+      return '<tr' + attr('data-guide-row', r.id) + attr('data-guide-row-group', r.group) + '>' +
+        cells.map(function (cell, i) {
+          return '<td' + attr('data-guide-field', headers[i]) + '><span class="pf-guide-label" aria-hidden="true">' +
+            headers[i] + '</span><div>' + cell + '</div></td>';
+        }).join('') + '</tr>';
     }).join('');
     return '<dialog class="pf-dlg" id="pf-guide-dlg" aria-labelledby="pf-guide-t"><div class="pf-dlg-h"><b id="pf-guide-t">권장 배치 가이드</b>' +
       button('guide-close', '', ic('x', 'ic-sm') + ' 닫기', false, 'pf-btn') + '</div>' + guide(view) +
-      (rows ? '<table class="pf-rec"><thead><tr><th>역할</th><th>현재</th><th>공식 권장</th><th>상태</th></tr></thead><tbody>' + rows + '</tbody></table>' : '') +
+      (rows ? '<table class="pf-rec"><thead><tr>' + headers.map(function (h) { return '<th scope="col">' + h + '</th>'; }).join('') +
+        '</tr></thead><tbody>' + rows + '</tbody></table>' : '') +
       '</dialog>';
   }
 
   // ---- pending tray, preview diff and apply result -----------------------------------------------------------------
-  function diffRows(preview) {
+  function diffRows(preview, view) {
     var diffs = arr(preview && preview.diffs);
     if (!diffs.length) return emptyNote('바뀌는 파일이 없습니다.');
     return diffs.map(function (d) {
-      var changes = arr(d.changes);
+      // The preview alone reproduced lexical role order. Reorder its display slots by the
+      // existing routing metadata, within each JSON scope; leave the source diff and pending list intact.
+      var changes = arr(d.changes).slice();
+      var roles = arr(obj(view && view.routing) && view.routing.rows);
+      var buckets = Object.create(null);
+      changes.forEach(function (c, i) {
+        var match = /^(.*)\.(agents|categories)\.([^.]+)(?:\.|$)/.exec(str(c.path));
+        if (!match) return;
+        var rank = roles.findIndex(function (r) { return r.section === match[2] && r.role === match[3]; });
+        if (rank < 0) return;
+        var key = match[1] + '.' + match[2];
+        if (!buckets[key]) buckets[key] = [];
+        buckets[key].push({ change: c, index: i, rank: rank });
+      });
+      Object.keys(buckets).forEach(function (key) {
+        var slots = buckets[key].map(function (item) { return item.index; });
+        buckets[key].sort(function (a, b) { return a.rank - b.rank; }).forEach(function (item, i) {
+          changes[slots[i]] = item.change;
+        });
+      });
       return '<details class="pf-diff" open><summary><code>' + esc(d.file) + '</code> <span class="pf-count">' + changes.length + '</span></summary><ul>' +
         changes.map(function (c) {
           return '<li><code class="pf-diff-path">' + esc(c.path) + '</code><span class="pf-diff-b">' + esc(jsonText(c.before)) +
@@ -1115,7 +1276,7 @@
     var preview = obj(edit && edit.preview);
     var result = obj(edit && edit.result);
     // The strip's label follows its state: pending, applied or failed, and a neutral 대기 while nothing is pending.
-    var label = result ? '적용됨' : err || conflict ? '실패' : pending.length ? '보류' : '대기';
+    var label = result ? STATUS_TEXT.applied : err || conflict ? STATUS_TEXT.failure : pending.length ? STATUS_TEXT.pending : STATUS_TEXT.idle;
     var head = ' id="pf-sec-tray" data-pf-sec="tray" data-flow="message" aria-label="메시지">';
     var tail = journalBanner(view, edit, ro) + arr(view && view.warnings).map(function (w) {
       return '<p class="pf-warn">' + ic('info', 'ic-sm') + ' ' + esc(w) + '</p>';
@@ -1135,14 +1296,14 @@
       '<header class="pf-sec-h"><div class="pf-sec-t">' + tag(label) + '<h2>바꿀 값</h2><p class="pf-sec-s">미리보기는 쓰지 않고, 적용만 파일을 씁니다.</p></div>' +
       '<div class="pf-sec-r"><span class="pf-count">' + pending.length + '</span>' +
       (status ? '<span class="pf-chip ' + (conflict ? 'pf-c-red' : result ? 'pf-c-green' : 'pf-c-gray') +
-        '" id="pf-focus-status" tabindex="-1" role="status">' + esc(status) + '</span>' : '') + '</div></header>' +
+        '"' + attr('title', status) + attr('aria-label', status) + ' id="pf-focus-status" tabindex="-1" role="status" aria-labelledby="pf-focus-status">' + esc(status) + '</span>' : '') + '</div></header>' +
       '<div class="pf-sec-b">' + list +
-      (busy ? '<p class="pf-note" role="status">처리 중…</p>' : '') +
+      (busy ? '<p class="pf-note" role="status">' + esc(STATUS_TEXT.processing) + '</p>' : '') +
       (conflict ? '<div class="pf-conflict" role="alert"><b>' + esc(CONFLICT_TEXT) + '</b> ' +
         button('reload', ' aria-label="새로고침"', ic('refresh-cw', 'ic-sm') + ' 새로고침', false, 'pf-btn pf-btn-primary') + '</div>' : '') +
       (err && !conflict ? '<p class="pf-err" role="alert">' + errorHtml(err) + '</p>' : '') +
       (preview ? '<div class="pf-preview" data-pf-preview><p class="pf-preview-h">' + ic('file-text', 'ic-sm') + ' 파일별 차이 <span class="pf-count">' +
-        arr(preview.diffs).length + '</span></p>' + diffRows(preview) +
+        arr(preview.diffs).length + '</span></p>' + diffRows(preview, detailView(view, edit)) +
         arr(preview.warnings).map(function (w) { return '<p class="pf-warn">' + ic('info', 'ic-sm') + ' ' + esc(w) + '</p>'; }).join('') + '</div>' : '') +
       (result ? '<div class="pf-done" data-pf-result="apply"><p class="pf-done-s">백업</p><ul class="pf-backups">' + (arr(result.backups).length ? arr(result.backups).map(function (b) {
           return '<li><code>' + esc(b) + '</code></li>';
@@ -1163,7 +1324,7 @@
     return '<div class="pf-apply" data-flow="apply" data-flow-sec="apply">' +
       button('apply', attr('data-flow', 'apply:detail'), ic('check', 'ic-sm') + ' 이 프로필 적용하기', busy || conflict, 'pf-btn pf-btn-primary') +
       button('preview', '', ic('search', 'ic-sm') + ' 미리보기', busy || conflict, 'pf-btn') +
-      chip(n ? 'pf-c-amber' : 'pf-c-gray', '변경 보류 ' + n + '건') +
+      chip(n ? 'pf-c-amber' : 'pf-c-gray', STATUS_TEXT.pending + ' ' + n) +
       button('clear', '', '모두 버리기', busy || !n, 'pf-btn pf-btn-danger') +
       (edit && edit.confirmClear ? '<div class="pf-clear" role="group" aria-label="대기 변경 버리기 확인"><p>대기 중인 변경을 모두 버릴까요?</p>' +
         button('clear-cancel', ' aria-label="계속 보관"', '계속 보관', busy, 'pf-btn') + ' ' +
@@ -1172,13 +1333,59 @@
 
   // WinForms detail pane (PS:7211-7290) for the shown profile: title, usage, the caption, the role box (its own scroll,
   // like the routing box PS:6172, 7251), then the lane, main, summarizer and apply rows.
+  function routingEditor(v, dv, edit, ro) {
+    var selected = str(edit && edit.tab) || 'primary';
+    var searching = !!str(edit && edit.query).trim();
+    var bodies = {
+      primary: agentRows(dv, edit, ro),
+      agents: routingRows(dv, edit, ro, 'agents'),
+      categories: routingRows(dv, edit, ro, 'categories'),
+      memory: memoryRows(v, edit, ro) + '<p class="pf-note" data-pf-memory-placement>Kibitzer와 Reflection은 Memory 탭에서 설정하며, 모든 프로필에 적용됩니다. ' +
+        'Summary는 탭 밖의 요약 담당 모델(compaction.model)에서 설정합니다. model_profile과 메인 모델 설정 아래에 있는 요약 담당 모델을 고른 뒤 적용하십시오.</p>'
+    };
+    var counts = {};
+    ROUTING_TABS.forEach(function (tab) {
+      counts[tab[0]] = (bodies[tab[0]].match(/data-pf-(?:agent|route|memory-row)=/g) || []).length;
+    });
+    var tabs = ROUTING_TABS.map(function (tab) {
+      var on = tab[0] === selected;
+      return '<button type="button" role="tab" data-pf="tab"' + attr('data-tab', tab[0]) +
+        attr('id', 'pf-tab-' + tab[0]) + attr('aria-controls', 'pf-panel-' + tab[0]) +
+        ' aria-selected="' + on + '" tabindex="' + (on ? '0' : '-1') + '">' +
+        tab[1] + ' <span class="pf-count">' + counts[tab[0]] + '</span></button>';
+    }).join('');
+    // Native Tab follows the same panel order as the rendered tabs and search results.
+    var panels = ROUTING_TABS.map(function (tab) {
+      var id = tab[0];
+      return '<div class="pf-tab-panel pf-groups" role="tabpanel"' + attr('id', 'pf-panel-' + id) +
+        attr('data-pf-panel', id) + attr('aria-labelledby', 'pf-tab-' + id) +
+        boolAttr('hidden', searching ? !counts[id] : id !== selected) + '>' +
+        '<h3 class="pf-search-group"' + boolAttr('hidden', !searching) + '>' + idOf(ROUTING_TABS, id) + '</h3>' +
+        bodies[id] + '</div>';
+    }).join('');
+    return '<div class="pf-routing-tools"><label for="pf-routing-search"><span class="pf-sel-t">역할·모델 검색</span></label>' +
+      '<input type="search" id="pf-routing-search" data-pf="routing-search"' + attr('value', str(edit && edit.query)) +
+      ' placeholder="role / provider / model / alias">' +
+      '<div class="pf-routing-tabs" role="tablist" aria-label="Routing">' + tabs + '</div></div>' +
+      '<div class="pf-tab-panels">' + panels + '</div>' +
+      (searching && !Object.keys(counts).some(function (id) { return counts[id]; }) ? '<p role="status">검색 결과 없음</p>' : '');
+  }
+  function detailView(v, edit) {
+    var detail = obj(v.details && v.details[shownKeyOf(v, edit)]);
+    return Object.assign({}, v, {
+      routing: obj(detail && detail.routing) || obj(v.routing),
+      main: obj(detail && detail.main) || obj(v.main),
+      modelProfile: obj(detail && detail.modelProfile) || obj(v.modelProfile),
+      guide: obj(detail && detail.guide) || obj(v.guide)
+    });
+  }
   function detailPane(v, dv, edit, ro) {
     var key = shownKeyOf(v, edit), p = profileOf(v, key);
-    var title = p ? cardTitle(p) + (p.name && p.name !== p.nameKr ? ' (' + p.name + ')' : '') : key;
+    var title = p ? cardTitle(p) : key;
     return '<section class="pf-sec pf-detail" data-flow="detail"><h2 class="pf-dt">' + esc(title) + '</h2>' +
       (p && p.summary ? '<p class="pf-du">' + summaryText(p.summary) + '</p>' : '') +
       '<p class="pf-cap">모델 라우팅 · 전담 에이전트 / 작업 카테고리 <span class="pf-count">' + arr(obj(dv.routing) && dv.routing.rows).length + '</span></p>' +
-      '<div class="pf-roles" id="pf-sec-routing" data-pf-sec="routing" data-flow="roles">' + memoryRows(v, edit, ro) + routingRows(dv, edit, ro) + '</div>' +
+      '<div class="pf-roles" id="pf-sec-routing" data-pf-sec="routing" data-flow="roles">' + routingEditor(v, dv, edit, ro) + '</div>' +
       modelLane(dv, edit, ro) + mainModel(dv, edit, ro) + summarizer(v, edit, ro) + applyBar(edit, ro) + '</section>';
   }
   // ---- public renderers --------------------------------------------------------------------------------------------
@@ -1196,15 +1403,10 @@
   // The WinForms screen in the board look: status strip, cards | detail over the message strip (one client area, so the
   // strip is a bottom row under both panes, PS:4438), then the board extras.
   function loaded(v, e, ro, stale) {
-    var detail = obj(v.details && v.details[shownKeyOf(v, e)]);
-    var dv = Object.assign({}, v, {
-      routing: obj(detail && detail.routing) || obj(v.routing),
-      main: obj(detail && detail.main) || obj(v.main),
-      modelProfile: obj(detail && detail.modelProfile) || obj(v.modelProfile)
-    });
-    return statusStrip(v, e, ro, stale) + guideDialog(dv) +
+    var dv = detailView(v, e);
+    return statusStrip(v, e, ro, stale) + guideDialog(dv, e) +
       '<div class="pf-panes">' + profileCards(v, e, ro) + detailPane(v, dv, e, ro) + tray(v, e, ro) + '</div>' +
-      agentRows(v, e, ro) + homes(v);
+      homes(v);
   }
 
   function side(view, edit) {
@@ -1221,11 +1423,11 @@
         '<span class="pf-nav-t">' + esc(s[1]) + '</span>' + (count !== '' ? '<span class="pf-count">' + count + '</span>' : '') + '</button>';
     }).join('');
     var loadState = viewState(v, e);
-    var state = loadState === 'loading' ? chip('pf-c-gray', '불러오는 중')
-      : loadState === 'error' ? chip('pf-c-red', '불러오기 실패')
-      : ro ? chip('pf-c-amber', '읽기 전용') : chip('pf-c-green', '편집 가능');
+    var state = loadState === 'loading' ? chip('pf-c-gray', loadState)
+      : loadState === 'error' ? chip('pf-c-red', loadState)
+      : ro ? chip('pf-c-amber', STATUS_TEXT.readOnly) : chip('pf-c-green', STATUS_TEXT.editable);
     return '<div class="pf-nav" data-pf-side>' + emptyNote('섹션 이동', 'pf-nav-h') +
-      '<div class="pf-nav-state">' + state + (pending ? chip('pf-c-amber', '변경 보류 ' + pending + '건') : '') + '</div>' +
+      '<div class="pf-nav-state">' + state + (pending ? chip('pf-c-amber', STATUS_TEXT.pending + ' ' + pending) : '') + '</div>' +
       nav +
       (e.conflict ? '<p class="pf-nav-warn">' + esc(CONFLICT_TEXT) + '</p>' : '') +
       (e.error && !e.conflict ? '<p class="pf-nav-warn">' + errorHtml(e.error) + '</p>' : '') +
@@ -1238,7 +1440,7 @@
     var fetchFn = opt.fetch;
     var tokenFn = opt.token;
     var notify = typeof opt.onChange === 'function' ? opt.onChange : function () {};
-    var s = { view: null, shown: '', pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false, agentsOpen: false };
+    var s = { view: null, shown: '', pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false, openRow: '', tab: 'primary', query: '' };
     var seq = 0;
 
     function snapshot() {
@@ -1248,7 +1450,7 @@
         memoryErrors: copyMap(s.memoryErrors), memorySaved: copyMap(s.memorySaved),
         preview: s.preview, conflict: s.conflict, error: s.error, errorKind: s.errorKind,
         status: s.status, result: s.result, loading: s.loading, busy: s.busy, confirmClear: s.confirmClear,
-        agentsOpen: s.agentsOpen
+        openRow: s.openRow, tab: s.tab, query: s.query
       };
     }
     function changed() { notify(snapshot()); }
@@ -1306,7 +1508,7 @@
           s.errorKind = '';
           // A successful state read is the 409 recovery: the stale conflict and its banner are gone.
           s.conflict = false;
-          if (s.status === '다른 곳에서 바뀜') s.status = '';
+          if (s.status === STATUS_TEXT.conflict) s.status = '';
           changed();
           return snapshot();
         });
@@ -1510,7 +1712,7 @@
         rosterRevision: num(obj(s.view && s.view.roster) && s.view.roster.revision) || 0
       };
       s.busy = true; s.preview = null; s.result = null; s.conflict = false; s.error = ''; s.errorKind = ''; s.confirmClear = false;
-      s.status = reapply ? '다시 적용 중…' : action === 'preview' ? '미리보기 중…' : '적용 중…';
+      s.status = reapply ? STATUS_TEXT.reapplying : action === 'preview' ? STATUS_TEXT.previewing : STATUS_TEXT.applying;
       changed();
       var request;
       try {
@@ -1530,7 +1732,7 @@
         s.busy = false;
         if (res.status === 200 && json && json.ok === true) {
           if (action === 'preview') {
-            s.preview = json; s.status = '미리보기 준비됨'; s.conflict = false; s.error = ''; s.errorKind = '';
+            s.preview = json; s.status = STATUS_TEXT.previewReady; s.conflict = false; s.error = ''; s.errorKind = '';
             changed();
             return snapshot();
           }
@@ -1546,16 +1748,16 @@
             s.pending = s.pending.filter(function (c) { return !sentSet.has(c); });
             s.draft = map();
           }
-          s.status = reapply ? '다시 적용했습니다' : '적용했습니다';
+          s.status = reapply ? STATUS_TEXT.reapplied : STATUS_TEXT.applied;
           changed();
           return load().then(function () { return snapshot(); });
         }
         if (res.status === 409) {
-          s.conflict = true; s.status = '다른 곳에서 바뀜'; s.error = CONFLICT_TEXT; s.errorKind = 'conflict';
+          s.conflict = true; s.status = STATUS_TEXT.conflict; s.error = CONFLICT_TEXT; s.errorKind = 'conflict';
           changed();
           return snapshot();
         }
-        s.status = '실패';
+        s.status = STATUS_TEXT.failure;
         s.errorKind = 'server';
         s.error = (json && (str(json.message) || str(json.code))) || ('HTTP ' + res.status + ' - 다시 시도해 주십시오.');
         var memInList = list.filter(function (c) { return c && c.kind === 'setMemoryRow'; });
@@ -1572,7 +1774,7 @@
         return snapshot();
       }).catch(function (err) {
         s.busy = false;
-        s.status = '실패';
+        s.status = STATUS_TEXT.failure;
         if (g.console && g.console.warn) g.console.warn('[profiles] send failed', err);
         s.errorKind = 'network';
         s.error = '보내지 못했습니다. 네트워크 연결을 확인한 뒤 다시 시도해 주십시오.';
@@ -1594,6 +1796,19 @@
       removeKind: removeKind,
       removeRoute: removeRoute,
       removeMemoryRow: removeMemoryRow,
+      selectTab: function (tab) {
+        if (!ROUTING_TABS.some(function (t) { return t[0] === tab; })) return snapshot();
+        s.tab = tab;
+        changed();
+        return snapshot();
+      },
+      search: function (query) {
+        s.query = str(query);
+        if (s.openRow && s.view && routingEditor(s.view, detailView(s.view, s), s, readonly(s.view, s))
+          .indexOf('data-row="' + esc(s.openRow) + '"') < 0) s.openRow = '';
+        changed();
+        return snapshot();
+      },
       show: function (profileKey) {
         if (s.busy) return snapshot();
         // A main, lane or role draft is the shown profile's row in the making. WinForms rebuilds the rows and the
@@ -1606,8 +1821,12 @@
         changed();
         return snapshot();
       },
-      // The DOM already shows the toggle; the next render keeps it, so no notification is needed.
-      agentsOpen: function (on) { s.agentsOpen = on === true; return snapshot(); },
+      openRow: function (rowKey) {
+        var k = str(rowKey);
+        s.openRow = s.openRow === k ? '' : k;
+        changed();
+        return snapshot();
+      },
       preview: function (profileKey) { return send('preview', null, { profileKey: profileKey }); },
       apply: function (profileKey) { return send('apply', null, { profileKey: profileKey }); },
       reapply: function () {
@@ -1616,7 +1835,7 @@
         var payload = obj(journal && journal.reapply);
         var changes = arr(payload && payload.changes);
         if (!changes.length) {
-          s.status = '실패'; s.error = '다시 적용할 변경 기록이 없습니다.'; changed();
+          s.status = STATUS_TEXT.failure; s.error = '다시 적용할 변경 기록이 없습니다.'; changed();
           return Promise.resolve(snapshot());
         }
         return send('apply', changes, { reapply: true });
@@ -1663,14 +1882,40 @@
       // older response's pending/draft reset.
       if (c.snapshot().busy && ['select-profile', 'apply-card', 'reset-memory', 'preview', 'apply', 'reapply',
         'clear', 'clear-cancel', 'clear-confirm', 'drop', 'reload-state'].indexOf(act) >= 0) return;
-      if (act === 'guide-open' || (act === 'jump' && t.getAttribute('data-target') === 'guide')) {
+      if (act === 'tab') {
+        var tab = str(t.getAttribute('data-tab'));
+        c.selectTab(tab);
+        var tabTarget = root.querySelector('#pf-tab-' + tab);
+        if (tabTarget && typeof tabTarget.focus === 'function') tabTarget.focus({ preventScroll: true });
+      } else if (act === 'row-toggle' || act === 'row-close') {
+        var rowKey = str(t.getAttribute('data-row'));
+        if (!rowKey) {
+          var rBox = t.closest('[data-pf-route]');
+          var mBox = t.closest('[data-pf-memory-row]');
+          rowKey = rBox ? 'route:' + str(rBox.getAttribute('data-pf-route')) : mBox ? 'memory:' + str(mBox.getAttribute('data-pf-memory-row')) : '';
+        }
+        var wasOpen = str(c.snapshot().openRow) === rowKey;
+        c.openRow(act === 'row-close' ? '' : rowKey);
+        if (wasOpen || act === 'row-close') {
+          var sumTarget = root.querySelector('.pf-row-sum[data-row="' + rowKey + '"]');
+          if (sumTarget && typeof sumTarget.focus === 'function') sumTarget.focus({ preventScroll: true });
+        }
+      } else if (act === 'guide-open' || (act === 'jump' && t.getAttribute('data-target') === 'guide')) {
         var guideBox = root.querySelector('#pf-guide-dlg');
         if (guideBox && typeof guideBox.showModal === 'function' && !guideBox.open) guideBox.showModal();
       } else if (act === 'guide-close') {
         var openBox = root.querySelector('#pf-guide-dlg');
         if (openBox && typeof openBox.close === 'function') openBox.close();
+        var guideCall = root.querySelector('[data-pf="guide-open"]');
+        if (guideCall && typeof guideCall.focus === 'function') guideCall.focus({ preventScroll: true });
       } else if (act === 'jump') {
-        var id = 'pf-sec-' + str(t.getAttribute('data-target'));
+        var target = str(t.getAttribute('data-target'));
+        var jumpTab = { routing: 'agents', memory: 'memory', agents: 'primary' }[target];
+        if (jumpTab) {
+          if (c.snapshot().query) c.search('');
+          c.selectTab(jumpTab);
+        }
+        var id = 'pf-sec-' + target;
         var doc = root.ownerDocument;
         var el = doc && typeof doc.getElementById === 'function' ? doc.getElementById(id) : null;
         if (!el && doc && typeof doc.querySelector === 'function') el = doc.querySelector('#' + id);
@@ -1715,6 +1960,11 @@
     }
     function onInput(ev) {
       var t = ev && ev.target;
+      if (t && t.getAttribute('data-pf') === 'routing-search') {
+        var searchController = controller();
+        if (searchController) searchController.search(str(t.value));
+        return;
+      }
       if (!t || t.getAttribute('data-pf') !== 'lane-literal') return;
       var c = controller();
       if (!c || c.snapshot().busy) return;
@@ -1749,10 +1999,15 @@
       if (act === 'agent-lane') {
         c.setDraft('agent:' + t.getAttribute('data-agent'), { lane: t.value });
         c.add({ kind: 'setAgentLane', agentId: t.getAttribute('data-agent'), lane: t.value });
+      } else if (act === 'agent-provider') {
+        var providerAgent = t.getAttribute('data-agent');
+        c.setDraft('agent:' + providerAgent, { provider: str(t.value), pin: '', thinking: '' });
+        c.add({ kind: 'setAgentPin', agentId: providerAgent, pin: null });
       } else if (act === 'agent-pin') {
         var agentId = t.getAttribute('data-agent');
         var value = str(t.value);
         var thinking = rowValue(t, '[data-pf-agent]', '[data-pf="agent-pin-thinking"]') || 'medium';
+        if (agentId === 'hephaestus' && value && value.slice(value.indexOf('|') + 1).indexOf('gpt-') !== 0) return;
         c.setDraft('agent:' + agentId, { pin: value, thinking: thinking });
         if (!value) c.add({ kind: 'setAgentPin', agentId: agentId, pin: null });
         else {
@@ -1766,6 +2021,8 @@
         var pinValue = rowValue(t, '[data-pf-agent]', '[data-pf="agent-pin"]');
         if (pinValue) {
           var cutAt = pinValue.indexOf('|');
+          if (agent === 'hephaestus' && pinValue.slice(cutAt + 1).indexOf('gpt-') !== 0) return;
+          c.setDraft('agent:' + agent, { thinking: str(t.value) });
           if (cutAt > 0) c.add({ kind: 'setAgentPin', agentId: agent, pin: { provider: pinValue.slice(0, cutAt), modelId: pinValue.slice(cutAt + 1), thinking: t.value } });
         }
       } else if (act === 'route-provider' || act === 'route-model' || act === 'route-thinking') {
@@ -1949,15 +2206,47 @@
         });
       };
     }
-    function onToggle(ev) {
-      var t = ev && ev.target;
-      var c = t && t.id === 'pf-sec-agents' ? controller() : null;
-      if (c) c.agentsOpen(t.open === true);
-    }
     // Keys 1-6 show cards 1-6 like WinForms (PS:7382-7395, Must have 9): only while the card buttons are on screen and
     // enabled, never from a text or select control, with a modifier, during an IME composition or behind the guide.
     function onKey(ev) {
       if (!ev || ev.defaultPrevented || ev.isComposing || ev.keyCode === 229) return;
+      var keyTarget = ev.target;
+      var keyController = controller();
+      // The read-only guide has one tab stop. Keep Tab and Shift+Tab on it
+      // rather than letting the browser move focus to the document body.
+      var openGuide = root.querySelector('#pf-guide-dlg[open]');
+      if (openGuide && ev.key === 'Tab' && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+        ev.preventDefault();
+        openGuide.querySelector('[data-pf="guide-close"]').focus();
+        return;
+      }
+      if (keyTarget && keyTarget.getAttribute && keyTarget.getAttribute('data-pf') === 'tab' &&
+          !ev.ctrlKey && !ev.altKey && !ev.metaKey && /^(ArrowLeft|ArrowRight|ArrowUp|ArrowDown|Home|End)$/.test(str(ev.key))) {
+        var index = ROUTING_TABS.map(function (t) { return t[0]; }).indexOf(keyTarget.getAttribute('data-tab'));
+        index = ev.key === 'Home' ? 0 : ev.key === 'End' ? ROUTING_TABS.length - 1 :
+          (index + (/Left|Up/.test(ev.key) ? -1 : 1) + ROUTING_TABS.length) % ROUTING_TABS.length;
+        if (typeof ev.preventDefault === 'function') ev.preventDefault();
+        keyController.selectTab(ROUTING_TABS[index][0]);
+        var nextTab = root.querySelector('#pf-tab-' + ROUTING_TABS[index][0]);
+        if (nextTab && typeof nextTab.focus === 'function') nextTab.focus({ preventScroll: true });
+        return;
+      }
+      if (str(ev.key) === 'Escape') {
+        if (keyController && keyController.snapshot().query && !root.querySelector('#pf-guide-dlg[open]')) {
+          if (typeof ev.preventDefault === 'function') ev.preventDefault();
+          keyController.search('');
+          return;
+        }
+        var cEsc = controller();
+        var curRow = cEsc ? str(cEsc.snapshot().openRow) : '';
+        if (curRow && !root.querySelector('#pf-guide-dlg[open]')) {
+          if (typeof ev.preventDefault === 'function') ev.preventDefault();
+          cEsc.openRow('');
+          var sumBtn = root.querySelector('.pf-row-sum[data-row="' + curRow + '"]');
+          if (sumBtn && typeof sumBtn.focus === 'function') sumBtn.focus({ preventScroll: true });
+          return;
+        }
+      }
       if (ev.ctrlKey || ev.altKey || ev.metaKey || ev.shiftKey || !/^[1-6]$/.test(str(ev.key))) return;
       var t = ev.target;
       if (t && (t.isContentEditable || (typeof t.closest === 'function' && t.closest('input,select,textarea,[contenteditable]')))) return;
@@ -1976,15 +2265,20 @@
     var doc = root.ownerDocument;
     var click = keepScroll(onClick), change = keepScroll(onChange), input = keepScroll(onInput), keydown = keepScroll(onKey);
     root.addEventListener('click', click);
+    function guideClosed(ev) {
+      if (!ev.target || ev.target.id !== 'pf-guide-dlg') return;
+      var call = root.querySelector('[data-pf="guide-open"]');
+      if (call && typeof call.focus === 'function') call.focus({ preventScroll: true });
+    }
+    root.addEventListener('close', guideClosed, true);
     root.addEventListener('change', change);
     root.addEventListener('input', input);
-    root.addEventListener('toggle', onToggle, true);
     if (doc && typeof doc.addEventListener === 'function') doc.addEventListener('keydown', keydown);
     return function unbind() {
       root.removeEventListener('click', click);
+      root.removeEventListener('close', guideClosed, true);
       root.removeEventListener('change', change);
       root.removeEventListener('input', input);
-      root.removeEventListener('toggle', onToggle, true);
       if (doc && typeof doc.removeEventListener === 'function') doc.removeEventListener('keydown', keydown);
     };
   }

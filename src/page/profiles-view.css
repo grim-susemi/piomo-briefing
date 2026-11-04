@@ -2,7 +2,7 @@
  * Tokens.css owns every colour and every 4 px step; this sheet only names tokens. The layout is a dense
  * card wall on a wide screen and one column on a phone. No style attributes are written by the renderer. */
 .pf {
-  max-width: 1220px;
+  max-width: none;
   padding: var(--sp-4) var(--sp-4) var(--sp-12);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -12,25 +12,28 @@
 }
 .pf-head {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
+  flex-wrap: nowrap;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
   min-width: 0;
-  padding: 0 0 var(--sp-2);
+  padding: 0 0 var(--sp-1);
   border-bottom: var(--hair) solid var(--c-line);
 }
-.pf-head-l { min-width: 0; }
-.pf-head-r { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); min-width: 0; max-width: 100%; }
-.pf-kicker {
-  margin: 0;
-  color: var(--c-fg-3);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  letter-spacing: .04em;
+.pf-head-l { min-width: 0; display: flex; align-items: center; gap: var(--sp-2); }
+.pf-head-r { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); min-width: 0; flex: 0 0 auto; }
+.pf-kicker, .pf-sub {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
-.pf-title { margin: 2px 0 0; font-size: var(--fs-2xl); line-height: 1.25; }
-.pf-sub { margin: var(--sp-1) 0 0; max-width: 64ch; color: var(--c-fg-2); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: break-word; }
+.pf-title { margin: 0; font-size: var(--fs-xl); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pf-keep { white-space: nowrap; }
 .pf-active { color: var(--c-fg-2); font-size: var(--fs-sm); font-weight: var(--fw-medium); }
 
@@ -279,6 +282,20 @@
   background: var(--c-main);
 }
 .pf-agent-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); min-width: 0; }
+.pf-agent.pf-route { display: block; padding: 0; border: 0; border-radius: var(--r-md); }
+.pf-agent-editor { display: grid; gap: var(--sp-2); padding: var(--sp-2); min-width: 0; }
+.pf-agent-editor[hidden] { display: none; }
+.pf-routing-tools { padding: var(--sp-2) var(--sp-2) 0; min-width: 0; }
+.pf-routing-tools > label { display: block; font-size: var(--fs-sm); margin-bottom: var(--sp-1); }
+.pf-routing-tools > input { box-sizing: border-box; width: 100%; min-width: 0; }
+.pf-routing-tabs { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-2); }
+.pf-routing-tabs [role="tab"] { cursor: pointer; color: inherit; background: transparent; border: 1px solid var(--c-line); border-radius: 4px; padding: 5px 8px; }
+.pf-routing-tabs [aria-selected="true"] { background: var(--fill-sel); font-weight: var(--fw-medium); border-color: currentColor; }
+.pf-routing-tabs [role="tab"]:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.pf-tab-panels { display: flex; flex-direction: column; }
+.pf-tab-panel[hidden], .pf-search-group[hidden] { display: none; }
+.pf-search-group { margin: var(--sp-2) 0; }
+.pf-agent-fields { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 2fr); gap: var(--sp-2); }
 .pf-pin-sels { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .8fr); gap: var(--sp-1); align-items: start; }
 .pf-mem-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; }
 .pf-mem-line .pf-ro-val { flex: 1 1 auto; }
@@ -356,15 +373,30 @@
  * pushed out of the pane's view and lane, main, summarizer and apply stay one short scroll away */
 .pf-roles {
   display: grid;
+  container: roles / inline-size;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  scrollbar-width: thin;
+  scroll-margin-top: calc(var(--bar-h) + var(--hit));
   align-content: start;
   gap: var(--sp-2);
   height: clamp(200px, calc(100cqh - 88px), 560px);
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: var(--sp-2);
+  padding: 0;
   border: var(--hair) solid var(--c-line);
   border-radius: var(--r-lg);
   background: var(--c-sunk);
+}
+.pf-groups { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; min-width: 0; }
+.pf-groups > .pf-rh,
+.pf-groups > .pf-search-group,
+.pf-groups > .pf-mems,
+.pf-group[data-flow-sec="primary"],
+.pf-group:has(.pf-row-sum[aria-expanded="true"]) { grid-column: 1 / -1; }
+.pf-groups > .pf-mems { display: contents; }
+@container roles (min-width: 612px) {
+  .pf-groups { grid-template-columns: 300px 300px; }
 }
 .pf-rh { margin: var(--sp-1) 0 0; font-size: var(--fs-sm); line-height: 1.4; }
 .pf-tri { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-1); }
@@ -381,7 +413,8 @@
 .pf-chev { color: var(--c-fg-3); transition: transform var(--dur) var(--ease-out); }
 .pf-agents-card:not([open]) > summary .pf-chev { transform: rotate(-90deg); }
 .pf-dlg {
-  width: min(860px, calc(100vw - 32px));
+  width: min(1180px, calc(100vw - 32px));
+  box-sizing: border-box;
   max-height: calc(100vh - 64px);
   padding: var(--sp-4);
   border: var(--hair) solid var(--c-line);
@@ -392,8 +425,13 @@
 }
 .pf-dlg::backdrop { background: var(--c-shadow-strong); }
 .pf-dlg-h { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-3); }
-.pf-rec { width: 100%; margin-top: var(--sp-3); border-collapse: collapse; font-size: var(--fs-xs); }
+.pf-rec { width: 100%; table-layout: fixed; margin-top: var(--sp-3); border-collapse: collapse; font-size: var(--fs-xs); }
 .pf-rec th, .pf-rec td { padding: var(--sp-1) var(--sp-2); border-bottom: var(--hair) solid var(--c-line-soft); text-align: left; overflow-wrap: anywhere; }
+.pf-rec td { vertical-align: top; }
+.pf-rec td > div { display: grid; gap: var(--sp-1); min-width: 0; }
+.pf-rec .pf-chip { max-width: 100%; white-space: normal; }
+.pf-rec tr[data-guide-row-group="memory"], .pf-rec tr[data-guide-row-group="summary"] { background: var(--c-main); }
+.pf-guide-label { display: none; }
 
 /* profiles: one card per row; the main button fills the card, 적용 sits beside it at the bottom right */
 .pf-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
@@ -423,27 +461,24 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-card.on { border-color: var(--c-green); background: var(--c-green-tint); box-shadow: inset 0 0 0 1px var(--c-green); }
 /* the right gutters keep text clear of 적용 중 (top) and 적용 (bottom); the cards header stays on one line so two cards
  * and their 적용 sit above the fold at 1180x700 */
-.pf-card-top { padding-right: 64px; }
+.pf-card:has(> .pf-current) .pf-card-top { padding-right: 64px; }
 .pf-card-main, .pf-card-svc { padding-right: 48px; }
 .pf-card > .pf-current { position: absolute; top: var(--sp-2); right: var(--sp-3); }
 .pf-card-apply { position: absolute; right: var(--sp-3); bottom: var(--sp-2); padding: 2px var(--sp-2); }
 #pf-sec-profiles .pf-sec-t { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); }
 .pf-current .ic { width: 12px; height: 12px; }
-.pf-card-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); }
+.pf-card-top { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: var(--sp-1) var(--sp-2); }
 .pf-card-num { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); }
 .pf-card-name { font-weight: var(--fw-semibold); }
 .pf-card-en { color: var(--c-fg-3); font-size: var(--fs-xs); }
 .pf-card-tag { margin-top: 2px; }
 .pf-card-sum {
-  display: -webkit-box;
+  display: block;
   margin-top: 2px;
-  overflow: hidden;
   color: var(--c-fg-2);
   font-size: var(--fs-sm);
   word-break: keep-all;
   overflow-wrap: break-word;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 .pf-card-main, .pf-card-svc { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
 .pf-card-main { margin-top: var(--sp-1); }
@@ -455,7 +490,57 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-group-h { display: flex; align-items: baseline; gap: var(--sp-2); margin: 0; color: var(--c-fg-2); font-size: var(--fs-sm); }
 .pf-routes { display: grid; gap: var(--sp-1); }
 .pf-route { display: grid; gap: 2px; min-width: 0; padding: var(--sp-1) var(--sp-2); border-radius: var(--r-md); background: var(--c-main); }
+.pf-route:has(> .pf-row-sum[aria-expanded="false"]),
+.pf-mem-row:has(> .pf-row-sum[aria-expanded="false"]) {
+  padding: 0;
+  gap: 0;
+}
+.pf-route:has(> .pf-row-sum[aria-expanded="false"]) > .pf-route-id,
+.pf-mem-row:has(> .pf-row-sum[aria-expanded="false"]) > .pf-mem-id,
+.pf-mem-row:has(> .pf-row-sum[aria-expanded="false"]) > .pf-note {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.pf-row-sum {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  min-width: 0;
+  min-height: var(--ctl-h);
+  height: 28px;
+  max-height: 32px;
+  padding: 2px var(--sp-2);
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--c-fg);
+  font: inherit;
+  font-size: var(--fs-xs);
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+}
+.pf-row-sum[hidden], .pf-tri[hidden], .pf-mem-sels[hidden], .pf-ro-val[hidden] { display: none; }
+.pf-row-sum:hover:not(:disabled) { background: var(--fill-hover); }
+.pf-row-sum:active:not(:disabled) { background: var(--fill-press); }
+.pf-row-sum-r { font-weight: var(--fw-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pf-row-sum-m { font-family: var(--font-mono); color: var(--c-fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 auto; }
+.pf-row-sum:has([data-pf-saved]) { height: auto; }
+.pf-row-sum [data-pf-saved] { display: block; font-size: var(--fs-2xs); line-height: 1; overflow: hidden; text-overflow: ellipsis; }
+.pf-row-sum-o { display: inline-flex; align-items: center; gap: var(--sp-1); flex: 0 1 auto; min-width: 0; max-width: 45%; }
+.pf-row-sum-o > .pf-chip { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .pf-route-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1); min-width: 0; }
+.pf-route-id > * { min-width: 0; max-width: 100%; }
+.pf-route-id > .pf-chip { display: inline-block; overflow: hidden; text-overflow: ellipsis; }
 .pf-route-ko { font-weight: var(--fw-medium); }
 .pf-route-en { color: var(--c-fg-3); font-size: var(--fs-xs); overflow-wrap: anywhere; }
 .pf-rec-off { color: var(--c-fg-3); font-size: var(--fs-2xs); overflow-wrap: anywhere; }
@@ -569,11 +654,17 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
   .pf-skel-pin { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 899px) {
+  .pf-routing-tools > input, .pf-routing-tabs [role="tab"] { min-height: var(--hit); }
   .pf-panes { grid-template-columns: minmax(0, 1fr); }
   .pf-detail { position: static; max-height: none; overflow: visible; }
   .pf-roles { height: auto; overflow: visible; }
 }
 @media (max-width: 760px) {
+  .pf-rec, .pf-rec tbody, .pf-rec tr, .pf-rec td { display: block; width: auto; }
+  .pf-rec thead { display: none; }
+  .pf-rec tr { margin-bottom: var(--sp-3); border: var(--hair) solid var(--c-line); border-radius: var(--r-md); }
+  .pf-rec td { min-width: 0; }
+  .pf-guide-label { display: block; font-weight: var(--fw-semibold); margin-bottom: var(--sp-1); }
   .pf { padding: var(--sp-3) var(--sp-2) var(--sp-8); }
   .pf-agent { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .pf-agent-id { grid-column: 1 / -1; }
@@ -587,9 +678,13 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
   .pf-sec-b { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
 }
 @media (max-width: 599px) {
+  .pf-agent-fields { grid-template-columns: minmax(0, 1fr); }
   /* Phone visual-qa D1: the shell's 44 px target (shell.css 322-328, tokens.css --hit).
    * Desktop keeps the 28 px board density in --ctl-h; only the phone raises the local token. */
   .pf { --ctl-h: var(--hit); }
+  .pf-row-sum { flex-wrap: wrap; height: auto; max-height: none; }
+  .pf-row-sum-o { flex: 1 1 100%; flex-wrap: wrap; max-width: 100%; }
+  .pf-row-sum-o > .pf-chip { flex-shrink: 0; max-width: 100%; }
   .pf-agent { grid-template-columns: minmax(0, 1fr); align-items: start; }
   .pf-pin-sels, .pf-tri { grid-template-columns: minmax(0, 1fr); }
   .pf-nav-b, .pf-diff summary { min-height: var(--hit); }

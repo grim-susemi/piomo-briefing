@@ -23,6 +23,9 @@ import { launch, listProfilePids, isPidAlive, watchCsp, axSnapshot, unnamedInter
 import { createBoardServer } from '../src/server.mjs';
 import { pageHtml } from '../src/render.mjs';
 import { formatJsonText, openProfilesStore } from '../src/profiles/store.mjs';
+import { checkF8, comparisonSections, comparisonSteps, requireF8 } from './flow-map-f8.mjs';
+import { measurePurposeGrid } from './profiles-grid.mjs';
+import { RAW_NAME_COPY, RAW_CONDITIONAL_NAME_COPY, RAW_STATUS_COPY } from './profiles-copy.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const GOLDEN = path.join(ROOT, 'test/fixtures/profiles/goldens/apply-gpt-kimi-deepseek/files');
@@ -50,10 +53,10 @@ const STATIC_COPY = ['현재 전역 적용', '전역 적용 중', '권장 배치
   '탐색 · 자료 조사', '계획 · 조언', '검토 · QA', '작업 카테고리 · Categories', '빠른 작업 · 일반 작업', '심층 추론', '전문 작업',
   '메인 모델 설정', '요약 담당 모델', '이 프로필 적용하기', '1. 구독 서비스', '2. AI 모델', '3. 추론 강도',
   '공통 / 전체 · Kibitzer 회상', '공통 / 전체 · Reflection 성찰', 'quick 공유 (기본)', '직접 선택', '현재: ', '보류: ',
-  '1. 제공사', '원본 기본 컴팩션'];
+  '1. 제공사', '원본 기본 컴팩션'].map(copy => RAW_NAME_COPY[copy] || RAW_STATUS_COPY[copy] || copy);
 // Shown only in states the three tasks do not reach (no extra roles in the shared fixture, no refused memory apply);
 // the node test 'layout: every Must have 4 string is on the board word for word' renders them.
-const CONDITIONAL_COPY = ['추가 설정', '실패 · 보류 유지: '];
+const CONDITIONAL_COPY = ['추가 설정', '실패 · 보류 유지: '].map(copy => RAW_CONDITIONAL_NAME_COPY[copy] || RAW_STATUS_COPY[copy] || copy);
 
 const argv = process.argv.slice(2);
 const arg = (name, fallback = '') => {
@@ -117,11 +120,11 @@ const FLOW_LIB = `(() => {
   const REGIONS = ${JSON.stringify(REGIONS)};
   const box = (r, ox, oy) => ({ x: Math.round(r.left + ox), y: Math.round(r.top + oy), w: Math.round(r.width), h: Math.round(r.height) });
   const q = (id) => document.querySelector('[data-flow="' + id + '"]');
-  const scrollers = (el) => {
+  const scrollers = (el, includeUnfilled = false) => {
     const out = [];
     for (let n = el.parentElement; n; n = n.parentElement) {
       const cs = getComputedStyle(n);
-      if (/(auto|scroll)/.test(cs.overflowY) && n.scrollHeight > n.clientHeight + 1) out.push(n);
+      if (/(auto|scroll)/.test(cs.overflowY) && (includeUnfilled || n.scrollHeight > n.clientHeight + 1)) out.push(n);
     }
     const se = document.scrollingElement;
     if (se && se.scrollHeight > se.clientHeight + 1 && !out.includes(se)) out.push(se);
@@ -136,7 +139,9 @@ const FLOW_LIB = `(() => {
     return null;
   };
   const contentBox = (el) => {
-    const sc = scrollers(el)[0];
+    // overflow:auto establishes the coordinate frame even before content fills it.
+    // Grid reflow must not switch a row between detail and role coordinates halfway through a cascade.
+    const sc = scrollers(el, true)[0];
     const r = el.getBoundingClientRect();
     if (!sc || sc === document.scrollingElement) return box(r, window.scrollX, window.scrollY);
     const c = sc.getBoundingClientRect();
@@ -149,6 +154,25 @@ const FLOW_LIB = `(() => {
   });
   const options = (el) => [...el.querySelectorAll('option')].map((o) => ({ value: o.value, text: o.textContent }));
   const snap = () => window.BriefPage && window.BriefPage.state.ui.profilesState;
+  const prepare = (id) => {
+    let el = q(id);
+    if (!el) return {};
+    const panel = el.closest('[data-pf-panel]');
+    const tabId = panel && panel.getAttribute('data-pf-panel');
+    let tab = tabId && document.querySelector('[role="tab"][data-tab="' + tabId + '"]');
+    if (tab && tab.getAttribute('aria-selected') !== 'true') tab.click();
+    el = q(id);
+    let row = el && el.closest('[data-pf-route], [data-pf-memory-row]');
+    const sum = row && row.querySelector('.pf-row-sum[aria-expanded="false"]');
+    if (sum) sum.click();
+    el = q(id);
+    row = el && el.closest('[data-pf-route], [data-pf-memory-row]');
+    tab = tabId && document.querySelector('[role="tab"][data-tab="' + tabId + '"]');
+    return {
+      tab: { id: tabId, selected: !!tab && tab.getAttribute('aria-selected') === 'true' },
+      row: { expanded: !!(row && row.querySelector('.pf-row-sum[aria-expanded="true"]')) }
+    };
+  };
   window.__flow = {
     frame() {
       const side = document.querySelector('.sh-side'), rail = document.querySelector('.sh-rail'), shell = document.querySelector('.sh-shell');
@@ -171,15 +195,29 @@ const FLOW_LIB = `(() => {
         sections: [...document.querySelectorAll('[data-flow="roles"] [data-flow-sec]')].map((el) => [el.getAttribute('data-flow-sec'), h(el)]) };
     },
     rows() {
-      const route = document.querySelector('[data-pf-route="agents/explore"]');
-      const mem = document.querySelector('[data-pf-memory="kibitzer"]');
+      const rolePreparation = prepare('role:agents/explore:service');
+      let route = document.querySelector('[data-pf-route="agents/explore"]');
+      const routeSum = route && route.querySelector('.pf-row-sum[aria-expanded="false"]');
+      if (routeSum) { routeSum.click(); route = document.querySelector('[data-pf-route="agents/explore"]'); }
+      const widths = route ? [...route.querySelectorAll('select')].map((s) => Math.round(s.getBoundingClientRect().width)) : [];
+      const role = { captions: route ? captions(route) : [], selects: widths.length, widths, recommendationOnLabelLine: !!(route && route.querySelector('.pf-route-id [class*="pf-st-"]')) };
+      const routeClose = route && route.querySelector('.pf-row-sum[aria-expanded="true"]');
+      if (routeClose) routeClose.click();
+      const memoryPreparation = prepare('memory:kibitzer:mode');
+      let mem = document.querySelector('[data-pf-memory="kibitzer"]');
+      const memRow = mem && mem.closest('[data-pf-memory-row]');
+      const memSum = memRow && memRow.querySelector('.pf-row-sum[aria-expanded="false"]');
+      if (memSum) { memSum.click(); mem = document.querySelector('[data-pf-memory="kibitzer"]'); }
+      const memory = { modes: mem ? options(mem.querySelector('[data-pf="memory-mode"]')).map((o) => o.text) : [], captions: mem ? captions(mem).slice(1) : [],
+        lines: ['current', 'pending'].map((k) => { const p = document.querySelector('[data-pf-memory-' + k + '="kibitzer"]'); return p ? (p.textContent.match(/^[^:]+: /) || [''])[0] : ''; }) };
+      const memClose = document.querySelector('[data-pf-memory-row="kibitzer"] .pf-row-sum[aria-expanded="true"]');
+      if (memClose) memClose.click();
       const sum = document.querySelector('[data-pf-sum]');
       const main = document.querySelector('[data-pf-main]');
-      const widths = route ? [...route.querySelectorAll('select')].map((s) => Math.round(s.getBoundingClientRect().width)) : [];
       return {
-        role: { captions: route ? captions(route) : [], selects: widths.length, widths, recommendationOnLabelLine: !!(route && route.querySelector('.pf-route-id [class*="pf-st-"]')) },
-        memory: { modes: mem ? options(mem.querySelector('[data-pf="memory-mode"]')).map((o) => o.text) : [], captions: mem ? captions(mem).slice(1) : [],
-          lines: ['current', 'pending'].map((k) => { const p = document.querySelector('[data-pf-memory-' + k + '="kibitzer"]'); return p ? p.textContent.slice(0, 4) : ''; }) },
+        role,
+        memory,
+        preparation: { role: rolePreparation, memory: memoryPreparation },
         summarizer: { firstItem: sum ? options(sum.querySelector('[data-pf="summarizer-provider"]'))[0].text : '', captions: sum ? captions(sum) : [], effort: sum ? sum.querySelectorAll('select').length > 2 : null },
         main: { captions: main ? captions(main) : [] },
       };
@@ -187,14 +225,18 @@ const FLOW_LIB = `(() => {
     copy(list) { const t = text(); return list.filter((s) => !t.includes(s)); },
     heading() { const h = document.querySelector('.pf-title'); return h ? h.textContent : ''; },
     reach(id) {
-      const el = q(id);
+      const preparation = prepare(id);
+      let el = q(id);
       if (!el) return { missing: true };
+      const row = el.closest('[data-pf-route], [data-pf-memory-row]');
+      const sum = row && row.querySelector('.pf-row-sum[aria-expanded="false"]');
+      if (sum) { sum.click(); el = q(id); }
       const list = scrollers(el);
       const before = list.map((n) => n.scrollTop);
       el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
       const moved = list.map((n, i) => ({ container: nameOf(n), px: Math.abs(n.scrollTop - before[i]), visible: n.clientHeight }));
       const r = el.getBoundingClientRect();
-      return { region: regionOf(el), box: contentBox(el), view: box(r, 0, 0), disabled: !!el.disabled,
+      return { preparation, region: regionOf(el), box: contentBox(el), view: box(r, 0, 0), disabled: !!el.disabled,
         scrolls: moved.reduce((s, m) => s + (m.px ? Math.ceil(m.px / m.visible) : 0), 0), moved: moved.filter((m) => m.px) };
     },
     visible(id) {
@@ -352,7 +394,7 @@ async function perform(page, id, posts, log) {
       levels: model ? await page.eval(`window.__flow.levels(${JSON.stringify(model)})`) : null };
   }
   log.push({ control: id, ...done });
-  return { control: id, region: step.region, box: step.box, scrolls: step.scrolls, view: step.view, moved: step.moved, disabled: step.disabled, hit, live, result: done };
+  return { control: id, preparation: step.preparation, region: step.region, box: step.box, scrolls: step.scrolls, view: step.view, moved: step.moved, disabled: step.disabled, hit, live, result: done };
 }
 
 const rel = (a, b, tol) => {
@@ -365,9 +407,9 @@ function diff(board, ref, rules, size) {
   const out = {};
   const add = (rule, detail) => { (out[rule].differences ||= []).push(detail); };
   for (const id of Object.keys(rules.rules)) out[id] = { name: rules.rules[id].name, differences: [] };
-  if (JSON.stringify(board.sections) !== JSON.stringify(ref.sections)) add('F1', { expected: ref.sections, actual: board.sections });
+  if (JSON.stringify(comparisonSections(board.sections)) !== JSON.stringify(ref.sections)) add('F1', { expected: ref.sections, actual: comparisonSections(board.sections) });
   for (const task of Object.keys(ref.tasks)) {
-    const want = ref.tasks[task], got = board.tasks[task] || [];
+    const want = ref.tasks[task], got = comparisonSteps(board.tasks[task] || []);
     const ids = (list) => list.filter((s) => !s.missing).map((s) => s.control);
     // A step counts only when it worked: present, enabled, and an apply that the store accepted.
     const failed = (s) => s.missing || s.disabled || (s.result && s.result.ok === false);
@@ -399,6 +441,7 @@ function diff(board, ref, rules, size) {
     }
   }
   const rows = board.rows;
+  for (const detail of checkF8(board, ref)) add('F8', detail);
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   if (!same(rows.role.captions, ref.rows.role.captions)) add('F6', { row: 'role', expected: ref.rows.role.captions, actual: rows.role.captions });
   if (rows.role.selects !== 3 || Math.max(...rows.role.widths) - Math.min(...rows.role.widths) > 1) add('F6', { row: 'role', expected: 'three equal-width selects', actual: rows.role.widths });
@@ -406,7 +449,8 @@ function diff(board, ref, rules, size) {
   if (!same(rows.main.captions, ref.rows.role.captions)) add('F6', { row: 'main', expected: ref.rows.role.captions, actual: rows.main.captions });
   if (!same(rows.memory.modes, ref.rows.memory.modes)) add('F6', { row: 'memory', expected: ref.rows.memory.modes, actual: rows.memory.modes });
   if (!same(rows.memory.captions, ref.rows.role.captions)) add('F6', { row: 'memory', expected: ref.rows.role.captions, actual: rows.memory.captions });
-  if (!same(rows.memory.lines, ['현재: ', '보류: '])) add('F6', { row: 'memory', expected: ['현재: ', '보류: '], actual: rows.memory.lines });
+  const memoryStatusPrefixes = ['현재: ', '보류: '].map(copy => RAW_STATUS_COPY[copy] || copy);
+  if (!same(rows.memory.lines, memoryStatusPrefixes)) add('F6', { row: 'memory', expected: memoryStatusPrefixes, actual: rows.memory.lines });
   if (rows.summarizer.firstItem !== ref.rows.summarizer.firstItem) add('F6', { row: 'summarizer', expected: ref.rows.summarizer.firstItem, actual: rows.summarizer.firstItem });
   if (!same(rows.summarizer.captions, ['1. 제공사', '2. AI 모델']) || rows.summarizer.effort) add('F6', { row: 'summarizer', expected: ['1. 제공사', '2. AI 모델'], actual: rows.summarizer });
   for (const miss of board.copy.missing) add('F6', { copy: miss, expected: 'present word for word', actual: 'missing' });
@@ -443,6 +487,7 @@ function diff(board, ref, rules, size) {
 async function main() {
   const reference = JSON.parse(fs.readFileSync(REFERENCE, 'utf8'));
   const rules = JSON.parse(fs.readFileSync(RULES, 'utf8'));
+  requireF8(rules);
   const allow = JSON.parse(fs.readFileSync(AX_ALLOWLIST, 'utf8'));
   const tempRoot = path.join(os.tmpdir(), 'omo-switcher-tests', 'flow-map-' + Date.now().toString(36));
   assertFixtureRoot(tempRoot);
@@ -468,6 +513,7 @@ async function main() {
             map.regions = await page.eval(`window.__flow.regions()`);
             map.sections = await page.eval(`window.__flow.sections()`);
             map.layout = await page.eval(`window.__flow.layout()`);
+            map.purposeGrid = await measurePurposeGrid(page);
             await page.screenshot(path.join(OUT, `screen-${size.name}.png`));
             map.rows = await page.eval(`window.__flow.rows()`);
             map.copy = { missing: await page.eval(`window.__flow.copy(${JSON.stringify(STATIC_COPY)})`), conditional: CONDITIONAL_COPY };
@@ -494,11 +540,11 @@ async function main() {
             }
             if (task === 'role' && id.endsWith(':effort')) {
               const heading = await page.eval(`window.__flow.heading()`);
-              if (!/ · 변경 보류 \d+건$/.test(heading)) map.copy.missing.push(' · 변경 보류 N건');
+              if (!/ · pending \d+$/.test(heading)) map.copy.missing.push(RAW_STATUS_COPY[' · 변경 보류 1건'].replace('1', 'N'));
             }
           }
           if (task === 'memory') {
-            const missing = await page.eval(`window.__flow.copy(['저장됨 · 다음 대화부터 반영'])`);
+            const missing = await page.eval(`window.__flow.copy(${JSON.stringify([RAW_STATUS_COPY['저장됨 · 다음 대화부터 반영']])})`);
             map.copy.missing.push(...missing);
           }
           map.tasks[task] = steps;

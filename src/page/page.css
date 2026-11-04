@@ -15,7 +15,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: var(--fs-base)/
 button { font: inherit; color: inherit; cursor: pointer; }
 code { font-family: var(--mono); font-size: var(--fs-sm); }
 .app { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 100vh; }
-.main { padding: 12px 18px 40px; max-width: 1100px; }
+.main { padding: 12px 18px 40px; max-width: none; }
 .sum { margin-bottom: var(--sp-3); }
 .sumline { margin: 0; font-weight: var(--fw-semibold); font-size: var(--fs-md); }
 .note { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-sm); }
@@ -197,3 +197,22 @@ h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
   .oq-b { display: block; min-width: 0; }
   .oq-b code { word-break: keep-all; }
 }
+
+
+/* 2026-11-04: 개요가 세로 7만 px까지 늘어나던 문제 — 프로젝트 헤더 고정 + 세션별 접기. */
+.overview > .projh { position: sticky; top: 0; z-index: 2; background: var(--bg, Canvas); padding-top: 4px; }
+.overview > .sess { border-top: 1px solid var(--line, rgba(128,128,128,.25)); }
+.overview > .sess > .sessh { display: flex; align-items: center; gap: 8px; padding: 8px 4px; cursor: pointer; font-weight: 600; list-style: none; }
+.overview > .sess > .sessh::-webkit-details-marker { display: none; }
+.overview > .sess > .sessh::before { content: '\25B8'; flex: none; opacity: .7; }
+.overview > .sess[open] > .sessh::before { content: '\25BE'; }
+.overview .sessh-w { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overview .sessh-b { flex: none; font-size: var(--fs-xs, 12px); padding: 1px 6px; border-radius: 999px; background: rgba(128,128,128,.18); }
+.overview .sessh-bad { color: #c33; }
+
+.overview > .proj { border-top: 1px solid var(--line, rgba(128,128,128,.25)); }
+.overview > .proj > .projh { display: flex; align-items: center; gap: 8px; padding: 8px 4px; cursor: pointer; list-style: none; font-weight: 700; position: sticky; top: 0; z-index: 2; background: var(--bg, Canvas); }
+.overview > .proj > .projh::-webkit-details-marker { display: none; }
+.overview > .proj > .projh::before { content: '\25B8'; flex: none; opacity: .7; }
+.overview > .proj[open] > .projh::before { content: '\25BE'; }
+.overview > .proj > .sess:first-of-type { border-top: 0; }

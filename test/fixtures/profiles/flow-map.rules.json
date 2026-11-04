@@ -37,6 +37,19 @@
       "name": "Region relations at both sizes",
       "description": "Region relations at both sizes: status above cards and detail; cards left of detail (with the sidebar docked at 1180x700); guide at the right end of status; apply below the role box inside detail; message below cards and detail",
       "check": "region_relations"
+    },
+    "F8": {
+      "name": "Board routing navigation",
+      "description": "Open rows before select reads; exclude row-open and tab clicks from WinForms steps and board-only Primary from F1; preserve memory document order; measure purpose grid columns, full spans, equal topmost selects, native Tab/search order and zero horizontal scroll",
+      "check": "board_navigation",
+      "checks": [
+        "row-open-excluded-from-steps",
+        "row-open-before-selects",
+        "tab-click-excluded-from-steps",
+        "primary-excluded-from-F1",
+        "memory-document-order",
+        "purpose-group-grid-navigation"
+      ]
     }
   }
 }

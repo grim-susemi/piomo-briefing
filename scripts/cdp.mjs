@@ -7,12 +7,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
+import net from 'node:net';
 
 export const CHROME = process.env.OMO_CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const LAUNCH_TIMEOUT_MS = 20000;
 const CALL_TIMEOUT_MS = 15000;
 const EXIT_TIMEOUT_MS = 10000;
 const TASKKILL_TIMEOUT_MS = 5000;
+
+function traceChrome(event, data) {
+  if (process.env.OMO_CDP_TRACE) console.log('CDP_LIFECYCLE ' + JSON.stringify({ event, ...data }));
+}
 
 function withTimeout(promise, ms, what) {
   let t;
@@ -23,7 +28,7 @@ function withTimeout(promise, ms, what) {
 // Windows needs taskkill to take the child tree down; the wait is bounded by TASKKILL_TIMEOUT_MS.
 export function killProcessTree(pid, { platform = process.platform, run = spawnSync } = {}) {
   if (platform !== 'win32') return;
-  run('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore', timeout: TASKKILL_TIMEOUT_MS, killSignal: 'SIGKILL' });
+  return run('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore', timeout: TASKKILL_TIMEOUT_MS, killSignal: 'SIGKILL' });
 }
 
 export function isPidAlive(pid) {
@@ -43,7 +48,7 @@ export function listProfilePids(profileDir) {
   return result.stdout.trim().split(/\s+/).filter(Boolean).map(Number);
 }
 
-export async function closeChromeProcess({ proc, profileDir, deps = {} }) {
+export async function closeChromeProcess({ proc, profileDir, port, deps = {} }) {
   const kill = deps.killProcessTree ?? killProcessTree;
   const list = deps.listProfilePids ?? listProfilePids;
   const rm = deps.rm ?? fs.promises.rm;
@@ -52,8 +57,13 @@ export async function closeChromeProcess({ proc, profileDir, deps = {} }) {
     let onExit;
     const exited = new Promise((resolve) => { onExit = resolve; proc.once('exit', onExit); });
     try {
-      await kill(proc.pid);
-      if (process.platform !== 'win32') proc.kill('SIGKILL');
+      const report = await kill(proc.pid);
+      // taskkill may time out or return before termination. Use the native child
+      // handle when it is still alive, then await its actual exit event.
+      const nativeKill = process.platform !== 'win32' || (report && isPidAlive(proc.pid));
+      if (nativeKill) proc.kill('SIGKILL');
+      traceChrome('kill', { pid: proc.pid, profileDir, status: report?.status,
+        error: report?.error?.code, nativeKill: !!nativeKill });
       proc.stderr?.destroy();
       await withTimeout(exited, EXIT_TIMEOUT_MS, 'Chrome exit');
     } catch (e) {
@@ -68,12 +78,51 @@ export async function closeChromeProcess({ proc, profileDir, deps = {} }) {
   let pids = [];
   try {
     pids = await list(profileDir);
-    for (const pid of pids) await kill(pid);
+    for (const pid of pids) {
+      await kill(pid);
+      if (isPidAlive(pid)) {
+        try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+      }
+    }
+    const alive = pids.filter(isPidAlive);
+    if (alive.length && process.platform === 'win32') {
+      // These descendants are not Node children, so wait on their OS process
+      // handles instead of checking liveness immediately after termination.
+      const command = `@(Get-Process -Id @(${alive.join(',')}) -ErrorAction SilentlyContinue) | Wait-Process -Timeout ${EXIT_TIMEOUT_MS / 1000} -ErrorAction Stop`;
+      const waiter = spawn('powershell', ['-NoProfile', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')], {
+        windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let stderr = '';
+      waiter.stderr.on('data', data => { stderr += data; });
+      try {
+        await withTimeout(new Promise((resolve, reject) => {
+          waiter.once('error', reject);
+          waiter.once('exit', code => code === 0 ? resolve() : reject(new Error(`Chrome descendant wait failed: ${stderr}`)));
+        }), EXIT_TIMEOUT_MS, 'Chrome descendants exit');
+      } finally {
+        if (waiter.exitCode === null && waiter.signalCode === null) waiter.kill('SIGKILL');
+        waiter.stderr.destroy();
+      }
+    }
   } catch (e) {
     errors.push(e);
   }
   for (const pid of new Set([proc?.pid, ...pids].filter(Boolean))) {
     if (isPidAlive(pid)) errors.push(new Error(`Chrome pid ${pid} still alive for ${profileDir}`));
+  }
+  if (port) {
+    const socket = net.createConnection({ host: '127.0.0.1', port });
+    try {
+      const listening = await withTimeout(new Promise((resolve, reject) => {
+        socket.once('connect', () => resolve(true));
+        socket.once('error', error => error.code === 'ECONNREFUSED' ? resolve(false) : reject(error));
+      }), CALL_TIMEOUT_MS, 'Chrome port probe');
+      if (listening) errors.push(new Error(`Chrome port ${port} still listening for ${profileDir}`));
+    } catch (error) {
+      errors.push(error);
+    } finally {
+      socket.destroy();
+    }
   }
   try {
     await rm(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
@@ -81,6 +130,9 @@ export async function closeChromeProcess({ proc, profileDir, deps = {} }) {
   } catch (e) {
     errors.push(new Error(`could not remove temp profile: ${profileDir}`, { cause: e }));
   }
+  traceChrome('closed', { pid: proc?.pid, profileDir, port,
+    alive: [...new Set([proc?.pid, ...pids].filter(Boolean))].filter(isPidAlive),
+    profileExists: fs.existsSync(profileDir), errors: errors.map(error => error.message) });
   if (errors.length === 1) throw errors[0];
   if (errors.length) throw new AggregateError(errors, `Chrome cleanup failed for ${profileDir}: ${errors.map((e) => e.message).join('; ')}`);
 }
@@ -157,7 +209,7 @@ export async function launch({ width = 1440, height = 900, extraArgs = [], chrom
     `--window-size=${width},${height}`, '--no-first-run', '--no-default-browser-check',
     '--disable-extensions', '--disable-background-networking', ...extraArgs, 'about:blank',
   ];
-  let proc, browserWs, pageWs;
+  let proc, browserWs, pageWs, port;
   try {
     proc = spawn(chrome, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
     // Chrome publishes the browser endpoint on stderr. Subscribe before it can emit; no file polling.
@@ -183,7 +235,8 @@ export async function launch({ width = 1440, height = 900, extraArgs = [], chrom
       lines.close();
       proc.stderr.resume();
     }
-    const port = Number(new URL(endpoint).port);
+    port = Number(new URL(endpoint).port);
+    traceChrome('launched', { pid: proc.pid, profileDir, port });
     browserWs = await connect(endpoint);
     const browser = new Client(browserWs);
     // Create the page by protocol request instead of polling /json/list for a target.
@@ -195,7 +248,7 @@ export async function launch({ width = 1440, height = 900, extraArgs = [], chrom
     await c.send('Runtime.enable');
     await c.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
 
-    let closed = false;
+    let closing;
     const page = {
       pid: proc.pid, profileDir, port, client: c,
       async goto(url) {
@@ -221,10 +274,11 @@ export async function launch({ width = 1440, height = 900, extraArgs = [], chrom
         await c.send('Page.addScriptToEvaluateOnNewDocument', { source });
       },
       async close() {
-        if (closed) return;
-        pageWs.close();
-        await closeChromeProcess({ proc, profileDir });
-        closed = true;
+        if (!closing) closing = (async () => {
+          pageWs.close();
+          await closeChromeProcess({ proc, profileDir, port });
+        })();
+        return closing;
       },
     };
     return page;
@@ -232,7 +286,7 @@ export async function launch({ width = 1440, height = 900, extraArgs = [], chrom
     pageWs?.close();
     browserWs?.close();
     try {
-      await closeChromeProcess({ proc, profileDir });
+      await closeChromeProcess({ proc, profileDir, port });
     } catch (cleanupError) {
       throw new AggregateError([e, cleanupError], 'Chrome launch and cleanup failed');
     }

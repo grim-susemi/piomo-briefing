@@ -121,6 +121,11 @@ test('select on one home writes only inside that home', (t) => {
   assert.ok(result.writes.every((id) => !id.startsWith('stable/')));
   assert.notEqual(hashFile(path.join(fx.home, 'omo.jsonc')), omoBefore);
   assert.equal(hashFile(fx.sentinel), sentinelBefore);
+  const roster = JSON.parse(fs.readFileSync(path.join(fx.home, 'agent', 'primary-agents', 'roster.json'), 'utf8'));
+  assert.equal(roster.revision, 1);
+  assert.equal(roster.agents.sisyphus.rev, 1);
+  assert.equal(roster.agents.sisyphus.pin, null);
+  assert.equal(roster.agents.hephaestus.rev, 0);
 });
 
 test('a memory row change lands in the primary omo.jsonc and never in a stable copy', (t) => {
@@ -132,6 +137,51 @@ test('a memory row change lands in the primary omo.jsonc and never in a stable c
   assert.equal(result.ok, true, result.message);
   assert.deepEqual(result.writes, ['omo.jsonc']);
   assert.notEqual(hashFile(path.join(fx.home, 'omo.jsonc')), omoBefore);
+});
+
+test('external memory selector is a separate unproven stored value and never a write target', (t) => {
+  const fx = makeSameHome(t);
+  const selector = path.join(fx.home, 'memory-model-selection.json');
+  fs.writeFileSync(selector, '{"modelAlias":"selector-only-alias","note":"keep these bytes"}\n');
+  const before = hashFile(selector);
+  const targetIds = fx.store.targetIds();
+  assert.deepEqual(targetIds, [
+    'omo.jsonc', 'agent/settings.json', 'agent/models.json',
+    'runtime/native-profile-switcher-main.json', 'native-profile-selection.json',
+    'agent/native-profile-selection.json', 'agent/primary-agents/roster.json',
+  ]);
+  const state = fx.store.state();
+  assert.equal(state.memory.externalSelector.storedValue, 'selector-only-alias');
+  assert.equal(state.memory.externalSelector.runtimeEffect, 'unproven');
+  assert.match(state.memory.externalSelector.label, /별도 저장값.*미입증/);
+  assert.notEqual(state.memory.kibitzer.category, state.memory.externalSelector.storedValue);
+  assert.equal(Object.hasOwn(state.memory.externalSelector, 'category'), false);
+  const result = fx.store.apply(body('apply', [
+    { kind: 'setMemoryRow', row: 'kibitzer', mode: 'custom', model: 'alibaba-token-plan/MiniMax-M2.5', reasoning: 'low', profileKey: 'gpt-deepseek' },
+    { kind: 'setSummarizer', modelId: 'openai/gpt-6-sol' },
+  ], fx.store));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.writes.sort(), ['agent/settings.json', 'omo.jsonc']);
+  assert.deepEqual(fx.store.targetIds(), targetIds);
+  assert.equal(hashFile(selector), before);
+  assert.equal(fx.store.state().memory.externalSelector.storedValue, 'selector-only-alias');
+  assert.equal(fx.store.state().memory.externalSelector.runtimeEffect, 'unproven');
+});
+
+test('a missing or malformed external selector remains explained and never changes the category', (t) => {
+  const fx = makeSameHome(t);
+  const before = fx.store.state().memory.kibitzer;
+  assert.equal(fx.store.state().memory.externalSelector.reason, 'missing-selector');
+  const selector = path.join(fx.home, 'memory-model-selection.json');
+  for (const text of ['null', '{"modelAlias":42}', '{broken']) {
+    fs.writeFileSync(selector, text);
+    const state = fx.store.state();
+    assert.equal(state.memory.externalSelector.storedValue, null);
+    assert.equal(state.memory.externalSelector.runtimeEffect, 'unproven');
+    assert.match(state.memory.externalSelector.reason, /invalid-selector|unreadable-selector/);
+    assert.deepEqual(state.memory.kibitzer, before);
+    assert.equal(fs.readFileSync(selector, 'utf8'), text);
+  }
 });
 
 test('every spelling of the app home is refused as the primary root, before any fs access', () => {

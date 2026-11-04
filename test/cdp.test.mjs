@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import net from 'node:net';
 import { closeChromeProcess, isPidAlive, killProcessTree } from '../scripts/cdp.mjs';
 
 const fixture = new URL('./fixtures/cdp/fake-chrome.mjs', import.meta.url);
@@ -114,4 +115,47 @@ test('Chrome cleanup rejects with the profile path when an unlisted process hold
   });
   assert.equal(isPidAlive(holder.pid), true, 'an unlisted process is not killed');
   assert.equal(fs.existsSync(profileDir), true);
+});
+
+for (const report of [
+  { name: 'timed-out taskkill', result: { status: null, error: Object.assign(new Error('taskkill deadline'), { code: 'ETIMEDOUT' }) } },
+  { name: 'taskkill returns before native exit', result: { status: 0 } },
+]) {
+  test(`Chrome cleanup awaits native exit after ${report.name}`, { timeout: 25000 }, async (t) => {
+    const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-cdp-test-'));
+    const proc = fork(fixture, ['hold', profileDir], {
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'], windowsHide: true,
+    });
+    t.after(async () => {
+      await stop(proc);
+      await fs.promises.rm(profileDir, { recursive: true, force: true });
+    });
+    await once(proc, 'message', bounded());
+    let nativeExit = false;
+    proc.once('exit', () => { nativeExit = true; });
+    await closeChromeProcess({
+      proc, profileDir,
+      deps: {
+        killProcessTree: () => report.result,
+        listProfilePids: () => [],
+        rm: fs.promises.rm,
+      },
+    });
+    assert.equal(nativeExit, true, 'cleanup observed the real child exit event');
+    assert.equal(isPidAlive(proc.pid), false);
+    assert.equal(fs.existsSync(profileDir), false);
+  });
+}
+
+test('Chrome cleanup rejects a surviving DevTools listener', async (t) => {
+  const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-cdp-test-'));
+  const server = net.createServer(socket => socket.end());
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const port = server.address().port;
+  await assert.rejects(closeChromeProcess({
+    profileDir, port, deps: { listProfilePids: () => [] },
+  }), new RegExp(`Chrome port ${port} still listening`));
+  assert.equal(fs.existsSync(profileDir), false);
 });

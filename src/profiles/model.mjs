@@ -2154,7 +2154,7 @@ export function expandLayerRoles({ catalog, layer }) {
           const candidateAlias = source.categories?.[category]?.model ?? '';
           if (!candidateAlias) continue;
           const resolved = catalog?.[candidateAlias];
-          if (!resolved?.model) continue;
+          if (typeof resolved?.model !== 'string' || !resolved.model.trim()) continue;
           effectiveAlias = candidateAlias;
           effectiveCategory = category;
           break;
