@@ -139,6 +139,26 @@ test('search: role ids, Korean and English names, providers, model ids and alias
   assert.deepEqual(e.errors, []);
 });
 
+test('search: matching opened rows stay open until excluded in every section', async () => {
+  const e = await openProfilesPage();
+  const root = e.byId.main;
+  for (const key of ['primary/hephaestus', 'agents/explore', 'categories/quick', 'memory/kibitzer']) {
+    e.fire(root.querySelector('[data-row="' + key + '"]'), 'click');
+    let search = root.querySelector('#pf-route-search');
+    search.value = key.split('/')[1];
+    e.fire(search, 'input');
+    assert.equal(e.page.state.ui.profilesState.openRow, key, 'matching row remains open: ' + key);
+    search = root.querySelector('#pf-route-search');
+    search.value = 'no matching role anywhere';
+    e.fire(search, 'input');
+    assert.equal(e.page.state.ui.profilesState.openRow, null, 'excluded row closes: ' + key);
+    search = root.querySelector('#pf-route-search');
+    search.value = '';
+    e.fire(search, 'input');
+  }
+  assert.deepEqual(e.errors, []);
+});
+
 test('search: hiding a pending row preserves pending counts and the tray byte for byte', async () => {
   const e = await openProfilesPage();
   const root = e.byId.main;
@@ -153,6 +173,11 @@ test('search: hiding a pending row preserves pending counts and the tray byte fo
   search.value = 'no matching role anywhere';
   e.fire(search, 'input');
   assert.equal(root.querySelector('[data-pf-route="agents/explore"]').hasAttribute('hidden'), true);
+  assert.equal(e.page.state.ui.profilesState.openRow, null, 'search closes the excluded open row');
+  assert.equal(root.querySelector('[data-row="agents/explore"]').getAttribute('aria-expanded'), 'false');
+  search.value = '';
+  e.fire(search, 'input');
+  assert.equal(e.page.state.ui.profilesState.openRow, null, 'clearing search does not reopen the excluded row');
   assert.deepEqual(plain(e.page.state.ui.profilesState.pending), before);
   assert.equal(root.querySelector('.pf-tray').innerHTML, tray);
   assert.match(root.querySelector('.pf-title').textContent, /변경 보류 1건/);
@@ -2641,7 +2666,7 @@ test('page wiring: the cards panel keeps its scroll when a card is shown by clic
 // Review A round 2, D3: a staged change grows the message strip. The strip is a bottom row under both panes, so after
 // the owner's scroll the detail's 이 프로필 적용하기, the role effort select and the row's drop are each the topmost
 // element where they are clicked. Real Chrome over the fixture state; the board has no profiles write route.
-test('layout: with one pending change the message strip covers neither 이 프로필 적용하기, the effort select nor the drop (Chrome, 1180x700 and 1600x900)', { timeout: 90000 }, async () => {
+test('layout: routing remains usable at 900x600 and the pending strip covers no controls (Chrome)', { timeout: 90000 }, async () => {
   const vm = JSON.parse(read('test/fixtures/view-model-board.json'));
   const token = 'profiles-view-geometry';
   const server = createBoardServer({ portBase: 49880 + (process.pid % 25) * 8, portCount: 8, generation: 7, token,
@@ -2662,7 +2687,7 @@ test('layout: with one pending change the message strip covers neither 이 프�
   try {
     page = await launch({ width: 1180, height: 700 });
     profileDir = page.profileDir;
-    for (const [width, height] of [[1180, 700], [1600, 900]]) {
+    for (const [width, height] of [[900, 600], [1100, 700], [1101, 700], [1180, 700], [1440, 900], [1600, 900]]) {
       await page.client.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
       await page.goto(`http://127.0.0.1:${port}/`);
       await until(`document.querySelector('[data-sh="view"][data-key="profiles"]')`, 'board shell');
@@ -2670,8 +2695,43 @@ test('layout: with one pending change the message strip covers neither 이 프�
         await page.eval(`(document.querySelector('.sh-topen').click(), true)`);
         await until(`document.querySelector('.sh-shell').getAttribute('data-side') === 'open'`, 'docked sidebar');
       }
+      await page.eval(`(document.querySelector('[data-sh="view"][data-key="home"]').click(), true)`);
+      await until(`document.querySelector('details.proj') && document.querySelector('details.sess')`, 'overview disclosures');
+      // IS-8 pins the accepted installed generation, superseding the plan's blanket zero-minimum amendment.
+      // Its table token is 54rem at a 16px root; the existing max-width:1100px override includes 1100px.
+      const carried = await page.eval(`(() => {
+        const main = document.createElement('div'), root = document.createElement('div'), table = document.createElement('table');
+        main.className = 'main'; root.className = 'mcards-root'; table.className = 'mcards-table';
+        root.append(table); document.body.append(main, root);
+        const result = {
+          rootFontSize: getComputedStyle(document.documentElement).fontSize,
+          tableMin: getComputedStyle(table).minWidth,
+          mainMax: getComputedStyle(main).maxWidth,
+          cardsMax: getComputedStyle(root).maxWidth,
+          projects: document.querySelectorAll('details.proj').length,
+          sessions: document.querySelectorAll('details.sess').length
+        };
+        main.remove(); root.remove(); return result;
+      })()`);
+      assert.equal(carried.rootFontSize, '16px', 'IS-8: 54rem derives from the accepted root size');
+      assert.equal(carried.tableMin, width <= 1100 ? '0px' : '864px', 'IS-8: accepted table minimum at ' + width);
+      assert.equal(carried.mainMax, 'none', 'IS-8: legacy main stays uncapped');
+      assert.equal(carried.cardsMax, 'none', 'IS-8: card root stays uncapped');
+      assert.ok(carried.projects > 0 && carried.sessions > 0, 'IS-8: overview keeps project and session disclosures');
       await page.eval(`(document.querySelector('[data-sh="view"][data-key="profiles"]').click(), true)`);
       await until(`document.querySelector('[data-pf-root][data-pf-state="view"] [data-flow="apply:detail"]')`, 'profiles view');
+      await painted();
+      assert.equal(await page.eval(`getComputedStyle(document.querySelector('.pf')).maxWidth`), 'none', 'IS-8: profiles stay uncapped');
+      if (width === 900) {
+        const primary = await page.eval(`(() => {
+          const pane = document.querySelector('.pf-roles').getBoundingClientRect();
+          return [...document.querySelectorAll('[data-pf-primary-agent]')].filter(el => {
+            const r = el.getBoundingClientRect();
+            return r.top >= pane.top && r.bottom <= Math.min(pane.bottom, innerHeight);
+          }).length;
+        })()`);
+        assert.equal(primary, 4, 'all four primary rows fit at 900x600');
+      }
       await page.eval(`(() => {
         const b = document.querySelector('[data-pf="row-toggle"][data-row="agents/explore"]');
         if (b && b.getAttribute('aria-expanded') === 'false') b.click();
@@ -2696,7 +2756,7 @@ test('layout: with one pending change the message strip covers neither 이 프�
     if (page) await page.close();
     await server.close();
   }
-  assert.equal(seen.length, 6);
+  assert.equal(seen.length, 18);
   assert.deepEqual(seen.filter((s) => !s.onTop), [], 'each control is the topmost element at its centre');
   assert.deepEqual(listProfilePids(profileDir), []);
 });

@@ -58,12 +58,13 @@
   var TABS = [['primary', '메인 에이전트'], ['agents', '전담 에이전트'], ['categories', '작업 카테고리'], ['memory', '메모리']];
   // Count and match the same rendered values, including pending edits and catalog aliases.
   // These counters belong to one render only; filtering never changes controller edits.
-  function searchRow(edit, section, words, entries) {
+  function searchRow(edit, section, words, entries, key) {
     var values = words.slice();
     entries.forEach(function (entry) {
       if (words.indexOf(entry.model) >= 0 || words.indexOf(entry.alias) >= 0) values.push(entry.alias, entry.model);
     });
     var match = values.join(' ').toLowerCase().indexOf(str(edit.query).trim().toLowerCase()) >= 0;
+    if (edit.rowMatches) edit.rowMatches[key] = match;
     if (edit.rowCounts) {
       edit.rowCounts[section].total++;
       if (match) edit.rowCounts[section].matches++;
@@ -765,7 +766,7 @@
       var mismatch = id === 'sisyphus' && origin === 'main' && sidecarThinking && str(effective.thinking) && sidecarThinking !== str(effective.thinking);
       var unapplied = id === 'sisyphus' && (provider !== str(effective.provider) || bareModel(model) !== bareModel(effective.modelId) || thinking !== str(effective.thinking));
       return '<article class="pf-mem-row pf-primary-row' + (isOpen ? ' open' : '') + '" data-pf-primary-agent="' + esc(id) + '"' + attr('data-agent', id) + (isOpen ? '' : attr('id', rid)) +
-        searchRow(edit, 'primary', [id, name, '메인 에이전트', effective.provider, effective.modelId, str(effective.provider) + '/' + bareModel(effective.modelId), provider, model, provider + '/' + bareModel(model)], entries) + '>' +
+        searchRow(edit, 'primary', [id, name, '메인 에이전트', effective.provider, effective.modelId, str(effective.provider) + '/' + bareModel(effective.modelId), provider, model, provider + '/' + bareModel(model)], entries, key) + '>' +
         '<button type="button" class="pf-row-sum"' + attr('data-pf', 'row-toggle') + attr('data-row', key) +
         attr('aria-expanded', isOpen ? 'true' : 'false') + attr('aria-controls', rid) + '><span class="pf-route-id">' +
         '<span class="pf-dot pf-dot-' + esc(id) + ' pf-shape-' + esc(SHAPES[id]) + '" role="img" aria-label="' +
@@ -889,7 +890,7 @@
         fields + '</div>';
     }
     return '<div class="pf-route' + (isOpen ? ' open' : '') + '" data-pf-route="' + esc(key) + '"' + (isOpen ? '' : attr('id', rid)) +
-      searchRow(edit, r.section, [r.role, r.labelKo, r.labelEn, provider, full, alias], entries) + '>' +
+      searchRow(edit, r.section, [r.role, r.labelKo, r.labelEn, provider, full, alias], entries, key) + '>' +
       sumBtn + body + '</div>';
   }
   // The role sections of the WinForms routing box (PS:6213-6260) in their fixed order, whatever order the rows arrive in.
@@ -1126,7 +1127,7 @@
       }
       return '<section class="pf-group"' + attr('data-flow-sec', key) + '><h3 class="pf-rh">' + esc(secTitle) + '</h3>' +
         '<article class="pf-mem-row' + (isOpen ? ' open' : '') + '" data-pf-memory-row="' + esc(key) + '"' + (isOpen ? '' : attr('id', memId + '-body')) +
-        searchRow(edit, 'memory', [key, rowTitle, key === 'kibitzer' ? '회상' : '성찰', provider, model || curModel], allEntries) + '>' +
+        searchRow(edit, 'memory', [key, rowTitle, key === 'kibitzer' ? '회상' : '성찰', provider, model || curModel], allEntries, rowKey) + '>' +
         sumBtn + body +
         '<p class="pf-note pf-mem-cur' + (isOpen ? '' : ' pf-sr') + '" data-pf-memory-current="' + esc(key) + '">' + esc(curLine) + '</p>' +
         '<p class="pf-note pf-mem-pend' + (rowErr ? ' pf-err' : '') + (isOpen ? '' : ' pf-sr') + '" data-pf-memory-pending="' + esc(key) + '"' +
@@ -1733,6 +1734,12 @@
       },
       search: function (query) {
         s.query = str(query);
+        if (s.openRow) {
+          // Use the renderer's exact matching values, including shown-profile drafts and aliases.
+          var matches = map();
+          render(s.view, Object.assign(snapshot(), { rowMatches: matches }));
+          if (!matches[s.openRow]) s.openRow = null;
+        }
         changed();
         return snapshot();
       },

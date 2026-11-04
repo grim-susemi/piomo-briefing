@@ -389,6 +389,14 @@
   background: var(--c-sunk);
 }
 .pf-rh { margin: var(--sp-1) 0 0; font-size: var(--fs-sm); line-height: 1.4; }
+/* At short docked heights, give routing room before the scrollable extras.
+ * The status strip and selected card already name the profile; repeated prose would push rows below the pane. */
+@media (min-width: 900px) and (max-height: 700px) {
+  .pf-tabs { flex-wrap: nowrap; overflow-x: auto; }
+  .pf-tab { flex: none; }
+  .pf-detail > .pf-dt, .pf-detail > .pf-du, .pf-detail > .pf-cap { display: none; }
+  .pf-roles { height: calc(100cqh - 104px); min-height: 252px; }
+}
 .pf-tri { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-1); }
 .pf-blk { display: grid; gap: var(--sp-1); min-width: 0; }
 .pf-blk-h { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
