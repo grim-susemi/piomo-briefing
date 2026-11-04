@@ -44,7 +44,7 @@
     ['main', '메인 모델', '세션을 여는 기본 모델'],
     ['summarizer', '요약 모델', '압축 요약 모델과 경고'],
     ['guide', '권장 가이드', '경로와 sha256'],
-    ['agents', '메인 에이전트', '에이전트별 레인·핀·기억']
+    ['primary', '메인 에이전트', '에이전트별 레인·핀·기억']
   ];
   // WinForms copy (Must have 4) and the purpose groups of PS RoutingGroups (PS:346-358) in their order. A board
   // group id maps to the WinForms section id of the flow map; unknown groups follow and 추가 설정 closes a section.
@@ -585,7 +585,7 @@
       ic('refresh-cw', 'ic-sm') + '</span> 프로필 상태를 불러오는 중…</span></div></section>' +
       '<div class="pf-panes">' + loadingSection('profiles', '<div class="pf-cards">' + cards + '</div>', null) +
       loadingSection('routing', '<div class="pf-routes">' + routes + '</div>', null) + '</div>' +
-      loadingSection('agents', '<div class="pf-agents">' + agents + '</div>', AGENTS.length, ic('chevron-down', 'ic-sm pf-chev')) +
+      loadingSection('primary', '<div class="pf-mems">' + agents + '</div>', AGENTS.length) +
       '<div class="pf-homes pf-skel-homes" data-pf-skel="homes" aria-hidden="true">' +
       home('primary') + home('mirror') + home('stable-500') + '</div>' +
       '</div></div>';
@@ -683,64 +683,93 @@
     var entries = servedEntries(view);
     var pending = pendingOf(edit);
     var busy = !!(edit && edit.busy === true);
+    var activeKey = str(obj(view && view.activeProfile) && view.activeProfile.key);
+    var active = profileOf(view, activeKey);
+    var detail = obj(obj(view && view.details) && view.details[activeKey]);
+    var activeView = Object.assign({}, view, { main: obj(detail && detail.main) || obj(view && view.main) });
     var rows = AGENTS.map(function (pair) {
       var id = pair[0], name = idOf(AGENTS, id);
+      var key = 'primary/' + id, rid = 'pf-primary-' + id;
+      var isOpen = str(edit && edit.openRow) === key;
       var agent = obj(agents[id]) || {};
+      var effective = obj(agent.effective) || {};
       var laneChange = agentChange(pending, id, 'setAgentLane');
-      var pinChange = agentChange(pending, id, 'setAgentPin');
+      var pinChange = id === 'sisyphus' ? mainChangeOf(pending, active) : agentChange(pending, id, 'setAgentPin');
+      var draft = draftOf(edit, 'agent:' + id);
       var reset = agentChange(pending, id, 'resetAgentMemory');
       var lane = laneChange ? str(laneChange.lane) : str(agent.lane) || (id === 'hephaestus' ? 'geeky-normal' : id === 'prometheus' ? 'daily-heavy' : 'daily-normal');
-      var pin = pinChange ? pinChange.pin : agent.pin;
-      pin = obj(pin) ? pin : null;
       var remembered = obj(agent.remembered) || obj(agent.memory) || null;
-      var pinEntry = pin ? entryOf(entries, '', str(pin.modelId)) : null;
-      if (pin && !pinEntry) pinEntry = entries.filter(function (e) { return bareModel(e.model) === bareModel(pin.modelId); })[0] || null;
-      var pinProvider = pin ? pinEntry ? providerOf(pinEntry.model) : str(pin.provider) : '';
-      var pinModel = pin ? pinEntry ? bareModel(pinEntry.model) : bareModel(pin.modelId) : '';
-      var pinValue = pin ? pinProvider + '|' + pinModel : '';
-      var pinThinking = pin ? str(pin.thinking) : 'medium';
+      var provider = draft && has(draft, 'provider') ? str(draft.provider) : pinChange && obj(pinChange.pin) ? str(pinChange.pin.provider) : str(effective.provider);
+      var model = draft && has(draft, 'model') ? str(draft.model) : pinChange && obj(pinChange.pin) ? str(pinChange.pin.modelId) : str(effective.modelId);
+      var thinking = draft && has(draft, 'thinking') ? str(draft.thinking) : pinChange && obj(pinChange.pin) ? str(pinChange.pin.thinking) : str(effective.thinking);
+      if (id === 'sisyphus') {
+        var main = obj(activeView.main) || {};
+        var mainValue = obj(main.override) || obj(main.effective) || {};
+        var sidecarThinking = str(mainValue.thinking);
+        var mainDraft = draftOf(edit, 'main:' + activeKey) || (activeKey === shownKeyOf(view, edit) ? draftOf(edit, 'main') : null);
+        provider = mainDraft ? str(mainDraft.provider) : pinChange ? str(pinChange.provider) : str(mainValue.provider);
+        model = mainDraft ? str(mainDraft.model) : pinChange ? str(pinChange.model) : str(mainValue.model);
+        thinking = mainDraft ? str(mainDraft.thinking) : pinChange ? str(pinChange.thinking) : str(mainValue.thinking);
+      }
+      var pinValue = provider && model ? provider + '|' + bareModel(model) : '';
       var pinEntries = id === 'hephaestus' ? entries.filter(function (e) { return bareModel(e.model).indexOf('gpt-') === 0; }) : entries;
-      var pinOpts = '<option value=""' + (pin ? '' : ' selected') + '>핀 없음 (레인 사용)</option>';
+      var noPin = pinChange && pinChange.pin === null;
+      var pinOpts = '<option value=""' + (noPin || !pinValue ? ' selected' : '') + '>핀 없음 (레인 사용)</option>';
       var pinSeen = map();
       pinEntries.forEach(function (e) {
+        if (providerOf(e.model) !== provider) return;
         var value = providerOf(e.model) + '|' + bareModel(e.model);
         if (has(pinSeen, value)) return;
         pinSeen[value] = true;
-        pinOpts += '<option value="' + esc(value) + '"' + (value === pinValue ? ' selected' : '') + '>' +
+        pinOpts += '<option value="' + esc(value) + '"' + (!noPin && value === pinValue ? ' selected' : '') + '>' +
           esc(e.alias + ' · ' + e.model) + '</option>';
       });
-      if (pinValue && !has(pinSeen, pinValue)) {
+      if (!noPin && pinValue && !has(pinSeen, pinValue) && (id !== 'hephaestus' || bareModel(model).indexOf('gpt-') === 0)) {
         pinOpts += '<option value="' + esc(pinValue) + '" selected>' + esc(pinValue) + '</option>';
       }
       var mem = remembered ? str(remembered.provider) + ' · ' + str(remembered.modelId) + (str(remembered.thinking) ? ' / ' + str(remembered.thinking) : '') : '';
       var laneId = 'pf-agent-lane-' + id;
       var controls = ro
         ? '<span class="pf-lbl">레인</span><span class="pf-ro-val">' + esc(lane) + '</span>'
-        : labelled('레인', laneId, select('agent-lane', withId(laneId, ' data-agent="' + esc(id) + '"'), laneOptions(lane), busy));
+        : labelled('레인 (핀이 없을 때)', laneId, select('agent-lane', withId(laneId, ' data-agent="' + esc(id) + '"'), laneOptions(lane), busy));
       var pinId = 'pf-agent-pin-' + id, pinThinkId = 'pf-agent-pin-thinking-' + id;
       var pinHint = id === 'hephaestus' ? 'GPT 계열만' : '';
-      var pinControls = ro
-        ? '<span class="pf-lbl">핀</span><span class="pf-ro-val">' + (pin ? esc(pinProvider + ' · ' + pinModel + ' / ' + pinThinking) : '없음') + '</span>'
-        : '<div class="pf-pin-sels">' +
-          labelledHint('핀', pinHint, pinId, select('agent-pin', withId(pinId, ' data-agent="' + esc(id) + '"'), pinOpts, busy)) +
-          labelled('추론', pinThinkId, select('agent-pin-thinking', withId(pinThinkId, ' data-agent="' + esc(id) + '"'), thinkingOptions(pinThinking, false), busy || !pin)) +
+      var pinControls = id === 'sisyphus' ? mainModel(activeView, edit, ro, id) : ro
+        ? '<span class="pf-ro-val">' + valueOrDash(provider) + ' · ' + valueOrDash(model) + ' / ' + valueOrDash(thinking) + '</span>'
+        : '<div class="pf-tri">' +
+          labelled(CAPTIONS[0], rid + '-provider', providerSelect('agent-provider', withId(rid + '-provider', attr('data-agent', id)), providersOf(pinEntries, provider), provider, busy)) +
+          labelledHint(CAPTIONS[1], pinHint, pinId, select('agent-pin', withId(pinId, attr('data-agent', id)), pinOpts, busy || !provider)) +
+          labelled(CAPTIONS[2], pinThinkId, select('agent-pin-thinking', withId(pinThinkId, attr('data-agent', id)),
+            memoryThinkingOptions(memoryCandidates(view), provider + '/' + bareModel(model), thinking), busy || !model || noPin)) +
           '</div>';
       var resetBtn = ro ? '<span class="pf-muted">기억은 확장이 관리</span>' : button('reset-memory', ' data-agent="' + esc(id) + '"', '기억 초기화', busy, 'pf-btn pf-btn-ghost');
       if (reset && !ro) resetBtn = button('reset-memory', ' data-agent="' + esc(id) + '"', '초기화 대기', busy, 'pf-btn pf-btn-ghost on');
-      return '<article class="pf-agent" data-pf-agent="' + esc(id) + '">' +
-        '<div class="pf-agent-id"><span class="pf-dot pf-dot-' + esc(id) + ' pf-shape-' + esc(SHAPES[id]) + '" role="img" aria-label="' +
+      var origin = str(effective.origin) || 'unknown';
+      var origins = { memory: '기억', pin: '핀', main: '메인', lane: '레인 기본', builtin: '내장 기본', unknown: '미확인', unavailable: '사용 불가' };
+      var originChip = chip(origin === 'unavailable' ? 'pf-c-amber' : 'pf-c-gray', origins[origin] || origins.unknown, str(effective.reason));
+      var mismatch = id === 'sisyphus' && origin === 'main' && sidecarThinking && str(effective.thinking) && sidecarThinking !== str(effective.thinking);
+      return '<article class="pf-mem-row pf-primary-row' + (isOpen ? ' open' : '') + '" data-pf-primary-agent="' + esc(id) + '"' + attr('data-agent', id) + (isOpen ? '' : attr('id', rid)) + '>' +
+        '<button type="button" class="pf-row-sum"' + attr('data-pf', 'row-toggle') + attr('data-row', key) +
+        attr('aria-expanded', isOpen ? 'true' : 'false') + attr('aria-controls', rid) + '><span class="pf-route-id">' +
+        '<span class="pf-dot pf-dot-' + esc(id) + ' pf-shape-' + esc(SHAPES[id]) + '" role="img" aria-label="' +
         esc(name + ' · ' + SHAPE_KO[SHAPES[id]] + ' 표식') + '"></span>' +
-        '<span class="pf-agent-n">' + esc(name) + '</span><span class="pf-agent-k">[rev ' + esc(num(agent.rev) === null ? 0 : agent.rev) + ']</span></div>' +
-        '<div class="pf-field">' + controls + '</div>' +
-        '<div class="pf-field">' + pinControls + '</div>' +
-        '<div class="pf-field pf-mem-field"><span class="pf-lbl">기억</span><div class="pf-mem-line">' +
-        '<span class="pf-ro-val pf-mem">' + (mem ? esc(mem) : '<span class="pf-dash">—</span>') + '</span>' + resetBtn + '</div></div></article>';
+        '<span class="pf-route-ko">' + esc(name) + '</span>' + originChip +
+        (agent.pin && origin !== 'pin' ? chip('pf-c-gray', '핀') : '') +
+        (id === 'sisyphus' ? chip('pf-c-gray', '= 메인 모델 · 활성 프로필') : '') +
+        (mismatch ? chip('pf-c-amber', '메인 추론 불일치', 'sidecar 메인과 settings.defaultThinkingLevel이 다릅니다.') : '') +
+        (pinChange || laneChange || reset ? chip('pf-c-amber', '보류') : '') +
+        '<span class="pf-route-en">모든 프로필 공통</span>' +
+        (remembered && remembered.updatedAt ? '<span class="pf-route-en"' + attr('title', '기억 시각 · ' + remembered.updatedAt) + '>기억 시각 · ' + esc(remembered.updatedAt) + '</span>' : '') + '</span>' +
+        '<span class="pf-row-val"' + attr('title', provider + ' · ' + model + ' / ' + thinking) + '>' +
+        esc((bareModel(model) || '—') + (thinking ? ' · ' + thinking : '')) + '</span></button>' +
+        (isOpen ? '<div class="pf-row-body"' + attr('id', rid) + '>' + pinControls +
+          '<div class="pf-field">' + controls + '</div><div class="pf-field pf-mem-field"><span class="pf-lbl">기억</span><div class="pf-mem-line">' +
+          '<span class="pf-ro-val pf-mem">' + (mem ? esc(mem) : '<span class="pf-dash">—</span>') + '</span>' +
+          (id === 'sisyphus' ? '' : resetBtn) + '</div></div></div>' : '') + '</article>';
     }).join('');
-    // The board-only roster is a collapsed card below both panes; its open state survives re-renders.
-    return '<details class="pf-sec pf-agents-card" id="pf-sec-agents" data-pf-sec="agents"' + boolAttr('open', !!(edit && edit.agentsOpen === true)) + '>' +
-      secHead('agents', AGENTS.length, (roster.warning ? chip('pf-c-amber', 'roster 경고', str(roster.warning)) : '') +
-        ic('chevron-down', 'ic-sm pf-chev'), null, 'summary') +
-      '<div class="pf-sec-b"><div class="pf-agents">' + rows + '</div></div></details>';
+    return '<section class="pf-group" id="pf-sec-primary" data-pf-sec="primary" data-flow-sec="primary">' +
+      secHead('primary', AGENTS.length, roster.warning ? chip('pf-c-amber', 'roster 경고', str(roster.warning)) : '') +
+      '<div class="pf-mems">' + rows + '</div></section>';
   }
 
   // A card's main model as WinForms builds it for every card (Get-MainComboCurrentValues, PS:2489-2518, PS:6086-6094):
@@ -868,10 +897,11 @@
     });
     return html || emptyState('배치할 역할이 없습니다. 프로필 설정을 확인한 뒤 상태를 다시 불러와 주십시오.', edit);
   }
-  function mainModel(view, edit, ro) {
-    var pending = mainChangeOf(pendingOf(edit), profileOf(view, shownKeyOf(view, edit)));
+  function mainModel(view, edit, ro, agentId) {
+    var profileKey = agentId ? str(obj(view && view.activeProfile) && view.activeProfile.key) : shownKeyOf(view, edit);
+    var pending = mainChangeOf(pendingOf(edit), profileOf(view, profileKey));
     var busy = !!(edit && edit.busy === true);
-    var draft = draftOf(edit, 'main');
+    var draft = draftOf(edit, 'main:' + profileKey) || (profileKey === shownKeyOf(view, edit) ? draftOf(edit, 'main') : null);
     var current = obj(view && view.main) || {};
     var effective = obj(current.effective) || {};
     var override = obj(current.override) || null;
@@ -895,14 +925,18 @@
     } else if (ro) {
       body = '<span class="pf-main-v">' + valueOrDash(provider) + ' · ' + valueOrDash(model) + ' / ' + valueOrDash(thinking) + '</span>';
     } else {
-      body = '<div class="pf-tri" data-pf-main' + attr('data-thinking', thinking) + '>' +
-        labelled(CAPTIONS[0], 'pf-main-provider', providerSelect('main-provider', withId('pf-main-provider', ' data-main="1"'), providers, provider, busy)) +
-        labelled(CAPTIONS[1], 'pf-main-model', mainModelSelect('main-model', withId('pf-main-model', ' data-main="1"'), entries, provider, model, busy)) +
-        labelled(CAPTIONS[2], 'pf-main-thinking', select('main-thinking', withId('pf-main-thinking', ' data-main="1"'),
+      var providerId = agentId ? 'pf-primary-' + agentId + '-provider' : 'pf-main-provider';
+      var modelId = agentId ? 'pf-agent-pin-' + agentId : 'pf-main-model';
+      var thinkingId = agentId ? 'pf-agent-pin-thinking-' + agentId : 'pf-main-thinking';
+      body = '<div class="pf-tri" data-pf-main' + attr('data-profile', profileKey) + attr('data-thinking', thinking) + '>' +
+        labelled(CAPTIONS[0], providerId, providerSelect('main-provider', withId(providerId, ' data-main="1"'), providers, provider, busy)) +
+        labelled(CAPTIONS[1], modelId, mainModelSelect('main-model', withId(modelId, ' data-main="1"'), entries, provider, model, busy)) +
+        labelled(CAPTIONS[2], thinkingId, select('main-thinking', withId(thinkingId, ' data-main="1"'),
           levels ? thinkingOptions(clampedThinking(entry, thinking), false, levels) : thinkingOptions(thinking, true),
           busy || !!off)) +
         '</div>';
     }
+    if (agentId) return body;
     return '<div class="pf-blk" id="pf-sec-main" data-pf-sec="main" data-flow="main" data-flow-sec="main"><h3 class="pf-blk-h">메인 모델 설정 ' +
       (override ? chip('pf-c-green', '직접 지정') : chip('pf-c-gray', '프로필 기본')) + offChip(off) + '</h3>' + body + '</div>';
   }
@@ -1208,7 +1242,7 @@
     return '<section class="pf-sec pf-detail" data-flow="detail"><h2 class="pf-dt">' + esc(title) + '</h2>' +
       (p && p.summary ? '<p class="pf-du">' + summaryText(p.summary) + '</p>' : '') +
       '<p class="pf-cap">모델 라우팅 · 전담 에이전트 / 작업 카테고리 <span class="pf-count">' + arr(obj(dv.routing) && dv.routing.rows).length + '</span></p>' +
-      '<div class="pf-roles" id="pf-sec-routing" data-pf-sec="routing" data-flow="roles">' + memoryRows(v, edit, ro) + routingRows(dv, edit, ro) + '</div>' +
+      '<div class="pf-roles" id="pf-sec-routing" data-pf-sec="routing" data-flow="roles">' + agentRows(v, edit, ro) + memoryRows(v, edit, ro) + routingRows(dv, edit, ro) + '</div>' +
       modelLane(dv, edit, ro) + mainModel(dv, edit, ro) + summarizer(v, edit, ro) + applyBar(edit, ro) + '</section>';
   }
   // ---- public renderers --------------------------------------------------------------------------------------------
@@ -1234,7 +1268,7 @@
     });
     return statusStrip(v, e, ro, stale) + guideDialog(dv) +
       '<div class="pf-panes">' + profileCards(v, e, ro) + detailPane(v, dv, e, ro) + tray(v, e, ro) + '</div>' +
-      agentRows(v, e, ro) + homes(v);
+      homes(v);
   }
 
   function side(view, edit) {
@@ -1243,7 +1277,7 @@
     var pending = pendingOf(e).length;
     var nav = SECTIONS.map(function (s) {
       var count = '';
-      if (s[0] === 'agents') count = AGENTS.length;
+      if (s[0] === 'primary') count = AGENTS.length;
       else if (s[0] === 'profiles') count = arr(v && v.profiles).length;
       else if (s[0] === 'routing') count = arr(obj(v && v.routing) && v.routing.rows).length;
       else if (s[0] === 'memory') count = 2;
@@ -1268,7 +1302,7 @@
     var fetchFn = opt.fetch;
     var tokenFn = opt.token;
     var notify = typeof opt.onChange === 'function' ? opt.onChange : function () {};
-    var s = { view: null, shown: '', pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false, agentsOpen: false, openRow: null };
+    var s = { view: null, shown: '', pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false, openRow: null };
     var seq = 0;
 
     function snapshot() {
@@ -1278,7 +1312,7 @@
         memoryErrors: copyMap(s.memoryErrors), memorySaved: copyMap(s.memorySaved),
         preview: s.preview, conflict: s.conflict, error: s.error, errorKind: s.errorKind,
         status: s.status, result: s.result, loading: s.loading, busy: s.busy, confirmClear: s.confirmClear,
-        agentsOpen: s.agentsOpen, openRow: s.openRow
+        openRow: s.openRow
       };
     }
     function changed() { notify(snapshot()); }
@@ -1399,7 +1433,7 @@
       if (!obj(c)) return null;
       if (c.kind === 'setRoute') return 'route:' + str(c.section) + '/' + str(c.role);
       if (c.kind === 'setAgentLane' || c.kind === 'setAgentPin') return 'agent:' + str(c.agentId);
-      if (c.kind === 'setMain') return 'main';
+      if (c.kind === 'setMain') return 'main:' + str(c.profileKey);
       if (c.kind === 'setModelProfile') return 'lane';
       if (c.kind === 'setSummarizer') return 'summarizer';
       if (c.kind === 'setMemoryRow') return 'memory:' + (str(c.row) || 'kibitzer');
@@ -1460,6 +1494,7 @@
       if (s.busy) return snapshot();
       var targetProf = profileKey ? cardKeyOf(str(profileKey)) : '';
       s.pending = s.pending.filter(function (c) {
+        if (obj(c) && agentKind(kind) && profileKey) return c.kind !== kind || c.agentId !== profileKey;
         return !obj(c) || c.kind !== kind || (!!targetProf && cardKeyOf(str(c.profileKey || c.omoProfile)) !== targetProf);
       });
       s.preview = null; s.result = null;
@@ -1630,14 +1665,15 @@
         // model_profile combo for each shown profile (PS:6058-6077), so another profile starts from its own saved and
         // pending values, never from that draft.
         if (str(profileKey) !== s.shown) {
-          Object.keys(s.draft).forEach(function (k) { if (k === 'main' || k === 'lane' || k.indexOf('route:') === 0) delete s.draft[k]; });
+          Object.keys(s.draft).forEach(function (k) {
+            if (k === 'main' || k.indexOf('main:') === 0 && k !== 'main:' + str(obj(s.view && s.view.activeProfile) && s.view.activeProfile.key) ||
+                k === 'lane' || k.indexOf('route:') === 0) delete s.draft[k];
+          });
         }
         s.shown = str(profileKey);
         changed();
         return snapshot();
       },
-      // The DOM already shows the toggle; the next render keeps it, so no notification is needed.
-      agentsOpen: function (on) { s.agentsOpen = on === true; return snapshot(); },
       toggleRow: function (rowKey) {
         if (s.busy) return snapshot();
         var k = str(rowKey);
@@ -1798,24 +1834,33 @@
       if (act === 'agent-lane') {
         c.setDraft('agent:' + t.getAttribute('data-agent'), { lane: t.value });
         c.add({ kind: 'setAgentLane', agentId: t.getAttribute('data-agent'), lane: t.value });
-      } else if (act === 'agent-pin') {
+      } else if (act === 'agent-provider' || act === 'agent-pin' || act === 'agent-pin-thinking') {
         var agentId = t.getAttribute('data-agent');
-        var value = str(t.value);
-        var thinking = rowValue(t, '[data-pf-agent]', '[data-pf="agent-pin-thinking"]') || 'medium';
-        c.setDraft('agent:' + agentId, { pin: value, thinking: thinking });
-        if (!value) c.add({ kind: 'setAgentPin', agentId: agentId, pin: null });
-        else {
-          var at = value.indexOf('|');
-          if (at > 0 && at < value.length - 1) {
-            c.add({ kind: 'setAgentPin', agentId: agentId, pin: { provider: value.slice(0, at), modelId: value.slice(at + 1), thinking: thinking } });
-          }
+        var prevAgent = draftOf(c.snapshot(), 'agent:' + agentId);
+        var agentProvider = prevAgent && has(prevAgent, 'provider') ? str(prevAgent.provider) : rowValue(t, '[data-pf-primary-agent]', '[data-pf="agent-provider"]');
+        var agentValue = rowValue(t, '[data-pf-primary-agent]', '[data-pf="agent-pin"]');
+        var agentModel = prevAgent && has(prevAgent, 'model') ? str(prevAgent.model) : agentValue.slice(agentValue.indexOf('|') + 1);
+        var agentThinking = prevAgent && has(prevAgent, 'thinking') ? str(prevAgent.thinking) : rowValue(t, '[data-pf-primary-agent]', '[data-pf="agent-pin-thinking"]');
+        if (act === 'agent-provider') {
+          agentProvider = str(t.value);
+          agentModel = '';
+          agentThinking = '';
+        } else if (act === 'agent-pin') {
+          agentValue = str(t.value);
+          var at = agentValue.indexOf('|');
+          agentModel = at > 0 ? agentValue.slice(at + 1) : '';
+          var agentEntry = entryOf(servedEntries(c.snapshot().view), '', agentProvider + '/' + agentModel);
+          agentThinking = agentModel ? agentEntry && arr(agentEntry.levels).length ? agentEntry.levels[0] : THINKING[0] : '';
+        } else {
+          agentThinking = str(t.value);
         }
-      } else if (act === 'agent-pin-thinking') {
-        var agent = t.getAttribute('data-agent');
-        var pinValue = rowValue(t, '[data-pf-agent]', '[data-pf="agent-pin"]');
-        if (pinValue) {
-          var cutAt = pinValue.indexOf('|');
-          if (cutAt > 0) c.add({ kind: 'setAgentPin', agentId: agent, pin: { provider: pinValue.slice(0, cutAt), modelId: pinValue.slice(cutAt + 1), thinking: t.value } });
+        c.setDraft('agent:' + agentId, { provider: agentProvider, model: agentModel, thinking: agentThinking });
+        if (act === 'agent-pin' && !agentModel) c.add({ kind: 'setAgentPin', agentId: agentId, pin: null });
+        else if (agentProvider && agentModel && agentThinking) {
+          c.add({ kind: 'setAgentPin', agentId: agentId, pin: { provider: agentProvider, modelId: agentModel, thinking: agentThinking } });
+        } else {
+          c.removeKind('setAgentPin', agentId);
+          c.touch();
         }
       } else if (act === 'route-provider' || act === 'route-model' || act === 'route-thinking') {
         var route = t.getAttribute('data-route');
@@ -1860,14 +1905,15 @@
         }
       } else if (act === 'main-provider' || act === 'main-model' || act === 'main-thinking') {
         var main = t.closest('[data-pf-main]');
-        var mainPrevDraft = draftOf(c.snapshot(), 'main');
+        var mainProfKey = main ? str(main.getAttribute('data-profile')) : str(c.snapshot().shown);
+        var mainDraftKey = 'main:' + mainProfKey;
+        var mainPrevDraft = draftOf(c.snapshot(), mainDraftKey);
         var curMainProv = mainPrevDraft ? str(mainPrevDraft.provider) : (main ? selectVal(main.querySelector('[data-pf="main-provider"]')) : '');
         var curMainMdl = mainPrevDraft ? str(mainPrevDraft.model) : (main ? selectVal(main.querySelector('[data-pf="main-model"]')) : '');
         var curMainThk = mainPrevDraft ? str(mainPrevDraft.thinking) : (main ? str(main.getAttribute('data-thinking')) : '');
         var mp = curMainProv;
         var mm = curMainMdl;
         var mt = curMainThk;
-        var mainProfKey = str(c.snapshot().shown);
         var entries = servedEntries(c.snapshot().view);
         if (act === 'main-provider') {
           // WinForms: service change keeps model whose last id segment survives in new list and clamps current effort, else empties model
@@ -1896,7 +1942,7 @@
         } else if (act === 'main-thinking') {
           mt = str(t.value);
         }
-        c.setDraft('main', { provider: mp, model: mm, thinking: mt });
+        c.setDraft(mainDraftKey, { provider: mp, model: mm, thinking: mt });
         if (mp && mm && mt) {
           c.add({ kind: 'setMain', profileKey: mainProfKey, provider: mp, model: mm, thinking: mt });
         } else {
@@ -1998,11 +2044,6 @@
         });
       };
     }
-    function onToggle(ev) {
-      var t = ev && ev.target;
-      var c = t && t.id === 'pf-sec-agents' ? controller() : null;
-      if (c) c.agentsOpen(t.open === true);
-    }
     // Keys 1-6 show cards 1-6 like WinForms (PS:7382-7395, Must have 9): only while the card buttons are on screen and
     // enabled, never from a text or select control, with a modifier, during an IME composition or behind the guide.
     function onKey(ev) {
@@ -2043,13 +2084,11 @@
     root.addEventListener('click', click);
     root.addEventListener('change', change);
     root.addEventListener('input', input);
-    root.addEventListener('toggle', onToggle, true);
     if (doc && typeof doc.addEventListener === 'function') doc.addEventListener('keydown', keydown);
     return function unbind() {
       root.removeEventListener('click', click);
       root.removeEventListener('change', change);
       root.removeEventListener('input', input);
-      root.removeEventListener('toggle', onToggle, true);
       if (doc && typeof doc.removeEventListener === 'function') doc.removeEventListener('keydown', keydown);
     };
   }

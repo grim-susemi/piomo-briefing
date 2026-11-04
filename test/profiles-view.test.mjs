@@ -44,7 +44,7 @@ test('render: header, target homes and every section in order', () => {
   assert.match(html, /\[primary\]/);
   assert.match(html, /\[stable-500\]/);
   assert.match(html, /\[omo-original\]|\[mirror 1\]/);
-  assert.deepEqual(all(html, /data-pf-sec="([^"]+)"/g), ['guide', 'profiles', 'routing', 'memory', 'lanes', 'main', 'summarizer', 'tray', 'agents']);
+  assert.deepEqual(all(html, /data-pf-sec="([^"]+)"/g), ['guide', 'profiles', 'routing', 'primary', 'memory', 'lanes', 'main', 'summarizer', 'tray']);
   for (const title of ['메인 에이전트', '프로필', '모델 라우팅 · 전담 에이전트 / 작업 카테고리', '메인 모델 설정', 'model_profile', '요약 담당 모델', '공통 설정 · Kibitzer 회상', '권장 가이드']) {
     assert.ok(text.includes(title), title);
   }
@@ -60,14 +60,16 @@ test('render: header, target homes and every section in order', () => {
 test('render: 4 agent rows (lane, pin, remembered model, reset), 6 profile cards and grouped routing rows', () => {
   const P = load();
   const html = P.render(STATE, live());
-  assert.equal((html.match(/data-pf-agent="/g) || []).length, 4);
-  assert.deepEqual(all(html, /data-pf-agent="([^"]+)"/g), ['sisyphus', 'hephaestus', 'prometheus', 'atlas']);
+  assert.equal((html.match(/data-pf-primary-agent="/g) || []).length, 4);
+  assert.deepEqual(all(html, /data-pf-primary-agent="([^"]+)"/g), ['sisyphus', 'hephaestus', 'prometheus', 'atlas']);
   for (const id of ['sisyphus', 'hephaestus', 'prometheus', 'atlas']) {
     assert.match(html, new RegExp('pf-dot-' + id));
     assert.match(html, new RegExp('data-agent="' + id + '"'));
   }
-  assert.match(html, /기억 초기화/);
-  assert.match(textOf(html), /anthropic-subscription · claude-opus-5-5 \/ medium/, 'remembered model is read-only text');
+  const sisyphus = P.render(STATE, live({ openRow: 'primary/sisyphus' }));
+  const hephaestus = P.render(STATE, live({ openRow: 'primary/hephaestus' }));
+  assert.match(hephaestus, /기억 초기화/);
+  assert.match(textOf(sisyphus), /anthropic-subscription · claude-opus-5-5 \/ medium/, 'remembered model is read-only text');
   assert.equal((html.match(/class="pf-card(?: on)?"/g) || []).length, 6, 'six profile cards');
   assert.equal((html.match(/class="pf-card on"/g) || []).length, 1, 'the current card is marked');
   assert.match(textOf(html), /탐색 · 자료 조사/);
@@ -79,7 +81,10 @@ test('render: 4 agent rows (lane, pin, remembered model, reset), 6 profile cards
   assert.match(html, /pf-st-variant-different/);
   assert.match(html, /pf-st-unresolved/);
   assert.match(html, /pf-st-untracked/);
-  assert.match(html, /<option value="chatgpt-subscription\|gpt-6\.1-sol" selected>/, 'a pin is provider + bare gpt-* model id');
+  const pinned = clone(STATE);
+  pinned.roster.agents.hephaestus.effective = { ...pinned.roster.agents.hephaestus.pin, origin: 'pin' };
+  assert.match(P.render(pinned, live({ openRow: 'primary/hephaestus' })), /<option value="chatgpt-subscription\|gpt-6\.1-sol" selected>/, 'a pin is provider + bare gpt-* model id');
+  assert.doesNotMatch(html, /pf-sec-agents|pf-agents-card|data-pf-agent="/);
   assert.equal((html.match(/<div class="pf-route"/g) || []).length, STATE.routing.rows.length);
   assert.equal((html.match(/data-pf="route-provider"/g) || []).length, 0, 'closed routing rows render no selects');
   const openHtml = P.render(STATE, live({ openRow: 'agents/explore' }));
@@ -127,8 +132,8 @@ test('a11y: every select and input has a visible label and an accessible name', 
   const html = P.render(STATE, live());
   const { labels, controls } = labelledControls(html);
   const selects = controls.filter((c) => c.tag === 'select');
-  assert.equal(selects.length, 18, 'the closed fixture renders 18 selects (12 agent + 1 lane + 3 main + 2 summarizer)');
-  assert.equal(controls.length, 19, '18 selects + 1 text input');
+  assert.equal(selects.length, 6, 'closed rows leave 1 lane + 3 main + 2 summarizer selects');
+  assert.equal(controls.length, 7, '6 selects + 1 text input');
   for (const c of controls) {
     const name = c.aria || c.ref || labels.get(c.id) || '';
     assert.ok(name.trim(), `${c.tag} [data-pf=${c.pf || '?'}] has no accessible name`);
@@ -141,11 +146,20 @@ test('a11y: every select and input has a visible label and an accessible name', 
   assert.equal(byPf('main-provider').length, 1);
   for (const c of byPf('summarizer-provider')) assert.equal(labels.get(c.id), '1. 제공사');
   for (const c of byPf('summarizer-model')) assert.equal(labels.get(c.id), '2. AI 모델');
-  for (const c of byPf('agent-pin-thinking')) assert.equal(labels.get(c.id), '추론');
   assert.equal(byPf('route-provider').length, 0);
-  assert.equal(byPf('agent-pin-thinking').length, 4);
+  assert.equal(byPf('agent-pin-thinking').length, 0);
   assert.equal(byPf('summarizer-provider').length, 1);
   assert.equal(byPf('summarizer-model').length, 1);
+  for (const id of ['sisyphus', 'hephaestus', 'prometheus', 'atlas']) {
+    const open = labelledControls(P.render(STATE, live({ openRow: 'primary/' + id })));
+    for (const suffix of ['provider', 'model', 'thinking']) {
+      const pf = id === 'sisyphus' ? 'main-' + suffix : suffix === 'provider' ? 'agent-provider' : suffix === 'model' ? 'agent-pin' : 'agent-pin-thinking';
+      const control = open.controls.find((c) => c.pf === pf && c.id !== 'pf-main-' + suffix);
+      assert.ok(control, id + ' ' + suffix);
+      assert.equal(open.labels.get(control.id), ['1. 구독 서비스', '2. AI 모델', '3. 추론 강도'][['provider', 'model', 'thinking'].indexOf(suffix)]);
+    }
+    for (const control of open.controls) assert.ok(open.labels.get(control.id), control.id + ' visible label');
+  }
   for (const r of STATE.routing.rows) {
     const rowHtml = P.render(STATE, live({ openRow: r.section + '/' + r.role }));
     const open = labelledControls(rowHtml);
@@ -202,19 +216,19 @@ test('phone: the pending-row icon button keeps its 44 px width when the label sh
   assert.match(css, /\.pf-btn-icon\s*\{[^}]*min-height:\s*var\(--ctl-h\);/);
 });
 
-test('agents: lane, pin and thinking share a top baseline; reset sits with the memory value', () => {
+test('agents: three model selects share the row grid; reset sits with the expanded memory value', () => {
   const P = load();
-  const html = P.render(STATE, live());
+  const html = P.render(STATE, live({ openRow: 'primary/atlas' }));
   assert.match(html, /class="pf-field pf-mem-field"[\s\S]*?class="pf-mem-line"[\s\S]*?data-pf="reset-memory"/);
   const css = read('src/page/profiles-view.css');
-  assert.match(css, /\.pf-agent \{[\s\S]*?align-items:\s*start;/);
+  assert.match(html, /class="pf-row-body" id="pf-primary-atlas"><div class="pf-tri">/);
+  assert.match(css, /\.pf-tri \{[^}]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
   assert.match(css, /\.pf-mem-line\s*\{[\s\S]*?align-items:\s*center;/);
-  const at1040 = css.slice(css.indexOf('@media (max-width: 1040px)'), css.indexOf('@media (max-width: 760px)'));
-  assert.doesNotMatch(at1040, /\.pf-agent \.pf-field-act/, 'the reset action must not be pushed to its own row');
-  assert.match(at1040, /\.pf-agent \{ grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\) minmax\(0, 1\.2fr\); \}/);
-  assert.match(at1040, /\.pf-agent \.pf-mem-field \{ grid-column: 1 \/ -1; \}/);
+  assert.match(css, /\.pf-row-body \{[^}]*display: grid/);
+  assert.doesNotMatch(html, /pf-field-act/, 'reset remains next to its memory value');
   // Memory rows follow the WinForms row (mode, then three equal selects) at every width above the phone.
   assert.match(css, /\.pf-tri \{ display: grid; grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
+  const at1040 = css.slice(css.indexOf('@media (max-width: 1040px)'), css.indexOf('@media (max-width: 760px)'));
   assert.doesNotMatch(at1040, /\.pf-mem-sels|\.pf-tri/);
 });
 
@@ -254,8 +268,8 @@ test('loading reuses the homes, tray and section-header primitives and pulses on
   assert.match(html, /class="pf-tray pf-tray-compact" data-pf-skel="tray"/);
   assert.match(html, /class="pf-sec-h"/);
   const loaded = P.render(STATE, live());
-  const loadedHead = /<details class="pf-sec pf-agents-card" id="pf-sec-agents"[\s\S]*?<summary class="pf-sec-h">([\s\S]*?)<\/summary>/.exec(loaded)[1];
-  const loadingHead = /<section class="pf-skel-sec" data-pf-skel="agents"[\s\S]*?<header class="pf-sec-h">([\s\S]*?)<\/header>/.exec(html)[1];
+  const loadedHead = /<section class="pf-group" id="pf-sec-primary"[\s\S]*?<header class="pf-sec-h">([\s\S]*?)<\/header>/.exec(loaded)[1];
+  const loadingHead = /<section class="pf-skel-sec" data-pf-skel="primary"[\s\S]*?<header class="pf-sec-h">([\s\S]*?)<\/header>/.exec(html)[1];
   assert.equal(textOf(loadingHead), textOf(loadedHead));
   assert.equal((html.match(/data-pf-skel="route"/g) || []).length, 20, 'routing placeholders');
   assert.doesNotMatch(html, /data-pf-sec=/, 'the loading frame must not claim loaded sections');
@@ -281,6 +295,7 @@ test('page wiring: the pending row remove button removes that exact row', async 
   e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => STATE });
   await tick();
   for (const [agent, lane] of [['atlas', 'daily-heavy'], ['prometheus', 'geeky-heavy']]) {
+    e.fire(e.byId.main.querySelector('[data-pf="row-toggle"][data-row="primary/' + agent + '"]'), 'click');
     const sel = e.byId.main.querySelector('[data-pf="agent-lane"][data-agent="' + agent + '"]');
     sel.value = lane;
     e.fire(sel, 'change');
@@ -300,7 +315,7 @@ test('selects: every control titles its selected label and declares an ellipsis'
   const P = load();
   const html = P.render(STATE, live({ openRow: 'agents/explore' }));
   const tags = [...html.matchAll(/<select\b([^>]*)>/g)].map((m) => m[1]);
-  assert.equal(tags.length, 21);
+  assert.equal(tags.length, 9, 'six fixed selects and the three expanded route selects');
   for (const attrs of tags) assert.match(attrs, /\btitle="[^"]+"/, 'select without a full-value title');
   const model = /<select[^>]*data-pf="route-model"[^>]*>/.exec(html)[0];
   assert.match(model, /title="[^"]*·[^"]*\/[^"]*"/, 'model title carries alias and full id');
@@ -628,10 +643,12 @@ test('page wiring: busy preview and its result keep focus on the profiles status
   e.fire(e.byId.rail.querySelector('[data-key="profiles"]'), 'click');
   e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => STATE });
   await tick();
+  e.fire(e.byId.main.querySelector('[data-pf="row-toggle"][data-row="primary/atlas"]'), 'click');
   const lane = e.byId.main.querySelector('[data-pf="agent-lane"][data-agent="atlas"]');
   lane.value = 'daily-heavy';
   e.fire(lane, 'change');
   await tick();
+  e.byId.main.querySelector('[data-pf="preview"]').focus();
   e.fire(e.byId.main.querySelector('[data-pf="preview"]'), 'click');
   assert.equal(e.document.activeElement.id, 'pf-focus-status', 'busy render dropped focus');
   assert.equal(e.page.state.ui.profilesState.busy, true, 'the held preview is not marked busy');
@@ -747,6 +764,7 @@ test('page wiring: the profiles rail click loads GET /profiles/state and a previ
   await new Promise((resolve) => setImmediate(resolve));
   assert.ok(e.byId.main.querySelector('.pf'), 'the main region is the profiles view');
   assert.equal(e.byId.main.querySelectorAll('[data-pf-sec]').length, 9);
+  e.fire(e.byId.main.querySelector('[data-pf="row-toggle"][data-row="primary/atlas"]'), 'click');
   const lane = e.byId.main.querySelector('[data-pf="agent-lane"][data-agent="atlas"]');
   lane.value = 'daily-heavy';
   e.fire(lane, 'change');
@@ -774,7 +792,7 @@ test('loading: four full-width agent placeholders keep the loaded field set', ()
   assert.equal((html.match(/class="pf-skel pf-skel-card"/g) || []).length, 6);
   // The skeleton consumes the loaded primitives; the actual first-row rect comparison lives in
   // scripts/qa-profiles.mjs because string assertions cannot measure layout.
-  assert.match(html, /class="pf-agents">/);
+  assert.match(html, /class="pf-mems">/);
   assert.match(html, /class="pf-cards">/);
   assert.match(html, /class="pf-routes">/);
   assert.match(html, /class="pf-sec-b">/);
@@ -926,8 +944,9 @@ test('busy: a held apply rejects controller mutations and disables every editor 
   assert.deepEqual(plain(c.snapshot().draft), draftBefore, 'a busy controller accepted draft input');
   const html = P.render(STATE, { ...live(), busy: true, confirmClear: true, openRow: 'agents/explore',
     pending: [{ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' }] }) +
-    P.render(STATE, { ...live(), busy: true, openRow: 'memory/kibitzer' });
-  for (const name of ['agent-lane', 'agent-pin', 'agent-pin-thinking', 'route-provider', 'route-model',
+    P.render(STATE, { ...live(), busy: true, openRow: 'memory/kibitzer' }) +
+    P.render(STATE, { ...live(), busy: true, openRow: 'primary/hephaestus' });
+  for (const name of ['agent-lane', 'agent-provider', 'agent-pin', 'agent-pin-thinking', 'route-provider', 'route-model',
     'route-thinking', 'main-provider', 'main-model', 'main-thinking', 'lane-select', 'lane-literal',
     'summarizer-provider', 'summarizer-model', 'memory-mode', 'memory-service', 'memory-model', 'memory-thinking', 'reset-memory', 'drop',
     'clear-cancel', 'clear-confirm']) {
@@ -944,8 +963,8 @@ test('busy: a held apply rejects controller mutations and disables every editor 
 
 test('pin hint: GPT 계열만 sits inside the pin label before the thinking control', () => {
   const P = load();
-  const html = P.render(STATE, live());
-  const agent = /<article class="pf-agent" data-pf-agent="hephaestus">[\s\S]*?<\/article>/.exec(html)[0];
+  const html = P.render(STATE, live({ openRow: 'primary/hephaestus' }));
+  const agent = /<article class="pf-mem-row pf-primary-row open" data-pf-primary-agent="hephaestus"[^>]*>[\s\S]*?<\/article>/.exec(html)[0];
   const label = /<label class="pf-sel"[^>]*for="pf-agent-pin-hephaestus"[^>]*>[\s\S]*?<\/label>/.exec(agent)[0];
   assert.match(label, /<span class="pf-hint">GPT 계열만<\/span>/);
   const pin = agent.indexOf('id="pf-agent-pin-hephaestus"');
@@ -2325,7 +2344,7 @@ test('reapply: re-applying the active profile with nothing pending equals golden
 });
 
 // ---- todo 8: the WinForms layout in the board look ---------------------------------------------------------------------
-const FLOW_SECTIONS = ['kibitzer', 'reflection', 'agents:explore-research', 'agents:plan-advice', 'agents:review-qa',
+const FLOW_SECTIONS = ['primary', 'kibitzer', 'reflection', 'agents:explore-research', 'agents:plan-advice', 'agents:review-qa',
   'categories:quick-general', 'categories:deep', 'categories:specialist', 'lane', 'main', 'summarizer', 'apply'];
 const extraRow = (section, role) => ({ section, role, group: 'extras', groupLabel: '추가 역할 · Extras', labelKo: role, labelEn: role, model: 'fable', reasoning: 'medium' });
 async function openProfilesPage(state = STATE) {
@@ -2346,7 +2365,7 @@ test('layout: sections keep the WinForms order whatever order the rows arrive in
   const state = clone(STATE);
   state.routing.rows.push(extraRow('agents', 'qa-extra'));
   const extra = P.render(state, live());
-  assert.deepEqual(all(extra, /data-flow-sec="([^"]+)"/g).slice(2, 7),
+  assert.deepEqual(all(extra, /data-flow-sec="([^"]+)"/g).slice(3, 8),
     ['agents:explore-research', 'agents:plan-advice', 'agents:review-qa', 'agents:extras', 'categories:quick-general']);
   assert.ok(textOf(extra).includes('추가 설정'));
   assert.doesNotMatch(extra, /추가 역할 · Extras/);
@@ -2443,6 +2462,7 @@ test('pending: the heading suffix counts pending edits over every profile and le
   think.value = 'high';
   e.fire(think, 'change');
   e.fire(e.byId.main.querySelector('[data-flow="card:experimental-custom"]'), 'click');
+  e.fire(e.byId.main.querySelector('[data-pf="row-toggle"][data-row="primary/atlas"]'), 'click');
   const lane = e.byId.main.querySelector('[data-pf="agent-lane"][data-agent="atlas"]');
   lane.value = 'daily-heavy';
   e.fire(lane, 'change');
@@ -2582,6 +2602,130 @@ test('expanded recommendation stays on one truncated line', () => {
   assert.match(rule, /text-overflow:\s*ellipsis/);
   assert.match(rule, /overflow-wrap:\s*normal/);
   assert.doesNotMatch(rule, /overflow-wrap:\s*(?:anywhere|break-word)|white-space:\s*(?:normal|pre-wrap)/);
+});
+
+test('primary: four closed rows lead routing and show effective origin, a legacy pin and memory time', () => {
+  const P = load();
+  const state = clone(STATE);
+  const origins = ['main', 'pin', 'memory', 'builtin'];
+  for (const [i, id] of ['sisyphus', 'hephaestus', 'prometheus', 'atlas'].entries()) {
+    state.roster.agents[id].effective = { provider: 'chatgpt-subscription', modelId: 'gpt-6.1-sol', thinking: 'high', origin: origins[i] };
+  }
+  state.roster.agents.prometheus.pin = { provider: 'kimi-coding', modelId: 'kimi-k3', thinking: 'max' };
+  state.roster.agents.prometheus.remembered = { provider: 'chatgpt-subscription', modelId: 'gpt-6.1-sol', thinking: 'high', updatedAt: '2026-11-04T10:00:00.000Z' };
+  const html = P.render(state, live());
+  const rows = [...html.matchAll(/<article class="pf-mem-row pf-primary-row" data-pf-primary-agent="([^"]+)"[^>]*>([\s\S]*?)<\/article>/g)];
+  assert.equal(rows.length, 4);
+  assert.deepEqual(rows.map((r) => r[1]), ['sisyphus', 'hephaestus', 'prometheus', 'atlas']);
+  assert.equal(all(html, /data-flow-sec="([^"]+)"/g)[0], 'primary');
+  for (const [, id, row] of rows) {
+    assert.match(row, /class="pf-row-sum"/);
+    assert.match(row, /aria-expanded="false"/);
+    assert.match(row, /모든 프로필 공통/);
+    assert.equal((row.match(/<select\b/g) || []).length, 0, id + ' closed row');
+  }
+  assert.match(rows[0][2], /= 메인 모델 · 활성 프로필/);
+  assert.match(rows[0][2], /pf-row-val"[^>]*>k3 · max/);
+  assert.match(rows[0][2], /pf-c-amber"[^>]*>메인 추론 불일치/);
+  assert.match(rows[1][2], /pf-c-gray">핀<\/span>/);
+  assert.match(rows[2][2], /pf-c-gray">기억<\/span>/);
+  assert.match(rows[2][2], /pf-c-gray">핀<\/span>/, 'a legacy pin stays visible even when memory wins');
+  assert.match(rows[2][2], /기억 시각 · 2026-11-04T10:00:00.000Z/);
+  assert.match(rows[2][2], /pf-row-val"[^>]*>gpt-6\.1-sol · high/);
+  assert.match(rows[3][2], /pf-c-gray">내장 기본<\/span>/);
+  assert.doesNotMatch(html, /id="pf-sec-agents"|pf-agents-card/);
+  const controller = P.createController({});
+  assert.equal('agentsOpen' in controller.snapshot(), false);
+  assert.equal(typeof controller.agentsOpen, 'undefined');
+  for (const origin of ['memory', 'pin', 'lane']) {
+    state.roster.agents.sisyphus.effective.origin = origin;
+    assert.doesNotMatch(P.render(state, live()), /메인 추론 불일치/, origin + ' is not a settings-thinking comparison');
+  }
+  state.roster.agents.sisyphus.effective.origin = 'main';
+  state.main.effective.thinking = '';
+  assert.doesNotMatch(P.render(state, live()), /메인 추론 불일치/, 'absent sidecar thinking is not a mismatch');
+  state.main.effective.thinking = 'max';
+  state.roster.agents.sisyphus.effective.thinking = '';
+  assert.doesNotMatch(P.render(state, live()), /메인 추론 불일치/, 'both comparison values must exist');
+  state.roster.agents.sisyphus.effective.thinking = 'max';
+  assert.doesNotMatch(P.render(state, live()), /메인 추론 불일치/, 'equal thinking values need no warning');
+  assert.doesNotMatch(P.render(state, live({ pending: [{ kind: 'setMain', profileKey: state.activeProfile.key,
+    provider: 'chatgpt-subscription', model: 'gpt-6.1-sol', thinking: 'low' }] })), /메인 추론 불일치/, 'the comparison uses saved sidecar thinking, not a pending edit');
+  for (const [origin, label] of [['lane', '레인 기본'], ['unknown', '미확인'], ['unavailable', '사용 불가']]) {
+    state.roster.agents.atlas.effective = { provider: null, modelId: null, thinking: null, origin, reason: 'no-supported-rung' };
+    const row = /data-pf-primary-agent="atlas"[^>]*>([\s\S]*?)<\/article>/.exec(P.render(state, live()))[1];
+    assert.ok(textOf(row).includes(label));
+    if (origin === 'unavailable') assert.match(row, /class="pf-chip pf-c-amber" title="no-supported-rung">사용 불가/);
+  }
+});
+
+test('primary: Sisyphus edits the active profile main, shares its controls and never stages a pin', async () => {
+  const e = await openProfilesPage();
+  const q = (sel) => e.byId.main.querySelector(sel);
+  const active = STATE.activeProfile.key;
+  e.fire(q('[data-flow="card:experimental-custom"]'), 'click');
+  e.fire(q('[data-pf="row-toggle"][data-row="primary/sisyphus"]'), 'click');
+  const row = () => q('[data-pf-primary-agent="sisyphus"]');
+  assert.equal(row().querySelectorAll('.pf-tri select').length, 3);
+  assert.equal(row().querySelector('[data-pf="reset-memory"]'), null);
+  const change = (pf, value) => {
+    const control = row().querySelector('[data-pf="' + pf + '"]');
+    control.value = value;
+    e.fire(control, 'change');
+  };
+  change('main-provider', 'chatgpt-subscription');
+  change('main-model', 'gpt-6.1-sol');
+  change('main-thinking', 'high');
+  const pending = plain(e.page.state.ui.profilesState.pending);
+  assert.deepEqual(pending, [{ kind: 'setMain', profileKey: active, provider: 'chatgpt-subscription', model: 'gpt-6.1-sol', thinking: 'high' }]);
+  assert.equal(pending.some((c) => c.kind === 'setAgentPin'), false);
+  e.fire(q('[data-flow="card:' + active + '"]'), 'click');
+  assert.equal(selectedValueOf(q('#pf-main-model')), 'gpt-6.1-sol');
+  assert.equal(selectedValueOf(q('#pf-main-thinking')), 'high');
+  const mainThinking = q('#pf-main-thinking');
+  mainThinking.value = 'medium';
+  e.fire(mainThinking, 'change');
+  assert.equal(selectedValueOf(row().querySelector('[data-pf="main-thinking"]')), 'medium');
+  e.fire(q('[data-flow="apply:detail"]'), 'click');
+  const submitted = JSON.parse(e.fetches[e.fetches.length - 1].opts.body).changes;
+  assert.ok(submitted.some((c) => c.kind === 'setMain' && c.profileKey === active && c.thinking === 'medium'));
+  assert.equal(submitted.some((c) => c.kind === 'setAgentPin'), false);
+  assert.deepEqual(e.errors, []);
+});
+
+test('primary: non-main rows keep the role cascade, GPT-only models, lane, no-pin and memory reset', async () => {
+  const state = clone(STATE);
+  state.roster.agents.hephaestus.effective = { provider: 'chatgpt-subscription', modelId: 'gpt-6.1-sol', thinking: 'high', origin: 'pin' };
+  const e = await openProfilesPage(state);
+  const q = (sel) => e.byId.main.querySelector(sel);
+  e.fire(q('[data-pf="row-toggle"][data-row="primary/hephaestus"]'), 'click');
+  const row = () => q('[data-pf-primary-agent="hephaestus"]');
+  const options = [...row().querySelector('[data-pf="agent-pin"]').querySelectorAll('option')].map((o) => o.getAttribute('value')).filter(Boolean);
+  assert.ok(options.length > 0);
+  assert.ok(options.every((v) => v.slice(v.indexOf('|') + 1).startsWith('gpt-')));
+  assert.match(row().textContent, /GPT 계열만/);
+  assert.equal(row().querySelectorAll('.pf-tri select').length, 3);
+  const change = (pf, value) => {
+    const control = row().querySelector('[data-pf="' + pf + '"]');
+    control.value = value;
+    e.fire(control, 'change');
+  };
+  change('agent-provider', 'chatgpt-subscription');
+  assert.equal(selectedValueOf(row().querySelector('[data-pf="agent-pin"]')), '');
+  assert.equal(selectedValueOf(row().querySelector('[data-pf="agent-pin-thinking"]')), '');
+  assert.equal(e.page.state.ui.profilesState.pending.length, 0);
+  change('agent-pin', 'chatgpt-subscription|gpt-6.1-sol');
+  const pin = e.page.state.ui.profilesState.pending.find((c) => c.kind === 'setAgentPin');
+  assert.equal(pin.agentId, 'hephaestus');
+  assert.equal(pin.pin.modelId, 'gpt-6.1-sol');
+  assert.equal(pin.pin.thinking, selectedValueOf(row().querySelector('[data-pf="agent-pin-thinking"]')));
+  change('agent-pin', '');
+  assert.equal(e.page.state.ui.profilesState.pending.find((c) => c.kind === 'setAgentPin').pin, null);
+  change('agent-lane', 'geeky-heavy');
+  assert.ok(e.page.state.ui.profilesState.pending.some((c) => c.kind === 'setAgentLane' && c.lane === 'geeky-heavy'));
+  e.fire(row().querySelector('[data-pf="reset-memory"]'), 'click');
+  assert.ok(e.page.state.ui.profilesState.pending.some((c) => c.kind === 'resetAgentMemory' && c.agentId === 'hephaestus'));
+  assert.deepEqual(e.errors, []);
 });
 
 test('todo 5: one-line route and memory rows open in place (one at a time, click/Enter/Space), show pending chip and value while closed, and keep compact header <= 190px at 1440x900', async () => {

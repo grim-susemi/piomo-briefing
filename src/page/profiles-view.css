@@ -461,6 +461,9 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 
 /* routing: one WinForms row = one summary button line that opens in place over the official chain and three equal-width selects */
 .pf-group { display: grid; gap: var(--sp-1); min-width: 0; }
+.pf-group > .pf-sec-h { padding: 0; border: 0; align-items: center; }
+.pf-group > .pf-sec-h .pf-tag, .pf-group > .pf-sec-h .pf-sec-s { display: none; }
+.pf-group > .pf-sec-h h2 { font-size: var(--fs-sm); }
 .pf-group-h { display: flex; align-items: baseline; gap: var(--sp-2); margin: 0; color: var(--c-fg-2); font-size: var(--fs-sm); }
 .pf-routes { display: grid; gap: var(--sp-1); }
 .pf-route { display: grid; gap: 2px; min-width: 0; border-radius: var(--r-md); background: var(--c-main); }
