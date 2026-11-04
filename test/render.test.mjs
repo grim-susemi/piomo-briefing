@@ -1042,9 +1042,17 @@ test('tokens.css is the first stylesheet chunk of the page: later sheets read it
       tokens.set(name, values);
     }
     let seen = 0;
+    let seenFont = 0;
     let overview700 = false;
     for (const [, selector, declarations] of clean.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
       const selectors = selector.split(',').map((part) => part.trim());
+      const checkWeight = (weight, property) => {
+        if (weight > 600) {
+          assert.ok(weight >= 700 && selectors.length === 1 && selectors[0] === '.overview > .proj > .projh',
+            `unexpected ${property} ${weight} for ${selector.trim()}`);
+          if (weight === 700) overview700 = true;
+        }
+      };
       for (const [, rawValue] of declarations.matchAll(/(?:^|;)\s*font-weight\s*:\s*([^;]+)/gi)) {
         seen++;
         let value = rawValue.trim().replace(/\s*!important\s*$/i, '');
@@ -1056,18 +1064,28 @@ test('tokens.css is the first stylesheet chunk of the page: later sheets read it
         }
         const weight = /^bold$/i.test(value) ? 700 : /^normal$/i.test(value) ? 400 : Number(value);
         assert.ok(value !== '' && Number.isFinite(weight), `font-weight must resolve to a number: ${value}`);
-        if (weight > 600) {
-          assert.ok(weight >= 700 && selectors.length === 1 && selectors[0] === '.overview > .proj > .projh',
-            `unexpected font-weight ${weight} for ${selector.trim()}`);
-          if (weight === 700) overview700 = true;
+        checkWeight(weight, 'font-weight');
+      }
+      for (const [, rawValue] of declarations.matchAll(/(?:^|;)\s*font\s*:\s*([^;]+)/gi)) {
+        seenFont++;
+        for (const token of rawValue.match(/"[^"]*"|'[^']*'|\S+/g) ?? []) {
+          let weight;
+          if (/^bold$/i.test(token)) weight = 700;
+          else if (/^normal$/i.test(token)) weight = 400;
+          else if (/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(token) && Number(token) >= 100 && Number(token) <= 900) weight = Number(token);
+          else continue;
+          checkWeight(weight, 'font shorthand');
+          break;
         }
       }
     }
     assert.equal(seen, [...clean.matchAll(/(?:^|[;{])\s*font-weight\s*:/gi)].length, 'every font-weight declaration belongs to a parsed rule');
+    assert.equal(seenFont, [...clean.matchAll(/(?:^|[;{])\s*font\s*:/gi)].length, 'every font shorthand belongs to a parsed rule');
     return overview700;
   };
   assert.throws(() => checkWeights('.other { font-weight: 650; }'));
   assert.throws(() => checkWeights('.other, .overview > .proj > .projh { font-weight: 700; }'));
+  assert.throws(() => checkWeights('.overview > .proj > .projh {font-weight:700;} .other {font: 700 16px sans-serif;}'), /font shorthand/);
   assert.equal(checkWeights(styles[0]), true, 'the accepted overview heading uses weight 700');
 });
 
