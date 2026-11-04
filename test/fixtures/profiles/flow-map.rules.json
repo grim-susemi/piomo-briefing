@@ -41,7 +41,9 @@
     "F8": {
       "name": "One-line row disclosure",
       "description": "Route and memory rows render as one-line summary buttons and open in place before reading their selects; row-open clicks are disclosure interactions, not counted as WinForms steps",
-      "check": "row_open"
+      "check": "row_open",
+      "boardOnlySections": ["primary"],
+      "tabOrder": ["primary", "agents", "categories", "memory"]
     }
   }
 }

@@ -149,6 +149,9 @@ test('flow-map.rules.json conforms to rules schema and covers F1-F8 with F1-F7 d
     const key = `F${i}`;
     assert.deepEqual(rulesObj.rules[key], baseObj.rules[key], `${key} must be deep-equal to d282b3b`);
   }
+  assert.equal(rulesObj.rules.F8.check, 'row_open');
+  assert.deepEqual(rulesObj.rules.F8.boardOnlySections, ['primary'], 'only primary is board-only before WinForms sections');
+  assert.deepEqual(rulesObj.rules.F8.tabOrder, ['primary', 'agents', 'categories', 'memory']);
 });
 
 
@@ -164,6 +167,20 @@ test('board: the docked message tray is inside the viewport at both fixture size
       const box = map.regions.find((r) => r.id === 'message').box;
       assert.ok(box.y >= 0, `${size}: message top ${box.y} is on screen`);
       assert.ok(box.y + box.h <= map.frame.inner.h + 1, `${size}: message bottom ${box.y + box.h} is inside ${map.frame.inner.h}`);
+      assert.deepEqual(map.tabs.map((tab) => tab.key), ['primary', 'agents', 'categories', 'memory']);
+      assert.deepEqual(map.tabs.map((tab) => tab.count), [4, 9, 11, 2]);
+      for (const tab of map.tabs) {
+        assert.ok(tab.label.endsWith(` ${tab.count}`), `${size}: ${tab.key} count is real`);
+        assert.equal(tab.selected, 'true');
+        assert.equal(tab.opened.length, tab.count);
+        for (const row of tab.opened) {
+          assert.equal(row.expanded, 'true', `${size}: ${row.rowKey} opened before reading controls`);
+          assert.equal(row.selects, row.expectedSelects, `${size}: ${row.rowKey} has the controls its view model allows`);
+          if (row.readOnly) assert.equal(row.readOnlyValue, true, `${size}: ${row.rowKey} shows its read-only value`);
+        }
+      }
+      const diff = JSON.parse(readFileSync(join(out, `flow-diff-${size}.json`), 'utf8'));
+      assert.deepEqual(diff.differences, [], `${size}: F1-F8 all pass`);
     }
   } finally {
     rmSync(out, { recursive: true, force: true });

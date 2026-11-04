@@ -154,6 +154,38 @@ const FLOW_LIB = `(() => {
   const options = (el) => [...el.querySelectorAll('option')].map((o) => ({ value: o.value, text: o.textContent }));
   const snap = () => window.BriefPage && window.BriefPage.state.ui.profilesState;
   window.__flow = {
+    selectTab(key) {
+      const tab = document.querySelector('[data-pf="tab"][data-tab="' + key + '"]');
+      if (!tab) throw new Error('missing routing tab ' + key);
+      if (tab.getAttribute('aria-selected') !== 'true') tab.click();
+      return document.querySelector('[data-pf="tab"][data-tab="' + key + '"]').getAttribute('aria-selected') === 'true';
+    },
+    tabs() {
+      const keys = [...document.querySelectorAll('[role="tablist"] [data-pf="tab"]')].map((tab) => tab.getAttribute('data-tab'));
+      return keys.map((key) => {
+        this.selectTab(key);
+        const panel = document.querySelector('[data-pf-panel="' + key + '"]');
+        const buttons = [...panel.querySelectorAll('.pf-row-sum')].map((button) => button.getAttribute('data-row'));
+        const opened = buttons.map((rowKey) => {
+          const selector = '[data-pf="row-toggle"][data-row="' + rowKey + '"]';
+          let button = document.querySelector(selector);
+          if (button.getAttribute('aria-expanded') !== 'true') button.click();
+          button = document.querySelector(selector);
+          const row = button.parentElement;
+          const state = snap(), view = state.view;
+          const routing = view.details?.[state.shown]?.routing || view.routing;
+          const route = (routing?.rows || []).find((r) => r.section + '/' + r.role === rowKey);
+          const readOnly = !!(route && (route.readOnly === true || route.absentIn));
+          const result = { rowKey, expanded: button.getAttribute('aria-expanded'), selects: row.querySelectorAll('select').length,
+            expectedSelects: readOnly ? 0 : key === 'agents' || key === 'categories' ? 3 : 4,
+            readOnly, readOnlyValue: !!row.querySelector('.pf-row-body .pf-ro-val') };
+          button.click();
+          return result;
+        });
+        const tab = document.querySelector('[data-pf="tab"][data-tab="' + key + '"]');
+        return { key, label: tab.textContent, count: buttons.length, opened, selected: tab.getAttribute('aria-selected') };
+      });
+    },
     frame() {
       const side = document.querySelector('.sh-side'), rail = document.querySelector('.sh-rail'), shell = document.querySelector('.sh-shell');
       return { inner: { w: innerWidth, h: innerHeight }, dpr: devicePixelRatio, zoom: visualViewport ? visualViewport.scale : 1,
@@ -179,6 +211,7 @@ const FLOW_LIB = `(() => {
       if (id.startsWith('role:')) rowKey = id.slice(5).replace(/:(service|model|effort)$/, '');
       else if (id.startsWith('memory:')) rowKey = 'memory/' + id.slice(7).replace(/:(mode|service|model|effort)$/, '');
       if (!rowKey) return null;
+      this.selectTab(rowKey.split('/')[0]);
       const btn = document.querySelector('[data-pf-route="' + rowKey + '"] > .pf-row-sum, [data-pf-memory-row="' + rowKey.slice(7) + '"] > .pf-row-sum');
       if (!btn) return { rowKey, missing: true };
       const wasOpen = btn.getAttribute('aria-expanded') === 'true';
@@ -186,6 +219,7 @@ const FLOW_LIB = `(() => {
       return { rowKey, wasOpen, expanded: (document.querySelector('[data-pf-route="' + rowKey + '"] > .pf-row-sum, [data-pf-memory-row="' + rowKey.slice(7) + '"] > .pf-row-sum') || {}).getAttribute?.('aria-expanded') === 'true' };
     },
     rows() {
+      this.selectTab('agents');
       const closedRoute = document.querySelector('[data-pf-route="agents/explore"]');
       const closedBtn = closedRoute && closedRoute.querySelector('.pf-row-sum');
       const closedExpanded = closedBtn ? closedBtn.getAttribute('aria-expanded') : null;
@@ -196,6 +230,7 @@ const FLOW_LIB = `(() => {
       const widths = route ? [...route.querySelectorAll('select')].map((s) => Math.round(s.getBoundingClientRect().width)) : [];
       const recOnLabel = !!(route && route.querySelector('.pf-route-id [class*="pf-st-"]'));
       const openExpanded = route && route.querySelector('.pf-row-sum') ? route.querySelector('.pf-row-sum').getAttribute('aria-expanded') : null;
+      this.selectTab('memory');
       const memRow = document.querySelector('[data-pf-memory-row="kibitzer"]');
       const memBtn = memRow && memRow.querySelector('.pf-row-sum');
       const memClosedExpanded = memBtn ? memBtn.getAttribute('aria-expanded') : null;
@@ -222,6 +257,7 @@ const FLOW_LIB = `(() => {
     copy(list) {
       let t = text();
       for (const k of ['kibitzer', 'reflection']) {
+        this.selectTab('memory');
         const b = document.querySelector('[data-pf-memory-row="' + k + '"] .pf-row-sum');
         if (b && b.getAttribute('aria-expanded') === 'false') { b.click(); t += ' ' + text(); }
       }
@@ -413,7 +449,8 @@ function diff(board, ref, rules, size) {
   const out = {};
   const add = (rule, detail) => { (out[rule].differences ||= []).push(detail); };
   for (const id of Object.keys(rules.rules)) out[id] = { name: rules.rules[id].name, differences: [] };
-  if (JSON.stringify(board.sections) !== JSON.stringify(ref.sections)) add('F1', { expected: ref.sections, actual: board.sections });
+  const comparableSections = board.sections.filter((section) => !rules.rules.F8.boardOnlySections.includes(section));
+  if (JSON.stringify(comparableSections) !== JSON.stringify(ref.sections)) add('F1', { expected: ref.sections, actual: comparableSections });
   for (const task of Object.keys(ref.tasks)) {
     const want = ref.tasks[task], got = board.tasks[task] || [];
     const ids = (list) => list.filter((s) => !s.missing).map((s) => s.control);
@@ -482,6 +519,18 @@ function diff(board, ref, rules, size) {
     rule(box.message.y >= bottom(box.cards) && box.message.y >= bottom(box.detail), 'message below cards and detail');
   }
   if (out.F8) {
+    if (!same(board.sections.slice(0, rules.rules.F8.boardOnlySections.length), rules.rules.F8.boardOnlySections)) {
+      add('F8', { expected: rules.rules.F8.boardOnlySections, actual: board.sections.slice(0, rules.rules.F8.boardOnlySections.length) });
+    }
+    if (!same(board.tabs.map((tab) => tab.key), rules.rules.F8.tabOrder)) {
+      add('F8', { expected: rules.rules.F8.tabOrder, actual: board.tabs.map((tab) => tab.key) });
+    }
+    for (const tab of board.tabs) {
+      if (tab.selected !== 'true' || !tab.label.endsWith(' ' + tab.count) ||
+          tab.opened.some((row) => row.expanded !== 'true' || row.selects !== row.expectedSelects || row.readOnly && !row.readOnlyValue)) {
+        add('F8', { tab, expected: 'each tab selected, real count, every row opened before its controls are read' });
+      }
+    }
     if (rows.role.closedExpanded !== 'false' || rows.role.closedSelects !== 0 || rows.role.openExpanded !== 'true') {
       add('F8', { row: 'role', expected: { closedExpanded: 'false', closedSelects: 0, openExpanded: 'true' },
         actual: { closedExpanded: rows.role.closedExpanded, closedSelects: rows.role.closedSelects, openExpanded: rows.role.openExpanded } });
@@ -527,6 +576,7 @@ async function main() {
             map.sections = await page.eval(`window.__flow.sections()`);
             map.layout = await page.eval(`window.__flow.layout()`);
             await page.screenshot(path.join(OUT, `screen-${size.name}.png`));
+            map.tabs = await page.eval(`window.__flow.tabs()`);
             map.rows = await page.eval(`window.__flow.rows()`);
             map.copy = { missing: await page.eval(`window.__flow.copy(${JSON.stringify(STATIC_COPY)})`), conditional: CONDITIONAL_COPY };
             const snap = await axSnapshot(page);

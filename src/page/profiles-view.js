@@ -55,6 +55,21 @@
     ['agents', '전담 에이전트 · Agents', ['discovery', 'planning', 'review']],
     ['categories', '작업 카테고리 · Categories', ['general', 'reasoning', 'specialism']]
   ];
+  var TABS = [['primary', '메인 에이전트'], ['agents', '전담 에이전트'], ['categories', '작업 카테고리'], ['memory', '메모리']];
+  // Count and match the same rendered values, including pending edits and catalog aliases.
+  // These counters belong to one render only; filtering never changes controller edits.
+  function searchRow(edit, section, words, entries) {
+    var values = words.slice();
+    entries.forEach(function (entry) {
+      if (words.indexOf(entry.model) >= 0 || words.indexOf(entry.alias) >= 0) values.push(entry.alias, entry.model);
+    });
+    var match = values.join(' ').toLowerCase().indexOf(str(edit.query).trim().toLowerCase()) >= 0;
+    if (edit.rowCounts) {
+      edit.rowCounts[section].total++;
+      if (match) edit.rowCounts[section].matches++;
+    }
+    return boolAttr('hidden', !match);
+  }
   var FLOW_GROUP = { discovery: 'explore-research', planning: 'plan-advice', review: 'review-qa', general: 'quick-general', reasoning: 'deep', specialism: 'specialist' };
   // Identity marks are shapes as well as colours, so the fixed roster palette is never the only cue.
   var SHAPES = { sisyphus: 'circle', hephaestus: 'square', prometheus: 'triangle', atlas: 'diamond' };
@@ -748,7 +763,8 @@
       var origins = { memory: '기억', pin: '핀', main: '메인', lane: '레인 기본', builtin: '내장 기본', unknown: '미확인', unavailable: '사용 불가' };
       var originChip = chip(origin === 'unavailable' ? 'pf-c-amber' : 'pf-c-gray', origins[origin] || origins.unknown, str(effective.reason));
       var mismatch = id === 'sisyphus' && origin === 'main' && sidecarThinking && str(effective.thinking) && sidecarThinking !== str(effective.thinking);
-      return '<article class="pf-mem-row pf-primary-row' + (isOpen ? ' open' : '') + '" data-pf-primary-agent="' + esc(id) + '"' + attr('data-agent', id) + (isOpen ? '' : attr('id', rid)) + '>' +
+      return '<article class="pf-mem-row pf-primary-row' + (isOpen ? ' open' : '') + '" data-pf-primary-agent="' + esc(id) + '"' + attr('data-agent', id) + (isOpen ? '' : attr('id', rid)) +
+        searchRow(edit, 'primary', [id, name, '메인 에이전트', provider, model, provider + '/' + bareModel(model)], entries) + '>' +
         '<button type="button" class="pf-row-sum"' + attr('data-pf', 'row-toggle') + attr('data-row', key) +
         attr('aria-expanded', isOpen ? 'true' : 'false') + attr('aria-controls', rid) + '><span class="pf-route-id">' +
         '<span class="pf-dot pf-dot-' + esc(id) + ' pf-shape-' + esc(SHAPES[id]) + '" role="img" aria-label="' +
@@ -869,7 +885,8 @@
         (rec.official ? '<span class="pf-rec-off">' + esc(rec.official) + '</span>' : '') +
         fields + '</div>';
     }
-    return '<div class="pf-route' + (isOpen ? ' open' : '') + '" data-pf-route="' + esc(key) + '"' + (isOpen ? '' : attr('id', rid)) + '>' +
+    return '<div class="pf-route' + (isOpen ? ' open' : '') + '" data-pf-route="' + esc(key) + '"' + (isOpen ? '' : attr('id', rid)) +
+      searchRow(edit, r.section, [r.role, r.labelKo, r.labelEn, provider, full, alias], entries) + '>' +
       sumBtn + body + '</div>';
   }
   // The role sections of the WinForms routing box (PS:6213-6260) in their fixed order, whatever order the rows arrive in.
@@ -881,19 +898,23 @@
     var html = '';
     ROLE_SECTIONS.forEach(function (sec) {
       var mine = rows.filter(function (r) { return r.section === sec[0]; });
-      if (!mine.length) return;
+      if (!mine.length) {
+        html += tabPanel(sec[0], emptyState('배치할 역할이 없습니다. 프로필 설정을 확인한 뒤 상태를 다시 불러와 주십시오.', edit), edit);
+        return;
+      }
       var order = sec[2].slice();
       mine.forEach(function (r) { if (str(r.group) !== 'extras' && order.indexOf(str(r.group)) < 0) order.push(str(r.group)); });
       order.push('extras');
-      html += '<h3 class="pf-rh">' + esc(sec[1]) + '</h3>';
+      var body = '<h3 class="pf-rh">' + esc(sec[1]) + '</h3>';
       order.forEach(function (group) {
         var list = mine.filter(function (r) { return str(r.group) === group; });
         if (!list.length) return;
-        html += '<section class="pf-group"' + attr('data-flow-sec', sec[0] + ':' + (has(FLOW_GROUP, group) ? FLOW_GROUP[group] : group)) + '>' +
+        body += '<section class="pf-group"' + attr('data-flow-sec', sec[0] + ':' + (has(FLOW_GROUP, group) ? FLOW_GROUP[group] : group)) + '>' +
           '<h4 class="pf-group-h">' + esc(group === 'extras' ? '추가 설정' : str(list[0].groupLabel) || group) +
           ' <span class="pf-count">' + list.length + '</span></h4>' +
           list.map(function (r) { return routeRow(r, profile, entries, candidates, edit, ro); }).join('') + '</section>';
       });
+      html += tabPanel(sec[0], body, edit);
     });
     return html || emptyState('배치할 역할이 없습니다. 프로필 설정을 확인한 뒤 상태를 다시 불러와 주십시오.', edit);
   }
@@ -1101,7 +1122,8 @@
         body = '<div class="pf-row-body"' + attr('id', memId + '-body') + '>' + controls + '</div>';
       }
       return '<section class="pf-group"' + attr('data-flow-sec', key) + '><h3 class="pf-rh">' + esc(secTitle) + '</h3>' +
-        '<article class="pf-mem-row' + (isOpen ? ' open' : '') + '" data-pf-memory-row="' + esc(key) + '"' + (isOpen ? '' : attr('id', memId + '-body')) + '>' +
+        '<article class="pf-mem-row' + (isOpen ? ' open' : '') + '" data-pf-memory-row="' + esc(key) + '"' + (isOpen ? '' : attr('id', memId + '-body')) +
+        searchRow(edit, 'memory', [key, rowTitle, key === 'kibitzer' ? '회상' : '성찰', provider, model || curModel], allEntries) + '>' +
         sumBtn + body +
         '<p class="pf-note pf-mem-cur' + (isOpen ? '' : ' pf-sr') + '" data-pf-memory-current="' + esc(key) + '">' + esc(curLine) + '</p>' +
         '<p class="pf-note pf-mem-pend' + (rowErr ? ' pf-err' : '') + (isOpen ? '' : ' pf-sr') + '" data-pf-memory-pending="' + esc(key) + '"' +
@@ -1242,8 +1264,34 @@
     return '<section class="pf-sec pf-detail" data-flow="detail"><h2 class="pf-dt">' + esc(title) + '</h2>' +
       (p && p.summary ? '<p class="pf-du">' + summaryText(p.summary) + '</p>' : '') +
       '<p class="pf-cap">모델 라우팅 · 전담 에이전트 / 작업 카테고리 <span class="pf-count">' + arr(obj(dv.routing) && dv.routing.rows).length + '</span></p>' +
-      '<div class="pf-roles" id="pf-sec-routing" data-pf-sec="routing" data-flow="roles">' + agentRows(v, edit, ro) + memoryRows(v, edit, ro) + routingRows(dv, edit, ro) + '</div>' +
+      routingBoard(v, dv, edit, ro) +
       modelLane(dv, edit, ro) + mainModel(dv, edit, ro) + summarizer(v, edit, ro) + applyBar(edit, ro) + '</section>';
+  }
+  function tabPanel(key, body, edit) {
+    var searching = !!str(edit.query).trim();
+    var visible = searching ? edit.rowCounts[key].matches > 0 : (str(edit.tab) || 'primary') === key;
+    return '<div class="pf-tab-panel" role="tabpanel"' + attr('id', 'pf-panel-' + key) +
+      attr('data-pf-panel', key) + attr('aria-labelledby', 'pf-tab-' + key) + boolAttr('hidden', !visible) + '>' + body + '</div>';
+  }
+  function routingBoard(v, dv, edit, ro) {
+    var counts = {};
+    TABS.forEach(function (tab) { counts[tab[0]] = { total: 0, matches: 0 }; });
+    var e = Object.assign({}, edit, { rowCounts: counts });
+    // Memory stays before the WinForms role sections in document order. CSS places search groups in tab order.
+    var primary = agentRows(v, e, ro), memory = memoryRows(v, e, ro);
+    var roles = routingRows(dv, e, ro);
+    var tabs = TABS.map(function (tab) {
+      var key = tab[0], selected = (str(e.tab) || 'primary') === key;
+      return button('tab', attr('id', 'pf-tab-' + key) + attr('data-tab', key) + ' role="tab"' +
+        attr('aria-selected', selected ? 'true' : 'false') + attr('aria-controls', 'pf-panel-' + key) +
+        attr('tabindex', selected ? '0' : '-1'), esc(tab[1] + ' ' + counts[key].total +
+          (str(e.query).trim() ? ' (' + counts[key].matches + ')' : '')), false, 'pf-btn pf-tab');
+    }).join('');
+    return '<div class="pf-routing-tools"><label class="pf-sel" for="pf-route-search"><span class="pf-sel-t">역할·모델 검색</span>' +
+      '<input type="search" id="pf-route-search" data-pf="search"' + attr('value', e.query) + '></label>' +
+      '<div class="pf-tabs" role="tablist" aria-label="모델 라우팅 구역">' + tabs + '</div></div>' +
+      '<div class="pf-roles pf-tab-panels" id="pf-sec-routing" data-pf-sec="routing" data-flow="roles">' +
+      tabPanel('primary', primary, e) + tabPanel('memory', memory, e) + roles + '</div>';
   }
   // ---- public renderers --------------------------------------------------------------------------------------------
   function render(view, edit) {
@@ -1302,7 +1350,7 @@
     var fetchFn = opt.fetch;
     var tokenFn = opt.token;
     var notify = typeof opt.onChange === 'function' ? opt.onChange : function () {};
-    var s = { view: null, shown: '', pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false, openRow: null };
+    var s = { view: null, shown: '', pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false, openRow: null, tab: 'primary', query: '' };
     var seq = 0;
 
     function snapshot() {
@@ -1312,7 +1360,7 @@
         memoryErrors: copyMap(s.memoryErrors), memorySaved: copyMap(s.memorySaved),
         preview: s.preview, conflict: s.conflict, error: s.error, errorKind: s.errorKind,
         status: s.status, result: s.result, loading: s.loading, busy: s.busy, confirmClear: s.confirmClear,
-        openRow: s.openRow
+        openRow: s.openRow, tab: s.tab, query: s.query
       };
     }
     function changed() { notify(snapshot()); }
@@ -1674,9 +1722,21 @@
         changed();
         return snapshot();
       },
+      selectTab: function (key, clearSearch) {
+        if (TABS.some(function (tab) { return tab[0] === key; })) s.tab = key;
+        if (clearSearch) s.query = '';
+        changed();
+        return snapshot();
+      },
+      search: function (query) {
+        s.query = str(query);
+        changed();
+        return snapshot();
+      },
       toggleRow: function (rowKey) {
         if (s.busy) return snapshot();
         var k = str(rowKey);
+        s.tab = k.split('/')[0];
         s.openRow = k && s.openRow !== k ? k : null;
         changed();
         return snapshot();
@@ -1684,6 +1744,7 @@
       openRow: function (rowKey) {
         if (s.busy) return snapshot();
         var k = str(rowKey);
+        if (k) s.tab = k.split('/')[0];
         s.openRow = k || null;
         changed();
         return snapshot();
@@ -1743,7 +1804,12 @@
       // older response's pending/draft reset.
       if (c.snapshot().busy && ['select-profile', 'apply-card', 'reset-memory', 'preview', 'apply', 'reapply',
         'clear', 'clear-cancel', 'clear-confirm', 'drop', 'reload-state', 'row-toggle'].indexOf(act) >= 0) return;
-      if (act === 'row-toggle') {
+      if (act === 'tab') {
+        var tabKey = str(t.getAttribute('data-tab'));
+        c.selectTab(tabKey);
+        var tabBtn = root.querySelector('#pf-tab-' + tabKey);
+        if (tabBtn && typeof tabBtn.focus === 'function') tabBtn.focus({ preventScroll: true });
+      } else if (act === 'row-toggle') {
         var rKey = str(t.getAttribute('data-row'));
         c.toggleRow(rKey);
         var reBtn = root.querySelector('[data-pf="row-toggle"][data-row="' + rKey + '"]');
@@ -1755,7 +1821,10 @@
         var openBox = root.querySelector('#pf-guide-dlg');
         if (openBox && typeof openBox.close === 'function') openBox.close();
       } else if (act === 'jump') {
-        var id = 'pf-sec-' + str(t.getAttribute('data-target'));
+        var target = str(t.getAttribute('data-target'));
+        var jumpTabs = { routing: 'agents', memory: 'memory', agents: 'primary', primary: 'primary' };
+        if (has(jumpTabs, target)) c.selectTab(jumpTabs[target], true);
+        var id = has(jumpTabs, target) ? 'pf-panel-' + jumpTabs[target] : 'pf-sec-' + target;
         var doc = root.ownerDocument;
         var el = doc && typeof doc.getElementById === 'function' ? doc.getElementById(id) : null;
         if (!el && doc && typeof doc.querySelector === 'function') el = doc.querySelector('#' + id);
@@ -1800,8 +1869,13 @@
     }
     function onInput(ev) {
       var t = ev && ev.target;
-      if (!t || t.getAttribute('data-pf') !== 'lane-literal') return;
+      if (!t) return;
       var c = controller();
+      if (t.getAttribute('data-pf') === 'search') {
+        if (c) c.search(t.value);
+        return;
+      }
+      if (t.getAttribute('data-pf') !== 'lane-literal') return;
       if (!c || c.snapshot().busy) return;
       c.setDraft('lane', { literal: str(t.value) });
     }
@@ -2051,6 +2125,23 @@
       if (ev.ctrlKey || ev.altKey || ev.metaKey || ev.shiftKey) return;
       var t = ev.target;
       var k = str(ev.key);
+      if (t && root.contains(t) && typeof t.getAttribute === 'function') {
+        var ctl = controller();
+        if (ctl && k === 'Escape' && t.getAttribute('data-pf') === 'search' && ctl.snapshot().query) {
+          if (typeof ev.preventDefault === 'function') ev.preventDefault();
+          ctl.search('');
+          return;
+        }
+        if (ctl && t.getAttribute('data-pf') === 'tab' && (k === 'ArrowLeft' || k === 'ArrowRight')) {
+          if (typeof ev.preventDefault === 'function') ev.preventDefault();
+          var keys = TABS.map(function (tab) { return tab[0]; });
+          var next = keys[(keys.indexOf(ctl.snapshot().tab) + (k === 'ArrowRight' ? 1 : keys.length - 1)) % keys.length];
+          ctl.selectTab(next);
+          var nextBtn = root.querySelector('#pf-tab-' + next);
+          if (nextBtn && typeof nextBtn.focus === 'function') nextBtn.focus({ preventScroll: true });
+          return;
+        }
+      }
       if (k === 'Enter' || k === ' ' || k === 'Spacebar') {
         var rowBtn = t && typeof t.closest === 'function' ? t.closest('[data-pf="row-toggle"]') : null;
         if (rowBtn && root.contains(rowBtn)) {

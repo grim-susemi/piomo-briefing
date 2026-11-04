@@ -57,6 +57,109 @@ test('render: header, target homes and every section in order', () => {
   assert.match(text, /Reflection/);
 });
 
+test('tabs: counts follow real rows, primary is default, and search stays inside routing', async () => {
+  const state = clone(STATE);
+  state.routing.rows.push({ ...state.routing.rows.find((row) => row.section === 'agents'), role: 'extra-agent' });
+  const e = await openProfilesPage(state);
+  const root = e.byId.main;
+  const tabs = root.querySelectorAll('[role="tab"]');
+  const counts = [4, state.routing.rows.filter((row) => row.section === 'agents').length,
+    state.routing.rows.filter((row) => row.section === 'categories').length, 2];
+  assert.equal(e.page.state.ui.profilesState.tab, 'primary');
+  assert.deepEqual(tabs.map((tab) => tab.getAttribute('data-tab')), ['primary', 'agents', 'categories', 'memory']);
+  for (const [i, tab] of tabs.entries()) {
+    const panel = root.querySelector('#' + tab.getAttribute('aria-controls'));
+    assert.equal(panel.querySelectorAll('.pf-row-sum').length, counts[i]);
+    assert.ok(tab.textContent.endsWith(' ' + counts[i]));
+    assert.equal(tab.getAttribute('aria-selected'), i === 0 ? 'true' : 'false');
+    assert.equal(panel.hasAttribute('hidden'), i !== 0);
+  }
+  const tools = root.querySelector('.pf-routing-tools');
+  assert.ok(tools.closest('[data-flow="detail"]'));
+  assert.equal(tools.querySelector('input').getAttribute('type'), 'search');
+  assert.equal(tools.querySelector('label').textContent, '역할·모델 검색');
+  assert.equal(tools.children[0].tagName, 'LABEL', 'search precedes tabs');
+  assert.deepEqual(e.errors, []);
+});
+
+test('tabs: arrows wrap with focus and sidebar selects before scrolling', async () => {
+  const e = await openProfilesPage();
+  const root = e.byId.main;
+  for (const [key, expected] of [['ArrowRight', 'agents'], ['ArrowRight', 'categories'], ['ArrowRight', 'memory'],
+    ['ArrowRight', 'primary'], ['ArrowLeft', 'memory']]) {
+    const current = root.querySelector('[role="tab"][aria-selected="true"]');
+    const event = e.fire(current, 'keydown', { key });
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(e.page.state.ui.profilesState.tab, expected);
+    assert.equal(e.document.activeElement.id, 'pf-tab-' + expected);
+  }
+  for (const [target, expected] of [['routing', 'agents'], ['memory', 'memory'], ['primary', 'primary']]) {
+    e.fire(e.document.querySelector('[data-pf="jump"][data-target="' + target + '"]'), 'click');
+    assert.equal(e.page.state.ui.profilesState.tab, expected);
+    const panel = root.querySelector('#pf-panel-' + expected);
+    assert.equal(panel.hasAttribute('hidden'), false);
+    assert.equal(e.ctx.scrolled.at(-1), panel);
+  }
+  assert.deepEqual(e.errors, []);
+});
+
+test('search: role ids, Korean and English names, providers, model ids and aliases match across tabs with counts; Esc clears', async () => {
+  const state = clone(STATE);
+  state.catalog['NeedleAlias'] = { model: 'needle-provider/needle-model', variant: 'high' };
+  const agent = state.routing.rows.find((row) => row.section === 'agents');
+  Object.assign(agent, { role: 'needle-role', labelKo: '바늘 역할', labelEn: 'Needle English', model: 'NeedleAlias' });
+  const category = state.routing.rows.find((row) => row.section === 'categories');
+  Object.assign(category, { model: 'NeedleAlias' });
+  state.memory.kibitzer = { ...state.memory.kibitzer, mode: 'custom', model: 'needle-provider/needle-model', reasoning: 'high' };
+  const e = await openProfilesPage(state);
+  const root = e.byId.main;
+  for (const query of ['NEEDLE-ROLE', '바늘 역할', 'needle english', 'NEEDLE-PROVIDER', 'needle-model', 'needlealias']) {
+    const search = root.querySelector('#pf-route-search');
+    search.value = query;
+    e.fire(search, 'input');
+    assert.equal(e.page.state.ui.profilesState.query, query);
+    assert.equal(root.querySelector('[data-pf-route="agents/needle-role"]').hasAttribute('hidden'), false, query);
+    const cross = !['NEEDLE-ROLE', '바늘 역할', 'needle english'].includes(query);
+    for (const key of ['primary', 'agents', 'categories', 'memory']) {
+      const panel = root.querySelector('#pf-panel-' + key);
+      const rows = panel.querySelectorAll('[data-pf-primary-agent], [data-pf-route], [data-pf-memory-row]');
+      const matches = rows.filter((row) => !row.hasAttribute('hidden')).length;
+      const tab = root.querySelector('#pf-tab-' + key);
+      assert.ok(tab.textContent.endsWith(' (' + matches + ')'), tab.textContent);
+      assert.equal(panel.hasAttribute('hidden'), matches === 0);
+      if (cross && (key === 'agents' || key === 'categories' || key === 'memory')) assert.ok(matches > 0, key);
+    }
+  }
+  const event = e.fire(root.querySelector('#pf-route-search'), 'keydown', { key: 'Escape' });
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(e.page.state.ui.profilesState.query, '');
+  assert.equal(root.querySelector('#pf-route-search').value, '');
+  assert.equal(root.querySelectorAll('[data-pf-route][hidden]').length, 0);
+  for (const tab of root.querySelectorAll('[role="tab"]')) assert.doesNotMatch(tab.textContent, /\(\d+\)/);
+  assert.deepEqual(e.errors, []);
+});
+
+test('search: hiding a pending row preserves pending counts and the tray byte for byte', async () => {
+  const e = await openProfilesPage();
+  const root = e.byId.main;
+  e.fire(root.querySelector('[data-row="agents/explore"]'), 'click');
+  const thinking = root.querySelector('[data-flow="role:agents/explore:effort"]');
+  thinking.value = 'high';
+  e.fire(thinking, 'change');
+  const before = plain(e.page.state.ui.profilesState.pending);
+  assert.equal(before.length, 1);
+  const tray = root.querySelector('.pf-tray').innerHTML;
+  const search = root.querySelector('#pf-route-search');
+  search.value = 'no matching role anywhere';
+  e.fire(search, 'input');
+  assert.equal(root.querySelector('[data-pf-route="agents/explore"]').hasAttribute('hidden'), true);
+  assert.deepEqual(plain(e.page.state.ui.profilesState.pending), before);
+  assert.equal(root.querySelector('.pf-tray').innerHTML, tray);
+  assert.match(root.querySelector('.pf-title').textContent, /변경 보류 1건/);
+  assert.match(root.querySelector('.pf-apply').textContent, /변경 보류 1건/);
+  assert.deepEqual(e.errors, []);
+});
+
 test('render: 4 agent rows (lane, pin, remembered model, reset), 6 profile cards and grouped routing rows', () => {
   const P = load();
   const html = P.render(STATE, live());
@@ -133,7 +236,9 @@ test('a11y: every select and input has a visible label and an accessible name', 
   const { labels, controls } = labelledControls(html);
   const selects = controls.filter((c) => c.tag === 'select');
   assert.equal(selects.length, 6, 'closed rows leave 1 lane + 3 main + 2 summarizer selects');
-  assert.equal(controls.length, 7, '6 selects + 1 text input');
+  assert.equal(controls.length, 8, '6 selects + 1 literal input + 1 search input');
+  assert.equal(labels.get('pf-route-search'), '역할·모델 검색');
+  assert.equal(controls.filter((c) => c.pf === 'search').length, 1);
   for (const c of controls) {
     const name = c.aria || c.ref || labels.get(c.id) || '';
     assert.ok(name.trim(), `${c.tag} [data-pf=${c.pf || '?'}] has no accessible name`);
@@ -392,7 +497,8 @@ test('read-only without a token: no selects and no preview/apply controls', () =
   const html = P.render(STATE, { live: false });
   assert.match(html, /data-readonly="true"/);
   assert.doesNotMatch(html, /<select/);
-  assert.doesNotMatch(html, /<input/);
+  assert.doesNotMatch(html, /<input type="text"/);
+  assert.deepEqual(labelledControls(html).controls.map((c) => c.pf), ['search'], 'search is the sole read-only input');
   assert.doesNotMatch(html, /data-pf="preview"/);
   assert.doesNotMatch(html, /data-pf="apply"/);
   assert.match(html, /이 페이지는 보기 전용입니다/);
