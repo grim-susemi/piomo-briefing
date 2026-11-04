@@ -12,6 +12,7 @@ import {
   atomicWriteText, detectStyle, formatJsonText, hasComments, openProfilesStore, redact,
 } from '../src/profiles/store.mjs';
 import { pinnedOmoPath } from './helpers/pinned-plugin.mjs';
+import { defaultRoster, memoryPath, rosterPath } from '../src/profiles/contract/schema.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const GOLDEN = path.join(here, 'fixtures', 'profiles', 'goldens', 'apply-gpt-kimi-deepseek', 'files');
@@ -85,6 +86,8 @@ function makeFixture(t, options = {}) {
     mirrorHomes,
     pluginPath: plugin,
     inventory,
+    registry: options.registry,
+    registries: options.registries,
     hooks: options.hooks,
     now: options.now ?? (() => Date.parse('2026-10-20T12:00:00Z')),
   });
@@ -98,6 +101,249 @@ function expectedOf(store) {
 function body(action, changes, store, expected = expectedOf(store), rosterRevision = store.state().roster.revision) {
   return { action, changes, expected, rosterRevision };
 }
+
+const MAIN_A = { provider: 'openai', model: 'gpt-6-sol', thinking: 'high' };
+const MAIN_APPLY = { kind: 'setMain', ...MAIN_A };
+const HOST_MODELS = [
+  { provider: 'openai', id: 'gpt-6-sol' },
+  { provider: 'openai', id: 'gpt-memory' },
+  { provider: 'openai', id: 'gpt-pin' },
+  { provider: 'openai', id: 'gpt-lane' },
+];
+
+function agentFixture(t, options = {}) {
+  const models = HOST_MODELS.map(model => ({
+    provider: model.provider, modelId: `${model.provider}/${model.id}`, levels: ['medium', 'high'],
+  }));
+  const fx = makeFixture(t, {
+    ...options,
+    registry: options.registry ?? { getAvailable: () => HOST_MODELS },
+    registries: { primary: { models }, stable: { models } },
+    mainOverride: { 'native-gpt-kimi-deepseek': MAIN_A },
+    mutateSettings(settings) {
+      settings.defaultProvider = MAIN_A.provider;
+      settings.defaultModel = MAIN_A.model;
+      settings.defaultThinkingLevel = MAIN_A.thinking;
+    },
+  });
+  const agentDir = path.join(fx.stable, 'agent');
+  const roster = defaultRoster('2026-10-20T00:00:00Z');
+  roster.revision = 3;
+  for (const [index, agent] of Object.values(roster.agents).entries()) agent.rev = index + 7;
+  fs.mkdirSync(path.dirname(rosterPath(agentDir)), { recursive: true });
+  fs.writeFileSync(rosterPath(agentDir), JSON.stringify(roster));
+  fs.writeFileSync(path.join(agentDir, 'settings.json'), JSON.stringify({
+    defaultProvider: MAIN_A.provider, defaultModel: MAIN_A.model, defaultThinkingLevel: MAIN_A.thinking,
+  }));
+  return { ...fx, agentDir, roster };
+}
+
+function seedMemory(fx, agentId = 'sisyphus', model = { provider: 'openai', modelId: 'gpt-memory' }) {
+  const file = memoryPath(fx.agentDir, agentId);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({
+    v: 1, agentId, model, thinking: 'medium', rosterRev: fx.roster.agents[agentId].rev,
+    updatedAt: '2026-10-20T00:00:00Z',
+  }));
+  return file;
+}
+
+function snapshot(root) {
+  const files = {};
+  function visit(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) visit(file);
+      else files[path.relative(root, file)] = hashFile(file);
+    }
+  }
+  visit(root);
+  return files;
+}
+
+test('effective resolves memory, pin, stable-home main, lane, builtin and unavailable', (t) => {
+  const fx = agentFixture(t);
+  // The primary main must not be used for the extension's stable-home state.
+  const primarySettings = path.join(fx.primary, 'agent', 'settings.json');
+  const primary = readJsonFile(primarySettings);
+  primary.defaultModel = 'gpt-pin';
+  fs.writeFileSync(primarySettings, JSON.stringify(primary));
+  const setRoster = () => fs.writeFileSync(rosterPath(fx.agentDir), JSON.stringify(fx.roster));
+  const effective = () => fx.store.state().roster.agents.sisyphus.effective;
+  assert.deepEqual(effective(), { provider: 'openai', modelId: 'gpt-6-sol', thinking: 'high', origin: 'main' });
+  fx.roster.agents.sisyphus.pin = { provider: 'openai', modelId: 'gpt-pin', thinking: 'medium' };
+  setRoster();
+  assert.equal(effective().origin, 'pin');
+  const memory = seedMemory(fx);
+  const memoryHash = hashFile(memory);
+  assert.deepEqual(effective(), { provider: 'openai', modelId: 'gpt-memory', thinking: 'medium', origin: 'memory' });
+  fx.roster.agents.sisyphus.rev += 1;
+  setRoster();
+  assert.equal(effective().origin, 'pin');
+  assert.equal(hashFile(memory), memoryHash);
+  fx.roster.agents.sisyphus.pin = { provider: 'openai', modelId: 'missing-pin', thinking: 'high' };
+  setRoster();
+  assert.equal(effective().origin, 'main');
+  fs.writeFileSync(path.join(fx.agentDir, 'settings.json'), '{}');
+  fs.writeFileSync(path.join(fx.stable, 'omo.jsonc'), JSON.stringify({
+    model_profiles: { 'daily-normal': { models: [{ providers: ['openai'], model: 'gpt-lane', thinking: 'medium' }] } },
+  }));
+  assert.deepEqual(effective(), { provider: 'openai', modelId: 'gpt-lane', thinking: 'medium', origin: 'lane' });
+  fs.writeFileSync(path.join(fx.stable, 'omo.jsonc'), '{}');
+  assert.deepEqual(effective(), {
+    provider: null, modelId: null, thinking: null, origin: 'unavailable', reason: 'not-found',
+  });
+  const builtin = agentFixture(t, { registry: { getAvailable: () => [{ provider: 'anthropic', id: 'claude-opus-5-5' }] } });
+  fs.writeFileSync(path.join(builtin.agentDir, 'settings.json'), '{}');
+  assert.equal(builtin.store.state().roster.agents.sisyphus.effective.origin, 'builtin');
+});
+
+test('effective uses live registry find and getAvailable authentication semantics; absent host is unknown', (t) => {
+  let registry = null;
+  const fx = agentFixture(t, { registry: () => registry });
+  for (const agent of Object.values(fx.store.state().roster.agents)) assert.equal(agent.effective.origin, 'unknown');
+  let finds = 0;
+  registry = {
+    find(provider, id) { finds += 1; return { provider, id }; },
+    getAvailable: () => [],
+  };
+  assert.equal(fx.store.state().roster.agents.sisyphus.effective.origin, 'unavailable');
+  registry.getAvailable = () => HOST_MODELS;
+  assert.equal(fx.store.state().roster.agents.sisyphus.effective.origin, 'main');
+  assert.ok(finds > 0);
+});
+
+test('effective guards only non-Muse opencode-go lane rungs, preserving explicit choices', (t) => {
+  const fx = agentFixture(t, { registry: { getAvailable: () => [
+    { provider: 'opencode-go', id: 'glm-5.3' }, { provider: 'opencode-go', id: 'muse-fast' },
+  ] } });
+  fs.writeFileSync(path.join(fx.agentDir, 'settings.json'), '{}');
+  const lane = model => fs.writeFileSync(path.join(fx.stable, 'omo.jsonc'), JSON.stringify({
+    model_profiles: { 'daily-normal': { models: [{ providers: ['opencode-go'], model, thinking: 'high' }] } },
+  }));
+  lane('glm-5.3');
+  assert.equal(fx.store.state().roster.agents.sisyphus.effective.origin, 'unavailable');
+  const memory = seedMemory(fx, 'sisyphus', { provider: 'opencode-go', modelId: 'glm-5.3' });
+  const before = hashFile(memory);
+  assert.equal(fx.store.state().roster.agents.sisyphus.effective.origin, 'memory');
+  assert.equal(hashFile(memory), before);
+  fx.roster.agents.sisyphus.rev += 1;
+  fx.roster.agents.sisyphus.pin = { provider: 'opencode-go', modelId: 'glm-5.3', thinking: 'high' };
+  fs.writeFileSync(rosterPath(fx.agentDir), JSON.stringify(fx.roster));
+  assert.equal(fx.store.state().roster.agents.sisyphus.effective.origin, 'pin');
+  fx.roster.agents.sisyphus.pin = null;
+  fs.writeFileSync(rosterPath(fx.agentDir), JSON.stringify(fx.roster));
+  fs.writeFileSync(path.join(fx.agentDir, 'settings.json'), JSON.stringify({
+    defaultProvider: 'opencode-go', defaultModel: 'glm-5.3', defaultThinkingLevel: 'high',
+  }));
+  assert.equal(fx.store.state().roster.agents.sisyphus.effective.origin, 'main');
+  fs.writeFileSync(path.join(fx.agentDir, 'settings.json'), '{}');
+  lane('muse-fast');
+  assert.equal(fx.store.state().roster.agents.sisyphus.effective.origin, 'lane');
+});
+
+test('active-profile main reapply resets matching Sisyphus memory exactly once without settings writes', (t) => {
+  const fx = agentFixture(t);
+  const memory = seedMemory(fx);
+  const beforeMemory = hashFile(memory);
+  const beforeSettings = hashFile(path.join(fx.primary, 'agent', 'settings.json'));
+  assert.equal(fx.store.state().roster.agents.sisyphus.effective.origin, 'memory');
+  const result = fx.store.apply(body('apply', [MAIN_APPLY], fx.store));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.ok(!result.writes.includes('agent/settings.json'));
+  assert.equal(result.writes.filter(id => id === 'agent/primary-agents/roster.json').length, 1);
+  const after = readJsonFile(rosterPath(fx.agentDir));
+  assert.equal(after.revision, fx.roster.revision + 1);
+  assert.equal(after.agents.sisyphus.rev, fx.roster.agents.sisyphus.rev + 1);
+  for (const id of ['hephaestus', 'prometheus', 'atlas']) assert.deepEqual(after.agents[id], fx.roster.agents[id]);
+  assert.equal(fx.store.state().roster.agents.sisyphus.effective.origin, 'main');
+  assert.equal(hashFile(memory), beforeMemory);
+  assert.equal(hashFile(path.join(fx.primary, 'agent', 'settings.json')), beforeSettings);
+});
+
+test('a new main model, including an explicitly named inactive profile, resets only Sisyphus', (t) => {
+  for (const profileKey of ['gpt-kimi-deepseek', 'gpt-deepseek']) {
+    const fx = agentFixture(t);
+    const result = fx.store.apply(body('apply', [{ ...MAIN_APPLY, model: 'gpt-pin', profileKey }], fx.store));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(readJsonFile(path.join(fx.primary, 'agent', 'settings.json')).defaultModel, 'gpt-pin');
+    const after = readJsonFile(rosterPath(fx.agentDir));
+    assert.equal(after.agents.sisyphus.rev, fx.roster.agents.sisyphus.rev + 1);
+    for (const id of ['hephaestus', 'prometheus', 'atlas']) assert.deepEqual(after.agents[id], fx.roster.agents[id]);
+  }
+});
+
+for (const [source, change] of [
+  ['main block', { ...MAIN_APPLY, profileKey: 'gpt-kimi-deepseek' }],
+  ['Sisyphus row', MAIN_APPLY],
+  ['selectProfile', { kind: 'selectProfile', profileKey: 'gpt-kimi-deepseek' }],
+]) {
+  test(`main apply via ${source} clears Sisyphus pin and resets memory in one CAS write`, (t) => {
+    let rosterWrites = 0;
+    const fx = agentFixture(t, { hooks: { beforeWrite(id) {
+      if (id === 'agent/primary-agents/roster.json') rosterWrites += 1;
+    } } });
+    fx.roster.agents.sisyphus.pin = { provider: 'openai', modelId: 'gpt-pin', thinking: 'medium' };
+    fs.writeFileSync(rosterPath(fx.agentDir), JSON.stringify(fx.roster));
+    const memory = seedMemory(fx);
+    const before = snapshot(fx.root);
+    const preview = fx.store.preview(body('preview', [change], fx.store));
+    assert.equal(preview.ok, true, JSON.stringify(preview));
+    assert.ok(preview.warnings.includes('기억 초기화 · Sisyphus (메인 모델 적용)'));
+    assert.ok(preview.warnings.includes('핀 해제 · Sisyphus (메인 모델 따름)'));
+    assert.deepEqual(snapshot(fx.root), before);
+    assert.equal(rosterWrites, 0);
+    const result = fx.store.apply(body('apply', [change], fx.store));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const after = readJsonFile(rosterPath(fx.agentDir));
+    assert.equal(after.agents.sisyphus.pin, null);
+    assert.equal(after.agents.sisyphus.rev, fx.roster.agents.sisyphus.rev + 1);
+    assert.equal(after.revision, fx.roster.revision + 1);
+    assert.equal(rosterWrites, 1);
+    assert.equal(hashFile(memory), before[path.relative(fx.root, memory)]);
+    for (const id of ['hephaestus', 'prometheus', 'atlas']) assert.deepEqual(after.agents[id], fx.roster.agents[id]);
+    assert.equal(fx.store.state().roster.agents.sisyphus.effective.origin, 'main');
+  });
+}
+
+test('main applies coalesce explicit Sisyphus memory resets and repeated setMain in either order', (t) => {
+  for (const changes of [
+    [MAIN_APPLY, { kind: 'resetAgentMemory', agentId: 'sisyphus' }],
+    [{ kind: 'resetAgentMemory', agentId: 'sisyphus' }, MAIN_APPLY, MAIN_APPLY],
+  ]) {
+    const fx = agentFixture(t);
+    const result = fx.store.apply(body('apply', changes, fx.store));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(readJsonFile(rosterPath(fx.agentDir)).agents.sisyphus.rev, fx.roster.agents.sisyphus.rev + 1);
+    assert.equal(result.warnings.filter(w => w === '기억 초기화 · Sisyphus (메인 모델 적용)').length, 1);
+  }
+});
+
+test('a batch without a main apply leaves Sisyphus revision and memory unchanged', (t) => {
+  const fx = agentFixture(t);
+  const memory = seedMemory(fx);
+  const before = hashFile(rosterPath(fx.agentDir));
+  const beforeMemory = hashFile(memory);
+  const result = fx.store.apply(body('apply', [{ kind: 'setSummarizer', modelId: 'openai/gpt-6-sol' }], fx.store));
+  assert.equal(result.ok, true);
+  assert.equal(hashFile(rosterPath(fx.agentDir)), before);
+  assert.equal(hashFile(memory), beforeMemory);
+  assert.ok(!result.warnings.includes('기억 초기화 · Sisyphus (메인 모델 적용)'));
+});
+
+test('main apply refuses stale roster revision or hash without changing any file', (t) => {
+  for (const stale of ['revision', 'hash']) {
+    const fx = agentFixture(t);
+    const expected = expectedOf(fx.store);
+    if (stale === 'hash') expected['agent/primary-agents/roster.json'] = '0'.repeat(64);
+    const before = snapshot(fx.root);
+    const result = fx.store.apply(body('apply', [MAIN_APPLY], fx.store, expected,
+      fx.roster.revision + (stale === 'revision' ? 1 : 0)));
+    assert.equal(result.code, 'STALE');
+    assert.equal(result.status, 409);
+    assert.deepEqual(snapshot(fx.root), before);
+  }
+});
 
 test('preview returns path-level diffs and writes nothing', (t) => {
   const fx = makeFixture(t);
@@ -356,7 +602,7 @@ test('a non-GPT Hephaestus pin is rejected; a GPT pin and rev bumps are written'
   assert.equal(roster.revision, 3);
 });
 
-test('setMain changes exactly defaultProvider/defaultModel and only the primary home', (t) => {
+test('setMain changes only defaultProvider/defaultModel in primary settings and preserves stable config and settings', (t) => {
   const fx = makeFixture(t);
   const settingsPath = path.join(fx.primary, 'agent', 'settings.json');
   const before = readJsonFile(settingsPath);

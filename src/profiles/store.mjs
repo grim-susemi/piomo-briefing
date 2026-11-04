@@ -22,10 +22,11 @@ import { createHash, randomBytes } from 'node:crypto';
 import { basename, dirname, join, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { parseJsonc } from './contract/jsonc.mjs';
+import { parseJsonc, readLaneOverrides } from './contract/jsonc.mjs';
 import { atomicWriteJson, writeRoster as contractWriteRoster } from './contract/atomic.mjs';
 import { readMemory, readRoster, validateRoster } from './contract/schema.mjs';
-import { AGENT_IDS, LANES, THINKING } from './contract/constants.mjs';
+import { AGENT_IDS, DEFAULT_LANE, LANES, THINKING } from './contract/constants.mjs';
+import { resolve } from './contract/resolve.mjs';
 import {
   assertMemoryRouteWritable, clone, commandCodeWarning, deepEqual, getEffectiveMemoryCatalog, getMemorySelectionFromConfig,
   getModelProfileSettings, getOrCreateCatalogAlias, getReflectionMemorySelectionFromConfig,
@@ -561,13 +562,16 @@ export function openProfilesStore(options = {}) {
     return list;
   }
 
+  function hostRegistry() {
+    const source = options.registry ?? options.registryModels;
+    try { return typeof source === 'function' ? source() : source; } catch { return null; }
+  }
+
   // The host registry is handed over as a getter: extension.mjs points it at the live
   // session context, while tests pass an array. Only the ChatGPT-subscription models
   // are added to the picker, so the catalog stays the source of every other provider.
   function registryPickerModels() {
-    const source = options.registry ?? options.registryModels ?? [];
-    let available;
-    try { available = typeof source === 'function' ? source() : source; } catch { available = []; }
+    let available = hostRegistry();
     if (available && typeof available.getAvailable === 'function') {
       try { available = available.getAvailable(); } catch { available = []; }
     }
@@ -601,6 +605,53 @@ export function openProfilesStore(options = {}) {
       provider: CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE,
       model: `${CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE}/${id}`,
     }));
+  }
+
+  function startingModel(agentId, roster, memory, laneOverrides, registry, main) {
+    if (!registry) {
+      return { provider: null, modelId: null, thinking: null, origin: 'unknown', reason: 'no-registry' };
+    }
+    const available = () => Array.isArray(registry) ? registry
+      : typeof registry.getAvailable === 'function' ? registry.getAvailable() : [];
+    const adapter = {
+      find(provider, modelId) {
+        if (provider) {
+          return typeof registry.find === 'function' && !Array.isArray(registry)
+            ? registry.find(provider, modelId)
+            : available().find(model => model.provider === provider && (model.id ?? model.modelId) === modelId);
+        }
+        return available().filter(model => (model.id ?? model.modelId) === modelId);
+      },
+      hasAuth(provider) {
+        return available().some(model => model.provider === provider);
+      },
+    };
+    const agent = roster.agents[agentId];
+    const withPin = pin => ({ ...roster, agents: { ...roster.agents, [agentId]: { ...agent, pin } } });
+    const lane = LANES.includes(agent.lane) ? agent.lane : DEFAULT_LANE[agentId];
+    const noLane = { [lane]: { models: [{ model: '\u0000piomo-no-lane-match', providers: ['\u0000'] }] } };
+    const first = resolve({ agentId, roster, memory, laneOverrides: noLane, registry: adapter });
+    if (first.origin === 'memory' || first.origin === 'pin') return first;
+    if (agentId === 'sisyphus' && main) {
+      const fromMain = resolve({
+        agentId, roster: withPin(main), memory: null, laneOverrides: noLane, registry: adapter,
+      });
+      if (fromMain.origin === 'pin') return { ...fromMain, origin: 'main' };
+    }
+    const guarded = {
+      ...adapter,
+      find(provider, modelId) {
+        if (provider === 'opencode-go' && !/muse/i.test(modelId)) return [];
+        const found = adapter.find(provider, modelId);
+        if (provider) return found;
+        return (Array.isArray(found) ? found : found ? [found] : [])
+          .filter(model => model.provider !== 'opencode-go' || /muse/i.test(model.id ?? model.modelId ?? ''));
+      },
+    };
+    const result = resolve({ agentId, roster: withPin(null), memory: null, laneOverrides, registry: guarded });
+    return result.unavailable
+      ? { provider: null, modelId: null, thinking: null, origin: 'unavailable', reason: result.reason }
+      : result;
   }
 
   function routingRowsFor(inventory, layer) {
@@ -821,11 +872,28 @@ export function openProfilesStore(options = {}) {
       }
     }
     // The extension owns these files; the board only projects them for display.
+    const laneRead = readLaneOverrides(roots.stableHome, { fs });
+    if (laneRead.warning) warnings.push(laneRead.warning.message);
+    const registry = hostRegistry();
+    let settingsMain = null;
+    try {
+      const stableSettings = JSON.parse(fs.readFileSync(join(agentDir, 'settings.json'), UTF8).replace(/^\uFEFF/, ''));
+      if ([stableSettings.defaultProvider, stableSettings.defaultModel, stableSettings.defaultThinkingLevel]
+        .every(value => typeof value === 'string' && value.length > 0)) {
+        settingsMain = {
+          provider: stableSettings.defaultProvider, modelId: stableSettings.defaultModel,
+          thinking: stableSettings.defaultThinkingLevel,
+        };
+      }
+    } catch { /* A missing or invalid main leaves the lane chain in charge. */ }
     const rosterAgents = {};
     for (const id of AGENT_IDS) {
       const memoryRead = readMemory(agentDir, id, { fs });
       if (memoryRead.warning) warnings.push(memoryRead.warning.message);
-      rosterAgents[id] = { ...rosterRead.roster.agents[id] };
+      rosterAgents[id] = {
+        ...rosterRead.roster.agents[id],
+        effective: startingModel(id, rosterRead.roster, memoryRead.memory, laneRead.overrides, registry, settingsMain),
+      };
       if (memoryRead.memory) {
         rosterAgents[id].remembered = {
           provider: memoryRead.memory.model.provider,
@@ -1452,6 +1520,28 @@ export function openProfilesStore(options = {}) {
     for (const change of orderedChanges) {
       const result = applyChange(context, change);
       if (!result.ok) return result;
+    }
+    const mainModelApply = body.changes.some(change => change.kind === 'setMain' || change.kind === 'selectProfile')
+      || settings.value.defaultProvider !== settingsFile.value.defaultProvider
+      || settings.value.defaultModel !== settingsFile.value.defaultModel;
+    if (mainModelApply) {
+      const agent = context.roster.value.agents.sisyphus;
+      const hadPin = agent.pin != null || rosterRead.roster.agents.sisyphus.pin != null;
+      context.roster.value = {
+        ...context.roster.value,
+        updatedAt: new Date(nowFn()).toISOString(),
+        agents: {
+          ...context.roster.value.agents,
+          sisyphus: {
+            ...agent,
+            pin: null,
+            rev: rosterRead.roster.agents.sisyphus.rev + 1,
+          },
+        },
+      };
+      context.roster.touched = true;
+      context.warnings.push('기억 초기화 · Sisyphus (메인 모델 적용)');
+      if (hadPin) context.warnings.push('핀 해제 · Sisyphus (메인 모델 따름)');
     }
     const finalConfig = context.config;
     const savedConfig = saveConfig(finalConfig);
