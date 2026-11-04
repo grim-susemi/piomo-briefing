@@ -1024,7 +1024,7 @@ describe('C-CAP2 block protections', () => {
   });
 });
 
-test('tokens.css is the first stylesheet chunk of the page: later sheets read its tokens; only the overview heading uses 700', () => {
+test('tokens.css is the first stylesheet chunk of the page: later sheets read its tokens; only the overview heading exceeds 600', () => {
   const vm = JSON.parse(fs.readFileSync(join(HERE, 'fixtures', 'view-model-board.json'), 'utf8'));
   const html = pageHtml(vm, 7, { mode: 'file' });
   const styles = [...html.matchAll(/<style>\n([\s\S]*?)\n<\/style>/g)].map((m) => m[1]);
@@ -1033,9 +1033,42 @@ test('tokens.css is the first stylesheet chunk of the page: later sheets read it
   const order = ['tokens.css', 'page.css', 'plan-view.css', 'workers-view.css', 'alarm.css', 'shell.css', 'profiles-view.css', 'convo.css', 'blocks.css', 'annotate.css', 'cards-view.css', 'office.css'];
   assert.equal(styles[0], order.map(sheet).join('\n'), 'tokens.css first, then the sheets in their old order');
   assert.match(sheet('tokens.css'), /^:root \{\n  color-scheme: light dark;/m, 'the tokens follow the light and the dark scheme');
-  const overviewHeadingWeight = /(\.overview > \.proj > \.projh\s*\{[^}]*?)font-weight:\s*700\s*;/;
-  assert.match(styles[0], overviewHeadingWeight, 'the accepted overview heading uses weight 700');
-  assert.doesNotMatch(styles[0].replace(overviewHeadingWeight, '$1'), /font-weight:\s*(?:[7-9]00|bold)/, 'all other weights stay at 600 or below');
+  const checkWeights = (css) => {
+    const clean = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const tokens = new Map();
+    for (const [, name, value] of clean.matchAll(/(?:^|[;{])\s*(--[\w-]+)\s*:\s*([^;{}]+)(?=;|})/g)) {
+      const values = tokens.get(name) ?? [];
+      values.push(value.trim());
+      tokens.set(name, values);
+    }
+    let seen = 0;
+    let overview700 = false;
+    for (const [, selector, declarations] of clean.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selectors = selector.split(',').map((part) => part.trim());
+      for (const [, rawValue] of declarations.matchAll(/(?:^|;)\s*font-weight\s*:\s*([^;]+)/gi)) {
+        seen++;
+        let value = rawValue.trim().replace(/\s*!important\s*$/i, '');
+        const variable = /^var\(\s*(--[\w-]+)\s*\)$/.exec(value);
+        if (variable) {
+          const values = tokens.get(variable[1]);
+          assert.ok(values && values.length === 1, `font-weight token must have one definition: ${variable[1]}`);
+          [value] = values;
+        }
+        const weight = /^bold$/i.test(value) ? 700 : /^normal$/i.test(value) ? 400 : Number(value);
+        assert.ok(value !== '' && Number.isFinite(weight), `font-weight must resolve to a number: ${value}`);
+        if (weight > 600) {
+          assert.ok(weight >= 700 && selectors.length === 1 && selectors[0] === '.overview > .proj > .projh',
+            `unexpected font-weight ${weight} for ${selector.trim()}`);
+          if (weight === 700) overview700 = true;
+        }
+      }
+    }
+    assert.equal(seen, [...clean.matchAll(/(?:^|[;{])\s*font-weight\s*:/gi)].length, 'every font-weight declaration belongs to a parsed rule');
+    return overview700;
+  };
+  assert.throws(() => checkWeights('.other { font-weight: 650; }'));
+  assert.throws(() => checkWeights('.other, .overview > .proj > .projh { font-weight: 700; }'));
+  assert.equal(checkWeights(styles[0]), true, 'the accepted overview heading uses weight 700');
 });
 
 test('realKey answers are kept per fs object between calls and expire after the TTL', (t) => {
