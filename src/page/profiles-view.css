@@ -2,7 +2,7 @@
  * Tokens.css owns every colour and every 4 px step; this sheet only names tokens. The layout is a dense
  * card wall on a wide screen and one column on a phone. No style attributes are written by the renderer. */
 .pf {
-  max-width: 1220px;
+  max-width: none;
   padding: var(--sp-4) var(--sp-4) var(--sp-12);
   display: grid;
   grid-template-columns: minmax(0, 1fr);

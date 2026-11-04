@@ -147,14 +147,16 @@ test('no pictographic emoji left in the rail, the sidebar or the tab bar, in tex
 // Buffer.byteLength(pageHtml(test/fixtures/view-model-board.json, 7, { mode: 'file' })) = 563709 B
 // (branch 84f55c9 baseline was 473662 B; main baseline was 463375 B). Re-baseline once to 563709 B.
 // The growth budget was raised from 16384 B to 32768 B by owner decision on 2026-10-23 (plan Must have 11)
-// for the todo-8 WinForms layout work; the baseline itself is not moved again.
+// for the todo-8 WinForms layout work, then to 65536 B by owner decision on 2026-11-04
+// (board #823: "예산은 필요하면 더 늘려도 댐 40kb는 너무 작다") because the carried overview/width patch
+// grows the fixture page to 35253 B of non-office bytes; the baseline itself is not moved again.
 const BASELINE_TREE = '0683a8e4415daa8684776f475a56d47fabfd43ea';
 const BASELINE_PAGE_BYTES = 563709;
 // Office allowance (plan omo-office-view Must have 11), owner decision #521 2026-10-29:
 // "퀄리티 좋아지는거면 제한 올려도됨 대신에 마지막엔 최적화 렉 안걸리는 정도로 검수해서 마무리만 하자".
 // OFFICE_ALLOWANCE_BYTES records the measured bytes of the office files (art, model, view, css) as they sit in this page
 // (each script in its 20 B <script>\n...\n</script>\n wrapper, the sheet with its join newline), measured when the office
-// files last changed (plan todo 8, the visual QA round 6 fix); it is taken out of the growth and the 32 KB budget still holds
+// files last changed (plan todo 8, the visual QA round 6 fix); it is taken out of the growth and the 64 KB budget still holds
 // for everything else. No further size cap: lag is judged by todo 7 (CPU budget) and F3. The diagnostic prints the
 // current office bytes; re-record the constant under the same decision when the office files change.
 const OFFICE_ALLOWANCE_BYTES = 151700;
@@ -166,7 +168,7 @@ function officeChunks() {
   });
 }
 
-test('fixture page growth over the accepted tree stays within 32 KB (whole page; icon payload printed too)', (t) => {
+test('fixture page growth over the accepted tree stays within 64 KB (whole page; icon payload printed too)', (t) => {
   const notice = /<!--\nIcons: Lucide[\s\S]*?-->\n/.exec(PAGE)[0];
   const bytes = { sprite: Buffer.byteLength(SPRITE[0]), notice: Buffer.byteLength(notice), script: Buffer.byteLength(read('src/page/icons.js')) };
   bytes.payload = bytes.sprite + bytes.notice + bytes.script;
@@ -180,5 +182,5 @@ test('fixture page growth over the accepted tree stays within 32 KB (whole page;
   bytes.allowance = OFFICE_ALLOWANCE_BYTES;
   bytes.rest = bytes.growth - OFFICE_ALLOWANCE_BYTES;
   t.diagnostic('page growth vs ' + BASELINE_TREE + ': ' + bytes.growth + ' B (office allowance ' + OFFICE_ALLOWANCE_BYTES + ' B, office files now ' + bytes.office + ' B, everything else ' + bytes.rest + ' B)');
-  assert.ok(bytes.rest <= 32 * 1024, JSON.stringify(bytes));
+  assert.ok(bytes.rest <= 64 * 1024, JSON.stringify(bytes));
 });

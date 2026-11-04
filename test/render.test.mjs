@@ -1024,7 +1024,7 @@ describe('C-CAP2 block protections', () => {
   });
 });
 
-test('tokens.css is the first stylesheet chunk of the page: the later sheets read its tokens; no weight above 600', () => {
+test('tokens.css is the first stylesheet chunk of the page: later sheets read its tokens; only the overview heading uses 700', () => {
   const vm = JSON.parse(fs.readFileSync(join(HERE, 'fixtures', 'view-model-board.json'), 'utf8'));
   const html = pageHtml(vm, 7, { mode: 'file' });
   const styles = [...html.matchAll(/<style>\n([\s\S]*?)\n<\/style>/g)].map((m) => m[1]);
@@ -1033,7 +1033,9 @@ test('tokens.css is the first stylesheet chunk of the page: the later sheets rea
   const order = ['tokens.css', 'page.css', 'plan-view.css', 'workers-view.css', 'alarm.css', 'shell.css', 'profiles-view.css', 'convo.css', 'blocks.css', 'annotate.css', 'cards-view.css', 'office.css'];
   assert.equal(styles[0], order.map(sheet).join('\n'), 'tokens.css first, then the sheets in their old order');
   assert.match(sheet('tokens.css'), /^:root \{\n  color-scheme: light dark;/m, 'the tokens follow the light and the dark scheme');
-  assert.doesNotMatch(styles[0], /font-weight:\s*(?:[7-9]00|bold)/, 'weights 400 / 500 / 600 only');
+  const overviewHeadingWeight = /(\.overview > \.proj > \.projh\s*\{[^}]*?)font-weight:\s*700\s*;/;
+  assert.match(styles[0], overviewHeadingWeight, 'the accepted overview heading uses weight 700');
+  assert.doesNotMatch(styles[0].replace(overviewHeadingWeight, '$1'), /font-weight:\s*(?:[7-9]00|bold)/, 'all other weights stay at 600 or below');
 });
 
 test('realKey answers are kept per fs object between calls and expire after the TTL', (t) => {

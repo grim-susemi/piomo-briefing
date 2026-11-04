@@ -22,7 +22,7 @@
   --mc-border: var(--hair);
   --mc-gap: var(--sp-2);
   --mc-gap-lg: var(--sp-3);
-  --mc-max: 74rem;
+  --mc-max: none;
   --mc-table-min: 54rem;
   --mc-search-w: 18rem;
   --mc-project-w: 12rem;
@@ -153,4 +153,11 @@
   .mcards-log-item { grid-template-columns: minmax(0, 1fr); }
   .mcards-conflict-values { display: grid; gap: var(--sp-1); }
   .mcards-empty { min-height: 40vh; padding: var(--sp-6) var(--sp-3); }
+}
+
+
+/* 2026-11-04 (좁은 임베디드 탭): 카드 목록 여백·최소폭을 줄여 가로 스크롤과 세로 길이를 줄인다. */
+@media (max-width: 1100px) {
+  .mcards-root { padding: var(--sp-2); gap: var(--sp-2); }
+  .mcards-root { --mc-search-w: 12rem; --mc-project-w: 9rem; --mc-table-min: 0px; }
 }
