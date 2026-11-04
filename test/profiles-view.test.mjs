@@ -356,10 +356,12 @@ test('agents: three model selects share the row grid; reset sits with the expand
   assert.match(css, /\.pf-mem-line\s*\{[\s\S]*?align-items:\s*center;/);
   assert.match(css, /\.pf-row-body \{[^}]*display: grid/);
   assert.doesNotMatch(html, /pf-field-act/, 'reset remains next to its memory value');
-  // Memory rows follow the WinForms row (mode, then three equal selects) at every width above the phone.
+  // Wide rows keep three equal selects; narrow expanded bodies stack without changing other grids.
   assert.match(css, /\.pf-tri \{ display: grid; grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
   const at1040 = css.slice(css.indexOf('@media (max-width: 1040px)'), css.indexOf('@media (max-width: 760px)'));
-  assert.doesNotMatch(at1040, /\.pf-mem-sels|\.pf-tri/);
+  assert.doesNotMatch(at1040, /\.pf-mem-sels|(?:^|\n)\s*\.pf-tri\s*\{/);
+  assert.match(at1040, /\.pf-row-body \{ overflow-x: auto; \}/);
+  assert.match(at1040, /\.pf-row-body \.pf-tri \{ grid-template-columns: minmax\(224px, 1fr\); \}/);
 });
 
 test('loading and error expose explicit states, never a read-only view', () => {
@@ -2666,7 +2668,7 @@ test('page wiring: the cards panel keeps its scroll when a card is shown by clic
 // Review A round 2, D3: a staged change grows the message strip. The strip is a bottom row under both panes, so after
 // the owner's scroll the detail's 이 프로필 적용하기, the role effort select and the row's drop are each the topmost
 // element where they are clicked. Real Chrome over the fixture state; the board has no profiles write route.
-test('layout: routing remains usable at 900x600 and the pending strip covers no controls (Chrome)', { timeout: 90000 }, async () => {
+test('layout: routing remains usable at 900x600 and the pending strip covers no controls (Chrome)', { timeout: 90000 }, async (t) => {
   const vm = JSON.parse(read('test/fixtures/view-model-board.json'));
   const token = 'profiles-view-geometry';
   const server = createBoardServer({ portBase: 49880 + (process.pid % 25) * 8, portCount: 8, generation: 7, token,
@@ -2731,6 +2733,28 @@ test('layout: routing remains usable at 900x600 and the pending strip covers no 
           }).length;
         })()`);
         assert.equal(primary, 4, 'all four primary rows fit at 900x600');
+        await t.test('layout: opened primary selects stack at readable widths inside a scrolling body at 900x600', async () => {
+          await page.eval(`document.querySelector('[data-row="primary/sisyphus"]').click()`);
+          await painted();
+          const opened = await page.eval(`(() => {
+            const body = document.querySelector('#pf-primary-sisyphus');
+            const selects = [...body.querySelectorAll('.pf-tri select')].map(el => {
+              const r = el.getBoundingClientRect();
+              return { width: r.width, top: r.top, bottom: r.bottom, left: r.left };
+            });
+            return { selects, overflowX: getComputedStyle(body).overflowX,
+              clientWidth: body.clientWidth, scrollWidth: body.scrollWidth };
+          })()`);
+          assert.equal(opened.selects.length, 3);
+          assert.equal(opened.overflowX, 'auto');
+          assert.ok(opened.scrollWidth > opened.clientWidth, 'overflow belongs to the expanded body');
+          for (const [i, select] of opened.selects.entries()) {
+            assert.ok(select.width >= 224, 'select ' + i + ' keeps a readable width');
+            assert.equal(select.left, opened.selects[0].left, 'controls share one column');
+            if (i) assert.ok(select.top >= opened.selects[i - 1].bottom, 'controls stack without overlap');
+          }
+          await page.eval(`document.querySelector('[data-row="primary/sisyphus"]').click()`);
+        });
       }
       await page.eval(`(() => {
         const b = document.querySelector('[data-pf="row-toggle"][data-row="agents/explore"]');

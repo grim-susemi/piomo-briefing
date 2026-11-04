@@ -614,6 +614,10 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 /* The rail keeps the shared shell treatment on every route; the profiles page owns no override. */
 
 @media (max-width: 1040px) {
+  /* The docked detail can be narrower than a model name. Keep expanded controls readable
+   * and scroll only their body instead of squeezing three selects into the available width. */
+  .pf-row-body { overflow-x: auto; }
+  .pf-row-body .pf-tri { grid-template-columns: minmax(224px, 1fr); }
   .pf-agent { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr); }
   .pf-agent .pf-mem-field { grid-column: 1 / -1; }
   .pf-pin-sels { grid-template-columns: minmax(0, 1fr); }
