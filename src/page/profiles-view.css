@@ -503,6 +503,7 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-route-ko { font-weight: var(--fw-medium); white-space: nowrap; }
 .pf-route-en { color: var(--c-fg-3); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pf-row-val { flex: 0 1 42%; min-width: 0; margin-left: auto; color: var(--c-fg-2); font-family: var(--font-mono); font-size: var(--fs-xs); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-primary-row .pf-row-val { flex-shrink: 0; }
 .pf-row-body { display: grid; gap: var(--sp-1); min-width: 0; padding: 0 var(--sp-2) var(--sp-2); }
 .pf-rec-off { display: block; color: var(--c-fg-3); font-size: var(--fs-2xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
 
@@ -522,6 +523,7 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-mem-cat { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); white-space: nowrap; }
 .pf-mem-sels { display: grid; gap: var(--sp-1); }
 .pf-mem-row > .pf-note { margin: 0; padding: 0 var(--sp-2) var(--sp-1); }
+.pf-main-draft { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1); }
 
 /* guide */
 .pf-guide { display: grid; gap: var(--sp-2); }

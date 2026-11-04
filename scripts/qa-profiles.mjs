@@ -345,7 +345,19 @@ async function main() {
 
     const openProfiles = async () => {
       await page.eval(`document.querySelector('[data-sh="view"][data-key="profiles"]').click()`);
-      await waitFor(`document.querySelector('[data-pf-root]')?.getAttribute('data-pf-state') === 'view' && document.querySelectorAll('.pf-agent').length === 4`, 'profiles ready');
+      await waitFor(`document.querySelector('[data-pf-root]')?.getAttribute('data-pf-state') === 'view' && document.querySelectorAll('[data-pf-primary-agent]').length === 4`, 'profiles ready');
+    };
+    const openPrimaryRow = async (agent) => {
+      await page.eval(`(() => {
+        const tab = document.querySelector('#pf-tab-primary');
+        if (tab.getAttribute('aria-selected') !== 'true') tab.click();
+        const row = document.querySelector('[data-pf-primary-agent="${agent}"]');
+        if (!row) throw new Error('primary row missing: ${agent}');
+        const toggle = row.querySelector('[data-pf="row-toggle"]');
+        if (toggle.getAttribute('aria-expanded') !== 'true') toggle.click();
+        return true;
+      })()`);
+      await settle();
     };
     const applyViewport = async (vp) => {
       await page.client.send('Emulation.setDeviceMetricsOverride', {
@@ -727,12 +739,12 @@ async function main() {
       const rel = (el) => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top - base), height: Math.round(r.height), width: Math.round(r.width) }; };
       const sections = {};
       for (const el of document.querySelectorAll('[data-pf-sec]')) sections[el.getAttribute('data-pf-sec')] = rel(el);
-      const agents = [...document.querySelectorAll('.pf-agent')].map(rel);
+      const agents = [...document.querySelectorAll('[data-pf-primary-agent]')].map(rel);
       const title = document.querySelector('.pf-title');
       const tr = title.getBoundingClientRect();
       const hit = document.elementFromPoint(tr.left + tr.width / 2, tr.top + tr.height / 2);
       const tray = document.querySelector('.pf-tray');
-      const firstAgent = document.querySelector('.pf-agent');
+      const firstAgent = document.querySelector('[data-pf-primary-agent]');
       const dots = [...document.querySelectorAll('.pf-dot')].map((el) => ({
         id: (el.className.match(/pf-dot-(\\w+)/) || [])[1], shape: (el.className.match(/pf-shape-(\\w+)/) || [])[1],
         label: el.getAttribute('aria-label'), role: el.getAttribute('role'),
@@ -741,10 +753,10 @@ async function main() {
       const on = document.querySelector('.pf-card.on');
       const chip = on && on.querySelector('.pf-current');
       const cards = [...document.querySelectorAll('.pf-card')].map((el) => ({ on: el.classList.contains('on'), bg: getComputedStyle(el).backgroundColor, border: getComputedStyle(el).borderColor }));
-      const hint = document.querySelector('[data-pf-agent="hephaestus"] .pf-hint');
+      const hint = document.querySelector('[data-pf-primary-agent="hephaestus"] .pf-hint');
       const hintLabel = hint && hint.closest('label');
-      const pinSel = document.querySelector('[data-pf-agent="hephaestus"] [data-pf="agent-pin"]');
-      const thinkSel = document.querySelector('[data-pf-agent="hephaestus"] [data-pf="agent-pin-thinking"]');
+      const pinSel = document.querySelector('[data-pf-primary-agent="hephaestus"] [data-pf="agent-pin"]');
+      const thinkSel = document.querySelector('[data-pf-primary-agent="hephaestus"] [data-pf="agent-pin-thinking"]');
       const guide = document.querySelector('#pf-sec-guide');
       const guideHead = guide && guide.querySelector('.pf-guide-h');
       const guideSub = guide && guide.querySelector('.pf-sec-s');
@@ -892,9 +904,11 @@ async function main() {
       await applyViewport(vp);
       await applyScheme(theme);
       await closePeek();
+      await openPrimaryRow('hephaestus');
       await scrollTop();
       await settle();
       const probe = await loadedProbe();
+      assert.equal(probe.agents.length, 4, 'four primary rows measured');
       run.checks.byViewport = run.checks.byViewport || {};
       run.checks.byViewport[`${vp.name}-${theme}`] = probe;
       assert.equal(probe.title.text, '프로필·에이전트', 'visible page title');
@@ -915,7 +929,8 @@ async function main() {
       assert.equal(probe.hint.labelFor, probe.hint.pinId, 'GPT hint is not inside the pin label');
       assert.equal(probe.hint.text, 'GPT 계열만');
       assert.ok(probe.hint.hintTop >= probe.hint.pinBottom - 1, 'GPT hint does not sit under the pin select');
-      if (vp.width < 1440) assert.ok(probe.hint.hintTop < probe.hint.thinkTop, 'GPT hint is attached to thinking, not pin');
+      if (vp.width <= 599) assert.ok(probe.hint.hintTop < probe.hint.thinkTop, 'GPT hint is attached to thinking, not pin');
+      else assert.ok(probe.hint.thinkTop < probe.hint.hintTop, 'desktop thinking select must precede the model hint below the model select');
       assert.ok(probe.guide.headVersion, 'guide version chip missing');
       assert.equal(probe.guide.headVersion, (probe.guide.sub || '').split(' ')[0], 'guide heading/chip/subtitle versions differ');
       assert.equal(probe.guide.hasStale, false, 'guide still prints the stale 5.1.33 label');
@@ -987,11 +1002,12 @@ async function main() {
       run.checks.targeted = run.checks.targeted || {};
       run.checks.targeted[`oracle-${vp.name}-${theme}`] = oracle;
       if (vp.name === '390') {
-        await page.eval(`(() => { const line = document.querySelector('[data-pf-agent="sisyphus"] .pf-mem-line'); if (!line) throw new Error('memory line missing'); line.scrollIntoView({ block: 'center' }); return true; })()`);
+        await openPrimaryRow('sisyphus');
+        await page.eval(`(() => { const line = document.querySelector('[data-pf-primary-agent="sisyphus"] .pf-mem-line'); if (!line) throw new Error('memory line missing'); line.scrollIntoView({ block: 'center' }); return true; })()`);
         await settle();
         const memory = await page.eval(`(() => {
           const main = document.querySelector('#main');
-          const line = document.querySelector('[data-pf-agent="sisyphus"] .pf-mem-line');
+          const line = document.querySelector('[data-pf-primary-agent="sisyphus"] .pf-mem-line');
           const value = line.querySelector('.pf-mem');
           const reset = line.querySelector('[data-pf="reset-memory"]');
           const mr = main.getBoundingClientRect(), r = line.getBoundingClientRect();
@@ -1000,11 +1016,21 @@ async function main() {
             target: reset ? { w: Math.round(reset.getBoundingClientRect().width), h: Math.round(reset.getBoundingClientRect().height) } : null };
         })()`);
         assert.match(memory.value, /gpt-6\.1-sol/);
-        assert.match(memory.reset, /기억 초기화/);
+        assert.equal(memory.reset, null, 'Sisyphus memory is managed through the main model');
         assert.equal(memory.visible, true, `remembered model not in frame at 390-${theme}`);
-        assert.ok(memory.target.w >= 44 && memory.target.h >= 44, 'memory reset target below 44px at 390');
         await capture(path.join(OUT, `section-agents-memory-390-${theme}.png`));
         run.checks.targeted[`memory-390-${theme}`] = memory;
+        await openPrimaryRow('hephaestus');
+        const reset = await page.eval(`(() => {
+          const line = document.querySelector('[data-pf-primary-agent="hephaestus"] .pf-mem-line');
+          const reset = line.querySelector('[data-pf="reset-memory"]');
+          const r = reset.getBoundingClientRect();
+          return { text: reset.textContent, insideMemory: !!reset.closest('.pf-mem-field'), w: r.width, h: r.height };
+        })()`);
+        assert.match(reset.text, /기억 초기화/);
+        assert.equal(reset.insideMemory, true, 'memory reset is outside its memory field');
+        assert.ok(reset.w >= 44 && reset.h >= 44, 'memory reset target below 44px at 390');
+        run.checks.targeted[`memory-reset-390-${theme}`] = reset;
       }
     };
     for (const vp of [VIEWPORTS[0], VIEWPORTS[1]]) for (const theme of SCHEMES) await captureTargeted(vp, theme);
@@ -1030,35 +1056,45 @@ async function main() {
       assert.ok(size >= 14, `1440 profiles prose ${name} is ${size}px, below the 14px floor`);
     }
 
-    // Round-3 A7/A8: in every agent row the lane, pin and thinking selects start on one line, and the
-    // reset action lives inside the memory field (never under the agent name).
-    const agentAlignment = () => page.eval(`(() => {
-      const top = (el) => el ? Math.round(el.getBoundingClientRect().top) : null;
-      const center = (el) => el ? Math.round((el.getBoundingClientRect().top + el.getBoundingClientRect().bottom) / 2) : null;
-      const rows = [...document.querySelectorAll('.pf-agent')].map((row) => {
+    // Each primary row opens independently: measure its model triplet and lane, and keep
+    // the reset action inside memory. Sisyphus edits main and has no memory reset.
+    const agentAlignment = async () => {
+      const rows = [];
+      for (const agent of ['sisyphus', 'hephaestus', 'prometheus', 'atlas']) {
+        await openPrimaryRow(agent);
+        rows.push(await page.eval(`(() => {
+        const top = (el) => el ? Math.round(el.getBoundingClientRect().top) : null;
+        const center = (el) => el ? Math.round((el.getBoundingClientRect().top + el.getBoundingClientRect().bottom) / 2) : null;
+        const row = document.querySelector('[data-pf-primary-agent="${agent}"]');
         const lane = row.querySelector('[data-pf="agent-lane"]');
-        const pin = row.querySelector('[data-pf="agent-pin"]');
-        const think = row.querySelector('[data-pf="agent-pin-thinking"]');
+        const provider = row.querySelector('[data-pf="agent-provider"], [data-pf="main-provider"]');
+        const pin = row.querySelector('[data-pf="agent-pin"], [data-pf="main-model"]');
+        const think = row.querySelector('[data-pf="agent-pin-thinking"], [data-pf="main-thinking"]');
         const mem = row.querySelector('.pf-mem');
         const reset = row.querySelector('[data-pf="reset-memory"]');
-        const tops = [lane, pin].filter(Boolean).map(top);
-        const allTops = [lane, pin, think].filter(Boolean).map(top);
-        return { agent: row.getAttribute('data-pf-agent'), laneTop: top(lane), pinTop: top(pin), thinkingTop: top(think),
+        if (!lane || !provider || !pin || !think || !mem) throw new Error('primary controls missing: ${agent}');
+        const tops = [provider, pin].map(top);
+        const allTops = [provider, pin, think].map(top);
+        return { agent: row.getAttribute('data-pf-primary-agent'), laneTop: top(lane), pinTop: top(pin), thinkingTop: top(think),
           delta: tops.length ? Math.max(...tops) - Math.min(...tops) : null,
           allDelta: allTops.length ? Math.max(...allTops) - Math.min(...allTops) : null,
           thinkingBelowPin: !!(pin && think && top(think) > top(pin)),
           resetGap: reset && mem ? Math.abs(center(reset) - center(mem)) : null,
-          resetInsideMemory: !!(reset && reset.closest('.pf-mem-field')) };
-      });
+          resetInsideMemory: !!(reset && reset.closest('.pf-mem-field')), hasReset: !!reset };
+        })()`));
+      }
+      assert.equal(rows.length, 4, 'four expanded primary rows measured');
+      assert.equal(rows[0].hasReset, false, 'Sisyphus must not expose memory reset');
+      for (const row of rows.slice(1)) assert.equal(row.hasReset, true, row.agent + ' memory reset missing');
       return { rows, maxDelta: Math.max(...rows.map((r) => r.delta || 0)),
         maxAllDelta: Math.max(...rows.map((r) => r.allDelta || 0)),
         stacked: rows.every((r) => r.thinkingBelowPin),
         maxResetGap: Math.max(...rows.map((r) => r.resetGap || 0)),
-        resetOutside: rows.filter((r) => !r.resetInsideMemory).map((r) => r.agent) };
-    })()`);
+        resetOutside: rows.filter((r) => r.agent !== 'sisyphus' && !r.resetInsideMemory).map((r) => r.agent) };
+    };
     run.checks.agentAlign1440 = await agentAlignment();
-    assert.equal(run.checks.agentAlign1440.maxDelta <= 1, true, 'agent lane/pin select tops differ at 1440');
-    assert.equal(run.checks.agentAlign1440.maxAllDelta <= 1, true, 'agent lane/pin/thinking select tops differ at 1440');
+    assert.equal(run.checks.agentAlign1440.maxDelta <= 1, true, 'agent provider/model select tops differ at 1440');
+    assert.equal(run.checks.agentAlign1440.maxAllDelta <= 1, true, 'agent provider/model/thinking select tops differ at 1440');
     assert.deepEqual(run.checks.agentAlign1440.resetOutside, [], 'reset action outside the memory field at 1440');
     assert.equal(run.checks.agentAlign1440.maxResetGap <= 20, true, 'reset action is not next to the memory value at 1440');
 
@@ -1066,8 +1102,8 @@ async function main() {
     await applyScheme('light');
     await settle();
     run.checks.agentAlign1024 = await agentAlignment();
-    assert.equal(run.checks.agentAlign1024.maxDelta <= 1, true, 'agent lane/pin select tops differ at 1024');
-    assert.equal(run.checks.agentAlign1024.stacked, true, 'agent pin/thinking pair is not stacked at 1024');
+    assert.equal(run.checks.agentAlign1024.maxDelta <= 1, true, 'agent provider/model select tops differ at 1024');
+    assert.equal(run.checks.agentAlign1024.maxAllDelta <= 1, true, 'agent provider/model/thinking select tops differ at 1024');
     assert.deepEqual(run.checks.agentAlign1024.resetOutside, [], 'reset action outside the memory field at 1024');
     assert.equal(run.checks.agentAlign1024.maxResetGap <= 20, true, 'reset action is not next to the memory value at 1024');
     run.checks.layout1024 = await page.eval(`(() => {
@@ -1199,12 +1235,13 @@ async function main() {
 
     // Todo-22 carried states from todos 20/21: absent-in-5.1.44 row, recommendation pins and
     // the extension-owned remembered model, all read through the real store state.
+    await openPrimaryRow('sisyphus');
     run.checks.addedStates = await page.eval(`(() => {
       const absent = [...document.querySelectorAll('.pf-route')]
         .filter((row) => row.textContent.includes(${JSON.stringify(ABSENT_LABEL)}))
         .map((row) => ({ route: row.getAttribute('data-pf-route'), selects: row.querySelectorAll('select').length }));
       const guide = document.querySelector('.pf-guide');
-      const remembered = document.querySelector('[data-pf-agent="sisyphus"] .pf-mem');
+      const remembered = document.querySelector('[data-pf-primary-agent="sisyphus"] .pf-mem');
       return {
         absentRows: absent,
         guide: guide ? { sources: guide.querySelectorAll('.pf-guide-row').length, text: guide.textContent } : null,
@@ -1301,7 +1338,7 @@ async function main() {
       };
       const rows = [];
       const seen = new Set();
-      const selectors = ['.pf-title', '.pf-sub', '.pf-agent-n', '.pf-lbl', '.pf-sel-t', '.pf-route-ko', '.pf-route-en',
+      const selectors = ['.pf-title', '.pf-sub', '.pf-primary-row .pf-route-ko', '.pf-lbl', '.pf-sel-t', '.pf-route-ko', '.pf-route-en',
         '.pf-btn', '.pf-chip', '.pf-ro-val', '.pf-card-sum', '.pf-nav-b',
         '.pf select:disabled', '.pf input:disabled', '.pf-btn:disabled', '.pf-btn-ghost:disabled'];
       for (const selector of selectors) {
@@ -1541,11 +1578,11 @@ async function main() {
     await applyScheme('light');
     await page.eval(`window.__qaProfileFail = false`);
     await page.eval(`document.querySelector('.pf-error [data-pf="reload"]').click()`);
-    await waitFor(`document.querySelectorAll('.pf-agent').length === 4 && !document.querySelector('.pf-loading')`, 'offline retry loaded profiles');
+    await waitFor(`document.querySelectorAll('[data-pf-primary-agent]').length === 4 && !document.querySelector('.pf-loading')`, 'offline retry loaded profiles');
     run.checks.offlineRetry = await page.eval(`(() => ({
       error: !!document.querySelector('.pf-error'),
       loading: !!document.querySelector('.pf-loading'),
-      agents: document.querySelectorAll('.pf-agent').length,
+      agents: document.querySelectorAll('[data-pf-primary-agent]').length,
       editable: !!document.querySelector('.pf select') && !document.querySelector('.pf[data-readonly="true"]'),
       pageError: !!document.getElementById('page-error') && document.getElementById('page-error').hidden !== true,
     }))()`);
@@ -1669,6 +1706,7 @@ async function main() {
     await openProfiles();
 
     // Real pointer hover on a select and on a preview summary; the computed paint must change.
+    await openPrimaryRow('sisyphus');
     await hoverCapture(path.join(OUT, 'hover-select-390-light.png'), '[data-pf="agent-lane"][data-agent="sisyphus"]', VIEWPORTS[0], 'light');
     await hoverCapture(path.join(OUT, 'hover-select-1440-dark.png'), '[data-pf="agent-lane"][data-agent="sisyphus"]', VIEWPORTS[2], 'dark');
 
@@ -1703,6 +1741,7 @@ async function main() {
         });
       };`);
 
+    await openPrimaryRow(LANE_AGENT);
     await page.eval(`(() => {
       const el = document.querySelector('select[data-pf="agent-lane"][data-agent="${LANE_AGENT}"]');
       if (!el) throw new Error('atlas lane select missing');
@@ -1866,6 +1905,7 @@ async function main() {
     await applyViewport(VIEWPORTS[0]);
     await applyScheme('light');
     await closePeek();
+    await openPrimaryRow('sisyphus');
     await scrollUnderHeader('.pf-tray');
     await settle();
     await page.eval(`window.__qaHoldApply = true`);
@@ -1882,7 +1922,7 @@ async function main() {
     assert.ok(run.checks.busyEdges.count > 0, 'busy disabled control edges were not measured');
     assert.equal(run.checks.busyEdges.pass, true, 'busy disabled control edges below 3:1');
     run.checks.busyEdit = await page.eval(`(() => {
-      const sel = document.querySelector('[data-pf="agent-lane"][data-agent="sisyphus"]');
+      const sel = document.querySelector('[data-pf-primary-agent].open [data-pf="agent-lane"]');
       const before = window.BriefPage.state.ui.profilesState.pending.length;
       const draftBefore = Object.keys(window.BriefPage.state.ui.profilesState.draft || {}).length;
       const disabled = sel.disabled;
@@ -2000,7 +2040,12 @@ async function main() {
     }))()`);
     assert.equal(run.checks.apply.done, true, 'apply did not succeed: ' + JSON.stringify(run.checks.apply));
     assert.deepEqual([...run.checks.apply.writes].sort(), ['agent/primary-agents/roster.json', 'omo.jsonc'], 'apply write set');
-    await waitFor(`(() => { const el = document.querySelector('[data-pf-agent="atlas"] .pf-agent-k'); return el && el.textContent.includes('rev 1'); })()`, 'reloaded roster revision');
+    await openPrimaryRow('atlas');
+    await waitFor(`(() => {
+      const row = document.querySelector('[data-pf-primary-agent="atlas"]');
+      const agent = window.BriefPage.state.ui.profilesState.view.roster.agents.atlas;
+      return row && agent.rev === 1 && row.querySelector('[data-pf="agent-lane"]').value === ${JSON.stringify(LANE)};
+    })()`, 'reloaded roster revision and lane');
     await captureStates('success');
 
     // B5 confirm path: only the explicit confirmation clears the pending values.
@@ -2008,6 +2053,7 @@ async function main() {
     await applyScheme('light');
     await scrollTop();
     await settle();
+    await openPrimaryRow('atlas');
     await page.eval(`(() => {
       const el = document.querySelector('select[data-pf="agent-lane"][data-agent="atlas"]');
       el.value = 'daily-normal';
@@ -2058,6 +2104,7 @@ async function main() {
     run.actual.journal = journal;
 
     // ── stale 409: edit the temp omo.jsonc behind the page, apply again ───────
+    await openPrimaryRow('prometheus');
     await page.eval(`(() => {
       const el = document.querySelector('select[data-pf="agent-lane"][data-agent="prometheus"]');
       if (!el) throw new Error('prometheus lane select missing');
@@ -2611,7 +2658,7 @@ async function negativeControl() {
     };
     const openProfiles = async () => {
       await page.eval(`document.querySelector('[data-sh="view"][data-key="profiles"]').click()`);
-      await waitFor(`document.querySelectorAll('.pf-agent').length === 4 && !document.querySelector('.pf-loading')`, 'profiles view');
+      await waitFor(`document.querySelectorAll('[data-pf-primary-agent]').length === 4 && !document.querySelector('.pf-loading')`, 'profiles view');
       await settle();
     };
     const disabledProbe = () => page.eval(`(() => {

@@ -2731,7 +2731,9 @@ test('primary: four closed rows lead routing and show effective origin, a legacy
     assert.equal((row.match(/<select\b/g) || []).length, 0, id + ' closed row');
   }
   assert.match(rows[0][2], /= 메인 모델 · 활성 프로필/);
-  assert.match(rows[0][2], /pf-row-val"[^>]*>k3 · max/);
+  assert.match(rows[0][2], /pf-row-val" title="chatgpt-subscription · gpt-6\.1-sol \/ high">gpt-6\.1-sol · high/);
+  assert.match(rows[0][2], /<\/button><p class="pf-note pf-main-draft"><span class="pf-chip pf-c-amber">적용 전<\/span> <span class="pf-main-v">kimi-coding · k3 \/ max<\/span><\/p>/);
+  assert.doesNotMatch(/<button\b[\s\S]*?<\/button>/.exec(rows[0][2])[0], /k3 · max|적용 전/);
   assert.match(rows[0][2], /pf-c-amber"[^>]*>메인 추론 불일치/);
   assert.match(rows[1][2], /pf-c-gray">핀<\/span>/);
   assert.match(rows[2][2], /pf-c-gray">기억<\/span>/);
@@ -2762,6 +2764,30 @@ test('primary: four closed rows lead routing and show effective origin, a legacy
     const row = /data-pf-primary-agent="atlas"[^>]*>([\s\S]*?)<\/article>/.exec(P.render(state, live()))[1];
     assert.ok(textOf(row).includes(label));
     if (origin === 'unavailable') assert.match(row, /class="pf-chip pf-c-amber" title="no-supported-rung">사용 불가/);
+  }
+});
+
+test('primary: Sisyphus summary stays effective while saved and local main drafts are separately marked only when different', () => {
+  const P = load();
+  const state = clone(STATE);
+  const effective = { provider: 'chatgpt-subscription', modelId: 'gpt-6.1-sol', thinking: 'high', origin: 'main' };
+  state.roster.agents.sisyphus.effective = effective;
+  const main = { provider: effective.provider, model: effective.modelId, thinking: effective.thinking };
+  state.details = { [state.activeProfile.key]: { main: { effective: main, override: main } } };
+  const rowOf = (edit) => /data-pf-primary-agent="sisyphus"[^>]*>([\s\S]*?)<\/article>/.exec(P.render(state, edit))[1];
+  for (const openRow of ['', 'primary/sisyphus']) {
+    const equal = rowOf(live({ openRow }));
+    assert.match(equal, /pf-row-val" title="chatgpt-subscription · gpt-6\.1-sol \/ high">gpt-6\.1-sol · high/);
+    assert.match(equal, /pf-c-gray">메인<\/span>/);
+    assert.doesNotMatch(equal, /적용 전|미적용|pf-main-draft/, 'equal saved draft has no unapplied marker');
+    for (const changed of [{ ...main, provider: 'other-provider' }, { ...main, model: 'k3' }, { ...main, thinking: 'low' }]) {
+      const draft = { ['main:' + state.activeProfile.key]: changed };
+      const different = rowOf(live({ openRow, draft }));
+      assert.match(different, /pf-row-val" title="chatgpt-subscription · gpt-6\.1-sol \/ high">gpt-6\.1-sol · high/);
+      assert.match(different, /<\/button><p class="pf-note pf-main-draft">[\s\S]*?적용 전/);
+      assert.ok(different.includes(changed.provider + ' · ' + changed.model + ' / ' + changed.thinking), 'the local draft has its own visible value');
+    }
+    assert.doesNotMatch(rowOf(live({ openRow, draft: { ['main:' + state.activeProfile.key]: main } })), /적용 전|미적용|pf-main-draft/);
   }
 });
 

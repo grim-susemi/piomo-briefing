@@ -763,8 +763,9 @@
       var origins = { memory: '기억', pin: '핀', main: '메인', lane: '레인 기본', builtin: '내장 기본', unknown: '미확인', unavailable: '사용 불가' };
       var originChip = chip(origin === 'unavailable' ? 'pf-c-amber' : 'pf-c-gray', origins[origin] || origins.unknown, str(effective.reason));
       var mismatch = id === 'sisyphus' && origin === 'main' && sidecarThinking && str(effective.thinking) && sidecarThinking !== str(effective.thinking);
+      var unapplied = id === 'sisyphus' && (provider !== str(effective.provider) || bareModel(model) !== bareModel(effective.modelId) || thinking !== str(effective.thinking));
       return '<article class="pf-mem-row pf-primary-row' + (isOpen ? ' open' : '') + '" data-pf-primary-agent="' + esc(id) + '"' + attr('data-agent', id) + (isOpen ? '' : attr('id', rid)) +
-        searchRow(edit, 'primary', [id, name, '메인 에이전트', provider, model, provider + '/' + bareModel(model)], entries) + '>' +
+        searchRow(edit, 'primary', [id, name, '메인 에이전트', effective.provider, effective.modelId, str(effective.provider) + '/' + bareModel(effective.modelId), provider, model, provider + '/' + bareModel(model)], entries) + '>' +
         '<button type="button" class="pf-row-sum"' + attr('data-pf', 'row-toggle') + attr('data-row', key) +
         attr('aria-expanded', isOpen ? 'true' : 'false') + attr('aria-controls', rid) + '><span class="pf-route-id">' +
         '<span class="pf-dot pf-dot-' + esc(id) + ' pf-shape-' + esc(SHAPES[id]) + '" role="img" aria-label="' +
@@ -776,8 +777,10 @@
         (pinChange || laneChange || reset ? chip('pf-c-amber', '보류') : '') +
         '<span class="pf-route-en">모든 프로필 공통</span>' +
         (remembered && remembered.updatedAt ? '<span class="pf-route-en"' + attr('title', '기억 시각 · ' + remembered.updatedAt) + '>기억 시각 · ' + esc(remembered.updatedAt) + '</span>' : '') + '</span>' +
-        '<span class="pf-row-val"' + attr('title', provider + ' · ' + model + ' / ' + thinking) + '>' +
-        esc((bareModel(model) || '—') + (thinking ? ' · ' + thinking : '')) + '</span></button>' +
+        '<span class="pf-row-val"' + attr('title', str(effective.provider) + ' · ' + str(effective.modelId) + ' / ' + str(effective.thinking)) + '>' +
+        esc((bareModel(effective.modelId) || '—') + (effective.thinking ? ' · ' + effective.thinking : '')) + '</span></button>' +
+        (unapplied ? '<p class="pf-note pf-main-draft">' + chip('pf-c-amber', '적용 전') +
+          ' <span class="pf-main-v">' + valueOrDash(provider) + ' · ' + valueOrDash(model) + ' / ' + valueOrDash(thinking) + '</span></p>' : '') +
         (isOpen ? '<div class="pf-row-body"' + attr('id', rid) + '>' + pinControls +
           '<div class="pf-field">' + controls + '</div><div class="pf-field pf-mem-field"><span class="pf-lbl">기억</span><div class="pf-mem-line">' +
           '<span class="pf-ro-val pf-mem">' + (mem ? esc(mem) : '<span class="pf-dash">—</span>') + '</span>' +
