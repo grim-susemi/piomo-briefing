@@ -488,7 +488,7 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-route-en { color: var(--c-fg-3); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pf-row-val { flex: 0 1 42%; min-width: 0; margin-left: auto; color: var(--c-fg-2); font-family: var(--font-mono); font-size: var(--fs-xs); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pf-row-body { display: grid; gap: var(--sp-1); min-width: 0; padding: 0 var(--sp-2) var(--sp-2); }
-.pf-rec-off { display: block; color: var(--c-fg-3); font-size: var(--fs-2xs); overflow-wrap: anywhere; }
+.pf-rec-off { display: block; color: var(--c-fg-3); font-size: var(--fs-2xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
 
 /* main, lane, summarizer, memory */
 .pf-lane, .pf-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-1); align-items: end; }

@@ -2575,6 +2575,15 @@ test('layout: with one pending change the message strip covers neither 이 프�
   assert.deepEqual(listProfilePids(profileDir), []);
 });
 
+test('expanded recommendation stays on one truncated line', () => {
+  const rule = /\.pf-rec-off\s*\{([^}]+)\}/.exec(read('src/page/profiles-view.css'))[1];
+  assert.match(rule, /white-space:\s*nowrap/);
+  assert.match(rule, /overflow:\s*hidden/);
+  assert.match(rule, /text-overflow:\s*ellipsis/);
+  assert.match(rule, /overflow-wrap:\s*normal/);
+  assert.doesNotMatch(rule, /overflow-wrap:\s*(?:anywhere|break-word)|white-space:\s*(?:normal|pre-wrap)/);
+});
+
 test('todo 5: one-line route and memory rows open in place (one at a time, click/Enter/Space), show pending chip and value while closed, and keep compact header <= 190px at 1440x900', async () => {
   const P = load();
   const closed = P.render(STATE, live());
