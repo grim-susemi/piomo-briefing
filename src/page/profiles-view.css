@@ -13,24 +13,34 @@
 .pf-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
   min-width: 0;
-  padding: 0 0 var(--sp-2);
+  padding: 0 0 var(--sp-1);
   border-bottom: var(--hair) solid var(--c-line);
 }
 .pf-head-l { min-width: 0; }
 .pf-head-r { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); min-width: 0; max-width: 100%; }
+.pf-kicker, .pf-sub, .pf-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 .pf-kicker {
-  margin: 0;
   color: var(--c-fg-3);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
   letter-spacing: .04em;
 }
-.pf-title { margin: 2px 0 0; font-size: var(--fs-2xl); line-height: 1.25; }
-.pf-sub { margin: var(--sp-1) 0 0; max-width: 64ch; color: var(--c-fg-2); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: break-word; }
+.pf-title { margin: 0; font-size: var(--fs-2xl); line-height: 1.25; }
+.pf-sub { max-width: 64ch; color: var(--c-fg-2); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: break-word; }
 .pf-keep { white-space: nowrap; }
 .pf-active { color: var(--c-fg-2); font-size: var(--fs-sm); font-weight: var(--fw-medium); }
 
@@ -305,7 +315,6 @@
   min-width: 0;
   padding: var(--sp-2) var(--sp-4);
   border: var(--hair) solid var(--c-line);
-  border-left: 4px solid var(--c-green);
   border-radius: var(--r-xl);
   background: var(--c-elev);
   box-shadow: var(--shadow-card);
@@ -336,10 +345,10 @@
  * English-name line and one line each for main and service, so at 1180x700 two cards and their 적용 sit above the fold
  * and the fifth card is one scroll away */
 @media (min-width: 900px) {
-  .pf-panes:has(> .pf-tray) { height: calc(100vh - 252px); grid-template-rows: minmax(0, 1fr) auto; row-gap: 1px; }
+  .pf-panes:has(> .pf-tray) { height: calc(100vh - 184px); grid-template-rows: minmax(0, 1fr) auto; row-gap: 1px; }
   .pf-panes:has(> .pf-tray) > .pf-detail { height: 100%; container-type: size; }
   .pf-panes > .pf-tray { grid-column: 1 / -1; position: static; max-height: 14vh; }
-  .pf-panes > .pf-tray:has([data-pf-preview], [data-pf-result]) { max-height: clamp(14vh, calc(100vh - 589px), 33vh); }
+  .pf-panes > .pf-tray:has([data-pf-preview], [data-pf-result]) { max-height: clamp(14vh, calc(100vh - 521px), 33vh); }
   .pf-panes > .pf-tray .pf-sec-h { padding: var(--sp-1) var(--sp-3); }
   .pf-panes > .pf-tray .pf-sec-t { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); }
   .pf-panes > .pf-tray .pf-sec-b { padding: var(--sp-1) var(--sp-3) var(--sp-2); }
@@ -450,15 +459,36 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-card-main.pf-card-off { color: var(--c-amber); }
 .pf-card-flag .ic { width: 1em; height: 1em; vertical-align: -.1em; }
 
-/* routing: one WinForms row = the label line (recommendation chip kept) over three equal-width selects */
+/* routing: one WinForms row = one summary button line that opens in place over the official chain and three equal-width selects */
 .pf-group { display: grid; gap: var(--sp-1); min-width: 0; }
 .pf-group-h { display: flex; align-items: baseline; gap: var(--sp-2); margin: 0; color: var(--c-fg-2); font-size: var(--fs-sm); }
 .pf-routes { display: grid; gap: var(--sp-1); }
-.pf-route { display: grid; gap: 2px; min-width: 0; padding: var(--sp-1) var(--sp-2); border-radius: var(--r-md); background: var(--c-main); }
-.pf-route-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1); min-width: 0; }
-.pf-route-ko { font-weight: var(--fw-medium); }
-.pf-route-en { color: var(--c-fg-3); font-size: var(--fs-xs); overflow-wrap: anywhere; }
-.pf-rec-off { color: var(--c-fg-3); font-size: var(--fs-2xs); overflow-wrap: anywhere; }
+.pf-route { display: grid; gap: 2px; min-width: 0; border-radius: var(--r-md); background: var(--c-main); }
+.pf-row-sum {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  min-width: 0;
+  min-height: var(--ctl-h);
+  padding: 2px var(--sp-2);
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--c-fg);
+  font: inherit;
+  text-align: left;
+}
+.pf-row-sum:hover:not(:disabled) { background: var(--fill-hover); }
+.pf-row-sum:active:not(:disabled) { background: var(--fill-press); }
+.pf-row-sum:disabled { cursor: not-allowed; color: var(--c-fg-3); }
+.pf-route-id, .pf-mem-id { display: flex; flex: 1 1 auto; flex-wrap: nowrap; align-items: center; gap: var(--sp-1); min-width: 0; overflow: hidden; }
+.pf-route-ko { font-weight: var(--fw-medium); white-space: nowrap; }
+.pf-route-en { color: var(--c-fg-3); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-row-val { flex: 0 1 42%; min-width: 0; margin-left: auto; color: var(--c-fg-2); font-family: var(--font-mono); font-size: var(--fs-xs); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-row-body { display: grid; gap: var(--sp-1); min-width: 0; padding: 0 var(--sp-2) var(--sp-2); }
+.pf-rec-off { display: block; color: var(--c-fg-3); font-size: var(--fs-2xs); overflow-wrap: anywhere; }
 
 /* main, lane, summarizer, memory */
 .pf-lane, .pf-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-1); align-items: end; }
@@ -469,15 +499,13 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
   display: grid;
   gap: var(--sp-1);
   min-width: 0;
-  padding: var(--sp-2) var(--sp-3);
   border: var(--hair) solid var(--c-line);
   border-radius: var(--r-lg);
   background: var(--c-main);
 }
-.pf-mem-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); }
-.pf-mem-cat { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); }
+.pf-mem-cat { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); white-space: nowrap; }
 .pf-mem-sels { display: grid; gap: var(--sp-1); }
-.pf-mem-row > .pf-note { margin: 0; }
+.pf-mem-row > .pf-note { margin: 0; padding: 0 var(--sp-2) var(--sp-1); }
 
 /* guide */
 .pf-guide { display: grid; gap: var(--sp-2); }

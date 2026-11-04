@@ -37,6 +37,11 @@
       "name": "Region relations at both sizes",
       "description": "Region relations at both sizes: status above cards and detail; cards left of detail (with the sidebar docked at 1180x700); guide at the right end of status; apply below the role box inside detail; message below cards and detail",
       "check": "region_relations"
+    },
+    "F8": {
+      "name": "One-line row disclosure",
+      "description": "Route and memory rows render as one-line summary buttons and open in place before reading their selects; row-open clicks are disclosure interactions, not counted as WinForms steps",
+      "check": "row_open"
     }
   }
 }

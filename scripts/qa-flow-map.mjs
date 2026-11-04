@@ -29,9 +29,13 @@ const GOLDEN = path.join(ROOT, 'test/fixtures/profiles/goldens/apply-gpt-kimi-de
 const REGISTRY = path.join(ROOT, 'test/fixtures/profiles/registry');
 const RULES = path.join(ROOT, 'test/fixtures/profiles/flow-map.rules.json');
 const AX_ALLOWLIST = path.join(ROOT, 'scripts/qa-ax-allowlist.json');
-const INVENTORY = path.join(ROOT, 'src/profiles/inventory.json');
 if (!process.env.OMO_STABLE_PLUGIN) throw new Error('set OMO_STABLE_PLUGIN to the pinned plugin dir');
-const PLUGIN = path.join(process.env.OMO_STABLE_PLUGIN, 'extensions', 'omo.js');
+const INVENTORY = path.join(ROOT, 'src/profiles/inventory.json');
+const INV_OBJ = JSON.parse(fs.readFileSync(INVENTORY, 'utf8'));
+const ENV_PLUGIN = path.join(process.env.OMO_STABLE_PLUGIN, 'extensions', 'omo.js');
+const PLUGIN = fs.existsSync(INV_OBJ.sources?.omo?.path)
+  && crypto.createHash('sha256').update(fs.readFileSync(ENV_PLUGIN)).digest('hex') !== INV_OBJ.sources.omo.sha256
+  ? INV_OBJ.sources.omo.path : ENV_PLUGIN;
 const VM_FILE = path.join(ROOT, 'test/fixtures/view-model-board.json');
 const LIVE_HOMES = ['C:/Users/USER/.omo', 'C:/Users/USER/.omo-stable-500/home/.omo', 'C:/Users/USER/.omo-original/home/.omo', 'C:/Users/USER/.somo/home/.omo'];
 const LIVE_BOARD = [47317, 47326];
@@ -170,21 +174,61 @@ const FLOW_LIB = `(() => {
         offsets: { panes: Math.round(q('cards').getBoundingClientRect().top), cardsBody: Math.round(document.querySelector('.pf-cards').getBoundingClientRect().top) },
         sections: [...document.querySelectorAll('[data-flow="roles"] [data-flow-sec]')].map((el) => [el.getAttribute('data-flow-sec'), h(el)]) };
     },
+    openRowFor(id) {
+      let rowKey = null;
+      if (id.startsWith('role:')) rowKey = id.slice(5).replace(/:(service|model|effort)$/, '');
+      else if (id.startsWith('memory:')) rowKey = 'memory/' + id.slice(7).replace(/:(mode|service|model|effort)$/, '');
+      if (!rowKey) return null;
+      const btn = document.querySelector('[data-pf-route="' + rowKey + '"] > .pf-row-sum, [data-pf-memory-row="' + rowKey.slice(7) + '"] > .pf-row-sum');
+      if (!btn) return { rowKey, missing: true };
+      const wasOpen = btn.getAttribute('aria-expanded') === 'true';
+      if (!wasOpen) btn.click();
+      return { rowKey, wasOpen, expanded: (document.querySelector('[data-pf-route="' + rowKey + '"] > .pf-row-sum, [data-pf-memory-row="' + rowKey.slice(7) + '"] > .pf-row-sum') || {}).getAttribute?.('aria-expanded') === 'true' };
+    },
     rows() {
+      const closedRoute = document.querySelector('[data-pf-route="agents/explore"]');
+      const closedBtn = closedRoute && closedRoute.querySelector('.pf-row-sum');
+      const closedExpanded = closedBtn ? closedBtn.getAttribute('aria-expanded') : null;
+      const closedSelects = closedRoute ? closedRoute.querySelectorAll('select').length : -1;
+      if (closedBtn && closedExpanded === 'false') closedBtn.click();
       const route = document.querySelector('[data-pf-route="agents/explore"]');
+      const routeCaptions = route ? captions(route) : [];
+      const widths = route ? [...route.querySelectorAll('select')].map((s) => Math.round(s.getBoundingClientRect().width)) : [];
+      const recOnLabel = !!(route && route.querySelector('.pf-route-id [class*="pf-st-"]'));
+      const openExpanded = route && route.querySelector('.pf-row-sum') ? route.querySelector('.pf-row-sum').getAttribute('aria-expanded') : null;
+      const memRow = document.querySelector('[data-pf-memory-row="kibitzer"]');
+      const memBtn = memRow && memRow.querySelector('.pf-row-sum');
+      const memClosedExpanded = memBtn ? memBtn.getAttribute('aria-expanded') : null;
+      const memClosedSelects = memRow ? memRow.querySelectorAll('select').length : -1;
+      if (memBtn && memClosedExpanded === 'false') memBtn.click();
       const mem = document.querySelector('[data-pf-memory="kibitzer"]');
+      const memModes = mem ? options(mem.querySelector('[data-pf="memory-mode"]')).map((o) => o.text) : [];
+      const memCaptions = mem ? captions(mem).slice(1) : [];
+      const memLines = ['current', 'pending'].map((k) => { const p = document.querySelector('[data-pf-memory-' + k + '="kibitzer"]'); return p ? p.textContent.slice(0, 4) : ''; });
+      const activeOpen = [...document.querySelectorAll('.pf-row-sum[aria-expanded="true"]')].map((b) => b.getAttribute('data-row'));
+      const closeBtn = document.querySelector('[data-pf-memory-row="kibitzer"] .pf-row-sum');
+      if (closeBtn && closeBtn.getAttribute('aria-expanded') === 'true') closeBtn.click();
       const sum = document.querySelector('[data-pf-sum]');
       const main = document.querySelector('[data-pf-main]');
-      const widths = route ? [...route.querySelectorAll('select')].map((s) => Math.round(s.getBoundingClientRect().width)) : [];
       return {
-        role: { captions: route ? captions(route) : [], selects: widths.length, widths, recommendationOnLabelLine: !!(route && route.querySelector('.pf-route-id [class*="pf-st-"]')) },
-        memory: { modes: mem ? options(mem.querySelector('[data-pf="memory-mode"]')).map((o) => o.text) : [], captions: mem ? captions(mem).slice(1) : [],
-          lines: ['current', 'pending'].map((k) => { const p = document.querySelector('[data-pf-memory-' + k + '="kibitzer"]'); return p ? p.textContent.slice(0, 4) : ''; }) },
+        role: { captions: routeCaptions, selects: widths.length, widths, recommendationOnLabelLine: recOnLabel,
+          closedExpanded, closedSelects, openExpanded },
+        memory: { modes: memModes, captions: memCaptions, lines: memLines,
+          closedExpanded: memClosedExpanded, closedSelects: memClosedSelects, openRowsWhenMemoryOpen: activeOpen },
         summarizer: { firstItem: sum ? options(sum.querySelector('[data-pf="summarizer-provider"]'))[0].text : '', captions: sum ? captions(sum) : [], effort: sum ? sum.querySelectorAll('select').length > 2 : null },
         main: { captions: main ? captions(main) : [] },
       };
     },
-    copy(list) { const t = text(); return list.filter((s) => !t.includes(s)); },
+    copy(list) {
+      let t = text();
+      for (const k of ['kibitzer', 'reflection']) {
+        const b = document.querySelector('[data-pf-memory-row="' + k + '"] .pf-row-sum');
+        if (b && b.getAttribute('aria-expanded') === 'false') { b.click(); t += ' ' + text(); }
+      }
+      const closeBtn = document.querySelector('.pf-row-sum[aria-expanded="true"]');
+      if (closeBtn) closeBtn.click();
+      return list.filter((s) => !t.includes(s));
+    },
     heading() { const h = document.querySelector('.pf-title'); return h ? h.textContent : ''; },
     reach(id) {
       const el = q(id);
@@ -307,6 +351,10 @@ async function openScreen(page, url) {
 // One step = reach the control (scrolls counted), then do what the owner does there and wait for the screen to answer.
 async function perform(page, id, posts, log) {
   console.error('step ' + id);
+  if (/^(role|memory):/.test(id)) {
+    await page.eval(`window.__flow.openRowFor(${JSON.stringify(id)})`);
+    await settle(page);
+  }
   const step = await page.eval(`window.__flow.reach(${JSON.stringify(id)})`);
   if (step.missing) return { control: id, missing: true };
   await settle(page);
@@ -432,6 +480,16 @@ function diff(board, ref, rules, size) {
     rule(box.apply.y >= bottom(box.roles) && inside.apply && inside.roles && box.apply.x >= box.detail.x &&
       right(box.apply) <= right(box.detail), 'apply below the role box inside detail');
     rule(box.message.y >= bottom(box.cards) && box.message.y >= bottom(box.detail), 'message below cards and detail');
+  }
+  if (out.F8) {
+    if (rows.role.closedExpanded !== 'false' || rows.role.closedSelects !== 0 || rows.role.openExpanded !== 'true') {
+      add('F8', { row: 'role', expected: { closedExpanded: 'false', closedSelects: 0, openExpanded: 'true' },
+        actual: { closedExpanded: rows.role.closedExpanded, closedSelects: rows.role.closedSelects, openExpanded: rows.role.openExpanded } });
+    }
+    if (rows.memory.closedExpanded !== 'false' || rows.memory.closedSelects !== 0 || !same(rows.memory.openRowsWhenMemoryOpen, ['memory/kibitzer'])) {
+      add('F8', { row: 'memory', expected: { closedExpanded: 'false', closedSelects: 0, openRowsWhenMemoryOpen: ['memory/kibitzer'] },
+        actual: { closedExpanded: rows.memory.closedExpanded, closedSelects: rows.memory.closedSelects, openRowsWhenMemoryOpen: rows.memory.openRowsWhenMemoryOpen } });
+    }
   }
   const differences = Object.entries(out).flatMap(([id, r]) => r.differences.map((d) => ({ rule: id, ...d })));
   // Not a flow rule: every step control must be on top where it is clicked.

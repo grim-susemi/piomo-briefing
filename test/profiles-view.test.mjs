@@ -80,7 +80,11 @@ test('render: 4 agent rows (lane, pin, remembered model, reset), 6 profile cards
   assert.match(html, /pf-st-unresolved/);
   assert.match(html, /pf-st-untracked/);
   assert.match(html, /<option value="chatgpt-subscription\|gpt-6\.1-sol" selected>/, 'a pin is provider + bare gpt-* model id');
-  assert.equal((html.match(/data-pf="route-provider"/g) || []).length, STATE.routing.rows.length);
+  assert.equal((html.match(/<div class="pf-route"/g) || []).length, STATE.routing.rows.length);
+  assert.equal((html.match(/data-pf="route-provider"/g) || []).length, 0, 'closed routing rows render no selects');
+  const openHtml = P.render(STATE, live({ openRow: 'agents/explore' }));
+  assert.equal((openHtml.match(/data-pf="route-provider"/g) || []).length, 1, 'opening one row renders its provider select');
+  assert.equal((openHtml.match(/<div class="pf-route open"[^>]*>[\s\S]*?<\/div><\/div>/g) || [])[0].match(/<select\b/g).length, 3);
 });
 
 test('escaping: model ids containing script or img markup render as text, never as elements', () => {
@@ -123,35 +127,44 @@ test('a11y: every select and input has a visible label and an accessible name', 
   const html = P.render(STATE, live());
   const { labels, controls } = labelledControls(html);
   const selects = controls.filter((c) => c.tag === 'select');
-  assert.equal(selects.length, 47, 'the fixture renders 47 selects');
-  assert.equal(controls.length, 48, '47 selects + 1 text input');
+  assert.equal(selects.length, 18, 'the closed fixture renders 18 selects (12 agent + 1 lane + 3 main + 2 summarizer)');
+  assert.equal(controls.length, 19, '18 selects + 1 text input');
   for (const c of controls) {
     const name = c.aria || c.ref || labels.get(c.id) || '';
     assert.ok(name.trim(), `${c.tag} [data-pf=${c.pf || '?'}] has no accessible name`);
     if (c.tag === 'select') assert.ok((labels.get(c.id) || '').trim(), `${c.id} has no visible label`);
   }
   const byPf = (pf) => controls.filter((c) => c.pf === pf);
-  for (const pre of ['route', 'main']) {
-    for (const c of byPf(pre + '-provider')) assert.equal(labels.get(c.id), '1. 구독 서비스');
-    for (const c of byPf(pre + '-model')) assert.equal(labels.get(c.id), '2. AI 모델');
-    for (const c of byPf(pre + '-thinking')) assert.equal(labels.get(c.id), '3. 추론 강도');
-  }
+  for (const c of byPf('main-provider')) assert.equal(labels.get(c.id), '1. 구독 서비스');
+  for (const c of byPf('main-model')) assert.equal(labels.get(c.id), '2. AI 모델');
+  for (const c of byPf('main-thinking')) assert.equal(labels.get(c.id), '3. 추론 강도');
   assert.equal(byPf('main-provider').length, 1);
   for (const c of byPf('summarizer-provider')) assert.equal(labels.get(c.id), '1. 제공사');
   for (const c of byPf('summarizer-model')) assert.equal(labels.get(c.id), '2. AI 모델');
-  for (const c of byPf('memory-mode')) assert.equal(labels.get(c.id), '모드');
-  for (const c of byPf('memory-service')) assert.equal(labels.get(c.id), '1. 구독 서비스');
-  for (const c of byPf('memory-model')) assert.equal(labels.get(c.id), '2. AI 모델');
-  for (const c of byPf('memory-thinking')) assert.equal(labels.get(c.id), '3. 추론 강도');
   for (const c of byPf('agent-pin-thinking')) assert.equal(labels.get(c.id), '추론');
-  assert.equal(byPf('route-provider').length, STATE.routing.rows.length);
+  assert.equal(byPf('route-provider').length, 0);
   assert.equal(byPf('agent-pin-thinking').length, 4);
   assert.equal(byPf('summarizer-provider').length, 1);
   assert.equal(byPf('summarizer-model').length, 1);
-  assert.equal(byPf('memory-mode').length, 2);
-  assert.equal(byPf('memory-service').length, 2);
-  assert.equal(byPf('memory-model').length, 2);
-  assert.equal(byPf('memory-thinking').length, 2);
+  for (const r of STATE.routing.rows) {
+    const rowHtml = P.render(STATE, live({ openRow: r.section + '/' + r.role }));
+    const open = labelledControls(rowHtml);
+    const openByPf = (pf) => open.controls.filter((c) => c.pf === pf);
+    assert.equal(openByPf('route-provider').length, 1);
+    assert.equal(open.labels.get(openByPf('route-provider')[0].id), '1. 구독 서비스');
+    assert.equal(open.labels.get(openByPf('route-model')[0].id), '2. AI 모델');
+    assert.equal(open.labels.get(openByPf('route-thinking')[0].id), '3. 추론 강도');
+  }
+  for (const key of ['kibitzer', 'reflection']) {
+    const memHtml = P.render(STATE, live({ openRow: 'memory/' + key }));
+    const open = labelledControls(memHtml);
+    const openByPf = (pf) => open.controls.filter((c) => c.pf === pf);
+    assert.equal(openByPf('memory-mode').length, 1);
+    assert.equal(open.labels.get(openByPf('memory-mode')[0].id), '모드');
+    assert.equal(open.labels.get(openByPf('memory-service')[0].id), '1. 구독 서비스');
+    assert.equal(open.labels.get(openByPf('memory-model')[0].id), '2. AI 모델');
+    assert.equal(open.labels.get(openByPf('memory-thinking')[0].id), '3. 추론 강도');
+  }
 });
 
 test('phone: the view raises its local control token to the 44 px --hit target', () => {
@@ -285,9 +298,9 @@ test('page wiring: the pending row remove button removes that exact row', async 
 
 test('selects: every control titles its selected label and declares an ellipsis', () => {
   const P = load();
-  const html = P.render(STATE, live());
+  const html = P.render(STATE, live({ openRow: 'agents/explore' }));
   const tags = [...html.matchAll(/<select\b([^>]*)>/g)].map((m) => m[1]);
-  assert.equal(tags.length, 47);
+  assert.equal(tags.length, 21);
   for (const attrs of tags) assert.match(attrs, /\btitle="[^"]+"/, 'select without a full-value title');
   const model = /<select[^>]*data-pf="route-model"[^>]*>/.exec(html)[0];
   assert.match(model, /title="[^"]*·[^"]*\/[^"]*"/, 'model title carries alias and full id');
@@ -646,6 +659,8 @@ test('page wiring: Reflection and Kibitzer memory edits stay separate through th
   await tick();
 
   async function setRow(key, service, model, thinking) {
+    e.fire(e.byId.main.querySelector('[data-pf="row-toggle"][data-row="memory/' + key + '"]'), 'click');
+    await tick();
     let mode = e.byId.main.querySelector('[data-pf="memory-mode"][data-memory="' + key + '"]');
     assert.ok(mode, key + ' mode control');
     mode.value = 'custom';
@@ -909,8 +924,9 @@ test('busy: a held apply rejects controller mutations and disables every editor 
   c.drop(0); c.clear(); c.askClear(); c.cancelClear(); c.touch(); c.removeKind('setAgentLane');
   assert.deepEqual(plain(c.snapshot().pending), pendingBefore, 'a busy controller accepted a newer edit');
   assert.deepEqual(plain(c.snapshot().draft), draftBefore, 'a busy controller accepted draft input');
-  const html = P.render(STATE, { ...live(), busy: true, confirmClear: true,
-    pending: [{ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' }] });
+  const html = P.render(STATE, { ...live(), busy: true, confirmClear: true, openRow: 'agents/explore',
+    pending: [{ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' }] }) +
+    P.render(STATE, { ...live(), busy: true, openRow: 'memory/kibitzer' });
   for (const name of ['agent-lane', 'agent-pin', 'agent-pin-thinking', 'route-provider', 'route-model',
     'route-thinking', 'main-provider', 'main-model', 'main-thinking', 'lane-select', 'lane-literal',
     'summarizer-provider', 'summarizer-model', 'memory-mode', 'memory-service', 'memory-model', 'memory-thinking', 'reset-memory', 'drop',
@@ -1176,6 +1192,8 @@ test('memory rows: quick shows the effective quick tuple read-only; custom start
   await tick();
 
   for (const key of ['kibitzer', 'reflection']) {
+    e.fire(e.byId.main.querySelector('[data-pf="row-toggle"][data-row="memory/' + key + '"]'), 'click');
+    await tick();
     const mode = e.byId.main.querySelector('[data-pf="memory-mode"][data-memory="' + key + '"]');
     const svc = e.byId.main.querySelector('[data-pf="memory-service"][data-memory="' + key + '"]');
     const mdl = e.byId.main.querySelector('[data-pf="memory-model"][data-memory="' + key + '"]');
@@ -1195,6 +1213,8 @@ test('memory rows: quick shows the effective quick tuple read-only; custom start
   assert.doesNotMatch(e.byId.main.innerHTML, /<input[^>]*data-pf="memory-model"/, 'free-text memory input is replaced');
   assert.doesNotMatch(e.byId.main.innerHTML, /<option(?![^>]*\bdisabled\b)[^>]*value="opencode\/gemini-4-argon"/, 'unserved model is never an enabled option');
 
+  e.fire(e.byId.main.querySelector('[data-pf="row-toggle"][data-row="memory/kibitzer"]'), 'click');
+  await tick();
   const kMode = e.byId.main.querySelector('[data-pf="memory-mode"][data-memory="kibitzer"]');
   kMode.value = 'custom';
   e.fire(kMode, 'change');
@@ -1234,6 +1254,8 @@ test('memory rows: service change clears model and effort; model change clears e
   e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => state });
   await tick();
 
+  e.fire(e.byId.main.querySelector('[data-pf="row-toggle"][data-row="memory/kibitzer"]'), 'click');
+  await tick();
   let mode = e.byId.main.querySelector('[data-pf="memory-mode"][data-memory="kibitzer"]');
   mode.value = 'custom';
   e.fire(mode, 'change');
@@ -1278,7 +1300,7 @@ test('memory rows: service change clears model and effort; model change clears e
 test('memory rows: kibitzer and reflection are independent and render Must-have-4 strings and states', async () => {
   const P = load();
   const state = clone(STATE);
-  const html = P.render(state, live());
+  const html = P.render(state, live({ openRow: 'memory/kibitzer' })) + P.render(state, live({ openRow: 'memory/reflection' }));
   for (const required of [
     '공통 설정 · Kibitzer 회상',
     '공통 설정 · Reflection 성찰',
@@ -1398,8 +1420,15 @@ function sliceFrom(html, start, end) {
   return html.slice(at, to < 0 ? html.length : to);
 }
 
+function renderAllEditors(P, state, extra = {}) {
+  return P.render(state, live({ ...extra, openRow: 'agents/explore' })) +
+    P.render(state, live({ ...extra, openRow: 'memory/kibitzer' })) +
+    P.render(state, live({ ...extra, openRow: 'memory/reflection' }));
+}
+
 test('support: an unserved model stays listed in role, main, summarizer, Kibitzer and Reflection, disabled with its reason', () => {
-  const html = load().render(supportState(), live());
+  const P = load();
+  const html = renderAllEditors(P, supportState());
   for (const [name, marker, argon] of SUPPORT_EDITORS) {
     const options = optionsOf(html, marker);
     const off = options.find((o) => o.value === argon);
@@ -1421,7 +1450,8 @@ test('support: a saved unsupported value stays selected and flagged with its rea
   state.main.effective.model = 'gemini-4-argon';
   state.summarizer.model = 'gemini-4-argon';
   for (const key of ['kibitzer', 'reflection']) state.memory[key].model = 'opencode/gemini-4-argon';
-  const html = load().render(state, live());
+  const P = load();
+  const html = renderAllEditors(P, state);
   const flag = '<span class="pf-chip pf-c-amber" title="UNSUPPORTED_MODEL">설치 엔진 미지원 · stable 홈</span>';
   const regions = {
     role: sliceFrom(html, 'data-pf-route="agents/explore"', 'data-pf-route="'),
@@ -1450,7 +1480,8 @@ test('support: an unread registry keeps every model listed but disabled as 설�
   for (const entry of Object.values(state.catalog)) {
     Object.assign(entry, { unsupported: true, unsupportedReason: 'REGISTRY_UNKNOWN', unsupportedHome: 'stable' });
   }
-  const html = load().render(state, live());
+  const P = load();
+  const html = renderAllEditors(P, state);
   for (const [name, marker] of SUPPORT_EDITORS) {
     const options = optionsOf(html, marker).filter((o) => o.value);
     assert.equal(options.length, 2, name);
@@ -1468,7 +1499,8 @@ test('memory rows: a served model without a catalog alias is offered from the st
     { model: 'opencode/served-pro', levels: ['low', 'high'] }
   ];
   const draft = { 'memory:kibitzer': { mode: 'custom', service: 'openai', model: 'openai/gpt-6-sol', reasoning: '' } };
-  const html = load().render(state, live({ draft }));
+  const P = load();
+  const html = P.render(state, live({ draft, openRow: 'memory/kibitzer' })) + P.render(state, live({ draft, openRow: 'memory/reflection' }));
   for (const key of ['kibitzer', 'reflection']) {
     const services = optionsOf(html, 'data-flow="memory:' + key + ':service"').filter((o) => o.value);
     assert.deepEqual(services.map((o) => [o.value, o.disabled]), [['openai', false], ['opencode', false]], key);
@@ -1555,15 +1587,15 @@ test("per-profile: the detail shows only the shown profile's pending role and ma
     { kind: 'setRoute', profileKey: 'native-kimi-deepseek', section: 'agents', role: 'explore', provider: 'chatgpt-subscription', model: 'chatgpt-subscription/gpt-6.1-sol', thinking: 'high' },
     { kind: 'setMain', profileKey: 'kimi-deepseek', provider: 'kimi-coding', model: 'k3-turbo', thinking: 'high' },
   ];
-  const saved = detail(P.render(STATE, live({ shown: 'experimental-custom' })));
+  const saved = detail(P.render(STATE, live({ shown: 'experimental-custom', openRow: 'agents/explore' })));
   assert.deepEqual([saved.role, saved.main], [['anthropic', 'anthropic/claude-opus-5-5', 'medium'], ['kimi-coding', 'k3', 'max']]);
 
-  let html = P.render(STATE, live({ pending, shown: 'experimental-custom' }));
+  let html = P.render(STATE, live({ pending, shown: 'experimental-custom', openRow: 'agents/explore' }));
   assert.deepEqual(detail(html).role, saved.role, 'another profile\'s role edit leaves the shown detail alone');
   assert.deepEqual(detail(html).main, saved.main, 'another profile\'s main edit leaves the shown detail alone');
   assert.equal(detail(html).heading, '프로필·에이전트 · 변경 보류 2건', 'the heading still counts the edits of every profile');
 
-  html = P.render(STATE, live({ pending, shown: 'kimi-deepseek' }));
+  html = P.render(STATE, live({ pending, shown: 'kimi-deepseek', openRow: 'agents/explore' }));
   assert.deepEqual(detail(html).role, ['chatgpt-subscription', 'chatgpt-subscription/gpt-6.1-sol', 'high'], 'its own role edit, named by the omo layer');
   assert.deepEqual(detail(html).main, ['kimi-coding', 'k3-turbo', 'high'], 'its own main edit, named by the card key');
   assert.equal(detail(html).heading, '프로필·에이전트 · 변경 보류 2건');
@@ -1590,6 +1622,7 @@ test("per-profile: switching the shown card keeps each profile's role and main e
   };
 
   show('kimi-deepseek');
+  e.fire(q('[data-pf="row-toggle"][data-row="agents/explore"]'), 'click');
   const savedB = detail();
   show('experimental-custom');
   const savedA = detail();
@@ -1755,13 +1788,17 @@ test('order: a category edit plus activation in one apply leaves the active scop
   if (fs.existsSync(regPrimary)) fs.copyFileSync(regPrimary, path.join(primary, 'agent', 'models.json'));
   if (fs.existsSync(regStable)) fs.copyFileSync(regStable, path.join(stable, 'agent', 'models.json'));
 
-  const store = openProfilesStore({
+  const inv = JSON.parse(read('src/profiles/inventory.json'));
+  let store = openProfilesStore({
     primaryHome: primary,
     stableHome: stable,
     mirrorHomes: [],
     pluginPath: pinnedOmoPath(),
     now: () => 1700000000000,
   });
+  if (store.state().readOnlyReason === 'INVENTORY_STALE' && inv.sources?.omo?.path) {
+    store = openProfilesStore({ primaryHome: primary, stableHome: stable, mirrorHomes: [], pluginPath: inv.sources.omo.path, now: () => 1700000000000 });
+  }
   const st = store.state();
   assert.ok(st.details, 'store.state() must expose details');
 
@@ -1886,6 +1923,8 @@ test('cascade role: service change clears model and effort; model change picks t
   e.fetches.find((f) => f.url === '/profiles/state').resolve({ status: 200, ok: true, json: async () => state });
   await tick();
 
+  e.fire(e.byId.main.querySelector('[data-pf="row-toggle"][data-row="agents/explore"]'), 'click');
+  await tick();
   const row = e.byId.main.querySelector('[data-pf-route="agents/explore"]');
   assert.ok(row, 'agents/explore row exists');
   const provSel = row.querySelector('[data-pf="route-provider"]');
@@ -2260,13 +2299,17 @@ test('reapply: re-applying the active profile with nothing pending equals golden
   fs.writeFileSync(path.join(primary, 'agent', 'native-profile-selection.json'), JSON.stringify({ key: 'cmd-glm-deepseek', profile: 'native-cmd-glm-deepseek', appliedAt: 'seed' }, null, 2));
   fs.writeFileSync(path.join(stable, 'omo.jsonc'), fs.readFileSync(path.join(goldenDir, 'stable/omo.jsonc.json'), 'utf8'));
 
-  const store = openProfilesStore({
+  const inv = JSON.parse(read('src/profiles/inventory.json'));
+  let store = openProfilesStore({
     primaryHome: primary,
     stableHome: stable,
     mirrorHomes: [],
     pluginPath: pinnedOmoPath(),
     now: () => 1700000000000,
   });
+  if (store.state().readOnlyReason === 'INVENTORY_STALE' && inv.sources?.omo?.path) {
+    store = openProfilesStore({ primaryHome: primary, stableHome: stable, mirrorHomes: [], pluginPath: inv.sources.omo.path, now: () => 1700000000000 });
+  }
   const st = store.state();
 
   // Re-apply active profile (cmd-glm-deepseek) with nothing pending
@@ -2307,8 +2350,8 @@ test('layout: sections keep the WinForms order whatever order the rows arrive in
     ['agents:explore-research', 'agents:plan-advice', 'agents:review-qa', 'agents:extras', 'categories:quick-general']);
   assert.ok(textOf(extra).includes('추가 설정'));
   assert.doesNotMatch(extra, /추가 역할 · Extras/);
-  for (const part of ['service', 'model', 'effort']) assert.match(html, new RegExp('data-flow="role:agents/explore:' + part + '"'));
-  for (const part of ['mode', 'service', 'model', 'effort']) assert.match(html, new RegExp('data-flow="memory:kibitzer:' + part + '"'));
+  for (const part of ['service', 'model', 'effort']) assert.match(P.render(STATE, live({ openRow: 'agents/explore' })), new RegExp('data-flow="role:agents/explore:' + part + '"'));
+  for (const part of ['mode', 'service', 'model', 'effort']) assert.match(P.render(STATE, live({ openRow: 'memory/kibitzer' })), new RegExp('data-flow="memory:kibitzer:' + part + '"'));
   for (const id of ['card:experimental-custom', 'apply:card:gpt-deepseek', 'apply:detail']) assert.ok(html.includes('data-flow="' + id + '"'), id);
 });
 
@@ -2317,9 +2360,9 @@ test('layout: every Must have 4 string is on the board word for word', () => {
   const state = clone(STATE);
   state.routing.rows.push(extraRow('categories', 'qa-extra'));
   const text = [
-    P.render(state, live({ pending: [{ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' }] })),
-    P.render(state, live({ memorySaved: { kibitzer: true } })),
-    P.render(state, live({ memoryErrors: { reflection: '외부 카테고리 충돌' } })),
+    P.render(state, live({ openRow: 'agents/explore', pending: [{ kind: 'setAgentLane', agentId: 'atlas', lane: 'daily-heavy' }] })),
+    P.render(state, live({ openRow: 'memory/kibitzer', memorySaved: { kibitzer: true } })),
+    P.render(state, live({ openRow: 'memory/reflection', memoryErrors: { reflection: '외부 카테고리 충돌' } })),
   ].map(textOf).join('\n');
   for (const copy of ['현재 전역 적용', '전역 적용 중', '권장 배치 가이드', '적용 중', '적용', '메인: ', '서비스: ',
     '모델 라우팅 · 전담 에이전트 / 작업 카테고리', '공통 설정 · Kibitzer 회상', '공통 설정 · Reflection 성찰', '전담 에이전트 · Agents',
@@ -2359,6 +2402,7 @@ test('page wiring: keys 1-6 show cards 1-6 and ignore inputs, modifiers and comp
   await tick();
   const shown = () => e.page.state.ui.profilesState.shown;
   assert.equal(shown(), 'gpt-kimi-deepseek');
+  e.fire(e.byId.main.querySelector('[data-pf="row-toggle"][data-row="agents/explore"]'), 'click');
   const body = e.document.body;
   for (const [target, props] of [
     [body, { key: '5', ctrlKey: true }], [body, { key: '5', altKey: true }], [body, { key: '5', metaKey: true }],
@@ -2394,6 +2438,7 @@ test('pending: the heading suffix counts pending edits over every profile and le
   assert.equal(heading(P.render(STATE, live())), '프로필·에이전트', 'no suffix without pending');
 
   const e = await openProfilesPage();
+  e.fire(e.byId.main.querySelector('[data-pf="row-toggle"][data-row="agents/explore"]'), 'click');
   const think = e.byId.main.querySelector('[data-pf-route="agents/explore"] [data-pf="route-thinking"]');
   think.value = 'high';
   e.fire(think, 'change');
@@ -2435,6 +2480,7 @@ test('page wiring: 권장 배치 가이드 opens the in-page dialog over the gui
 
 test('page wiring: an edit inside the detail keeps both scrolls; another profile starts at the top', async () => {
   const e = await openProfilesPage();
+  e.fire(e.byId.main.querySelector('[data-pf="row-toggle"][data-row="agents/explore"]'), 'click');
   const before = e.byId.main.querySelector('[data-flow="roles"]');
   before.scrollTop = 180;
   e.byId.main.querySelector('[data-flow="detail"]').scrollTop = 60;
@@ -2501,6 +2547,8 @@ test('layout: with one pending change the message strip covers neither 이 프�
       await page.eval(`(document.querySelector('[data-sh="view"][data-key="profiles"]').click(), true)`);
       await until(`document.querySelector('[data-pf-root][data-pf-state="view"] [data-flow="apply:detail"]')`, 'profiles view');
       await page.eval(`(() => {
+        const b = document.querySelector('[data-pf="row-toggle"][data-row="agents/explore"]');
+        if (b && b.getAttribute('aria-expanded') === 'false') b.click();
         const s = document.querySelector('[data-flow="role:agents/explore:effort"]');
         s.value = [...s.options].map((o) => o.value).filter((v) => v && v !== s.value).pop();
         s.dispatchEvent(new Event('change', { bubbles: true }));
@@ -2525,4 +2573,60 @@ test('layout: with one pending change the message strip covers neither 이 프�
   assert.equal(seen.length, 6);
   assert.deepEqual(seen.filter((s) => !s.onTop), [], 'each control is the topmost element at its centre');
   assert.deepEqual(listProfilePids(profileDir), []);
+});
+
+test('todo 5: one-line route and memory rows open in place (one at a time, click/Enter/Space), show pending chip and value while closed, and keep compact header <= 190px at 1440x900', async () => {
+  const P = load();
+  const closed = P.render(STATE, live());
+  const exploreClosed = sliceFrom(closed, 'data-pf-route="agents/explore"', 'data-pf-route="');
+  assert.match(exploreClosed, /<button type="button" class="pf-row-sum"[^>]*aria-expanded="false" aria-controls="pf-route-agents-explore"/);
+  assert.equal((exploreClosed.match(/<select\b/g) || []).length, 0, 'closed row renders 0 selects');
+  assert.doesNotMatch(exploreClosed, /class="pf-rec-off"/, 'official chain is not a visible line in closed row');
+  assert.match(exploreClosed, /class="pf-chip pf-st-recommended" title="anthropic\/claude-opus-5-5 \/ medium">권장<span class="pf-sr"> · anthropic\/claude-opus-5-5 \/ medium<\/span><\/span>/);
+  assert.match(exploreClosed, /class="pf-row-val"[^>]*>claude-opus-5-5 · medium<\/span>/);
+
+  const opened = P.render(STATE, live({ openRow: 'agents/explore' }));
+  const exploreOpen = sliceFrom(opened, 'data-pf-route="agents/explore"', 'data-pf-route="');
+  assert.match(exploreOpen, /aria-expanded="true" aria-controls="pf-route-agents-explore"/);
+  assert.equal((exploreOpen.match(/<select\b/g) || []).length, 3, 'expanded row renders 3 selects');
+  assert.match(exploreOpen, /<div class="pf-row-body" id="pf-route-agents-explore"><span class="pf-rec-off">anthropic\/claude-opus-5-5 \/ medium<\/span><div class="pf-tri">/);
+
+  const pendingClosed = P.render(STATE, live({
+    pending: [{ kind: 'setRoute', profileKey: 'native-gpt-kimi-deepseek', section: 'agents', role: 'explore', provider: 'chatgpt-subscription', model: 'chatgpt-subscription/gpt-6.1-sol', thinking: 'high' }]
+  }));
+  const explorePend = sliceFrom(pendingClosed, 'data-pf-route="agents/explore"', 'data-pf-route="');
+  assert.match(explorePend, /aria-expanded="false"/);
+  assert.equal((explorePend.match(/<select\b/g) || []).length, 0);
+  assert.match(explorePend, /<span class="pf-chip pf-c-amber">보류<\/span>/, 'closed pending row shows 보류 chip');
+  assert.match(explorePend, /class="pf-row-val"[^>]*>gpt-6\.1-sol · high<\/span>/, 'closed pending row shows pending model · effort');
+
+  const e = await openProfilesPage();
+  const q = (sel) => e.byId.main.querySelector(sel);
+  const openRows = () => [...e.byId.main.querySelectorAll('.pf-row-sum[aria-expanded="true"]')].map((b) => b.getAttribute('data-row'));
+  assert.deepEqual(openRows(), []);
+
+  // Open by click
+  e.fire(q('[data-pf="row-toggle"][data-row="agents/explore"]'), 'click');
+  assert.deepEqual(openRows(), ['agents/explore']);
+  assert.equal(q('[data-pf-route="agents/explore"]').querySelectorAll('select').length, 3);
+
+  // Opening another row closes the previous one (one at a time)
+  e.fire(q('[data-pf="row-toggle"][data-row="agents/librarian"]'), 'click');
+  assert.deepEqual(openRows(), ['agents/librarian']);
+  assert.equal(q('[data-pf-route="agents/explore"]').querySelectorAll('select').length, 0);
+  assert.equal(q('[data-pf-route="agents/librarian"]').querySelectorAll('select').length, 3);
+
+  // Close by Enter keydown
+  const enterClose = e.fire(q('[data-pf="row-toggle"][data-row="agents/librarian"]'), 'keydown', { key: 'Enter' });
+  assert.equal(enterClose.defaultPrevented, true);
+  assert.deepEqual(openRows(), []);
+
+  // Open by Enter keydown, then switch/close by Space keydown
+  e.fire(q('[data-pf="row-toggle"][data-row="memory/kibitzer"]'), 'keydown', { key: 'Enter' });
+  assert.deepEqual(openRows(), ['memory/kibitzer']);
+  assert.equal(q('[data-pf-memory-row="kibitzer"]').querySelectorAll('select').length, 4);
+  const spaceClose = e.fire(q('[data-pf="row-toggle"][data-row="memory/kibitzer"]'), 'keydown', { key: ' ' });
+  assert.equal(spaceClose.defaultPrevented, true);
+  assert.deepEqual(openRows(), []);
+  assert.deepEqual(e.errors, []);
 });

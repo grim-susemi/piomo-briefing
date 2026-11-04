@@ -796,11 +796,12 @@
     list.length + '개 프로필 · ' + (shown ? '현재 선택' : '선택 없음'), attr('data-flow', 'cards'));
   }
 
-  // One WinForms New-RoutingRow (PS:5595-5785): the label line keeps the recommendation chip, then the three captions
-  // over three equal-width selects. The effort list holds only the chosen model's served levels.
+  // One WinForms New-RoutingRow (PS:5595-5785): the summary button line keeps the recommendation chip, and when open
+  // shows the official chain line over the three captions and three equal-width selects.
   function routeRow(r, profile, entries, candidates, edit, ro) {
     var key = str(r.section) + '/' + str(r.role);
     var busy = !!(edit && edit.busy === true);
+    var isOpen = str(edit && edit.openRow) === key;
     var change = routeChangeOf(pendingOf(edit), profile, r.section, r.role);
     var draft = draftOf(edit, 'route:' + key);
     var alias = str(r.model);
@@ -814,19 +815,33 @@
     var rec = recommendationOf(r);
     var rid = 'pf-route-' + slug(r.section + '-' + r.role);
     var on = function (part) { return attr('data-route', key) + attr('data-flow', 'role:' + key + ':' + part); };
-    var fields = ro || r.readOnly === true || !!r.absentIn
-      ? '<span class="pf-ro-val">' + valueOrDash(provider) + ' · ' + valueOrDash(bareModel(full)) + ' / ' + valueOrDash(thinking) + '</span>'
-      : '<div class="pf-tri">' +
-        labelled(CAPTIONS[0], rid + '-provider', providerSelect('route-provider', withId(rid + '-provider', on('service')), providersOf(entries, provider), provider, busy)) +
-        labelled(CAPTIONS[1], rid + '-model', modelSelect('route-model', withId(rid + '-model', on('model')), entries, provider, full, busy)) +
-        labelled(CAPTIONS[2], rid + '-thinking', select('route-thinking', withId(rid + '-thinking', on('effort')), memoryThinkingOptions(candidates, full, thinking), busy)) +
-        '</div>';
-    return '<div class="pf-route" data-pf-route="' + esc(key) + '">' +
-      '<div class="pf-route-id">' + tag(r.section === 'agents' ? 'agent' : 'category') +
+    var sumModel = bareModel(full);
+    var sumText = (sumModel || '—') + (thinking ? ' · ' + thinking : '');
+    var statusChip = '<span class="pf-chip pf-st-' + rec.status + '"' + (rec.official ? attr('title', rec.official) : '') + '>' +
+      esc(rec.label) + (rec.official ? '<span class="pf-sr">' + esc(' · ' + rec.official) + '</span>' : '') + '</span>';
+    var pendChip = change ? chip('pf-c-amber', '보류') : '';
+    var sumBtn = '<button type="button" class="pf-row-sum"' + attr('data-pf', 'row-toggle') + attr('data-row', key) +
+      attr('aria-expanded', isOpen ? 'true' : 'false') + attr('aria-controls', rid) + '>' +
+      '<span class="pf-route-id">' + tag(r.section === 'agents' ? 'agent' : 'category') +
       '<span class="pf-route-ko">' + esc(r.labelKo || r.role) + '</span>' +
       '<span class="pf-route-en">' + esc(r.labelEn || r.role) + '</span>' +
-      (r.stateLabel ? chip('pf-c-amber', r.stateLabel) : '') + offChip(off) + chip('pf-st-' + rec.status, rec.label, rec.official) +
-      (rec.official ? '<span class="pf-rec-off">' + esc(rec.official) + '</span>' : '') + '</div>' + fields + '</div>';
+      (r.stateLabel ? chip('pf-c-amber', r.stateLabel) : '') + offChip(off) + statusChip + pendChip + '</span>' +
+      '<span class="pf-row-val"' + attr('title', (provider ? provider + ' · ' : '') + sumText) + '>' + esc(sumText) + '</span></button>';
+    var body = '';
+    if (isOpen) {
+      var fields = ro || r.readOnly === true || !!r.absentIn
+        ? '<span class="pf-ro-val">' + valueOrDash(provider) + ' · ' + valueOrDash(bareModel(full)) + ' / ' + valueOrDash(thinking) + '</span>'
+        : '<div class="pf-tri">' +
+          labelled(CAPTIONS[0], rid + '-provider', providerSelect('route-provider', withId(rid + '-provider', on('service')), providersOf(entries, provider), provider, busy)) +
+          labelled(CAPTIONS[1], rid + '-model', modelSelect('route-model', withId(rid + '-model', on('model')), entries, provider, full, busy)) +
+          labelled(CAPTIONS[2], rid + '-thinking', select('route-thinking', withId(rid + '-thinking', on('effort')), memoryThinkingOptions(candidates, full, thinking), busy)) +
+          '</div>';
+      body = '<div class="pf-row-body"' + attr('id', rid) + '>' +
+        (rec.official ? '<span class="pf-rec-off">' + esc(rec.official) + '</span>' : '') +
+        fields + '</div>';
+    }
+    return '<div class="pf-route' + (isOpen ? ' open' : '') + '" data-pf-route="' + esc(key) + '"' + (isOpen ? '' : attr('id', rid)) + '>' +
+      sumBtn + body + '</div>';
   }
   // The role sections of the WinForms routing box (PS:6213-6260) in their fixed order, whatever order the rows arrive in.
   function routingRows(view, edit, ro) {
@@ -1006,28 +1021,9 @@
           ? 'Kibitzer 회상만 변경 · 다른 역할 / 성찰 / Dream / 사실 추출은 그대로'
           : 'Reflection 성찰만 변경 · 다른 역할 / Kibitzer 회상 / Dream / 사실 추출은 그대로');
       }
-      var controls;
-      if (ro) {
-        controls = '<span class="pf-ro-val">' + valueOrDash(mode === 'quick' ? 'quick 공유 (기본)' : '직접 선택') + ' · ' +
-          valueOrDash(provider) + ' · ' + valueOrDash(model) + (reasoning ? ' / ' + esc(reasoning) : '') + '</span>';
-      } else {
-        var memId = 'pf-memory-' + slug(key);
-        var dis = busy || mode !== 'custom';
-        var on = function (part) { return ' data-memory="' + esc(key) + '"' + attr('data-flow', 'memory:' + key + ':' + part); };
-        // WinForms memory row: the mode spans the row, then the three captions over three equal-width selects.
-        controls = '<div class="pf-mem-sels" data-pf-memory="' + esc(key) + '">' +
-          labelled('모드', memId + '-mode', select('memory-mode', withId(memId + '-mode', on('mode')),
-            '<option value="quick"' + (mode === 'quick' ? ' selected' : '') + '>quick 공유 (기본)</option>' +
-            '<option value="custom"' + (mode === 'custom' ? ' selected' : '') + '>직접 선택</option>', busy)) +
-          '<div class="pf-tri">' +
-          labelled(CAPTIONS[0], memId + '-service', select('memory-service', withId(memId + '-service', on('service')),
-            memoryServiceOptions(candidates, provider), dis)) +
-          labelled(CAPTIONS[1], memId + '-model', select('memory-model', withId(memId + '-model', on('model')),
-            memoryModelOptions(choices, provider, model), dis)) +
-          labelled(CAPTIONS[2], memId + '-thinking', select('memory-thinking', withId(memId + '-thinking', on('effort')),
-            memoryThinkingOptions(candidates, model, reasoning), dis)) +
-          '</div></div>';
-      }
+      var rowKey = 'memory/' + key;
+      var isOpen = str(edit && edit.openRow) === rowKey;
+      var memId = 'pf-memory-' + slug(key);
       var chips = [];
       if (m.owned) chips.push(chip('pf-c-green', '소유 행'));
       if (m.external) chips.push(chip('pf-c-amber', '외부 행'));
@@ -1035,12 +1031,46 @@
       var shownChoice = entryOf(choices, '', model);
       if (shownChoice && shownChoice.off) chips.push(offChip(shownChoice.off));
       if (m.hasDedicated) chips.push(chip('pf-c-gray', '전용 행'));
+      if (pending) chips.push(chip('pf-c-amber', '보류'));
+      var sumModel = bareModel(model || curModel);
+      var sumReasoning = reasoning || curReasoning;
+      var sumText = (mode === 'quick' ? 'quick · ' : '') + (sumModel || '—') + (sumReasoning ? ' · ' + sumReasoning : '');
+      var sumBtn = '<button type="button" class="pf-row-sum"' + attr('data-pf', 'row-toggle') + attr('data-row', rowKey) +
+        attr('aria-expanded', isOpen ? 'true' : 'false') + attr('aria-controls', memId + '-body') + '>' +
+        '<span class="pf-mem-id">' + tag('memory') + '<span class="pf-route-ko">' + esc(rowTitle) + '</span>' +
+        '<span class="pf-route-en">' + esc(key === 'kibitzer' ? 'Kibitzer' : 'Reflection') + '</span>' +
+        '<span class="pf-mem-cat">' + esc(curCat) + '</span>' + chips.join('') + '</span>' +
+        '<span class="pf-row-val"' + attr('title', sumText) + '>' + esc(sumText) + '</span></button>';
+      var body = '';
+      if (isOpen) {
+        var controls;
+        if (ro) {
+          controls = '<span class="pf-ro-val">' + valueOrDash(mode === 'quick' ? 'quick 공유 (기본)' : '직접 선택') + ' · ' +
+            valueOrDash(provider) + ' · ' + valueOrDash(model) + (reasoning ? ' / ' + esc(reasoning) : '') + '</span>';
+        } else {
+          var dis = busy || mode !== 'custom';
+          var on = function (part) { return ' data-memory="' + esc(key) + '"' + attr('data-flow', 'memory:' + key + ':' + part); };
+          // WinForms memory row: the mode spans the row, then the three captions over three equal-width selects.
+          controls = '<div class="pf-mem-sels" data-pf-memory="' + esc(key) + '">' +
+            labelled('모드', memId + '-mode', select('memory-mode', withId(memId + '-mode', on('mode')),
+              '<option value="quick"' + (mode === 'quick' ? ' selected' : '') + '>quick 공유 (기본)</option>' +
+              '<option value="custom"' + (mode === 'custom' ? ' selected' : '') + '>직접 선택</option>', busy)) +
+            '<div class="pf-tri">' +
+            labelled(CAPTIONS[0], memId + '-service', select('memory-service', withId(memId + '-service', on('service')),
+              memoryServiceOptions(candidates, provider), dis)) +
+            labelled(CAPTIONS[1], memId + '-model', select('memory-model', withId(memId + '-model', on('model')),
+              memoryModelOptions(choices, provider, model), dis)) +
+            labelled(CAPTIONS[2], memId + '-thinking', select('memory-thinking', withId(memId + '-thinking', on('effort')),
+              memoryThinkingOptions(candidates, model, reasoning), dis)) +
+            '</div></div>';
+        }
+        body = '<div class="pf-row-body"' + attr('id', memId + '-body') + '>' + controls + '</div>';
+      }
       return '<section class="pf-group"' + attr('data-flow-sec', key) + '><h3 class="pf-rh">' + esc(secTitle) + '</h3>' +
-        '<article class="pf-mem-row" data-pf-memory-row="' + esc(key) + '">' +
-        '<div class="pf-mem-id"><b>' + esc(rowTitle) + '</b>' +
-        '<span class="pf-mem-cat">' + esc(curCat) + '</span>' + chips.join('') + '</div>' + controls +
-        '<p class="pf-note pf-mem-cur" data-pf-memory-current="' + esc(key) + '">' + esc(curLine) + '</p>' +
-        '<p class="pf-note pf-mem-pend' + (rowErr ? ' pf-err' : '') + '" data-pf-memory-pending="' + esc(key) + '"' +
+        '<article class="pf-mem-row' + (isOpen ? ' open' : '') + '" data-pf-memory-row="' + esc(key) + '"' + (isOpen ? '' : attr('id', memId + '-body')) + '>' +
+        sumBtn + body +
+        '<p class="pf-note pf-mem-cur' + (isOpen ? '' : ' pf-sr') + '" data-pf-memory-current="' + esc(key) + '">' + esc(curLine) + '</p>' +
+        '<p class="pf-note pf-mem-pend' + (rowErr ? ' pf-err' : '') + (isOpen ? '' : ' pf-sr') + '" data-pf-memory-pending="' + esc(key) + '"' +
         attr('data-state', stateTag) + '>' + esc(pendLine) + '</p></article></section>';
     }).join('');
     return '<div class="pf-mems" id="pf-sec-memory" data-pf-sec="memory">' + rows + '</div>';
@@ -1238,7 +1268,7 @@
     var fetchFn = opt.fetch;
     var tokenFn = opt.token;
     var notify = typeof opt.onChange === 'function' ? opt.onChange : function () {};
-    var s = { view: null, shown: '', pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false, agentsOpen: false };
+    var s = { view: null, shown: '', pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false, agentsOpen: false, openRow: null };
     var seq = 0;
 
     function snapshot() {
@@ -1248,7 +1278,7 @@
         memoryErrors: copyMap(s.memoryErrors), memorySaved: copyMap(s.memorySaved),
         preview: s.preview, conflict: s.conflict, error: s.error, errorKind: s.errorKind,
         status: s.status, result: s.result, loading: s.loading, busy: s.busy, confirmClear: s.confirmClear,
-        agentsOpen: s.agentsOpen
+        agentsOpen: s.agentsOpen, openRow: s.openRow
       };
     }
     function changed() { notify(snapshot()); }
@@ -1608,6 +1638,20 @@
       },
       // The DOM already shows the toggle; the next render keeps it, so no notification is needed.
       agentsOpen: function (on) { s.agentsOpen = on === true; return snapshot(); },
+      toggleRow: function (rowKey) {
+        if (s.busy) return snapshot();
+        var k = str(rowKey);
+        s.openRow = k && s.openRow !== k ? k : null;
+        changed();
+        return snapshot();
+      },
+      openRow: function (rowKey) {
+        if (s.busy) return snapshot();
+        var k = str(rowKey);
+        s.openRow = k || null;
+        changed();
+        return snapshot();
+      },
       preview: function (profileKey) { return send('preview', null, { profileKey: profileKey }); },
       apply: function (profileKey) { return send('apply', null, { profileKey: profileKey }); },
       reapply: function () {
@@ -1662,8 +1706,13 @@
       // reject synthetic change/input events here, so a newer edit cannot be discarded by the
       // older response's pending/draft reset.
       if (c.snapshot().busy && ['select-profile', 'apply-card', 'reset-memory', 'preview', 'apply', 'reapply',
-        'clear', 'clear-cancel', 'clear-confirm', 'drop', 'reload-state'].indexOf(act) >= 0) return;
-      if (act === 'guide-open' || (act === 'jump' && t.getAttribute('data-target') === 'guide')) {
+        'clear', 'clear-cancel', 'clear-confirm', 'drop', 'reload-state', 'row-toggle'].indexOf(act) >= 0) return;
+      if (act === 'row-toggle') {
+        var rKey = str(t.getAttribute('data-row'));
+        c.toggleRow(rKey);
+        var reBtn = root.querySelector('[data-pf="row-toggle"][data-row="' + rKey + '"]');
+        if (reBtn && typeof reBtn.focus === 'function') reBtn.focus({ preventScroll: true });
+      } else if (act === 'guide-open' || (act === 'jump' && t.getAttribute('data-target') === 'guide')) {
         var guideBox = root.querySelector('#pf-guide-dlg');
         if (guideBox && typeof guideBox.showModal === 'function' && !guideBox.open) guideBox.showModal();
       } else if (act === 'guide-close') {
@@ -1958,8 +2007,24 @@
     // enabled, never from a text or select control, with a modifier, during an IME composition or behind the guide.
     function onKey(ev) {
       if (!ev || ev.defaultPrevented || ev.isComposing || ev.keyCode === 229) return;
-      if (ev.ctrlKey || ev.altKey || ev.metaKey || ev.shiftKey || !/^[1-6]$/.test(str(ev.key))) return;
+      if (ev.ctrlKey || ev.altKey || ev.metaKey || ev.shiftKey) return;
       var t = ev.target;
+      var k = str(ev.key);
+      if (k === 'Enter' || k === ' ' || k === 'Spacebar') {
+        var rowBtn = t && typeof t.closest === 'function' ? t.closest('[data-pf="row-toggle"]') : null;
+        if (rowBtn && root.contains(rowBtn)) {
+          var ctl = controller();
+          if (ctl && !ctl.snapshot().busy && !rowBtn.hasAttribute('disabled')) {
+            if (typeof ev.preventDefault === 'function') ev.preventDefault();
+            var rKey = str(rowBtn.getAttribute('data-row'));
+            ctl.toggleRow(rKey);
+            var reBtn = root.querySelector('[data-pf="row-toggle"][data-row="' + rKey + '"]');
+            if (reBtn && typeof reBtn.focus === 'function') reBtn.focus({ preventScroll: true });
+          }
+          return;
+        }
+      }
+      if (!/^[1-6]$/.test(k)) return;
       if (t && (t.isContentEditable || (typeof t.closest === 'function' && t.closest('input,select,textarea,[contenteditable]')))) return;
       if (root.querySelector('#pf-guide-dlg[open]')) return;
       var buttons = root.querySelectorAll('[data-pf="select-profile"]');

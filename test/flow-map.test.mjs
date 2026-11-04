@@ -128,7 +128,8 @@ test('flow-map.winforms.json conforms to flow-map/1 schema', () => {
   validateFlowMap(map, 'flow-map.winforms.json');
 });
 
-test('flow-map.rules.json conforms to rules schema and covers F1-F7', () => {
+test('flow-map.rules.json conforms to rules schema and covers F1-F8 with F1-F7 deep-equal to d282b3b', async () => {
+  const { execFileSync } = await import('node:child_process');
   let p = join(process.cwd(), 'test/fixtures/profiles/flow-map.rules.json');
   if (!existsSync(p)) {
     p = 'C:/Users/USER/orca/projects/기타 작업/.omo/evidence/switcher-flow-restore/task-3/stage/test/fixtures/profiles/flow-map.rules.json';
@@ -137,10 +138,16 @@ test('flow-map.rules.json conforms to rules schema and covers F1-F7', () => {
   const raw = readFileSync(p, 'utf8');
   const rulesObj = JSON.parse(raw);
   assert.ok(rulesObj.rules, 'rules object must exist');
-  for (let i = 1; i <= 7; i++) {
+  for (let i = 1; i <= 8; i++) {
     const key = `F${i}`;
     assert.ok(rulesObj.rules[key], `rules must contain ${key}`);
     assert.equal(typeof rulesObj.rules[key].description, 'string');
+  }
+  const baseRaw = execFileSync('git', ['show', 'd282b3b:test/fixtures/profiles/flow-map.rules.json'], { cwd: process.cwd(), encoding: 'utf8' });
+  const baseObj = JSON.parse(baseRaw);
+  for (let i = 1; i <= 7; i++) {
+    const key = `F${i}`;
+    assert.deepEqual(rulesObj.rules[key], baseObj.rules[key], `${key} must be deep-equal to d282b3b`);
   }
 });
 
