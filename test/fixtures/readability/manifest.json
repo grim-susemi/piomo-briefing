@@ -1,0 +1,436 @@
+{
+  "schema": "readability-manifest/1",
+  "plan": "herdr-dag-active-tracking",
+  "track": "W2",
+  "task": 5,
+  "language": "ko",
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "viewports": [
+    {
+      "name": "1180x700",
+      "width": 1180,
+      "height": 700,
+      "mobile": false
+    },
+    {
+      "name": "1440x900",
+      "width": 1440,
+      "height": 900,
+      "mobile": false
+    }
+  ],
+  "topPinContract": {
+    "rowPx": 20,
+    "maxRows": 8,
+    "maxBottomPx": 160,
+    "minTopPx": 0
+  },
+  "scrollBudgetContract": {
+    "formula": "S = sum ceil(abs(delta) / visibleSize)",
+    "initialActiveTitle": 0,
+    "namedFlowMax": 1
+  },
+  "scrollAllowList": [
+    {
+      "id": "main-body",
+      "selector": "#main",
+      "region": "main",
+      "direction": "vertical",
+      "openState": "always",
+      "note": "Single vertical scroll owner inside the fixed shell"
+    },
+    {
+      "id": "sidebar-list",
+      "selector": ".sh-scroll",
+      "region": "sidebar (#main outside)",
+      "direction": "vertical",
+      "openState": "sideOpen",
+      "note": "Sidebar list outside #main"
+    },
+    {
+      "id": "open-modal-popover",
+      "selector": "dialog[open], .pop, [data-ann-pop]",
+      "region": "modal/popover",
+      "direction": "vertical",
+      "openState": "open (locks background scroll)",
+      "note": "Open dialog or annotation popover only while open"
+    },
+    {
+      "id": "office-canvas",
+      "selector": "#office .of-pan, .of-scene",
+      "region": "office dedicated canvas",
+      "direction": "both",
+      "openState": "view=office",
+      "note": "Dedicated office canvas pan area"
+    },
+    {
+      "id": "horizontal-flowbox",
+      "selector": ".flowbox, .plan-lanes, .rbk-scroll, .stabs, .sh-tabs",
+      "region": "horizontal-only strip/table",
+      "direction": "horizontal",
+      "openState": "overflowX>0, overflowY=hidden/visible",
+      "note": "Horizontal-only overflow; table horizontal overflow is tracked separately and never hidden in vertical owner count"
+    }
+  ],
+  "forbiddenVerticalScrollers": [
+    ".pf-detail",
+    "#pf-sec-profiles",
+    ".pf-roles",
+    ".pf-tray",
+    ".pf-panes"
+  ],
+  "consumers": [
+    {
+      "id": "overview-cards",
+      "consumer": "view.js card/renderOverview -> page.js",
+      "files": [
+        "src/page/view.js",
+        "src/page/page.js",
+        "src/page/page.css"
+      ],
+      "scope": "IN",
+      "treatment": "project/session 경계 내 중첩 card 평면화; isFirst 강제 펼침 제거, 실제 활성·사용자 펼침만 우선"
+    },
+    {
+      "id": "convo-and-blocks-kit",
+      "consumer": "convo-view.js, blocks.js BriefView.kit",
+      "files": [
+        "src/page/convo-view.js",
+        "src/page/blocks.js",
+        "src/page/blocks.css"
+      ],
+      "scope": "IN",
+      "treatment": "공통 카드·결정·자료 행 평면화 (.scard, .dcard, .rbk)"
+    },
+    {
+      "id": "common-css-and-shell",
+      "consumer": "page.css .card/.dcard, convo.css .scard, shell.css",
+      "files": [
+        "src/page/page.css",
+        "src/page/convo.css",
+        "src/page/shell.css",
+        "src/page/tokens.css"
+      ],
+      "scope": "IN",
+      "treatment": "공통 시각 계층·본문 #main 단일 세로 scroll 소유권"
+    },
+    {
+      "id": "profiles-view",
+      "consumer": "profiles-view.css .pf-card + profiles JS",
+      "files": [
+        "src/page/profiles-view.css",
+        "src/page/profiles-view.js",
+        "src/page/generated/profiles-view.generated.mjs"
+      ],
+      "scope": "IN",
+      "treatment": "평면행·단일 본문(#main)·dirty/focus 보존; .pf-detail/#pf-sec-profiles/.pf-roles/.pf-tray/.pf-panes 세로 스크롤 제거"
+    },
+    {
+      "id": "plan-and-workers",
+      "consumer": "plan-view .plan-box, workers-view",
+      "files": [
+        "src/page/plan-view.js",
+        "src/page/plan-view.css",
+        "src/page/workers-view.js",
+        "src/page/workers-view.css"
+      ],
+      "scope": "IN",
+      "treatment": "공통 섹션·접힘; 활성(in_progress/running) 기본 펼침, 비활성 요약행"
+    },
+    {
+      "id": "office-kit-consumer",
+      "consumer": "office-view.js BriefView.kit consumer part",
+      "files": [
+        "src/page/office-view.js"
+      ],
+      "scope": "IN",
+      "treatment": "공통 카드(BriefView.kit.answerBox) 변경 호환, 전용 office canvas 재설계 OUT"
+    },
+    {
+      "id": "sibling-out-of-scope",
+      "consumer": "cards-view.css .mcards-*, office.css dedicated content",
+      "files": [
+        "src/page/cards-view.js",
+        "src/page/cards-view.css",
+        "src/page/office.css"
+      ],
+      "scope": "OUT",
+      "treatment": "전용 카드/캔버스 기능 재설계 제외. 공통 shell 영향·입력 회귀만 검사"
+    }
+  ],
+  "fixtures": {
+    "viewModel": "test/fixtures/readability/view-model.json",
+    "profilesState": "test/fixtures/readability/profiles-state.json",
+    "mementoState": "test/fixtures/readability/memento-state.json"
+  },
+  "screens": [
+    {
+      "id": "overview-default",
+      "screen": "overview",
+      "state": "default",
+      "scope": "IN",
+      "consumerId": "overview-cards",
+      "activeTitleSelector": "#main details.sess[open] .card .title, #main .card.st-needs_decision .title, #main .card.st-in_progress .title",
+      "expectedActiveSessionId": "fx-sess-beta-active",
+      "description": "Overview initial entry: active session (needs_decision/in_progress) must be expanded and its title within top 160px; inactive first session must not force-expand"
+    },
+    {
+      "id": "overview-expanded",
+      "screen": "overview",
+      "state": "expanded",
+      "scope": "IN",
+      "consumerId": "overview-cards",
+      "activeTitleSelector": "#main [data-card=\"fx-sess-beta-active\"] .title",
+      "expectedActiveSessionId": "fx-sess-beta-active",
+      "description": "Overview with user-expanded detail, more-ch, more-dc, plan, worker todos, and held decisions"
+    },
+    {
+      "id": "overview-dirty",
+      "screen": "overview",
+      "state": "dirty",
+      "scope": "IN",
+      "consumerId": "overview-cards",
+      "activeTitleSelector": "#main [data-card=\"fx-sess-beta-active\"] .title",
+      "expectedActiveSessionId": "fx-sess-beta-active",
+      "description": "Overview with dirty decision reply draft/input fields and active focus preserved across refresh"
+    },
+    {
+      "id": "overview-offline",
+      "screen": "overview",
+      "state": "offline",
+      "scope": "IN",
+      "consumerId": "overview-cards",
+      "activeTitleSelector": "#main [data-card=\"fx-sess-beta-active\"] .title, #main .card .title",
+      "expectedActiveSessionId": "fx-sess-beta-active",
+      "description": "Overview in read-only/offline file mode (ui.live=false) with read-only notice"
+    },
+    {
+      "id": "convo-ov-default",
+      "screen": "convo",
+      "sub": "ov",
+      "state": "default",
+      "scope": "IN",
+      "consumerId": "convo-and-blocks-kit",
+      "sessionId": "fx-sess-beta-active",
+      "activeTitleSelector": "#main .cv-h1",
+      "description": "Conversation overview sub-tab default state (.scard grid, open decisions, recent changes)"
+    },
+    {
+      "id": "convo-ov-expanded",
+      "screen": "convo",
+      "sub": "ov",
+      "state": "expanded",
+      "scope": "IN",
+      "consumerId": "convo-and-blocks-kit",
+      "sessionId": "fx-sess-beta-active",
+      "activeTitleSelector": "#main .cv-h1",
+      "description": "Conversation overview sub-tab with evidence path details, notes, and attachments expanded"
+    },
+    {
+      "id": "convo-ov-dirty",
+      "screen": "convo",
+      "sub": "ov",
+      "state": "dirty",
+      "scope": "IN",
+      "consumerId": "convo-and-blocks-kit",
+      "sessionId": "fx-sess-beta-active",
+      "activeTitleSelector": "#main .cv-h1",
+      "description": "Conversation overview sub-tab with dirty decision field values / reply draft"
+    },
+    {
+      "id": "convo-plan-default",
+      "screen": "plan",
+      "sub": "plan",
+      "state": "default",
+      "scope": "IN",
+      "consumerId": "plan-and-workers",
+      "sessionId": "fx-sess-beta-active",
+      "activeTitleSelector": "#main .cv-h1",
+      "description": "Conversation plan sub-tab default state (.plan-view, .plan-lane, .plan-box)"
+    },
+    {
+      "id": "convo-plan-expanded",
+      "screen": "plan",
+      "sub": "plan",
+      "state": "expanded",
+      "scope": "IN",
+      "consumerId": "plan-and-workers",
+      "sessionId": "fx-sess-beta-active",
+      "activeTitleSelector": "#main .cv-h1",
+      "description": "Conversation plan sub-tab with all tasks and out-of-scope lists expanded"
+    },
+    {
+      "id": "convo-workers-default",
+      "screen": "workers",
+      "sub": "wk",
+      "state": "default",
+      "scope": "IN",
+      "consumerId": "plan-and-workers",
+      "sessionId": "fx-sess-beta-active",
+      "activeTitleSelector": "#main .cv-h1",
+      "description": "Conversation workers sub-tab default state (running, stale, error, done worker rows)"
+    },
+    {
+      "id": "convo-workers-expanded",
+      "screen": "workers",
+      "sub": "wk",
+      "state": "expanded",
+      "scope": "IN",
+      "consumerId": "plan-and-workers",
+      "sessionId": "fx-sess-beta-active",
+      "activeTitleSelector": "#main .cv-h1",
+      "description": "Conversation workers sub-tab with worker todo lists expanded"
+    },
+    {
+      "id": "convo-dec-default",
+      "screen": "convo-dec",
+      "sub": "dec",
+      "state": "default",
+      "scope": "IN",
+      "consumerId": "convo-and-blocks-kit",
+      "sessionId": "fx-sess-beta-active",
+      "activeTitleSelector": "#main .cv-h1",
+      "description": "Conversation decisions sub-tab (open .dcard, held decisions, history table)"
+    },
+    {
+      "id": "convo-rep-blocks",
+      "screen": "blocks",
+      "sub": "rep",
+      "state": "default",
+      "scope": "IN",
+      "consumerId": "convo-and-blocks-kit",
+      "sessionId": "fx-sess-beta-active",
+      "activeTitleSelector": "#main .cv-h1",
+      "description": "Conversation report blocks sub-tab (.rbk table, bars, kv, flow, checklist, compare + .ropt image cards)"
+    },
+    {
+      "id": "profiles-primary-default",
+      "screen": "profiles-primary",
+      "tab": "primary",
+      "state": "default",
+      "scope": "IN",
+      "consumerId": "profiles-view",
+      "activeTitleSelector": "#main .pf-title",
+      "description": "Profiles view Primary tab default state (.pf-card list, .pf-detail, .pf-roles, .pf-tray)"
+    },
+    {
+      "id": "profiles-primary-expanded",
+      "screen": "profiles-primary",
+      "tab": "primary",
+      "state": "expanded",
+      "scope": "IN",
+      "consumerId": "profiles-view",
+      "activeTitleSelector": "#main .pf-title",
+      "description": "Profiles view Primary tab with agent row expanded (agent:sisyphus)"
+    },
+    {
+      "id": "profiles-agents-expanded",
+      "screen": "profiles-agents",
+      "tab": "agents",
+      "state": "expanded",
+      "scope": "IN",
+      "consumerId": "profiles-view",
+      "activeTitleSelector": "#main .pf-title",
+      "description": "Profiles view Agents tab with route row expanded (route:agents/explore)"
+    },
+    {
+      "id": "profiles-categories-expanded",
+      "screen": "profiles-categories",
+      "tab": "categories",
+      "state": "expanded",
+      "scope": "IN",
+      "consumerId": "profiles-view",
+      "activeTitleSelector": "#main .pf-title",
+      "description": "Profiles view Categories tab with route row expanded (route:categories/visual-engineering)"
+    },
+    {
+      "id": "profiles-memory-dirty",
+      "screen": "profiles-memory",
+      "tab": "memory",
+      "state": "dirty",
+      "scope": "IN",
+      "consumerId": "profiles-view",
+      "activeTitleSelector": "#main .pf-title",
+      "description": "Profiles view Memory tab with Kibitzer row expanded and staged dirty edits in .pf-tray"
+    },
+    {
+      "id": "profiles-offline",
+      "screen": "profiles-primary",
+      "tab": "primary",
+      "state": "offline",
+      "scope": "IN",
+      "consumerId": "profiles-view",
+      "activeTitleSelector": "#main .pf-title",
+      "description": "Profiles view offline/read-only error banner state"
+    },
+    {
+      "id": "profiles-guide-dialog",
+      "screen": "profiles-primary",
+      "tab": "primary",
+      "state": "dialog-open",
+      "scope": "IN",
+      "consumerId": "profiles-view",
+      "activeTitleSelector": "#pf-guide-t",
+      "description": "Profiles view with recommendation guide modal dialog open (dialog owns scroll, background locked)"
+    },
+    {
+      "id": "memento-sibling",
+      "screen": "memento",
+      "state": "default",
+      "scope": "OUT-SIBLING",
+      "judgment": "shell-input-regression",
+      "titleGate": false,
+      "consumerId": "sibling-out-of-scope",
+      "activeTitleSelector": "#main .mc-h1, #main [aria-label=\"메멘토\"]",
+      "description": "Memento cards view sibling shell check (OUT of redesign scope; shell regression only)"
+    },
+    {
+      "id": "office-sibling",
+      "screen": "office",
+      "state": "default",
+      "scope": "OUT-SIBLING",
+      "judgment": "shell-input-regression",
+      "titleGate": false,
+      "consumerId": "office-kit-consumer",
+      "activeTitleSelector": "#office .of-title",
+      "description": "Office view sibling shell + BriefView.kit consumer check (dedicated canvas OUT of redesign scope; shell/input regression only, not N=8 title gate)"
+    }
+  ],
+  "flows": [
+    {
+      "id": "flow-role-experimental-custom",
+      "task": "role",
+      "steps": [
+        "card:experimental-custom",
+        "role:agents/explore:service",
+        "role:agents/explore:model",
+        "role:agents/explore:effort",
+        "apply:detail"
+      ],
+      "budgetPerStep": 1
+    },
+    {
+      "id": "flow-profile-gpt-deepseek",
+      "task": "profile",
+      "steps": [
+        "apply:card:gpt-deepseek"
+      ],
+      "budgetPerStep": 1
+    },
+    {
+      "id": "flow-memory-kibitzer",
+      "task": "memory",
+      "steps": [
+        "memory:kibitzer:mode",
+        "memory:kibitzer:service",
+        "memory:kibitzer:model",
+        "memory:kibitzer:effort",
+        "apply:detail"
+      ],
+      "budgetPerStep": 1
+    }
+  ]
+}

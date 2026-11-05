@@ -1331,8 +1331,8 @@
         button('clear-confirm', ' aria-label="모두 버리기 확인"', '모두 버리기', busy, 'pf-btn pf-btn-danger') + '</div>' : '') + '</div>';
   }
 
-  // WinForms detail pane (PS:7211-7290) for the shown profile: title, usage, the caption, the role box (its own scroll,
-  // like the routing box PS:6172, 7251), then the lane, main, summarizer and apply rows.
+  // WinForms detail pane (PS:7211-7290) for the shown profile: title, usage, the caption, the role box (flat inside
+  // #main's single vertical viewport, W2), then the lane, main, summarizer and apply rows.
   function routingEditor(v, dv, edit, ro) {
     var selected = str(edit && edit.tab) || 'primary';
     var searching = !!str(edit && edit.query).trim();

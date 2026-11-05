@@ -41,11 +41,13 @@
 .sh-shell { position: relative; display: flex; box-sizing: border-box; height: 100vh; height: 100dvh; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); overflow: hidden; }
 .sh-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .sh-main { flex: 1; min-height: 0; overflow: auto; }
+.sh-main:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
 .sh-wrap > .live-status, .sh-wrap > .live-link { flex: none; }
 .trimmed-note { flex: none; margin: 0; padding: 4px 12px; color: var(--muted); font-size: var(--fs-sm); }
 .trimmed-note[hidden] { display: none; }
-.sh-main .overview { padding: 10px; }
-.sh-main .overview .card { margin-bottom: 10px; }
+.sh-main .overview { padding: 0 var(--sp-2) var(--sp-2); }
+.sh-main .overview .card { margin-bottom: var(--sp-1); }
+.sh-main .mcards-table-wrap { overflow-y: hidden; }
 
 /* rail: home first, no border, 40 px items, the selected one always filled (every width, sidebar open, closed or peeking) */
 .sh-rail {

@@ -10,7 +10,7 @@ const SOURCE = join(ROOT, 'src', 'page', 'profiles-view.js');
 const OUTPUT = join(ROOT, 'src', 'page', 'generated', 'profiles-view.min.js');
 // This recipe was reviewed for this source, not for arbitrary JavaScript.
 // Primary summaries share main draft values; guide drafts and native focus follow profile/tab scope.
-const REVIEWED_SOURCE = 'b2eedd39fe19b1bc639f4f7966bed4fadcabb3987c90ef0177c314271b001f49';
+const REVIEWED_SOURCE = '2c6086afd76165e0506760b6260b4c2dfe92b6ba6c5575078caa6f5aa6ca7ec9';
 const REVIEWED_PAYLOAD = 'bf6a58a95d7e997388ae30a09e918f5a2b15fe5b25d5d56042785390239c1311';
 
 try {

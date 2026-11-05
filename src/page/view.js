@@ -579,22 +579,32 @@
       sessions.length + '개만 보입니다 - 설치 전부터 열려 있던 대화는 새로 열어야 나타납니다</p></header>';
     if (!sessions.length) html += '<div class="empty">' + ic('inbox') + '<p class="big">아직 보고 없음</p><p class="muted">브리핑이 켜진 대화가 작업 턴을 끝내면 여기에 카드가 생깁니다</p></div>';
     if (!u.live && open) html += '<p class="note ro">이 페이지는 보기 전용입니다 - 답은 아무 대화창에 /decide 로, 또는 실시간 상황판에서</p>';
-    groupByProject(sessions).forEach(function (grp, gi) {
-      var projOpen = 0;
-      var isFirst = gi === 0;
+    groupByProject(sessions).forEach(function (grp) {
+      var projWait = 0, projActive = 0;
       grp.items.forEach(function (n) {
-        if (openDecisions(n.raw).length || n.raw.statusKey === 'blocked' || n.raw.status === 'blocked') projOpen++;
+        var s = n.raw, st = str(s.statusKey) || str(s.status);
+        var wait = openDecisions(s).length > 0 || st === 'blocked' || s.status === 'blocked' || !!obj(s.openQuestion);
+        var active = wait || st === 'in_progress' || s.status === 'in_progress' || st === 'needs_decision';
+        if (wait) projWait++;
+        var sk = 'sess:' + n.id, sv = own(u.expanded, sk);
+        if (typeof sv === 'boolean' ? sv : active) projActive++;
       });
-      html += '<details class="proj"' + ((projOpen > 0 || isFirst) ? ' open' : '') + '><summary class="projh">' + ic('folder') + ' ' + esc(grp.project) +
+      var pk = 'proj:' + grp.project, pv = own(u.expanded, pk);
+      var projIsOpen = typeof pv === 'boolean' ? pv : projActive > 0;
+      html += '<details class="proj"' + (projIsOpen ? ' open' : '') + ' data-open-key="' + esc(pk) + '"><summary class="projh">' + ic('folder') + ' ' + esc(grp.project) +
         ' <span class="sessh-b">' + grp.items.length + '</span>' +
-        (projOpen ? ' <span class="sessh-b sessh-bad">확인 ' + projOpen + '</span>' : '') + '</summary>';
-      grp.items.forEach(function (n, si) {
-        var openCount = openDecisions(n.raw).length;
-        var isBlocked = n.raw.statusKey === 'blocked' || n.raw.status === 'blocked';
-        var sessh = '<span class="sessh-w">' + whereLabelHtml(n.raw, 'ic-xs') + '</span>' +
+        (projWait ? ' <span class="sessh-b sessh-bad">확인 ' + projWait + '</span>' : '') + '</summary>';
+      grp.items.forEach(function (n) {
+        var s = n.raw, st = str(s.statusKey) || str(s.status);
+        var openCount = openDecisions(s).length;
+        var isBlocked = st === 'blocked' || s.status === 'blocked';
+        var isActive = openCount > 0 || isBlocked || !!obj(s.openQuestion) || st === 'in_progress' || s.status === 'in_progress' || st === 'needs_decision';
+        var sk = 'sess:' + n.id, sv = own(u.expanded, sk);
+        var sessIsOpen = typeof sv === 'boolean' ? sv : isActive;
+        var sessh = '<span class="sessh-w">' + esc(whereLabel(n.raw)) + '</span>' +
           (openCount ? '<span class="sessh-b">결정 ' + openCount + '</span>' : '') +
           (isBlocked ? '<span class="sessh-b sessh-bad">막힘</span>' : '');
-        html += '<details class="sess"' + ((openCount > 0 || isBlocked || (isFirst && si === 0)) ? ' open' : '') + '>' +
+        html += '<details class="sess"' + (sessIsOpen ? ' open' : '') + '>' +
           '<summary class="sessh">' + sessh + '</summary>' +
           '<button type="button" class="more" data-sh="open" data-sid="' + esc(n.id) + '">대화 페이지 열기 · ' +
           whereLabelHtml(n.raw, 'ic-xs') + '</button>' + card(n, u, toMs(vm.generatedAt)) + '</details>';

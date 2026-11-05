@@ -16,9 +16,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 code { font-family: var(--mono); font-size: var(--fs-sm); }
 .app { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 100vh; }
 .main { padding: 12px 18px 40px; max-width: none; }
-.sum { margin-bottom: var(--sp-3); }
-.sumline { margin: 0; font-weight: var(--fw-semibold); font-size: var(--fs-md); }
-.note { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-sm); }
+.sum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--sp-2); margin-bottom: 0; }
+.sumline { margin: 0; font-weight: var(--fw-semibold); font-size: var(--fs-md); line-height: 18px; }
+.note { margin: 0; color: var(--muted); font-size: var(--fs-sm); line-height: 16px; }
+.mc-h1 { margin: 0; padding: var(--sp-1) var(--sp-4) 0; font-size: var(--fs-lg); line-height: 20px; }
 /* the new fold explanation is body copy the owner must read: 14px desktop, 17px phone from the token ladder */
 .cv-fold-note { font-size: var(--fs-base); }
 .cv-fold-counts { font-size: var(--fs-base); }
@@ -30,18 +31,18 @@ h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
 .empty > .ic { width: var(--ic-empty); height: var(--ic-empty); margin-bottom: var(--sp-2); stroke-width: 1.25; vertical-align: 0; }
 .empty .big { margin: 0; color: var(--fg); font-size: var(--fs-2xl); font-weight: var(--fw-semibold); line-height: 1.3; }
 .empty .big + p { margin: 0; }
-.card { background: var(--panel); border: var(--hair) solid light-dark(var(--line), transparent); border-left: 3px solid var(--teal); border-radius: var(--r-lg); padding: var(--sp-3) var(--sp-4); margin: 0 0 var(--sp-4); box-shadow: var(--shadow-card); transition: box-shadow var(--dur) var(--ease-out); }
+.card { background: var(--panel); border: var(--hair) solid light-dark(var(--line), transparent); border-left: 3px solid var(--teal); border-radius: var(--r-lg); padding: 2px var(--sp-3) var(--sp-1); margin: 0 0 var(--sp-2); box-shadow: var(--shadow-card); transition: box-shadow var(--dur) var(--ease-out); }
 .card.st-done { border-left-color: var(--green); }
 .card.st-done_no_evidence { border-left-color: var(--gray); }
 .card.st-needs_decision, .card.st-recheck { border-left-color: var(--yellow); }
 .card.st-blocked { border-left-color: var(--red); }
 .card.flash { box-shadow: 0 0 0 2px var(--accent); }
-.ch { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.ch { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); line-height: 18px; }
 .title { font-weight: var(--fw-semibold); min-width: 0; }
 .tag { color: var(--c-fg-2); font-weight: var(--fw-medium); }
 .time { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
 .ch .time { margin-left: auto; }
-.hl, .oq, .kv { margin: 3px 0; display: flex; gap: var(--sp-2); align-items: baseline; }
+.hl, .oq, .kv { margin: 1px 0; display: flex; gap: var(--sp-2); align-items: baseline; line-height: 20px; }
 .kv.path { flex-wrap: nowrap; padding-left: 0; }
 .oq { color: var(--yellow); font-weight: var(--fw-semibold); }
 /* The question itself: display: contents keeps the line's flex items as they were; an unbroken run in it breaks anywhere. */
@@ -58,13 +59,13 @@ h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
 .ic-rail { display: block; width: var(--ic-rail); height: var(--ic-rail); }
 .ic-fill { fill: currentColor; }
 .ic-sel { stroke-width: 2.1; }
-.lbl { margin: var(--sp-2) 0 var(--sp-1); font-size: var(--fs-xs); font-weight: var(--fw-medium); color: var(--muted); }
+.lbl { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); font-weight: var(--fw-medium); color: var(--muted); line-height: 18px; }
 .rows { list-style: none; margin: 0; padding: 0; }
-.row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); padding: 1px 0; }
+.row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--sp-2); padding: 0; line-height: 17px; }
 .row .rt { flex: 1 1 260px; min-width: 0; }
 .overview .row, .overview .row > * { min-width: 0; }
 .overview .row .rt { overflow-wrap: anywhere; }
-.path { display: flex; flex-wrap: nowrap; align-items: baseline; gap: 4px; flex-basis: 100%; padding-left: 1.4em; color: var(--muted); }
+.path { display: flex; flex-wrap: nowrap; align-items: baseline; gap: 4px; flex-basis: 100%; padding-left: 1.4em; color: var(--muted); line-height: 16px; }
 .path code { flex: 0 1 auto; min-width: 0; word-break: break-all; }
 .path .copy { flex: none; }
 .chip { display: inline-block; padding: 0 6px; border-radius: var(--r-xs); font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 18px; white-space: nowrap; background: var(--gray-bg); color: var(--gray); }
@@ -76,23 +77,23 @@ h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
 .x-busy { background: var(--teal-bg); color: var(--teal); }
 .a-candidate, .a-live, .a-none { background: transparent; border: var(--hair) solid var(--c-line-strong); color: var(--muted); }
 .a-live { border-color: var(--teal); color: var(--teal); }
-.decs { margin-top: var(--sp-2); display: grid; gap: var(--sp-2); }
+.decs { margin-top: var(--sp-1); display: grid; gap: var(--sp-1); }
 .decs > .more { justify-self: start; margin-left: 0; }
-.dcard { border: var(--hair) solid var(--c-amber-line); border-left: 3px solid var(--yellow); background: var(--yellow-bg); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); }
-.dcard.blocks { border-left-color: var(--red); }
-.dline { padding: 1px 0; }
+.dcard { border: 0; border-top: var(--hair) solid var(--c-amber-line); background: transparent; border-radius: 0; box-shadow: none; padding: var(--sp-1) 0 0; }
+.dcard.blocks { border-top-color: var(--red); }
+.dline { padding: 0; line-height: 16px; }
 .dline.opt { padding-left: 1em; }
 .dline.rec-opt b { color: var(--fg); }
 .dline.rec { font-weight: var(--fw-medium); }
 /* Decision text can hold a path, URL or id with no break opportunity: it breaks there instead of widening the card, and
  * keep-all still makes Korean break between words. */
 .dline.dq, .dline.opt, .dline.rec { word-break: keep-all; overflow-wrap: anywhere; }
-.dline.from, .dline.when { color: var(--muted); font-size: var(--fs-sm); }
+.dline.from, .dline.when { display: inline-block; margin-right: var(--sp-2); color: var(--muted); font-size: var(--fs-sm); }
 .dline.ans { font-family: var(--mono); }
 .arrow { color: var(--muted); }
-.ans-box { display: grid; gap: var(--sp-2); margin: var(--sp-2) 0 var(--sp-1); }
+.ans-box { display: grid; gap: var(--sp-1); margin: var(--sp-1) 0 0; }
 .ans-opts, .ans-confirm, .ans-acts, .ans-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); }
-.ans-opt, .ans-write, .ans-go, .ans-cancel, .focusbtn { max-width: 100%; padding: 3px var(--sp-3); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); color: var(--fg); font-size: var(--fs-sm); line-height: 18px; text-align: left; transition: background-color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out); }
+.ans-opt, .ans-write, .ans-go, .ans-cancel, .focusbtn { max-width: 100%; min-height: 24px; padding: 1px var(--sp-2); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); color: var(--fg); font-size: var(--fs-sm); line-height: 18px; text-align: left; transition: background-color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out); }
 .ans-opt:hover, .ans-write:hover, .ans-cancel:hover, .focusbtn:hover { border-color: var(--c-fg-4); }
 .ans-opt.is-rec, .ans-go { border-color: var(--c-primary); background: var(--c-primary); color: var(--c-on-primary); font-weight: var(--fw-medium); }
 .ans-opt.is-rec:hover, .ans-go:hover { border-color: transparent; background: var(--c-fg-2); color: var(--c-on-primary); }
@@ -113,9 +114,9 @@ h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
 .ans-state { color: var(--teal); }
 .ans-state::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: middle; animation: ans-pulse 1s ease-in-out 6 alternate; }
 .ans-err { color: var(--red); }
-.ans-fields { display: grid; gap: var(--sp-3); min-width: 0; }
-.ans-field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: var(--sp-3); min-width: 0; }
-.ans-field { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--sp-1); min-width: 0; }
+.ans-fields { display: grid; gap: var(--sp-1); min-width: 0; }
+.ans-field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: var(--sp-2); min-width: 0; }
+.ans-field { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 2px; min-width: 0; }
 .ans-field .ans-hint { overflow-wrap: anywhere; }
 .ans-feedback { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .ans-feedback > * { grid-area: 1 / 1; overflow-wrap: anywhere; word-break: keep-all; }
@@ -126,12 +127,12 @@ h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
 .ans-field > label, .ans-field legend { font-weight: var(--fw-medium); }
 .ans-field fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .ans-field legend { padding: 0 0 var(--sp-1); }
-.ans-field input:not([type="radio"]), .ans-field select { width: 100%; min-width: 0; max-width: 100%; min-height: 36px; padding: var(--sp-2); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); color: var(--fg); font: inherit; font-variant-numeric: tabular-nums; }
+.ans-field input:not([type="radio"]), .ans-field select { width: 100%; min-width: 0; max-width: 100%; min-height: var(--ctl-h); padding: 2px var(--sp-2); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); color: var(--fg); font: inherit; font-variant-numeric: tabular-nums; }
 .ans-field input::placeholder { color: var(--muted); opacity: 1; }
 .ans-field input:focus-visible, .ans-field select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ans-field [aria-invalid="true"] { border-color: var(--red); }
 .ans-choices { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.ans-choices label { display: flex; align-items: center; gap: var(--sp-2); min-height: 36px; max-width: 100%; padding: var(--sp-1) var(--sp-2); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); cursor: pointer; }
+.ans-choices label { display: flex; align-items: center; gap: var(--sp-1); min-height: var(--ctl-h); max-width: 100%; padding: 2px var(--sp-2); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); cursor: pointer; }
 .ans-choices input { flex: 0 0 auto; accent-color: var(--fg); }
 .ans-choices label:hover { background: var(--fill-hover); }
 .ans-choices label:has(input:checked) { background: var(--fill-sel); }
@@ -154,14 +155,15 @@ h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
 .dsent { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin: 0; padding: 1px 0; }
 @keyframes ans-pulse { from { opacity: 1; } to { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { .ans-state::before { animation: none; } }
-.copy, .more, .detail-btn, .legend-btn { padding: 0 var(--sp-2); border: var(--hair) solid var(--c-line-strong); border-radius: var(--r-md); background: transparent; color: var(--c-fg-2); font-size: var(--fs-xs); line-height: 20px; transition: background-color var(--dur) var(--ease-out); }
+.copy, .more, .detail-btn, .legend-btn { min-height: 24px; padding: 2px var(--sp-2); border: var(--hair) solid var(--c-line-strong); border-radius: var(--r-md); background: transparent; color: var(--c-fg-2); font-size: var(--fs-xs); line-height: 20px; transition: background-color var(--dur) var(--ease-out); }
 .copy:hover, .more:hover, .detail-btn:hover, .legend-btn:hover { background: var(--fill-hover); color: var(--fg); }
 .more { margin: 3px 0 0 1.4em; }
 .cv-fold [data-act="fold-retry"] { border-color: var(--ctl-edge); }
-.overview > .more { display: block; max-width: 100%; margin: 0 0 var(--sp-1); padding: 2px var(--sp-2); border: 0; color: var(--muted); font-size: var(--fs-sm); text-align: left; }
-.detail-btn { margin-top: var(--sp-2); }
-.detail { margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: var(--hair) solid var(--line); }
-.flowbox { overflow-x: auto; padding: 2px 0; }
+.overview > .more { display: block; max-width: 100%; min-height: 24px; margin: 0; padding: 2px var(--sp-1); border: 0; color: var(--muted); font-size: var(--fs-sm); line-height: 20px; text-align: left; }
+.overview .sess > .more { display: block; max-width: 100%; min-height: 24px; margin: 0; padding: 2px var(--sp-1); border: 0; color: var(--muted); font-size: var(--fs-sm); line-height: 20px; text-align: left; }
+.detail-btn { margin-top: var(--sp-1); }
+.detail { margin-top: var(--sp-1); padding-top: var(--sp-1); border-top: var(--hair) solid var(--line); }
+.flowbox { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
 .flow { display: block; max-width: 100%; height: auto; }
 .flow-narrow { display: none; }
 .flow rect { stroke-width: 1; }
@@ -184,6 +186,24 @@ h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
 .sh-shell .sh-q { height: 32px; }
 .sh-shell .sh-q::placeholder { color: var(--muted); }
 .sh-shell .sh-cnt { color: var(--c-fg-2); }
+/* 2026-11-04: 개요가 세로 7만 px까지 늘어나던 문제 — 프로젝트 헤더 고정 + 세션별 접기. */
+.overview > .projh { position: sticky; top: 0; z-index: 2; background: var(--bg); min-height: 24px; padding: 2px var(--sp-1); line-height: 20px; margin: 0; }
+.overview .sess { border-top: var(--hair) solid var(--line); }
+.overview .sess > .sessh { display: flex; align-items: center; gap: var(--sp-2); min-height: 24px; padding: 2px var(--sp-1); cursor: pointer; font-weight: var(--fw-semibold); line-height: 20px; list-style: none; margin: 0; }
+.overview .sess > .sessh::-webkit-details-marker { display: none; }
+.overview .sess > .sessh::before { content: '\25B8'; flex: none; opacity: .7; }
+.overview .sess[open] > .sessh::before { content: '\25BE'; }
+.overview .sessh-w { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overview .sessh-b { flex: none; font-size: var(--fs-xs); padding: 0 var(--sp-2); border-radius: var(--r-full); background: var(--fill-soft); }
+.overview .sessh-bad { color: var(--red); }
+
+.overview > .proj { border-top: var(--hair) solid var(--line); margin-top: 0; }
+.overview > .proj > .projh { display: flex; align-items: center; gap: var(--sp-2); min-height: 24px; padding: 2px var(--sp-1); margin: 0; cursor: pointer; list-style: none; font-weight: var(--fw-semibold); line-height: 20px; position: sticky; top: 0; z-index: 2; background: var(--bg); }
+.overview > .proj > .projh::-webkit-details-marker { display: none; }
+.overview > .proj > .projh::before { content: '\25B8'; flex: none; opacity: .7; }
+.overview > .proj[open] > .projh::before { content: '\25BE'; }
+.overview > .proj > .sess:first-of-type { border-top: 0; }
+
 @media (max-width: 599px) {
   .app { grid-template-columns: minmax(0, 1fr); }
   .main { padding: 8px 10px 30px; }
@@ -192,27 +212,9 @@ h2 { margin: 10px 0 4px; font-size: var(--fs-lg); }
   .ch .time { margin-left: 0; }
   .new-badge { top: 6px; right: 8px; }
   .ans-opt, .ans-write, .ans-go, .ans-cancel, .focusbtn, .more, .detail-btn { min-height: 44px; min-width: 44px; }
+  .overview > .projh, .overview .sess > .sessh, .overview > .proj > .projh, .overview .sess > .more, .overview > .more, .copy, .legend-btn { min-height: var(--hit); min-width: var(--hit); }
   /* B6-01: one flow box beside the icon, so the sentence wraps as a sentence instead of narrow flex columns; the location
    * keeps its Korean words whole, and the focus button moves to the next line in one piece */
   .oq-b { display: block; min-width: 0; }
   .oq-b code { word-break: keep-all; }
 }
-
-
-/* 2026-11-04: 개요가 세로 7만 px까지 늘어나던 문제 — 프로젝트 헤더 고정 + 세션별 접기. */
-.overview > .projh { position: sticky; top: 0; z-index: 2; background: var(--bg, Canvas); padding-top: 4px; }
-.overview > .sess { border-top: 1px solid var(--line, rgba(128,128,128,.25)); }
-.overview > .sess > .sessh { display: flex; align-items: center; gap: 8px; padding: 8px 4px; cursor: pointer; font-weight: 600; list-style: none; }
-.overview > .sess > .sessh::-webkit-details-marker { display: none; }
-.overview > .sess > .sessh::before { content: '\25B8'; flex: none; opacity: .7; }
-.overview > .sess[open] > .sessh::before { content: '\25BE'; }
-.overview .sessh-w { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.overview .sessh-b { flex: none; font-size: var(--fs-xs, 12px); padding: 1px 6px; border-radius: 999px; background: rgba(128,128,128,.18); }
-.overview .sessh-bad { color: #c33; }
-
-.overview > .proj { border-top: 1px solid var(--line, rgba(128,128,128,.25)); }
-.overview > .proj > .projh { display: flex; align-items: center; gap: 8px; padding: 8px 4px; cursor: pointer; list-style: none; font-weight: 700; position: sticky; top: 0; z-index: 2; background: var(--bg, Canvas); }
-.overview > .proj > .projh::-webkit-details-marker { display: none; }
-.overview > .proj > .projh::before { content: '\25B8'; flex: none; opacity: .7; }
-.overview > .proj[open] > .projh::before { content: '\25BE'; }
-.overview > .proj > .sess:first-of-type { border-top: 0; }

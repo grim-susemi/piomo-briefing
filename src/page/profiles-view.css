@@ -3,10 +3,10 @@
  * card wall on a wide screen and one column on a phone. No style attributes are written by the renderer. */
 .pf {
   max-width: none;
-  padding: var(--sp-4) var(--sp-4) var(--sp-12);
+  padding: var(--sp-2) var(--sp-4) var(--sp-8);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--sp-3);
+  gap: var(--sp-2);
   min-width: 0;
   width: 100%;
 }
@@ -163,10 +163,11 @@
 
 .pf-sec {
   min-width: 0;
-  border: var(--hair) solid var(--c-line);
-  border-radius: var(--r-xl);
-  background: var(--c-elev);
-  box-shadow: var(--shadow-card);
+  border: 0;
+  border-top: var(--hair) solid var(--c-line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .pf-sec-h {
   display: flex;
@@ -174,7 +175,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-4) var(--sp-2);
+  padding: var(--sp-2) 0 var(--sp-1);
   border-bottom: var(--hair) solid var(--c-line-soft);
 }
 .pf-sec-t { min-width: 0; display: grid; gap: 1px; }
@@ -193,7 +194,7 @@
   line-height: 18px;
   text-align: center;
 }
-.pf-sec-b { padding: var(--sp-3) var(--sp-4) var(--sp-4); min-width: 0; }
+.pf-sec-b { padding: var(--sp-1) 0 var(--sp-2); min-width: 0; }
 
 /* fields and controls: the board's 4 px rhythm, 8 px row radius, 10 px control radius */
 .pf-field { display: grid; gap: 2px; min-width: 0; }
@@ -276,10 +277,11 @@
   grid-template-columns: minmax(150px, 1.1fr) minmax(120px, .8fr) minmax(190px, 1.4fr) minmax(180px, 1.2fr);
   align-items: start;
   gap: var(--sp-2) var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
-  border: var(--hair) solid var(--c-line);
-  border-radius: var(--r-lg);
-  background: var(--c-main);
+  padding: var(--sp-1) var(--sp-2);
+  border: 0;
+  border-top: var(--hair) solid var(--c-line);
+  border-radius: 0;
+  background: transparent;
 }
 .pf-agent-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); min-width: 0; }
 .pf-agent.pf-route { display: block; padding: 0; border: 0; border-radius: var(--r-md); }
@@ -318,14 +320,14 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--sp-2) var(--sp-4);
+  gap: var(--sp-1) var(--sp-4);
   min-width: 0;
-  padding: var(--sp-2) var(--sp-4);
-  border: var(--hair) solid var(--c-line);
-  border-left: 4px solid var(--c-green);
-  border-radius: var(--r-xl);
-  background: var(--c-elev);
-  box-shadow: var(--shadow-card);
+  padding: var(--sp-1) 0;
+  border: 0;
+  border-bottom: var(--hair) solid var(--c-line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .pf-status-l, .pf-status-r { display: grid; gap: 2px; min-width: 0; }
 .pf-status-m { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
@@ -339,9 +341,7 @@
   display: grid;
   gap: var(--sp-2);
   min-width: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  padding: var(--sp-1) 0 var(--sp-2);
 }
 /* the WinForms client area (PS:4154, 4438, 7283): cards | detail over the message strip, as tall as the viewport under
  * the shell tabs, this page's head and the status strip (252 px). The strip is a real bottom row under both panes, so a
@@ -353,14 +353,12 @@
  * English-name line and one line each for main and service, so at 1180x700 two cards and their 적용 sit above the fold
  * and the fifth card is one scroll away */
 @media (min-width: 900px) {
-  .pf-panes:has(> .pf-tray) { height: calc(100vh - 252px); grid-template-rows: minmax(0, 1fr) auto; row-gap: 1px; }
-  .pf-panes:has(> .pf-tray) > .pf-detail { height: 100%; container-type: size; }
-  .pf-panes > .pf-tray { grid-column: 1 / -1; position: static; max-height: 14vh; }
-  .pf-panes > .pf-tray:has([data-pf-preview], [data-pf-result]) { max-height: clamp(14vh, calc(100vh - 589px), 33vh); }
+  .pf-panes:has(> .pf-tray) { grid-template-rows: minmax(0, 1fr) auto; row-gap: var(--sp-2); }
+  .pf-panes:has(> .pf-tray) > .pf-detail { container-type: inline-size; }
+  .pf-panes > .pf-tray { grid-column: 1 / -1; position: static; }
   .pf-panes > .pf-tray .pf-sec-h { padding: var(--sp-1) var(--sp-3); }
   .pf-panes > .pf-tray .pf-sec-t { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); }
   .pf-panes > .pf-tray .pf-sec-b { padding: var(--sp-1) var(--sp-3) var(--sp-2); }
-  #pf-sec-profiles { max-height: 100%; overflow-y: auto; overscroll-behavior: contain; }
   #pf-sec-profiles > .pf-sec-h { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
   .pf-card-en { display: none; }
   .pf-card-main, .pf-card-svc { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -376,17 +374,14 @@
   container: roles / inline-size;
   min-width: 0;
   grid-template-columns: minmax(0, 1fr);
-  scrollbar-width: thin;
   scroll-margin-top: calc(var(--bar-h) + var(--hit));
   align-content: start;
   gap: var(--sp-2);
-  height: clamp(200px, calc(100cqh - 88px), 560px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
   padding: 0;
-  border: var(--hair) solid var(--c-line);
-  border-radius: var(--r-lg);
-  background: var(--c-sunk);
+  border: 0;
+  border-top: var(--hair) solid var(--c-line);
+  border-radius: 0;
+  background: transparent;
 }
 .pf-groups { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; min-width: 0; }
 .pf-groups > .pf-rh,
@@ -416,6 +411,7 @@
   width: min(1180px, calc(100vw - 32px));
   box-sizing: border-box;
   max-height: calc(100vh - 64px);
+  overflow-y: auto;
   padding: var(--sp-4);
   border: var(--hair) solid var(--c-line);
   border-radius: var(--r-xl);
@@ -434,22 +430,25 @@
 .pf-guide-label { display: none; }
 
 /* profiles: one card per row; the main button fills the card, 적용 sits beside it at the bottom right */
-.pf-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
+.pf-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
 .pf-card {
   position: relative;
   min-width: 0;
-  border: var(--hair) solid var(--c-line);
-  border-radius: var(--r-lg);
-  background: var(--c-main);
+  border: 0;
+  border-top: var(--hair) solid var(--c-line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .pf-card-b {
   display: grid;
-  gap: 2px;
+  gap: 1px;
   width: 100%;
   min-width: 0;
-  padding: var(--sp-2) var(--sp-3);
+  min-height: var(--ctl-h);
+  padding: var(--sp-1) var(--sp-2);
   border: 0;
-  border-radius: inherit;
+  border-radius: 0;
   background: none;
   color: var(--c-fg);
   font: inherit;
@@ -458,7 +457,7 @@
 button.pf-card-b:hover:not(:disabled) { background: var(--fill-hover); }
 button.pf-card-b:active:not(:disabled) { background: var(--fill-press); }
 button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
-.pf-card.on { border-color: var(--c-green); background: var(--c-green-tint); box-shadow: inset 0 0 0 1px var(--c-green); }
+.pf-card.on { border-top-color: var(--c-green); background: var(--c-green-tint); box-shadow: inset 0 0 0 1px var(--c-green); }
 /* the right gutters keep text clear of 적용 중 (top) and 적용 (bottom); the cards header stays on one line so two cards
  * and their 적용 sit above the fold at 1180x700 */
 .pf-card:has(> .pf-current) .pf-card-top { padding-right: 64px; }
@@ -489,7 +488,7 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-group { display: grid; gap: var(--sp-1); min-width: 0; }
 .pf-group-h { display: flex; align-items: baseline; gap: var(--sp-2); margin: 0; color: var(--c-fg-2); font-size: var(--fs-sm); }
 .pf-routes { display: grid; gap: var(--sp-1); }
-.pf-route { display: grid; gap: 2px; min-width: 0; padding: var(--sp-1) var(--sp-2); border-radius: var(--r-md); background: var(--c-main); }
+.pf-route { display: grid; gap: 2px; min-width: 0; padding: var(--sp-1) var(--sp-2); border: 0; border-top: var(--hair) solid var(--c-line-soft); border-radius: 0; background: transparent; }
 .pf-route:has(> .pf-row-sum[aria-expanded="false"]),
 .pf-mem-row:has(> .pf-row-sum[aria-expanded="false"]) {
   padding: 0;
@@ -554,10 +553,11 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
   display: grid;
   gap: var(--sp-1);
   min-width: 0;
-  padding: var(--sp-2) var(--sp-3);
-  border: var(--hair) solid var(--c-line);
-  border-radius: var(--r-lg);
-  background: var(--c-main);
+  padding: var(--sp-1) var(--sp-2);
+  border: 0;
+  border-top: var(--hair) solid var(--c-line);
+  border-radius: 0;
+  background: transparent;
 }
 .pf-mem-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); }
 .pf-mem-cat { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); }
@@ -573,10 +573,8 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-guide-url code { color: var(--c-accent); overflow-wrap: anywhere; }
 
 /* pending tray, preview, conflict and success */
-.pf-tray { border: var(--hair) solid var(--c-amber-line); border-radius: var(--r-xl); background: var(--c-elev); box-shadow: var(--shadow-card); }
-/* docked: below 900 px the message tray sticks to the bottom edge of the scroll area so results, warnings and the preview
- * diff are always in view (from 900 px it is the panes' bottom row, above); a long pending/preview list scrolls inside it */
-.pf-tray { position: sticky; bottom: 0; z-index: 3; max-height: 45vh; overflow-y: auto; overscroll-behavior: contain; }
+.pf-tray { border: 0; border-top: var(--hair) solid var(--c-amber-line); border-radius: 0; background: transparent; box-shadow: none; }
+.pf-tray { position: static; }
 .pf-tray .pf-sec-h { border-bottom-color: var(--c-amber-line); }
 /* empty tray: one quiet status line, so the editor leads at 390 without hiding any live state */
 .pf-tray-compact { padding: var(--sp-1) var(--sp-3); }
@@ -606,7 +604,7 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-preview { margin-top: var(--sp-3); display: grid; gap: var(--sp-1); }
 .pf-preview-h { margin: 0; display: flex; align-items: baseline; gap: var(--sp-1); font-weight: var(--fw-semibold); }
 .pf-diff { border: var(--hair) solid var(--c-line); border-radius: var(--r-md); background: var(--c-main); }
-.pf-diff summary { cursor: pointer; padding: var(--sp-1) var(--sp-2); font-size: var(--fs-sm); }
+.pf-diff summary { cursor: pointer; min-height: 24px; padding: var(--sp-1) var(--sp-2); font-size: var(--fs-sm); }
 .pf-diff summary:hover { background: var(--fill-hover); }
 .pf-diff ul { margin: 0; padding: 0 var(--sp-2) var(--sp-2); list-style: none; display: grid; gap: 2px; }
 .pf-diff li { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1); font-size: var(--fs-xs); }

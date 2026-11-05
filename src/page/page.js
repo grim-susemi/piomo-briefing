@@ -59,7 +59,7 @@
   var regionHtml = Object.create(null), scrollMemory = Object.create(null), renderedKey = null;
   var cardsView = null, cardsEpoch = 0, cardsRead = 0, cardsOwnerAction = null;
   // A constant region keeps TASK14's own DOM, filters and expanded rows outside string-rendered agent updates.
-  var CARDS_REGION = '<section aria-label="메멘토"><p id="memento-load" role="status"></p><div id="memento-cards"></div></section>';
+  var CARDS_REGION = '<section><h1 class="mc-h1" aria-label="메멘토">메멘토</h1><p id="memento-load" role="status"></p><div id="memento-cards"></div></section>';
   var OFFICE_REGION = '<section id="office" class="of" aria-label="사무실"></section>'; // office-view.js draws in it
 
   // Fail closed: without view.js, model text still cannot become markup (same mapping as view.js escapeHtml).
@@ -152,10 +152,22 @@
         cardsOwnerAction = cardsView && main.contains(ev.target) ? ev : null;
       }, true);
     });
-    root.addEventListener('toggle', guard('details toggle', function (ev) {
-      var t = ev.target, k = t && t.getAttribute && t.getAttribute('data-open-key');
-      if (k) state.ui.expanded[k] = t.open === true;
-    }), true);
+    root.addEventListener('click', guard('details choice', function (ev) {
+      if (!ev.isTrusted || ev.defaultPrevented) return;
+      var summary = ev.target.closest('summary');
+      if (!summary || ev.target.closest('a,button,input,select,textarea')) return;
+      var t = summary.parentElement;
+      if (!t || t.tagName !== 'DETAILS' || t.querySelector('summary') !== summary) return;
+      var k = t.getAttribute('data-open-key');
+      if (!k && t && t.classList && t.classList.contains('sess')) {
+        var c = t.querySelector && t.querySelector('[data-card]');
+        if (c) k = 'sess:' + c.getAttribute('data-card');
+      }
+      if (k) {
+        var open = !t.open;
+        g.queueMicrotask(function () { if (!ev.defaultPrevented) state.ui.expanded[k] = open; });
+      }
+    }));
     g.BriefShell.bind(shell, { dispatch: dispatch, now: function () { return state.now(); } });
     if (g.BriefProfiles && typeof g.BriefProfiles.bind === 'function') {
       g.BriefProfiles.bind(root, { controller: ensureProfiles, reload: function () { g.location.reload(); }, render: render });
