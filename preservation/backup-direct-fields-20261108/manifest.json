@@ -1,0 +1,69 @@
+{
+  "schema": 1,
+  "feature": "backup-direct-fields",
+  "baseline_head": "b2166f652cf0a2cc00101483ff049307eb3235c9",
+  "baseline_includes_uncommitted": true,
+  "scope": "Only candidate-vs-recorded-baseline delta; not a merge of shared pending work",
+  "files": [
+    {
+      "path": "scripts/minify-profiles.mjs",
+      "baseline_sha256": "9ff8886da9dcdc5b5277a08cff854a70f41a1e74d84be0e02c293223e5163fbe",
+      "candidate_sha256": "e1b26d8533b87ac0515487c5c8b93b327a120670c722696c384cf9729674d7d5"
+    },
+    {
+      "path": "scripts/profiles-grid.mjs",
+      "baseline_sha256": "4129071319f55fae67bc81ffc6745a03ee41a43bc12b45fe8106f7d72d189074",
+      "candidate_sha256": "09087175ad5b6c729719453270955837f392ddbf31c37fe4bf28407ffc0968de"
+    },
+    {
+      "path": "src/page/generated/profiles-view.min.js",
+      "baseline_sha256": "a85ee6ad78e85211ecac276ec13f969537005e412815c4d8aedab1b724aa6178",
+      "candidate_sha256": "675094dd18634fb911c49f3a00ce46bb325f601661e3fbbd6043bb2ed430a312"
+    },
+    {
+      "path": "src/page/profiles-view.css",
+      "baseline_sha256": "0b351ec60749d816cc08b98f3a0a9a173347d8ba2b17a90dbcd4187439f7935b",
+      "candidate_sha256": "344355a23272f7f4e50138bf3c1726cadbf19a84d5f4670f763f31999ae16803"
+    },
+    {
+      "path": "src/page/profiles-view.js",
+      "baseline_sha256": "2d11b6aaa2c5a2a744baf2bcbdcd43f5c4fe28be369fc34c3e25ac4833a7f94d",
+      "candidate_sha256": "1d5fd055fbae9ba6d6a2d6c13d869401d9653d390725806e66cdcc8a3b0d717a"
+    },
+    {
+      "path": "src/profiles/store.mjs",
+      "baseline_sha256": "52062ff7a0a49a90730e3b91c93e5584f783ce9e97be27b787af2934b5d0c851",
+      "candidate_sha256": "3f18244b7e3a86df74b81fd5b13faa130a4e64b54eae039d061127563f21927b"
+    },
+    {
+      "path": "test/profiles-view.test.mjs",
+      "baseline_sha256": "b4ec8a31dc860ad6a1248b9cf28bd9d673e1ddfbe4c360cab5c94b5c091eeb2f",
+      "candidate_sha256": "2b966c2fa3ceff13ea896715431fe890f8d34226f20b291385c72ff43dd947ab"
+    },
+    {
+      "path": "src/profiles/role-backup.mjs",
+      "baseline_sha256": null,
+      "candidate_sha256": "a9473bbd6925651c7630566000f81b39b60b7f3496ad8eaf239de08bb2e0c49e"
+    },
+    {
+      "path": "test/helpers/fallback-fixture.mjs",
+      "baseline_sha256": null,
+      "candidate_sha256": "8d254bf4621467af2a066109cbfbdc570e357a6464a3feca83d9dbffecd6cfc8"
+    },
+    {
+      "path": "test/profiles-role-backup.test.mjs",
+      "baseline_sha256": null,
+      "candidate_sha256": "40853c04c027e510f7b2090f0b42bf124abe84bf884d1d6956d0e15e0e939c0d"
+    },
+    {
+      "path": "scripts/qa-role-backup.mjs",
+      "baseline_sha256": null,
+      "candidate_sha256": "60c75753de670f53b8a8a33922487f6f898434c7b6eace7bd17059be0fb5cf1b"
+    },
+    {
+      "path": "scripts/qa-role-backup-detect.mjs",
+      "baseline_sha256": null,
+      "candidate_sha256": "706073e5e3dd295f7c3546599a37e919c0626e209d935d5bc2c9c7d7fcdd842b"
+    }
+  ]
+}
