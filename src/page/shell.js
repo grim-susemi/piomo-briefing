@@ -431,6 +431,8 @@
       case 'view': {
         if (VIEWS.indexOf(a.key) < 0) return st;
         var p = { view: a.key };
+        // 홈 is the overview: leave the open conversation (its tab stays) so the main pane shows the home list.
+        if (a.key === 'home') p.active = null;
         if (keys(BOXES).indexOf(a.box) >= 0) p.box = a.box;
         if (a.narrow === true) p.peek = true;
         else { p.sideOpen = true; p.peek = false; }

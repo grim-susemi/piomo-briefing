@@ -140,6 +140,11 @@ test('reduce: view switches the one sidebar column, opens it, and refuses unknow
   const narrow = S.reduce(closed, { type: 'view', key: 'archive', narrow: true });
   assert.deepEqual([narrow.view, narrow.sideOpen, narrow.peek], ['archive', false, true], 'narrow: the overlay opens, the docked state stays');
   for (const key of ['conv', 'inbox', 'plans', 'home', 'archive', 'profiles', 'settings', 'memento']) assert.equal(S.reduce(closed, { type: 'view', key }).view, key);
+  const open = S.reduce(S.defaults(), { type: 'open', sid: 'w:w1:t1', now: 1 });
+  assert.equal(open.active, 'w:w1:t1');
+  const home = S.reduce(open, { type: 'view', key: 'home' });
+  assert.deepEqual([home.view, home.active, home.tabs], ['home', null, open.tabs], '홈 shows the overview and keeps the open tab');
+  for (const key of ['conv', 'inbox', 'plans', 'archive', 'profiles', 'settings', 'memento']) assert.equal(S.reduce(open, { type: 'view', key }).active, 'w:w1:t1', `${key} keeps the open conversation`);
 });
 
 test('reduce: filter, search, fav and expand', () => {

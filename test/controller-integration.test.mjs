@@ -229,7 +229,7 @@ test('conversation refresh glow and worker measurements use stable block and ses
   assert.deepEqual(e.errors, []);
 });
 
-test('regions: a rail click with running workers keeps #main and #tabs; worker rows use one clock per applied model', () => {
+test('regions: a rail click with running workers keeps #main and #tabs (홈 shows the overview, the tab stays); worker rows use one clock per applied model', () => {
   // the page scripts' own Date.now() moves on every read: a render that reads it draws another pulse phase
   const e = makeController({ modules: ['icons', 'view', 'plan-view', 'workers-view', 'convo-view', 'shell', 'annotate'],
     configure: ctx => vm.runInContext('(function () { var t = 1700000000000; Date.now = function () { return t += 137; }; })();', ctx) });
@@ -237,8 +237,8 @@ test('regions: a rail click with running workers keeps #main and #tabs; worker r
   e.page.receive(model(1, s));
   const main = e.byId.main, tabs = e.byId.tabs;
   assert.match(main.innerHTML, /<span class="w-dot" style="animation-delay:-\d+ms"/, 'the overview card pulses');
-  const railClicks = where => {
-    for (const key of ['inbox', 'plans', 'home', 'archive', 'settings', 'conv']) {
+  const railClicks = (where, keys) => {
+    for (const key of keys) {
       const before = { main: main.innerHTML, tabs: tabs.innerHTML, writes: main.writes };
       click(e, `#rail [data-sh="view"][data-key="${key}"]`);
       assert.equal(e.page.state.ui.view, key, `${where} ${key}`);
@@ -247,7 +247,7 @@ test('regions: a rail click with running workers keeps #main and #tabs; worker r
       assert.equal(main.writes, before.writes, `${where} ${key}: #main not rewritten`);
     }
   };
-  railClicks('overview');
+  railClicks('overview', ['inbox', 'plans', 'home', 'archive', 'settings', 'conv']);
   // 65 s after the apply the same model's 작업자 sub-tab is drawn: its elapsed time is the current one, not the apply's
   e.advance(65_000);
   e.page.open('s1', 'wk');
@@ -255,8 +255,21 @@ test('regions: a rail click with running workers keeps #main and #tabs; worker r
   assert.ok(timer, 'the stable timer node remains available to the ticker');
   assert.equal(timer.textContent, '1분 06초');
   assert.ok(timer.parentNode.querySelector('svg.ic use[href="#i-clock"]'), 'a separate Lucide clock precedes the timer');
-  railClicks('작업자');
+  railClicks('작업자', ['inbox', 'plans', 'archive', 'settings', 'conv']);
   assert.equal(main.querySelector('[data-since]'), timer, 'rail navigation preserves the timer node');
+  // 홈 (owner-approved #1135 B): the main pane shows the overview, the open conversation tab and its sub-tab stay
+  const sid = e.page.state.ui.active, openTabs = e.page.state.ui.tabs.slice();
+  assert.ok(sid);
+  click(e, '#rail [data-sh="view"][data-key="home"]');
+  assert.equal(e.page.state.ui.view, 'home');
+  assert.equal(e.page.state.ui.active, null);
+  assert.deepEqual(e.page.state.ui.tabs, openTabs, '홈 keeps the open tabs');
+  assert.ok(main.querySelector('.overview'), '홈 draws the overview in #main');
+  assert.ok(tabs.querySelector(`[data-sh="active"][data-sid="${sid}"]`), 'the conversation tab is still in #tabs');
+  click(e, `#tabs [data-sh="active"][data-sid="${sid}"]`);
+  assert.equal(e.page.state.ui.active, sid);
+  assert.equal(main.querySelector('.overview'), null);
+  assert.ok(main.querySelector('[data-since]'), 'back on the tab: the 작업자 sub-tab is drawn again');
   assert.deepEqual(e.errors, []);
 });
 

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
+import http from 'node:http';
 import vm from 'node:vm';
 import { roadmapPublication, publishRoadmaps, ROADMAP_PAGE_BYTES } from '../src/roadmap-publication.mjs';
 import { ROADMAP_LIMITS } from '../src/roadmap-schema.mjs';
@@ -17,6 +18,16 @@ const models = (count) => Array.from({ length: count }, (_, i) => ({
   ] }],
 }));
 const full = (roadmaps) => ({ gen: 36, seq: 1, sessions: [], roadmaps });
+// node:http, not fetch: the OS may hand port 0 any port of the dynamic range, and fetch refuses its "bad port" list
+const get = (port, path, headers = {}) => new Promise((resolve, reject) => {
+  const req = http.get({ host: '127.0.0.1', port, path, agent: false, headers: { Connection: 'close', ...headers } }, (res) => {
+    let body = '';
+    res.setEncoding('utf8');
+    res.on('data', (chunk) => { body += chunk; });
+    res.on('end', () => resolve({ status: res.statusCode, json: () => JSON.parse(body) }));
+  });
+  req.on('error', reject);
+});
 const bodies = (publication, kind) => publication.artifacts
   .filter(([rel]) => rel.endsWith('.json') && rel.includes(`/${kind}-`))
   .map(([, text]) => JSON.parse(text));
@@ -55,15 +66,15 @@ test('ninth detail has identical offline and gated HTTP delivery', async (t) => 
   const board = createBoardServer({ portBase: 0, portCount: 1, generation: 36,
     roadmapStateDir: dir, getViewModel: () => model, getPage: () => '' });
   t.after(() => board.close());
-  const { port } = await board.start(), origin = `http://127.0.0.1:${port}`;
-  const response = await fetch(`${origin}${stem}.json`);
+  const { port } = await board.start();
+  const response = await get(port, `${stem}.json`);
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), JSON.parse(JSON.stringify(offline)));
+  assert.deepEqual(response.json(), JSON.parse(JSON.stringify(offline)));
   assert.deepEqual(JSON.parse(JSON.stringify(offline.items[0])), input.roadmaps[8]);
   for (const path of [`${stem}.js`, `/roadmap-data/${key}/../definition.json`]) {
-    assert.equal((await fetch(`${origin}${path}`)).status, 404);
+    assert.equal((await get(port, path)).status, 404);
   }
-  assert.equal((await fetch(`${origin}${stem}.json`, { headers: { 'Sec-Fetch-Site': 'cross-site' } })).status, 403);
+  assert.equal((await get(port, `${stem}.json`, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
 });
 
 test('offline loader discards superseded detail responses and retains only the selected snapshot', () => {
