@@ -1,0 +1,10 @@
+{
+ "name": "omo-task-no-fallback",
+ "version": "0.1.0",
+ "private": true,
+ "pi": {
+  "extensions": [
+   "./omo-task-no-fallback.js"
+  ]
+ }
+}

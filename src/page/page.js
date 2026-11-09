@@ -18,6 +18,7 @@
   var POLL_MS = 2000;
   var APPLY_MIN_MS = 500;
   var RELEASE_MS = 100;
+  var GENERATION_DRAFT_RELEASE_MS = 900;
   var GLOW_MS = 900;
   var EMPTY = { seq: -1, generatedAt: null, sessions: [] };
   var stampEl = doc.querySelector && doc.querySelector('meta[name="omo-briefing' + '-generation"]');
@@ -25,6 +26,8 @@
   var ownGeneration = typeof stamp === 'string' && /^\d+$/.test(stamp) ? generationOf(Number(stamp)) : null;
   var generationFloor = ownGeneration;
   var pendingGeneration = null;
+  var generationDraftFocus = null, reloadDraftFocus = null;
+  var generationDraftTimer = null;
   var reconnectErrors = 0;
   var closedNotice = false;
 
@@ -44,7 +47,7 @@
     transport: 'file',
     pointerDown: false,
     now: function () { return Date.now(); },
-    ui: { expanded: Object.create(null), live: false, focus: Object.create(null), sendNote: function (sid, text) { var s = sessionById(sid); if (s) sendAnnotation(s, text, { keepTray: true }); } },
+    ui: { expanded: Object.create(null), live: false, focus: Object.create(null), roadmapSearch: '', roadmapTrack: 'all', roadmapStatus: 'ready', roadmapTab: 'summary', roadmapSubView: 'board', roadmapReturnContext: null, roadmapSheetReturnKey: null, sendNote: function (sid, text) { var s = sessionById(sid); if (s) sendAnnotation(s, text, { keepTray: true }); } },
     full: new Map(),
     fullFlight: Object.create(null),
     fold: Object.create(null),
@@ -59,7 +62,7 @@
   var regionHtml = Object.create(null), scrollMemory = Object.create(null), renderedKey = null;
   var cardsView = null, cardsEpoch = 0, cardsRead = 0, cardsOwnerAction = null;
   // A constant region keeps TASK14's own DOM, filters and expanded rows outside string-rendered agent updates.
-  var CARDS_REGION = '<section aria-label="메멘토"><p id="memento-load" role="status"></p><div id="memento-cards"></div></section>';
+  var CARDS_REGION = '<section><h1 class="mc-h1" aria-label="메멘토">메멘토</h1><p id="memento-load" role="status"></p><div id="memento-cards"></div></section>';
   var OFFICE_REGION = '<section id="office" class="of" aria-label="사무실"></section>'; // office-view.js draws in it
 
   // Fail closed: without view.js, model text still cannot become markup (same mapping as view.js escapeHtml).
@@ -142,7 +145,82 @@
     trimEl.hidden = true;
     wrap.insertBefore(trimEl, tabs);
     badge.addEventListener('click', guard('badge', apply));
+    if (g.BriefRoadmapNavigation) g.BriefRoadmapNavigation.bind(root, g.BriefPage, main);
     root.addEventListener('click', guard('click', onClick));
+    root.addEventListener('keydown', guard('sheet keyboard', function (ev) {
+      if (!ev) return;
+      var dlg = main.querySelector('.rm-sheet-dialog[open]');
+      if (!dlg) return;
+
+      // Escape key closes sheet and restores focus
+      if (ev.key === 'Escape' && !ev.defaultPrevented && !ev.isComposing && !ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.shiftKey) {
+        if (typeof ev.preventDefault === 'function') ev.preventDefault();
+        if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+        var escReturnKey = state.ui.roadmapSheetReturnKey;
+        var escVanished = state.ui.roadmapSheetVanished;
+        Object.keys(state.ui.expanded).forEach(function (ek) {
+          if (ek.indexOf('rm-stage:') === 0) delete state.ui.expanded[ek];
+        });
+        state.ui.roadmapSheetReturnKey = null;
+        state.ui.roadmapSheetVanished = false;
+        render();
+        var escBtn = null;
+        if (escReturnKey) {
+          escBtn = main.querySelector('[data-act="exp"][data-key="' + escReturnKey + '"]');
+          if (escBtn && typeof escBtn.focus === 'function') escBtn.focus({ preventScroll: true });
+        }
+        if (escVanished || !escBtn || doc.activeElement !== escBtn) focusRoadmapHeading();
+        return;
+      }
+
+      // Tab key inside open sheet: focus trap
+      if (ev.key === 'Tab') {
+        var focusables = Array.prototype.slice.call(dlg.querySelectorAll('button, [tabindex], a[href], input, select, textarea')).filter(function (el) {
+          return (!el.hasAttribute('tabindex') || Number(el.getAttribute('tabindex')) >= 0) && !el.hasAttribute('disabled') &&
+            !el.closest('[hidden], [inert]') && el.offsetParent !== null;
+        });
+        if (focusables.length > 0) {
+          var firstF = focusables[0];
+          var lastF = focusables[focusables.length - 1];
+          if (ev.shiftKey) {
+            if (doc.activeElement === firstF || !dlg.contains(doc.activeElement)) {
+              if (typeof ev.preventDefault === 'function') ev.preventDefault();
+              lastF.focus();
+            }
+          } else {
+            if (doc.activeElement === lastF || !dlg.contains(doc.activeElement)) {
+              if (typeof ev.preventDefault === 'function') ev.preventDefault();
+              firstF.focus();
+            }
+          }
+        }
+        return;
+      }
+
+      // ArrowLeft / ArrowRight / Home / End for roving tabindex on tabs
+      var tabBtn = ev.target && ev.target.closest && ev.target.closest('.rm-sheet-tab');
+      if (tabBtn && dlg.contains(tabBtn)) {
+        var tabList = Array.prototype.slice.call(dlg.querySelectorAll('.rm-sheet-tab'));
+        var curIdx = tabList.indexOf(tabBtn);
+        if (curIdx >= 0) {
+          var nextIdx = -1;
+          if (ev.key === 'ArrowRight') nextIdx = (curIdx + 1) % tabList.length;
+          else if (ev.key === 'ArrowLeft') nextIdx = (curIdx - 1 + tabList.length) % tabList.length;
+          else if (ev.key === 'Home') nextIdx = 0;
+          else if (ev.key === 'End') nextIdx = tabList.length - 1;
+
+          if (nextIdx >= 0) {
+            if (typeof ev.preventDefault === 'function') ev.preventDefault();
+            var nextTabBtn = tabList[nextIdx];
+            var nextTabKey = nextTabBtn.getAttribute('data-tab');
+            state.ui.roadmapTab = nextTabKey;
+            render();
+            var focusedTab = main.querySelector('.rm-sheet-tab[data-tab="' + nextTabKey + '"]');
+            if (focusedTab && typeof focusedTab.focus === 'function') focusedTab.focus();
+          }
+        }
+      }
+    }));
     root.addEventListener('input', guard('input', onInput));
     root.addEventListener('change', guard('checklist', onCheck));
     // TASK14 calls setStatus synchronously from click/change handlers, then again for a BUSY retry.
@@ -152,10 +230,23 @@
         cardsOwnerAction = cardsView && main.contains(ev.target) ? ev : null;
       }, true);
     });
-    root.addEventListener('toggle', guard('details toggle', function (ev) {
-      var t = ev.target, k = t && t.getAttribute && t.getAttribute('data-open-key');
-      if (k) state.ui.expanded[k] = t.open === true;
-    }), true);
+    root.addEventListener('click', guard('details choice', function (ev) {
+      if (!ev.isTrusted || ev.defaultPrevented) return;
+      var summary = ev.target.closest('summary');
+      if (!summary || ev.target.closest('a,button,input,select,textarea')) return;
+      var t = summary.parentElement;
+      if (!t || t.tagName !== 'DETAILS' || t.querySelector('summary') !== summary) return;
+      var k = t.getAttribute('data-open-key');
+      if (!k && t && t.classList && t.classList.contains('sess')) {
+        var c = t.querySelector && t.querySelector('[data-card]');
+        if (c) k = 'sess:' + c.getAttribute('data-card');
+      }
+      if (k) {
+        var open = !t.open;
+        // Let click dispatch finish so later listeners can cancel the choice.
+        g.setTimeout(function () { if (!ev.defaultPrevented) state.ui.expanded[k] = open; }, 0);
+      }
+    }));
     g.BriefShell.bind(shell, { dispatch: dispatch, now: function () { return state.now(); } });
     if (g.BriefProfiles && typeof g.BriefProfiles.bind === 'function') {
       g.BriefProfiles.bind(root, { controller: ensureProfiles, reload: function () { g.location.reload(); }, render: render });
@@ -164,6 +255,10 @@
     // "busy" release triggers
     doc.addEventListener('selectionchange', guard('selectionchange', scheduleRelease));
     doc.addEventListener('focusout', guard('focusout', scheduleRelease));
+    doc.addEventListener('focusin', guard('focusin', function (ev) {
+      if (generationDraftFocus && ev.target !== doc.body &&
+          (ev.target.getAttribute('data-draft') !== generationDraftFocus.key || ev.target.getAttribute('data-where') !== generationDraftFocus.where)) generationDraftFocus = null;
+    }));
     doc.addEventListener('pointerdown', guard('pointerdown', function (ev) {
       if (ev && ev.target && root.contains(ev.target)) state.pointerDown = true;
     }));
@@ -174,7 +269,7 @@
   }
 
   // ---- busy: the owner is selecting, typing or pressing inside the board -------------------------
-  function busy() {
+  function busy(allowGenerationDraft) {
     if (state.pointerDown) return true;
     var sel = g.getSelection && g.getSelection();
     if (g.BriefAnnotate.busy()) return true;
@@ -183,7 +278,10 @@
     if (a && main.contains(a)) {
       var tag = String(a.tagName || '').toLowerCase();
       // a checklist box is no typing
-      if ((tag === 'input' && a.getAttribute('type') !== 'checkbox') || tag === 'textarea' || a.isContentEditable) return true;
+      if ((tag === 'input' && a.getAttribute('type') !== 'checkbox') || tag === 'textarea' || a.isContentEditable) {
+        if (!(allowGenerationDraft && tag === 'textarea' && generationDraftFocus &&
+            a.getAttribute('data-draft') === generationDraftFocus.key && a.getAttribute('data-where') === generationDraftFocus.where)) return true;
+      }
     }
     return false;
   }
@@ -193,7 +291,19 @@
   function tick(fn) { try { return fn(g.localStorage); } catch (e) { if (!tickFails++) warn('checklist tick', e); } }
   function isChecked(key) { return tick(function (s) { return s.getItem(key) === '1'; }) === true; }
   function onCheck(ev) {
-    var t = ev.target, key = t.getAttribute('data-check-key'), list = t.closest('.rbk-chk'), n = 0;
+    var t = ev.target;
+    var rmAct = t && t.getAttribute && t.getAttribute('data-act');
+    if (rmAct === 'rm-track') {
+      state.ui.roadmapTrack = String(t.value || 'all');
+      render();
+      return;
+    }
+    if (rmAct === 'rm-status') {
+      state.ui.roadmapStatus = String(t.value || 'ready');
+      render();
+      return;
+    }
+    var key = t.getAttribute('data-check-key'), list = t.closest('.rbk-chk'), n = 0;
     if (!key || !list) return;
     tick(function (s) { if (t.checked) s.setItem(key, '1'); else s.removeItem(key); });
     var boxes = list.querySelectorAll('input');
@@ -202,6 +312,7 @@
   }
 
   function scheduleRelease() {
+    if (pendingGeneration !== null && generationDraftFocus && !generationDraftTimer) scheduleGenerationDraft();
     if ((!state.pending && pendingGeneration === null && !state.foldDeferred) || releaseTimer) return;
     releaseTimer = g.setTimeout(function () {
       releaseTimer = null;
@@ -210,6 +321,14 @@
       if (heldForBusy && !busy()) apply();
       else consider();
     }, RELEASE_MS);
+  }
+
+  function scheduleGenerationDraft() {
+    if (generationDraftTimer) g.clearTimeout(generationDraftTimer);
+    generationDraftTimer = g.setTimeout(function () {
+      generationDraftTimer = null;
+      reloadGeneration(true);
+    }, GENERATION_DRAFT_RELEASE_MS);
   }
 
   // ---- region scroll: first stable block visible inside #main, never DOM position --------------
@@ -439,6 +558,7 @@
   }
   function mainKey() {
     if (state.ui.view === 'profiles') return 'profiles';
+    if (state.ui.view === 'plans' && g.BriefRoadmapView) return 'plans:' + (state.ui.roadmapSubView || 'board');
     var sid = shownSid() || state.ui.active;
     return state.ui.view === 'memento' || state.ui.view === 'office' ? state.ui.view : sid ? sid + '/' + (state.ui.sub[sid] || 'ov') : 'overview';
   }
@@ -483,7 +603,7 @@
     var active = doc.activeElement;
     var sideToggle = active && active.getAttribute && active.getAttribute('data-sh') === 'toggleSide';
     var overlay = overlayOpen();
-    if ((state.ui.view === 'memento' || state.ui.view === 'office') && (action.type === 'open' || action.type === 'active')) {
+    if ((state.ui.view === 'memento' || state.ui.view === 'office' || (state.ui.view === 'plans' && g.BriefRoadmapView)) && (action.type === 'open' || action.type === 'active')) {
       state.ui = g.BriefShell.reduce(state.ui, { type: 'view', key: 'conv' });
     }
     state.ui = g.BriefShell.reduce(state.ui, action);
@@ -524,7 +644,16 @@
       group = active.closest('[data-block],[data-decision]');
       group = group && (group.getAttribute('data-block') || group.getAttribute('data-decision'));
     }
+    var oldHost = name === 'main' && el.querySelector('#rm-sheet-host');
+    if (oldHost) oldHost.parentNode.removeChild(oldHost);
     el.innerHTML = html;
+    var newHost = oldHost && el.querySelector('#rm-sheet-host');
+    if (newHost) {
+      var sheetHtml = newHost.innerHTML;
+      newHost.parentNode.insertBefore(oldHost, newHost);
+      newHost.parentNode.removeChild(newHost);
+      if (oldHost.innerHTML !== sheetHtml) oldHost.innerHTML = sheetHtml;
+    }
     regionHtml[name] = html;
     if (key !== null) {
       var after = el.querySelectorAll(CONTROLS), target = null;
@@ -543,6 +672,13 @@
       }
     }
     return true;
+  }
+  function focusRoadmapHeading() {
+    var heading = main.querySelector('.rm-title, .rm-col-title, .rm-sec-title, h1, h2');
+    if (heading) {
+      if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+      heading.focus({ preventScroll: true });
+    }
   }
   function render() {
     saveScroll();
@@ -577,6 +713,14 @@
         html = g.BriefProfiles && typeof g.BriefProfiles.render === 'function'
           ? g.BriefProfiles.render(ps && ps.view, pe)
           : '<p class="empty">프로필 화면 모듈이 없어요</p>';
+      } else if (state.ui.view === 'plans' && g.BriefRoadmapView && typeof g.BriefRoadmapView.render === 'function') {
+        html = g.BriefRoadmapView.render(model, state.ui, { now: model.generatedAt, decision: findDecision });
+        if (state.ui.roadmapSheetVanished) {
+          var endBoard = html.lastIndexOf('</div>');
+          var vanishedHost = '<div id="rm-sheet-host"><dialog class="rm-sheet-dialog" role="dialog" aria-modal="true" aria-labelledby="rm-vanished-title" open><div class="rm-sheet-container" role="document"><header class="rm-sheet-header"><h2 id="rm-vanished-title">단계 갱신</h2><button type="button" class="rm-sheet-close-btn" data-act="rm-sheet-close">닫기</button></header><div class="rm-sheet-body"><p role="status">이 단계는 갱신으로 사라졌습니다.</p></div></div></dialog></div>';
+          if (html.indexOf('<div id="rm-sheet-host"></div>') >= 0) html = html.replace('<div id="rm-sheet-host"></div>', vanishedHost);
+          else html = html.slice(0, endBoard) + vanishedHost + html.slice(endBoard);
+        }
       } else html = cards ? CARDS_REGION : office ? OFFICE_REGION : s ? g.BriefConvo.render(s, state.ui, { now: model.generatedAt, decision: findDecision, checked: isChecked, fold: foldStatus(s), windowLive: g.BriefShell.windowLiveOf(model, state.ui) })
         : state.ui.active ? '<p class="empty">(지금 안 보임)</p>' : g.BriefView.renderOverview(model, state.ui);
       var openGuide = state.ui.view === 'profiles' && main.querySelector('#pf-guide-dlg[open]');
@@ -589,9 +733,58 @@
             nextGuide.scrollTop = guideScroll;
           }
         }
+        // Handle sheet focus, disappearing card, and background inert when in plans view
+        if (state.ui.view === 'plans' && g.BriefRoadmapView) {
+          var curSheet = main.querySelector('.rm-sheet-dialog[open]');
+          var openExpKey = null;
+          Object.keys(state.ui.expanded).forEach(function (ek) {
+            if (ek.indexOf('rm-stage:') === 0 && state.ui.expanded[ek]) openExpKey = ek;
+          });
+          if (openExpKey) {
+            // Check if card still exists in view
+            var survivingCard = main.querySelector('[data-act="exp"][data-key="' + openExpKey + '"]');
+            if (!survivingCard && !state.ui.roadmapSheetVanished) {
+              // Keep the sheet open long enough to explain the vanished stage.
+              state.ui.roadmapSheetVanished = true;
+              render();
+              return;
+            }
+          }
+          if (curSheet) {
+            // Move focus into the sheet if outside
+            if (!curSheet.contains(doc.activeElement)) {
+              var initialTab = curSheet.querySelector('.rm-sheet-tab[aria-selected="true"]') || curSheet.querySelector('.rm-sheet-close-btn');
+              if (initialTab && typeof initialTab.focus === 'function') initialTab.focus({ preventScroll: true });
+            }
+            // Mark background inert and aria-hidden
+            var host = main.querySelector('#rm-sheet-host');
+            var boardEl = host && host.parentNode;
+            if (boardEl) {
+              for (var ci = 0; ci < boardEl.children.length; ci++) {
+                var child = boardEl.children[ci];
+                if (child !== host) {
+                  child.setAttribute('inert', '');
+                  child.setAttribute('aria-hidden', 'true');
+                }
+              }
+            }
+          } else {
+            // Clean up any stale inert attributes
+            var inertEls = main.querySelectorAll('[inert]');
+            for (var ii = 0; ii < inertEls.length; ii++) {
+              inertEls[ii].removeAttribute('inert');
+              inertEls[ii].removeAttribute('aria-hidden');
+            }
+          }
+        }
         g.BriefAnnotate.decorate();
         // a #main drawn later than the apply shows the current elapsed times at once, not the apply's (the 1 s ticker goes on)
         if (g.BriefWorkersView) g.BriefWorkersView.tick(main, state.now());
+      }
+      if (reloadDraftFocus && state.real) {
+        var focus = reloadDraftFocus, decision = findDecision(Number(focus.key));
+        reloadDraftFocus = null;
+        if (doc.activeElement === doc.body && decision && decision.sessionId === focus.sessionId) focusDraft(focus.key, focus.where);
       }
       if (office) g.BriefOfficeView.render(doc.getElementById('office'), model, state.ui);
       if (cards && !cardsView) {
@@ -729,8 +922,12 @@
       var serverGen = generationOf(d.server && d.server.generation);
       var newer = serverGen !== null ? Math.max(gen, serverGen) : gen;
       if (ownGeneration !== null && newer > ownGeneration) {
+        var active = doc.activeElement, draft = active && active.getAttribute && active.getAttribute('data-draft');
+        var owner = validKey(draft) && findDecision(Number(draft));
+        if (owner) generationDraftFocus = { key: draft, where: active.getAttribute('data-where'), sessionId: owner.sessionId };
         pendingGeneration = pendingGeneration === null ? newer : Math.max(pendingGeneration, newer);
         reloadGeneration();
+        if (generationDraftFocus) scheduleGenerationDraft();
       }
     }
     var s = seqOf(d);
@@ -795,15 +992,20 @@
     else setStatus('');
   }
 
-  function reloadGeneration() {
-    if (pendingGeneration === null || busy()) return;
+  function reloadGeneration(allowGenerationDraft) {
+    if (pendingGeneration === null || busy(allowGenerationDraft)) return;
     var gen = pendingGeneration;
     pendingGeneration = null;
     if (gen < generationFloor || closedNotice) return;
     var key = 'omo-reloaded-for-' + gen;
     try {
       if (g.sessionStorage.getItem(key) !== null) return;
-      if (!rememberForReload()) return;
+      var active = doc.activeElement;
+      var focus = active === doc.body || (generationDraftFocus && active &&
+        active.getAttribute('data-draft') === generationDraftFocus.key &&
+        active.getAttribute('data-where') === generationDraftFocus.where) ? generationDraftFocus : null;
+      if (!rememberForReload(focus)) return;
+      generationDraftFocus = null;
       g.sessionStorage.setItem(key, '1');
       g.location.reload();
     } catch (e) { warn('generation reload flag', e); }
@@ -928,6 +1130,7 @@
   }
 
   function onClick(ev) {
+    if (ev.target.closest('[inert]')) return;
     var t = ev.target.closest('[data-copy],[data-act],[data-goto]');
     if (!t || !root.contains(t)) return;
     if (t.hasAttribute('data-copy')) { copy(t.getAttribute('data-copy'), t); return; }
@@ -943,8 +1146,120 @@
       g.BriefAnnotate.decorate();
     } else if (act === 'exp') {
       var k = t.getAttribute('data-key');
-      state.ui.expanded[k] = !state.ui.expanded[k];
+      var wasOpen = !!state.ui.expanded[k];
+      if (k && k.indexOf('rm-stage:') === 0) {
+        // Exclusive sheet behavior for roadmap stages
+        Object.keys(state.ui.expanded).forEach(function (ek) {
+          if (ek.indexOf('rm-stage:') === 0) delete state.ui.expanded[ek];
+        });
+        if (!wasOpen) {
+          state.ui.expanded[k] = true;
+          state.ui.roadmapTab = 'summary';
+          state.ui.roadmapSheetReturnKey = k;
+        } else {
+          state.ui.roadmapSheetReturnKey = null;
+        }
+      } else {
+        state.ui.expanded[k] = !wasOpen;
+      }
       render();
+    } else if (act === 'rm-sheet-close') {
+      var closeReturnKey = state.ui.roadmapSheetReturnKey;
+      var closeVanished = state.ui.roadmapSheetVanished;
+      Object.keys(state.ui.expanded).forEach(function (ek) {
+        if (ek.indexOf('rm-stage:') === 0) delete state.ui.expanded[ek];
+      });
+      state.ui.roadmapSheetReturnKey = null;
+      state.ui.roadmapSheetVanished = false;
+      render();
+      var cardBtn = null;
+      if (closeReturnKey) {
+        cardBtn = main.querySelector('[data-act="exp"][data-key="' + closeReturnKey + '"]');
+        if (cardBtn && typeof cardBtn.focus === 'function') cardBtn.focus({ preventScroll: true });
+      }
+      if (closeVanished || !cardBtn || doc.activeElement !== cardBtn) focusRoadmapHeading();
+    } else if (act === 'rm-sheet-tab') {
+      var selTab = t.getAttribute('data-tab');
+      if (selTab === 'summary' || selTab === 'evidence' || selTab === 'history') {
+        state.ui.roadmapTab = selTab;
+        render();
+        var actTabEl = main.querySelector('.rm-sheet-tab[data-tab="' + selTab + '"]');
+        if (actTabEl && typeof actTabEl.focus === 'function') actTabEl.focus({ preventScroll: true });
+      }
+      return;
+    } else if (act === 'rm-filter') {
+      var fk = t.getAttribute('data-key');
+      if (fk === 'all' || fk === 'ready' || fk === 'decisionNeeded' || fk === 'blocked') {
+        state.ui.roadmapFilter = fk;
+        render();
+      }
+    } else if (act === 'rm-attn-jump') {
+      var attnEl = doc.getElementById('rm-attention');
+      if (attnEl && typeof attnEl.scrollIntoView === 'function') {
+        var reducedMotion = g.matchMedia && g.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        attnEl.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
+      }
+    } else if (act === 'rm-connected-plans') {
+      var selKey = null;
+      Object.keys(state.ui.expanded).forEach(function (ek) {
+        if (ek.indexOf('rm-stage:') === 0 && state.ui.expanded[ek]) selKey = ek;
+      });
+      state.ui.roadmapReturnContext = {
+        catalogueSelected: state.ui.catalogueSelected || null,
+        roadmapSubView: state.ui.roadmapSubView || 'board',
+        roadmapSearch: state.ui.roadmapSearch || '',
+        roadmapTrack: state.ui.roadmapTrack || 'all',
+        roadmapStatus: state.ui.roadmapStatus || 'ready',
+        roadmapTab: state.ui.roadmapTab || 'summary',
+        selectedStageKey: selKey,
+        scrollY: main ? main.scrollTop : 0
+      };
+      state.ui.roadmapSubView = 'plans';
+      render();
+      var retBtn = main.querySelector('.rm-return-btn');
+      if (retBtn && typeof retBtn.focus === 'function') retBtn.focus();
+    } else if (act === 'rm-return-board') {
+      var savedCtx = state.ui.roadmapReturnContext;
+      state.ui.roadmapSubView = savedCtx && savedCtx.roadmapSubView || 'board';
+      if (savedCtx) {
+        state.ui.catalogueSelected = savedCtx.catalogueSelected;
+        state.ui.roadmapSearch = savedCtx.roadmapSearch;
+        state.ui.roadmapTrack = savedCtx.roadmapTrack;
+        state.ui.roadmapStatus = savedCtx.roadmapStatus;
+        state.ui.roadmapTab = savedCtx.roadmapTab;
+        if (savedCtx.selectedStageKey) {
+          state.ui.expanded[savedCtx.selectedStageKey] = true;
+          state.ui.roadmapSheetReturnKey = savedCtx.selectedStageKey;
+        }
+      }
+      render();
+      if (savedCtx && typeof savedCtx.scrollY === 'number' && main) {
+        main.scrollTop = savedCtx.scrollY;
+      }
+      var plansBtn = main.querySelector('.rm-plans-btn');
+      if (plansBtn && typeof plansBtn.focus === 'function') plansBtn.focus();
+    } else if (act === 'rm-mobile-filter-toggle') {
+      var btn = t.closest('[data-act="rm-mobile-filter-toggle"]');
+      if (btn) {
+        var coll = main.querySelector('#rm-toolbar-collapsible');
+        var wasOpen = coll && coll.classList.contains('is-open');
+        var nextOpen = !wasOpen;
+        state.ui.roadmapFiltersOpen = nextOpen;
+        if (coll) coll.classList.toggle('is-open', nextOpen);
+        btn.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+        btn.setAttribute('aria-label', nextOpen ? '검색 및 필터 닫기' : '검색 및 필터 열기');
+      }
+    } else if (act === 'rm-clear-search') {
+      state.ui.roadmapSearch = '';
+      render();
+      var sInp = doc.getElementById('rm-search');
+      if (sInp && typeof sInp.focus === 'function') sInp.focus();
+    } else if (act === 'rm-clear-all-filters') {
+      state.ui.roadmapSearch = '';
+      state.ui.roadmapTrack = 'all';
+      render();
+      var sInp2 = doc.getElementById('rm-search');
+      if (sInp2 && typeof sInp2.focus === 'function') sInp2.focus();
     } else if (act === 'focus') {
       focusTab(t.getAttribute('data-session'));
     } else if (act === 'fold-retry') {
@@ -1107,6 +1422,11 @@
   // typing never re-renders (that would drop the focus): the draft goes to the state, the counter is set in place
   function onInput(ev) {
     var t = ev && ev.target;
+    if (t && t.getAttribute && t.getAttribute('data-act') === 'rm-search') {
+      state.ui.roadmapSearch = String(t.value || '');
+      render();
+      return;
+    }
     var field = t && t.getAttribute && t.getAttribute('data-field');
     if (field) {
       var fieldKey = t.getAttribute('data-id');
@@ -1128,6 +1448,9 @@
     if (!validKey(key)) return;
     var a = answerState(key);
     a.draft = String(t.value == null ? '' : t.value).slice(0, REPLY_MAX);
+    if (pendingGeneration !== null && generationDraftFocus && key === generationDraftFocus.key) {
+      scheduleGenerationDraft();
+    }
     var box = typeof t.closest === 'function' ? t.closest('.ans-reply') : null;
     var count = box ? box.querySelector('.ans-count') : null;
     if (count) count.textContent = a.draft.length + '/' + REPLY_MAX;
@@ -1319,12 +1642,12 @@
 
   // The reload flag and every unsent reply draft ride over the reload in sessionStorage. Without storage there is no
   // automatic reload at all, since it could not be limited to one.
-  function rememberForReload() {
+  function rememberForReload(focus) {
     var drafts = {};
     var all = state.ui.answers || {};
     for (var k in all) if (Object.prototype.hasOwnProperty.call(all, k) && all[k] && all[k].draft) drafts[k] = all[k].draft;
     try {
-      g.sessionStorage.setItem(RELOAD_KEY, JSON.stringify({ drafts: drafts }));
+      g.sessionStorage.setItem(RELOAD_KEY, JSON.stringify({ drafts: drafts, focus: focus || null }));
       return true;
     } catch (e) {
       warn('answer reload flag', e);
@@ -1348,6 +1671,10 @@
     var saved = null;
     try { saved = JSON.parse(raw); } catch (e) { warn('answer reload drafts', e); }
     var drafts = saved && typeof saved === 'object' && saved.drafts && typeof saved.drafts === 'object' ? saved.drafts : {};
+    if (saved && saved.focus && validKey(saved.focus.key) && typeof saved.focus.where === 'string' && typeof saved.focus.sessionId === 'string') {
+      reloadDraftFocus = saved.focus;
+      answerState(saved.focus.key).open = true;
+    }
     for (var k in drafts) {
       if (Object.prototype.hasOwnProperty.call(drafts, k) && validKey(k) && typeof drafts[k] === 'string' && drafts[k]) {
         var a = answerState(k);

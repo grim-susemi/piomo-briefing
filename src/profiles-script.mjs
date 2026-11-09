@@ -3,7 +3,7 @@ import * as nodeFs from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
-export const PROFILES_RECIPE = 'bun-1.4.0-profiles-classic-v1';
+export const PROFILES_RECIPE = 'bun-1.4.0-profiles-classic-v4';
 export const canonicalLf = (text) => text.replace(/\r\n/g, '\n');
 export const profilesSha256 = (text) => createHash('sha256').update(canonicalLf(text), 'utf8').digest('hex');
 const HEADER = /^\/\* profiles-script recipe=(\S+) source-sha256=([0-9a-f]{64}) payload-sha256=([0-9a-f]{64}) \*\/\n/;

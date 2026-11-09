@@ -1,16 +1,16 @@
 {
   "schema": 1,
-  "version": "5.1.48",
+  "version": "5.1.60",
   "sources": {
     "omoTask": {
-      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.48-r1\\package\\plugin\\extensions\\omo-task.js",
-      "sha256": "0a1efc7421493bb2bc4551a622ce9e9531cca5bb30d23cdc630aad62bf06daad",
-      "bytes": 1256896
+      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.60-r1\\package\\plugin\\extensions\\omo-task.js",
+      "sha256": "f6deddc72924134b7ddbae9fafdd4912cc79faf151c2921357a1a2c19d640441",
+      "bytes": 1298908
     },
     "omo": {
-      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.48-r1\\package\\plugin\\extensions\\omo.js",
-      "sha256": "44849d96bad24b916a0f65632f3427420838a699ba0a66b1d049a47b40f62b55",
-      "bytes": 1417069
+      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.60-r1\\package\\plugin\\extensions\\omo.js",
+      "sha256": "8d4a4f5c66804f267895b5ddfde69ad158b61e152c7ad7e700cfb9c3231feed4",
+      "bytes": 1460383
     }
   },
   "agents": [
@@ -53,6 +53,7 @@
       "models",
       "model_profiles",
       "model_profile",
+      "model_pad",
       "memory",
       "telemetry",
       "side_panel",
@@ -78,18 +79,24 @@
       "models",
       "model_profiles",
       "model_profile",
+      "model_pad",
       "memory",
       "telemetry",
       "side_panel",
       "computer",
       "disabled_skills",
-      "exclude_models"
+      "exclude_models",
+      "[opencode]",
+      "[native]",
+      "[senpi]",
+      "[codex]"
     ],
     "agentEntry": [
       "description",
       "prompt",
       "model",
       "models",
+      "models_distribution",
       "reasoning",
       "variant",
       "reasoningEffort",

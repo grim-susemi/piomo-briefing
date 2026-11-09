@@ -363,6 +363,22 @@ export function openStore(root, opts = {}) {
     return collectPlans(makeReader());
   }
 
+  // Roadmap definitions are global, not owned by the currently rendered conversation.
+  function collectRoadmaps({ readErrors, load, dirs }) {
+    return dirs('roadmaps').filter((id) => /^rm[a-f0-9]{12}$/.test(id)).flatMap((id) => {
+      const before = readErrors.length;
+      const definition = load(`roadmaps/${id}/definition.json`);
+      const status = load(`roadmaps/${id}/status.json`) ?? null;
+      if (!definition || definition.registered !== true) return [];
+      return [{ definition, status, readErrors: readErrors.slice(before) }];
+    });
+  }
+
+  function readRoadmapStatuses() {
+    const reader = makeReader();
+    return { roadmaps: collectRoadmaps(reader), readErrors: reader.readErrors };
+  }
+
   function readSnapshot(now = Date.now()) {
     const reader = makeReader();
     const { readErrors, load, names, dirs } = reader;
@@ -389,6 +405,7 @@ export function openStore(root, opts = {}) {
       .filter((m) => m.data !== undefined);
 
     const plans = collectPlans(reader);
+    const roadmaps = collectRoadmaps(reader);
     const published = load('published.json', false) ?? null;
     const annotationReceipts = new Set(names('receipts', ANNOTATION_FILE));
     let archivedAnnotations = 0;
@@ -419,11 +436,12 @@ export function openStore(root, opts = {}) {
       archivedAnnotations,
       mirror,
       plans,
+      roadmaps,
       published,
       readErrors,
       maxMtime: reader.maxMtime(),
     };
   }
 
-  return { root, writeNew, replace, readText, readRecord, reclaimStale, allocDecisionId, nextBriefSeq, readSnapshot, readSettings, writeSettings, writePlanRev, writePlanStatus, readPlans };
+  return { root, writeNew, replace, readText, readRecord, reclaimStale, allocDecisionId, nextBriefSeq, readSnapshot, readSettings, writeSettings, writePlanRev, writePlanStatus, readPlans, readRoadmapStatuses };
 }

@@ -47,21 +47,44 @@ test('every inventory id appears as a routing row', () => {
 });
 
 test('roles absent from 5.1.44 are read-only, labelled, and keep their config', () => {
-  const layer = {
-    agents: { oracle: { model: 'sol' }, ouroboros: { model: 'flash-high' } },
-    categories: { 'fast-explore': { model: 'kimi-max' } },
-  };
+  const layer = { categories: { 'fast-explore': { model: 'kimi-max' } } };
   const rows = refreshRoutingRows({ inventory, layer });
   for (const [section, role] of [['agents', 'oracle'], ['agents', 'ouroboros'], ['categories', 'fast-explore']]) {
     const row = rows.find((entry) => entry.section === section && entry.role === role);
     assert.equal(row.readOnly, true, `${section}/${role} read-only`);
     assert.equal(row.absentIn, inventory.version);
     assert.equal(row.stateLabel, ABSENT_LABEL);
-    assert.deepEqual(row.config, layer[section][role]);
+    assert.deepEqual(row.config, layer[section]?.[role] ?? null);
   }
   const live = refreshRoutingRows({ inventory }).find((row) => row.section === 'agents' && row.role === 'explore');
   assert.equal(live.readOnly, false);
   assert.equal(live.stateLabel, null);
+});
+
+// The engine serves an agent its profile layer declares (oracle, with its tools) or an agent file defines
+// (agents/ouroboros.md) even when the bundle's builtin list omits it, and resolves its model from that layer entry.
+test('an agent the profile declares or an agent file defines is editable; a disabled or category one is not', () => {
+  const layer = {
+    agents: { oracle: { tools: { read: true }, model: 'sol' }, ouroboros: { model: 'flash-high' } },
+    categories: { 'fast-explore': { model: 'kimi-max' } },
+  };
+  const rows = refreshRoutingRows({ inventory, layer });
+  for (const role of ['oracle', 'ouroboros']) {
+    const row = rows.find((entry) => entry.section === 'agents' && entry.role === role);
+    assert.equal(row.readOnly, false, `agents/${role} editable`);
+    assert.equal(row.absentIn, null);
+    assert.equal(row.stateLabel, null);
+    assert.deepEqual(row.config, layer.agents[role]);
+  }
+  const category = rows.find((entry) => entry.section === 'categories' && entry.role === 'fast-explore');
+  assert.equal(category.readOnly, true, 'a declared category the bundle lacks stays read-only');
+  const disabled = refreshRoutingRows({ inventory, layer: { agents: { oracle: { model: 'sol', disable: true } } } })
+    .find((entry) => entry.section === 'agents' && entry.role === 'oracle');
+  assert.equal(disabled.readOnly, true);
+  const fromFile = refreshRoutingRows({ inventory, agentFiles: ['ouroboros'] })
+    .find((entry) => entry.section === 'agents' && entry.role === 'ouroboros');
+  assert.equal(fromFile.readOnly, false);
+  assert.equal(fromFile.config, null);
 });
 
 test('a role new in 5.1.44 becomes a row, group extras when no purpose group fits', () => {

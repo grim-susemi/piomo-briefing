@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { reportBlocks } from './fixtures/report-blocks.mjs';
 import { makeController, memoryStorage } from './fixtures/controller-dom.mjs';
 import { pageHtml } from '../src/render.mjs';
+import { readClassicScript } from '../src/page-script.mjs';
 import { validateBrief } from '../src/schema.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -402,7 +403,7 @@ test('annotations: every block carries its own button and is named 보고서 블
 test('page: blocks.js runs after view.js and before convo-view.js, blocks.css before annotate.css; blocks.css draws with tokens only', () => {
   const html = pageHtml(FIXTURE, 7, { mode: 'file' });
   const at = (s) => { const i = html.indexOf(s); assert.ok(i >= 0, s); return i; };
-  const view = at('/* omo-briefing view: pure renderer'), blocks = at('/* omo-briefing report blocks (C-REPORT blocks'), convo = at('/* omo-briefing conversation page: one full-width');
+  const view = at(readClassicScript(path.join(ROOT, 'src/page'), 'view.js').replace(/<(\/?script|!--)/gi, '\\x3C$1')), blocks = at('/* omo-briefing report blocks (C-REPORT blocks'), convo = at('/* omo-briefing conversation page: one full-width');
   assert.ok(view < blocks && blocks < convo);
   const css = read('src/page/blocks.css');
   const cssAt = at(css.slice(0, 80)), annAt = at('/* omo-briefing annotations (annotate.js)'), convoCss = at('/* omo-briefing conversation page (convo-view.js)');

@@ -1260,3 +1260,84 @@ test('options: naming some homes but not all is refused, so a home left out cann
   assert.deepEqual(fs.readdirSync(root), [], 'nothing was created');
   assert.deepEqual(openProfilesStore({ ...homes, mirrorHomes: [] }).roots, { ...homes, mirrorHomes: [] });
 });
+
+// The Oracle advisor table belongs to the oracle-advisor extension; the switcher rewrites one field of it.
+function seedAdvisors(fx) {
+  const file = path.join(fx.primary, 'agent', 'oracle-advisor', 'routing.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const value = {
+    v: 1,
+    profiles: {
+      claude: { model: 'commandcode-anthropic/claude-sonnet-5:high', family: 'claude' },
+      gpt: { model: 'commandcode/gpt-6-sol:high', family: 'gpt' },
+    },
+    by_family: { claude: { work: 'gpt', completion: 'gpt' }, gpt: { work: 'claude', completion: 'claude' }, other: { work: 'claude', completion: 'gpt' } },
+    by_agent: {},
+    by_nature: { design: 'claude', lowlevel: 'gpt' },
+  };
+  fs.writeFileSync(file, JSON.stringify(value, null, 2) + '\n');
+  return { file, value };
+}
+
+const claudeAdvisor = { kind: 'setAdvisor', advisor: 'claude', provider: 'commandcode-anthropic', model: 'commandcode-anthropic/claude-opus-5', thinking: 'high' };
+
+test('setAdvisor rewrites only that advisor model and the reopened state shows the saved pin', (t) => {
+  const fx = makeFixture(t);
+  const { file, value } = seedAdvisors(fx);
+  const untouched = ['omo.jsonc', 'agent/settings.json', 'native-profile-selection.json', 'agent/native-profile-selection.json']
+    .map((rel) => [rel, hashFile(path.join(fx.primary, rel))]);
+  assert.deepEqual(fx.store.state().advisors.rows.map((row) => [row.name, row.family, row.model, row.thinking]), [
+    ['claude', 'claude', 'commandcode-anthropic/claude-sonnet-5', 'high'],
+    ['gpt', 'gpt', 'commandcode/gpt-6-sol', 'high'],
+  ]);
+  const result = fx.store.apply(body('apply', [claudeAdvisor], fx.store));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.writes, ['agent/oracle-advisor/routing.json']);
+  assert.deepEqual(readJsonFile(file), {
+    ...value, profiles: { ...value.profiles, claude: { model: 'commandcode-anthropic/claude-opus-5:high', family: 'claude' } },
+  });
+  for (const [rel, hash] of untouched) assert.equal(hashFile(path.join(fx.primary, rel)), hash, rel + ' unchanged');
+  const reopened = fx.store.state().advisors.rows[0];
+  assert.deepEqual([reopened.model, reopened.thinking], ['commandcode-anthropic/claude-opus-5', 'high']);
+  const backups = fs.readdirSync(path.join(fx.primary, 'runtime', 'native-profile-switcher-backups'));
+  assert.ok(backups.some((name) => name.includes('oracle-advisor-routing')), backups.join(','));
+});
+
+test('setAdvisor refuses a missing table, another family and an unknown advisor without writing', (t) => {
+  const fx = makeFixture(t);
+  const missing = fx.store.preview(body('preview', [claudeAdvisor], fx.store));
+  assert.equal(missing.ok, false);
+  assert.equal(missing.code, 'MISSING_CONFIG');
+  const { file } = seedAdvisors(fx);
+  const before = hashFile(file);
+  const cross = fx.store.apply(body('apply', [{ ...claudeAdvisor, provider: 'commandcode', model: 'commandcode/gpt-6-sol' }], fx.store));
+  assert.equal(cross.ok, false);
+  assert.equal(cross.code, 'ADVISOR_FAMILY');
+  assert.match(cross.message, /claude advisor/);
+  const unknown = fx.store.apply(body('apply', [{ ...claudeAdvisor, advisor: 'gemini' }], fx.store));
+  assert.equal(unknown.ok, false);
+  assert.match(unknown.message, /Unknown oracle advisor gemini/);
+  assert.equal(hashFile(file), before);
+});
+
+test('setRoute on the declared oracle keeps its tools; an agent file makes ouroboros a writable route', (t) => {
+  const omo = readGolden('primary/omo.jsonc.json');
+  const profileKey = 'native-gpt-kimi-deepseek';
+  omo.profiles[profileKey]['[native]'].agents.oracle = { tools: { read: true, grep: true }, model: 'sol' };
+  const fx = makeFixture(t, { omo });
+  fs.mkdirSync(path.join(fx.primary, 'agent', 'agents'), { recursive: true });
+  fs.writeFileSync(path.join(fx.primary, 'agent', 'agents', 'ouroboros.md'), '---\ndescription: fixture\n---\n');
+  const rows = fx.store.state().routing.rows;
+  for (const role of ['oracle', 'ouroboros']) {
+    assert.equal(rows.find((row) => row.section === 'agents' && row.role === role).readOnly, false, role);
+  }
+  const route = (role) => ({ kind: 'setRoute', profileKey, section: 'agents', role, provider: 'openai', model: 'gpt-6-sol', thinking: 'high' });
+  const result = fx.store.apply(body('apply', [route('oracle'), route('ouroboros')], fx.store));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const config = readJsonFile(path.join(fx.primary, 'omo.jsonc'));
+  const agents = config.profiles[profileKey]['[native]'].agents;
+  assert.deepEqual(agents.oracle.tools, { read: true, grep: true });
+  for (const role of ['oracle', 'ouroboros']) {
+    assert.equal(config['[native]'].models[agents[role].model].model, 'gpt-6-sol', role);
+  }
+});

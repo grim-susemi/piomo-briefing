@@ -507,7 +507,7 @@ test('support: an unread registry gives REGISTRY_UNKNOWN in the write refusal, t
 
   // The page words that one verdict alike: on the saved role row, on the main heading and on every catalog option.
   const html = renderView(state);
-  const flag = '<span class="pf-chip pf-c-amber" title="REGISTRY_UNKNOWN">설치 엔진 미확인 · stable 홈</span>';
+  const flag = '<span class="pf-chip pf-c-amber" title="REGISTRY_UNKNOWN · stable" aria-label="REGISTRY_UNKNOWN · stable">REGISTRY_UNKNOWN · stable</span>';
   const region = (start, end) => {
     const at = html.indexOf(start);
     assert.ok(at >= 0, 'missing ' + start);
@@ -517,8 +517,8 @@ test('support: an unread registry gives REGISTRY_UNKNOWN in the write refusal, t
   assert.ok(region('id="pf-sec-main"', 'id="pf-sec-summarizer"').includes(flag), 'the saved main model reads 미확인');
   const options = [...html.matchAll(/<option\b[^>]*\btitle="([^"]*)"/g)].map((m) => m[1]);
   assert.ok(options.length > 0);
-  for (const title of options) assert.equal(title, '설치 엔진 미확인 · stable 홈 · REGISTRY_UNKNOWN');
-  assert.doesNotMatch(html, /설치 엔진 미지원/, 'no shown value reads 미지원 while a registry is unread');
+  for (const title of options) assert.equal(title, 'REGISTRY_UNKNOWN · stable');
+  assert.doesNotMatch(html, /UNSUPPORTED_MODEL/, 'an unread registry is not treated as a proven unsupported model');
 });
 
 test('support: an existing alias cannot bypass the check', async (t) => {

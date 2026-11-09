@@ -25,7 +25,8 @@
   };
   // store.handle answers a refusal with its bare code; the ones the owner can act on read as one sentence.
   var REFUSAL_TEXT = {
-    UNSUPPORTED_MODEL: '설치 엔진이 이 모델을 지원하지 않아 적용하지 않았으니 다른 모델을 고르십시오.'
+    UNSUPPORTED_MODEL: '설치 엔진이 이 모델을 지원하지 않아 적용하지 않았으니 다른 모델을 고르십시오.',
+    ADVISOR_FAMILY: '자문가는 자기 계열(Claude 또는 GPT) 모델만 쓸 수 있어 저장하지 않았으니 같은 계열 모델을 고르십시오.'
   };
   var AGENTS = [
     ['sisyphus', 'Sisyphus'],
@@ -82,9 +83,9 @@
     previewReady: 'preview ready', reapplied: 'reapplied', conflict: 'conflict'
   };
   var CHANGE_LABEL = {
-    selectProfile: '프로필', setRoute: '역할', setMain: '메인 모델', setModelProfile: '모델 레인',
+    selectProfile: '프로필', setRoute: '역할', setRoleBackup: '역할 백업', setMain: '메인 모델', setModelProfile: '모델 레인',
     setSummarizer: '요약 모델', setMemoryRow: '메모리 행', setAgentLane: '에이전트 레인',
-    setAgentPin: '에이전트 핀', resetAgentMemory: '기억 초기화', migrateReviewerKeys: '리뷰어 키'
+    setAgentPin: '에이전트 핀', resetAgentMemory: '기억 초기화', migrateReviewerKeys: '리뷰어 키', setAdvisor: '오라클 자문가'
   };
 
   // ---- small helpers (each string ends in esc() before it reaches markup) -------------------------------------------
@@ -209,6 +210,7 @@
       if (!entry) return;
       out.push({
         alias: alias,
+        registered: true,
         model: str(entry.model),
         variant: str(entry.variant) || str(entry.reasoning),
         off: unservedOf(entry),
@@ -299,6 +301,49 @@
     if (fullId && !found) opts += '<option value="' + esc(fullId) + '"' + attr('data-provider', providerOf(fullId)) + ' selected>' + esc(fullId) + '</option>';
     if (!opts) opts = '<option value="" selected>(모델 없음)</option>';
     return select(name, attrs, opts, disabled);
+  }
+  function backupSelect(entries, alias, primary, attrs, busy, direct) {
+    var options = '<option value=""' + (alias || direct ? '' : ' selected') + '>백업 없음</option>';
+    if (direct) options += '<option value="__direct__" selected>직접 선택한 백업</option>';
+    var found = !alias;
+    entries.forEach(function (entry) {
+      if (entry.alias !== alias && (!entry.registered || entry.alias === primary ||
+        providerOf(entry.model) === 'opencode-go' && !/^(?:ocg-)?muse-/i.test(bareModel(entry.model)))) return;
+      if (entry.alias === alias) found = true;
+      options += modelOption(entry.alias, entry.alias + ' · ' + entry.model + (entry.variant ? ' / ' + entry.variant : ''),
+        entry.model, entry.alias === alias, entry.off);
+    });
+    if (!found) options += '<option selected value="' + esc(alias) + '">' + esc(alias) + ' · 저장된 백업</option>';
+    return select('route-backup', attrs, options, busy);
+  }
+  function backupFields(edit, profile, section, role, saved, entries, id, primary) {
+    var route = section + '/' + role;
+    var choice = backupChangeOf(pendingOf(edit), profile, section, role) || saved || {};
+    var alias = str(choice.alias), definition = alias ? entryOf(entries, alias) : null;
+    var model = alias ? str(definition && definition.model) : str(choice.model);
+    var provider = str(choice.provider) || providerOf(model);
+    if (model && model.indexOf('/') < 0 && provider) model = provider + '/' + model;
+    var thinking = str(choice.thinking) || str(definition && definition.variant);
+    var summary = alias || (model ? bareModel(model) + (thinking ? ' / ' + thinking : '') : '');
+    var draft = draftOf(edit, 'backup:' + str(profile && profile.omoProfile) + ':' + route);
+    if (draft) { provider = str(draft.provider); model = str(draft.model); thinking = str(draft.thinking); }
+    var candidates = entries.filter(function (e) {
+      return providerOf(e.model) !== 'opencode-go' || /^(?:ocg-)?muse-/i.test(bareModel(e.model));
+    }).map(function (e) { return { alias: e.alias, provider: providerOf(e.model), model: e.model, levels: e.levels || THINKING, off: e.off }; });
+    var busy = !!(edit && edit.busy);
+    var on = function (part) { return withId(id + '-' + part, attr('data-route', route)); };
+    return {
+      summary: summary,
+      html: '<div class="pf-backup" data-backup-route="' + esc(route) + '">' +
+        '<div class="pf-backup-direct">' +
+        labelled('백업 1. 서비스', id + '-provider', select('backup-provider', on('provider'), memoryServiceOptions(candidates, provider), busy)) +
+        labelled('백업 2. 모델', id + '-model', select('backup-model', on('model'), memoryModelOptions(candidates, provider, model), busy || !provider)) +
+        labelled('백업 3. 추론강도', id + '-thinking', select('backup-thinking', on('thinking'), memoryThinkingOptions(candidates, model, thinking), busy || !model)) +
+        '</div>' +
+        labelledHint('기존 등록 별칭', '선택값만 저장합니다. 자동 전환하지 않습니다.', id,
+          backupSelect(entries, alias, primary, withId(id, attr('data-route', route)), busy, !alias && !!str(choice.model))) +
+        '</div>'
+    };
   }
   function mainModelSelect(name, attrs, entries, provider, bare, disabled) {
     var opts = '<option value=""' + (bare ? '' : ' selected') + '>(선택)</option>', found = false, seen = map();
@@ -477,6 +522,9 @@
   function routeChangeOf(pending, p, section, role) {
     return findChange(pending, function (c) { return c && c.kind === 'setRoute' && c.section === section && c.role === role && ofProfile(c, p); });
   }
+  function backupChangeOf(pending, p, section, role) {
+    return findChange(pending, function (c) { return c && c.kind === 'setRoleBackup' && c.section === section && c.role === role && ofProfile(c, p); });
+  }
   function mainChangeOf(pending, p) {
     return findChange(pending, function (c) { return c && c.kind === 'setMain' && ofProfile(c, p); });
   }
@@ -490,7 +538,10 @@
     var kind = str(c && c.kind);
     var head = CHANGE_LABEL[kind] || kind || '변경';
     if (kind === 'selectProfile') return head + ' → ' + str(c.profileKey);
+    if (kind === 'setRoleBackup') return head + ' ' + str(c.section) + '/' + str(c.role) + ' → ' +
+      (str(c.alias) || (str(c.model) ? str(c.provider) + '/' + bareModel(c.model) + ' / ' + str(c.thinking) : '백업 없음'));
     if (kind === 'setRoute') return head + ' ' + str(c.section) + '/' + str(c.role) + ' → ' + str(c.provider) + ' · ' + str(c.model) + ' / ' + str(c.thinking);
+    if (kind === 'setAdvisor') return head + ' ' + str(c.advisor) + ' → ' + str(c.provider) + ' · ' + str(c.model) + ' / ' + str(c.thinking);
     if (kind === 'setMain') return head + ' → ' + str(c.provider) + ' · ' + str(c.model) + ' / ' + str(c.thinking);
     if (kind === 'setModelProfile') return head + ' → ' + (str(c.selection) === 'custom-literal' ? '직접 입력 ' + str(c.literal) : str(c.selection) === 'off' ? '끔' : str(c.selection) || '프로필 기본');
     if (kind === 'setSummarizer') return head + ' → ' + (str(c.modelId) || '설정 안 함');
@@ -704,6 +755,13 @@
     var rows = AGENTS.map(function (pair) {
       var id = pair[0], name = idOf(AGENTS, id);
       var agent = obj(agents[id]) || {};
+      var backupProfile = profileOf(view, shownKeyOf(view, edit));
+      var backupId = 'pf-primary-backup-' + id;
+      var backupEntries = id === 'hephaestus' ? entries.filter(function (e) { return bareModel(e.model).indexOf('gpt-') === 0; }) : entries;
+      var backup = backupFields(edit, backupProfile, 'primary', id, view.primaryBackups && view.primaryBackups[id], backupEntries, backupId, '');
+      var backupAlias = backup.summary;
+      var backupControl = ro ? '<p class="pf-note">백업: ' + esc(backupAlias || '없음') + '</p>' :
+        backup.html;
       var laneChange = agentChange(pending, id, 'setAgentLane');
       var pinChange = agentChange(pending, id, 'setAgentPin');
       var reset = agentChange(pending, id, 'resetAgentMemory');
@@ -778,7 +836,7 @@
         '<span class="pf-row-sum-r"><span class="pf-dot pf-dot-' + esc(id) + ' pf-shape-' + esc(SHAPES[id]) + '" role="img" aria-label="' +
         esc(name + ' · ' + SHAPE_KO[SHAPES[id]] + ' 표식') + '"></span>' +
         ' <span class="pf-agent-n">' + esc(name) + '</span></span>' +
-        '<span class="pf-row-sum-m">' + esc(summaryText) +
+        '<span class="pf-row-sum-m">' + esc(summaryText) + '<span class="pf-backup-summary">백업: ' + esc(backupAlias || '없음') + '</span>' +
         (staged ? '<span data-pf-saved> · effective: ' + esc(savedText + ' · ' + originLabel) + '</span>' : '') + '</span>' +
         '<span class="pf-row-sum-o">' + chip(reason ? 'pf-c-amber' : 'pf-c-gray', originLabel) +
         (staged ? chip('pf-c-amber', STATUS_TEXT.pending) : '') +
@@ -787,6 +845,7 @@
         '<div class="pf-agent-editor"' + withId(editorId, boolAttr('hidden', !open)) + '>' +
         '<p class="pf-note">공통 설정 · 모든 프로필에 적용됩니다.' + (id === 'sisyphus' ? ' 메인 모델과 같은 설정을 편집합니다.' : '') + '</p>' +
         (id === 'sisyphus' ? mainModel(view, edit, ro, 'pf-sisyphus') : pinControls) +
+        backupControl +
         '<div class="pf-agent-fields">' +
         '<div class="pf-field">' + controls + '</div>' +
         '<div class="pf-field pf-mem-field"><span class="pf-lbl">기억</span><div class="pf-mem-line">' +
@@ -873,6 +932,8 @@
     var off = shownEntry ? shownEntry.off : !change && !draft ? unservedOf(r) : null;
     var rec = recommendationOf(r);
     var rid = 'pf-route-' + slug(r.section + '-' + r.role);
+    var backup = backupFields(edit, profile, r.section, r.role, r.backup, entries, rid + '-backup', alias);
+    var backupAlias = backup.summary;
     var editId = rid + '-editor';
     var open = str(edit && edit.openRow) === 'route:' + key;
     var on = function (part) { return attr('data-route', key) + attr('data-flow', 'role:' + key + ':' + part); };
@@ -882,8 +943,11 @@
         labelled(CAPTIONS[0], rid + '-provider', providerSelect('route-provider', withId(rid + '-provider', on('service')), providersOf(entries, provider), provider, busy)) +
         labelled(CAPTIONS[1], rid + '-model', modelSelect('route-model', withId(rid + '-model', on('model')), entries, provider, full, busy)) +
         labelled(CAPTIONS[2], rid + '-thinking', select('route-thinking', withId(rid + '-thinking', on('effort')), memoryThinkingOptions(candidates, full, thinking), busy)) +
+        backup.html +
         '</div>';
-    var sumModel = valueOrDash(bareModel(full)) + (str(thinking) ? ' / ' + esc(thinking) : '');
+    var sumModel = '<span class="pf-row-primary"' + attr('title', full + (thinking ? ' / ' + thinking : '')) + '>' +
+      valueOrDash(bareModel(full)) + (str(thinking) ? ' / ' + esc(thinking) : '') + '</span>' +
+      '<span class="pf-backup-summary"' + attr('title', '백업: ' + (backupAlias || '없음')) + '>백업: ' + esc(backupAlias || '없음') + '</span>';
     var stateLabel = r.absentIn ? STATUS_TEXT.absent + ': ' + str(r.absentIn) : str(r.stateLabel);
     var sumOrigin = !change && !draft && (rec.status === 'unresolved' || (alias && !entry))
       ? chip('pf-c-amber', MEMORY_STATUS_LABEL.skippedUnresolved)
@@ -931,6 +995,58 @@
       });
     });
     return html || emptyState('배치할 역할이 없습니다. 프로필 설정을 확인한 뒤 상태를 다시 불러와 주십시오.', edit);
+  }
+  // The Oracle advisors of agent/oracle-advisor/routing.json, shared by every profile. A consult runs on the advisor
+  // the main agent names or the routing table resolves; with neither, it runs on the oracle row above. Each advisor
+  // is offered only its own family's models, so a Claude advisor stays Claude and a GPT advisor stays GPT.
+  function advisorFamily(model) {
+    var bare = bareModel(model).toLowerCase();
+    return bare.indexOf('claude') >= 0 ? 'claude' : bare.indexOf('gpt-') === 0 ? 'gpt' : 'other';
+  }
+  function advisorRows(view, edit, ro) {
+    var adv = obj(view && view.advisors);
+    var rows = arr(adv && adv.rows).filter(obj);
+    if (!rows.length) return '';
+    var busy = !!(edit && edit.busy === true);
+    var all = memoryRowCandidates(view, true);
+    var rendered = rows.map(function (r) {
+      var name = str(r.name);
+      var change = findChange(pendingOf(edit), function (c) { return c && c.kind === 'setAdvisor' && c.advisor === name; });
+      var draft = draftOf(edit, 'advisor:' + name);
+      var model = change ? str(change.model) : draft ? str(draft.model) : str(r.model);
+      var provider = change ? str(change.provider) : draft ? str(draft.provider) : providerOf(model);
+      var thinking = change ? str(change.thinking) : draft ? str(draft.thinking) : str(r.thinking);
+      if (!searchMatch(edit, ['oracle', 'advisor', name, r.family, provider, model])) return '';
+      var candidates = all.filter(function (c) { return advisorFamily(c.model) === str(r.family); });
+      var off = !change && !draft ? unservedOf(r) : null;
+      var rid = 'pf-advisor-' + slug(name);
+      var editId = rid + '-editor';
+      var open = str(edit && edit.openRow) === 'advisor:' + name;
+      var on = function (part) { return attr('data-advisor', name) + attr('data-flow', 'advisor:' + name + ':' + part); };
+      var fields = ro
+        ? '<span class="pf-ro-val"' + withId(editId, boolAttr('hidden', !open)) + '>' + valueOrDash(provider) + ' · ' + valueOrDash(bareModel(model)) + ' / ' + valueOrDash(thinking) + '</span>'
+        : '<div class="pf-tri"' + withId(editId, boolAttr('hidden', !open)) + '>' +
+          labelled(CAPTIONS[0], rid + '-provider', select('advisor-provider', withId(rid + '-provider', on('service')), memoryServiceOptions(candidates, provider), busy)) +
+          labelled(CAPTIONS[1], rid + '-model', select('advisor-model', withId(rid + '-model', on('model')), memoryModelOptions(candidates, provider, model), busy)) +
+          labelled(CAPTIONS[2], rid + '-thinking', select('advisor-thinking', withId(rid + '-thinking', on('effort')), memoryThinkingOptions(candidates, model, thinking), busy)) +
+          '</div>';
+      var familyLabel = str(r.family) === 'claude' ? 'Claude 계열만' : str(r.family) === 'gpt' ? 'GPT 계열만' : str(r.family);
+      var sumBtn = '<button type="button" class="pf-row-sum" data-pf="row-toggle"' + attr('data-row', 'advisor:' + name) +
+        ' aria-expanded="' + (open ? 'true' : 'false') + '"' + attr('aria-controls', editId) + '>' +
+        '<span class="pf-row-sum-r">' + esc('oracle · ' + name) + '</span>' +
+        '<span class="pf-row-sum-m"><span class="pf-row-primary"' + attr('title', model + (thinking ? ' / ' + thinking : '')) + '>' +
+        valueOrDash(bareModel(model)) + (thinking ? ' / ' + esc(thinking) : '') + '</span></span>' +
+        '<span class="pf-row-sum-o">' + chip('pf-c-gray', change || draft ? STATUS_TEXT.override : familyLabel) + offChip(off) + '</span></button>';
+      return '<div class="pf-route"' + attr('data-pf-advisor', name) + '>' + sumBtn +
+        '<div class="pf-route-id">' + tag('advisor') + '<span class="pf-route-ko">' + esc('Oracle 자문가 · ' + name) + '</span>' +
+        '<span class="pf-route-en">' + esc(familyLabel) + '</span>' + offChip(off) + '</div>' + fields + '</div>';
+    }).join('');
+    if (!rendered) return '';
+    return '<section class="pf-group" data-flow-sec="agents:advisors"><h4 class="pf-group-h">오라클 자문가 · 모든 프로필 공통 <span class="pf-count">' +
+      (rendered.match(/data-pf-advisor=/g) || []).length + '</span></h4>' +
+      '<p class="pf-note"><span class="pf-keep">메인이 자문가를 지정하거나</span> <span class="pf-keep">자문 배분표가 고르면</span> <span class="pf-keep">이 모델로 자문합니다.</span> ' +
+      '<span class="pf-keep">둘 다 없으면</span> <span class="pf-keep">위 oracle 역할 모델을 씁니다.</span></p>' +
+      rendered + '</section>';
   }
   function mainValuesOf(view, edit) {
     var pending = mainChangeOf(pendingOf(edit), profileOf(view, shownKeyOf(view, edit)));
@@ -1189,7 +1305,7 @@
       var current = obj(r.current) || {}, rec = obj(r.recommended) || {}, linked = obj(r.linked) || {};
       var status = str(rec.status || rec.Status) || 'untracked';
       var held = pendingOf(edit).filter(function (c) {
-        if (r.group === 'routing') return c.kind === 'setRoute' && c.section === r.section && c.role === r.role && ofProfile(c, profile);
+        if (r.group === 'routing') return (c.kind === 'setRoute' || c.kind === 'setRoleBackup') && c.section === r.section && c.role === r.role && ofProfile(c, profile);
         if (r.group === 'primary') return c.agentId === r.role ||
           (r.role === 'sisyphus' && c.kind === 'setMain' && ofProfile(c, profile));
         if (r.group === 'memory') return c.kind === 'setMemoryRow' && c.row === r.role;
@@ -1316,16 +1432,28 @@
 
   // WinForms 이 프로필 적용하기 (PS:4200-4211, 7517-7545): the shown profile's edits plus the shared ones, then activation.
   // 미리보기 is optional and never a step; 모두 버리기 asks first.
-  function applyBar(edit, ro) {
+  function applyBar(view, edit, ro) {
     if (ro) return '';
     var n = pendingOf(edit).length;
     var busy = !!(edit && edit.busy === true);
     var conflict = !!(edit && edit.conflict);
+    var backupsOnly = n > 0 && pendingOf(edit).every(function (change) { return change.kind === 'setRoleBackup'; });
+    var advisorsOnly = n > 0 && pendingOf(edit).every(function (change) { return change.kind === 'setAdvisor'; });
+    var savesOnly = n > 0 && pendingOf(edit).every(function (change) { return change.kind === 'setRoleBackup' || change.kind === 'setAdvisor'; });
+    var shownProfile = profileOf(view, shownKeyOf(view, edit));
+    var backupCount = pendingOf(edit).filter(function (change) { return change.kind === 'setRoleBackup' && ofProfile(change, shownProfile); }).length;
+    var drafts = obj(edit && edit.draft) || {};
+    var hasBackupDraft = Object.keys(drafts).some(function (key) { return key.indexOf('backup:') === 0; });
+    var incompleteBackup = Object.keys(drafts).some(function (key) {
+      if (key.indexOf('backup:' + str(shownProfile && shownProfile.omoProfile) + ':') !== 0) return false;
+      var d = drafts[key];
+      return (d.provider || d.model || d.thinking) && !(d.provider && d.model && d.thinking);
+    });
     return '<div class="pf-apply" data-flow="apply" data-flow-sec="apply">' +
-      button('apply', attr('data-flow', 'apply:detail'), ic('check', 'ic-sm') + ' 이 프로필 적용하기', busy || conflict, 'pf-btn pf-btn-primary') +
-      button('preview', '', ic('search', 'ic-sm') + ' 미리보기', busy || conflict, 'pf-btn') +
+      button('apply', attr('data-flow', 'apply:detail'), ic('check', 'ic-sm') + (advisorsOnly ? ' 자문가 선택 저장' : backupsOnly || !n && hasBackupDraft ? ' 백업 선택 저장' : savesOnly ? ' 선택 저장' : ' 이 프로필 적용하기'), busy || conflict || incompleteBackup || !n && hasBackupDraft || backupsOnly && !backupCount, 'pf-btn pf-btn-primary') +
+      button('preview', '', ic('search', 'ic-sm') + ' 미리보기', busy || conflict || incompleteBackup, 'pf-btn') +
       chip(n ? 'pf-c-amber' : 'pf-c-gray', STATUS_TEXT.pending + ' ' + n) +
-      button('clear', '', '모두 버리기', busy || !n, 'pf-btn pf-btn-danger') +
+      button('clear', '', '모두 버리기', busy || !n && !hasBackupDraft, 'pf-btn pf-btn-danger') +
       (edit && edit.confirmClear ? '<div class="pf-clear" role="group" aria-label="대기 변경 버리기 확인"><p>대기 중인 변경을 모두 버릴까요?</p>' +
         button('clear-cancel', ' aria-label="계속 보관"', '계속 보관', busy, 'pf-btn') + ' ' +
         button('clear-confirm', ' aria-label="모두 버리기 확인"', '모두 버리기', busy, 'pf-btn pf-btn-danger') + '</div>' : '') + '</div>';
@@ -1338,7 +1466,7 @@
     var searching = !!str(edit && edit.query).trim();
     var bodies = {
       primary: agentRows(dv, edit, ro),
-      agents: routingRows(dv, edit, ro, 'agents'),
+      agents: routingRows(dv, edit, ro, 'agents') + advisorRows(v, edit, ro),
       categories: routingRows(dv, edit, ro, 'categories'),
       memory: memoryRows(v, edit, ro) + '<p class="pf-note" data-pf-memory-placement>Kibitzer와 Reflection은 Memory 탭에서 설정하며, 모든 프로필에 적용됩니다. ' +
         'Summary는 탭 밖의 요약 담당 모델(compaction.model)에서 설정합니다. model_profile과 메인 모델 설정 아래에 있는 요약 담당 모델을 고른 뒤 적용하십시오.</p>'
@@ -1376,7 +1504,8 @@
       routing: obj(detail && detail.routing) || obj(v.routing),
       main: obj(detail && detail.main) || obj(v.main),
       modelProfile: obj(detail && detail.modelProfile) || obj(v.modelProfile),
-      guide: obj(detail && detail.guide) || obj(v.guide)
+      guide: obj(detail && detail.guide) || obj(v.guide),
+      primaryBackups: obj(detail && detail.primaryBackups) || obj(v.primaryBackups)
     });
   }
   function detailPane(v, dv, edit, ro) {
@@ -1386,7 +1515,7 @@
       (p && p.summary ? '<p class="pf-du">' + summaryText(p.summary) + '</p>' : '') +
       '<p class="pf-cap">모델 라우팅 · 전담 에이전트 / 작업 카테고리 <span class="pf-count">' + arr(obj(dv.routing) && dv.routing.rows).length + '</span></p>' +
       '<div class="pf-roles" id="pf-sec-routing" data-pf-sec="routing" data-flow="roles">' + routingEditor(v, dv, edit, ro) + '</div>' +
-      modelLane(dv, edit, ro) + mainModel(dv, edit, ro) + summarizer(v, edit, ro) + applyBar(edit, ro) + '</section>';
+      modelLane(dv, edit, ro) + mainModel(dv, edit, ro) + summarizer(v, edit, ro) + applyBar(v, edit, ro) + '</section>';
   }
   // ---- public renderers --------------------------------------------------------------------------------------------
   function render(view, edit) {
@@ -1404,9 +1533,29 @@
   // strip is a bottom row under both panes, PS:4438), then the board extras.
   function loaded(v, e, ro, stale) {
     var dv = detailView(v, e);
-    return statusStrip(v, e, ro, stale) + guideDialog(dv, e) +
+    return statusStrip(v, e, ro, stale) + webDeepseek(v, e) + guideDialog(dv, e) +
       '<div class="pf-panes">' + profileCards(v, e, ro) + detailPane(v, dv, e, ro) + tray(v, e, ro) + '</div>' +
       homes(v);
+  }
+  function webDeepseek(v, edit) {
+    var state = obj(v.webDeepseek) || {};
+    var active = arr(state.active).length;
+    var enabled = state.enabled === true;
+    var installed = state.installed === true;
+    var label = !installed ? 'Install required' : enabled ? (active ? 'ON · Active ' + active : 'ON · Idle')
+      : active ? 'OFF · Stopping ' + active : 'OFF';
+    var busy = edit.busy === true;
+    var canWrite = edit.live === true && installed && !busy;
+    return '<section class="pf-sec pf-web" id="pf-sec-web-deepseek" aria-label="웹딥식 수동 제어">' +
+      '<h2>웹딥식</h2><p role="status" id="pf-web-status" tabindex="-1">' +
+      chip(enabled ? 'pf-c-green' : 'pf-c-gray', label) + '</p>' +
+      '<p>로그인된 Orca DeepSeek 탭이 필요합니다. 켜기는 사용 허용이며 gateway는 모델 요청 때만 실행됩니다.</p>' +
+      '<p>끄기는 새 호출을 막고 이 기능의 요청만 취소합니다. 사용자 브라우저와 다른 세션은 유지됩니다.</p>' +
+      '<div class="pf-web-actions">' +
+      button('web-deepseek-on', ' aria-label="웹딥식 켜기"', '켜기', !canWrite || enabled, 'pf-btn' + (!enabled ? ' pf-btn-primary' : '')) +
+      button('web-deepseek-off', ' aria-label="웹딥식 끄기"', '끄기', !canWrite || !enabled, 'pf-btn' + (enabled ? ' pf-btn-primary' : '')) +
+      button('reload-state', ' aria-label="웹딥식 상태 새로고침"', '상태 새로고침', busy, 'pf-btn') +
+      '</div></section>';
   }
 
   function side(view, edit) {
@@ -1516,7 +1665,7 @@
     }
 
     function isGlobalKind(kind) {
-      return kind === 'setSummarizer' || kind === 'setMemoryRow' || kind === 'setAgentLane' || kind === 'setAgentPin' || kind === 'resetAgentMemory' || kind === 'migrateReviewerKeys';
+      return kind === 'setSummarizer' || kind === 'setMemoryRow' || kind === 'setAgentLane' || kind === 'setAgentPin' || kind === 'resetAgentMemory' || kind === 'migrateReviewerKeys' || kind === 'setAdvisor';
     }
     // setRoute names its profile by the omo layer key (store routeChange), setMain by the card key (getProfile);
     // both mean the same card here.
@@ -1533,11 +1682,12 @@
         var bProf = cardKeyOf(str(b.profileKey || b.omoProfile));
         if (aProf !== bProf) return false;
       }
-      if (a.kind === 'setRoute') return a.section === b.section && a.role === b.role;
+      if (a.kind === 'setRoute' || a.kind === 'setRoleBackup') return a.section === b.section && a.role === b.role;
       if (a.kind === 'setAgentLane' || a.kind === 'setAgentPin' || a.kind === 'resetAgentMemory') return a.agentId === b.agentId;
       if (a.kind === 'setMemoryRow') return (str(a.row) || 'kibitzer') === (str(b.row) || 'kibitzer');
       if (a.kind === 'selectProfile' || a.kind === 'setMain' || a.kind === 'setModelProfile') return true;
       if (a.kind === 'migrateReviewerKeys') return true;
+      if (a.kind === 'setAdvisor') return a.advisor === b.advisor;
       return false;
     }
     function agentKind(kind) { return kind === 'setAgentLane' || kind === 'setAgentPin' || kind === 'resetAgentMemory'; }
@@ -1569,12 +1719,14 @@
     }
     function draftKeyOfChange(c) {
       if (!obj(c)) return null;
+      if (c.kind === 'setRoleBackup') return 'backup:' + str(c.profileKey) + ':' + str(c.section) + '/' + str(c.role);
       if (c.kind === 'setRoute') return 'route:' + str(c.section) + '/' + str(c.role);
       if (c.kind === 'setAgentLane' || c.kind === 'setAgentPin') return 'agent:' + str(c.agentId);
       if (c.kind === 'setMain') return 'main';
       if (c.kind === 'setModelProfile') return 'lane';
       if (c.kind === 'setSummarizer') return 'summarizer';
       if (c.kind === 'setMemoryRow') return 'memory:' + (str(c.row) || 'kibitzer');
+      if (c.kind === 'setAdvisor') return 'advisor:' + str(c.advisor);
       return null;
     }
     function drop(index) {
@@ -1602,7 +1754,7 @@
     }
     function askClear() {
       if (s.busy) return snapshot();
-      if (!s.pending.length) return snapshot();
+      if (!s.pending.length && !Object.keys(s.draft).some(function (key) { return key.indexOf('backup:') === 0; })) return snapshot();
       s.confirmClear = true;
       changed();
       return snapshot();
@@ -1617,6 +1769,7 @@
       if (s.busy) return snapshot();
       var k = str(key);
       if (!k) return snapshot();
+      if (patch === null) { delete s.draft[k]; s.preview = null; return snapshot(); }
       if (k.indexOf('memory:') === 0) {
         var mKey = k.slice(7);
         delete s.memoryErrors[mKey];
@@ -1640,12 +1793,21 @@
       changed();
       return snapshot();
     }
-    function removeRoute(section, role, profileKey) {
+    function removeRoute(section, role, profileKey, kind) {
       if (s.busy) return snapshot();
       var targetProf = cardKeyOf(str(profileKey || s.shown));
       s.pending = s.pending.filter(function (c) {
-        return !obj(c) || c.kind !== 'setRoute' || c.section !== section || c.role !== role || cardKeyOf(str(c.profileKey || c.omoProfile)) !== targetProf;
+        return !obj(c) || c.kind !== (kind || 'setRoute') || c.section !== section || c.role !== role || cardKeyOf(str(c.profileKey || c.omoProfile)) !== targetProf;
       });
+      s.preview = null; s.result = null;
+      if (!s.conflict) { s.error = ''; s.status = ''; }
+      s.confirmClear = false;
+      changed();
+      return snapshot();
+    }
+    function removeAdvisor(name) {
+      if (s.busy) return snapshot();
+      s.pending = s.pending.filter(function (c) { return !obj(c) || c.kind !== 'setAdvisor' || c.advisor !== name; });
       s.preview = null; s.result = null;
       if (!s.conflict) { s.error = ''; s.status = ''; }
       s.confirmClear = false;
@@ -1666,9 +1828,11 @@
     }
 
     function isGlobalKind(kind) {
-      return kind === 'setSummarizer' || kind === 'setMemoryRow' || kind === 'setAgentLane' || kind === 'setAgentPin' || kind === 'resetAgentMemory' || kind === 'migrateReviewerKeys';
+      return kind === 'setSummarizer' || kind === 'setMemoryRow' || kind === 'setAgentLane' || kind === 'setAgentPin' || kind === 'resetAgentMemory' || kind === 'migrateReviewerKeys' || kind === 'setAdvisor';
     }
-    function changesForProfile(targetProfileKey) {
+    // A role backup and an advisor are saved selections: saving only those does not activate the shown profile.
+    function saveOnly(change) { return change.kind === 'setRoleBackup' || change.kind === 'setAdvisor'; }
+    function changesForProfile(targetProfileKey, activateProfile) {
       var activeKey = str(obj(s.view && s.view.activeProfile) && s.view.activeProfile.key);
       var profKey = cardKeyOf(str(targetProfileKey || s.shown || activeKey));
       var list = [];
@@ -1679,7 +1843,9 @@
           list.push(c);
         }
       });
-      if (profKey) {
+      var backupSave = s.pending.length > 0 ? s.pending.every(saveOnly)
+        : Object.keys(s.draft).some(function (key) { return key.indexOf('backup:') === 0; });
+      if (profKey && (activateProfile || !backupSave && !(list.length && list.every(saveOnly)))) {
         list.push({ kind: 'selectProfile', profileKey: profKey });
       }
       return list;
@@ -1691,7 +1857,7 @@
       var list = Array.isArray(changesOverride)
         ? changesOverride.slice()
         : action === 'apply' || action === 'preview'
-          ? changesForProfile(applyProfileKey)
+          ? changesForProfile(applyProfileKey, Boolean(opt.profileKey))
           : s.pending.slice();
       if (s.busy) return Promise.resolve(snapshot());
       // A 409 makes the loaded roster revision stale: neither preview nor apply may post it again
@@ -1746,7 +1912,9 @@
           if (!reapply) {
             var sentSet = new Set(list);
             s.pending = s.pending.filter(function (c) { return !sentSet.has(c); });
-            s.draft = map();
+            Object.keys(s.draft).forEach(function (key) {
+              if (key.indexOf('backup:') !== 0 || list.some(function (c) { return draftKeyOfChange(c) === key; })) delete s.draft[key];
+            });
           }
           s.status = reapply ? STATUS_TEXT.reapplied : STATUS_TEXT.applied;
           changed();
@@ -1783,9 +1951,42 @@
       });
     }
 
+    function setWebDeepseek(enabled) {
+      var state = obj(s.view && s.view.webDeepseek);
+      if (s.busy || !state || state.installed !== true || typeof enabled !== 'boolean') return Promise.resolve(snapshot());
+      var body = { action: 'apply', changes: [{ kind: 'setWebDeepseekEnabled',
+        enabled: enabled, expectedRevision: state.revision }], expected: {}, rosterRevision: 0 };
+      s.busy = true; s.error = ''; s.errorKind = ''; changed();
+      var request;
+      try {
+        request = fetchFn('/profiles', { method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Board-Token': token() },
+          body: JSON.stringify(body) });
+      } catch (error) { request = Promise.reject(error); }
+      return Promise.resolve(request).then(function (response) {
+        return responseJson(response).then(function (json) { return { status: statusOf(response), json: json }; });
+      }).then(function (result) {
+        s.busy = false;
+        if (result.status === 200 && result.json && result.json.ok === true && obj(result.json.webDeepseek)) {
+          s.view.webDeepseek = result.json.webDeepseek;
+          s.status = enabled ? '웹딥식 켜짐' : '웹딥식 꺼짐';
+        } else {
+          s.errorKind = 'server';
+          s.error = result.status === 409 ? '웹딥식 상태가 바뀌었습니다. 상태를 새로고침하세요.' : '웹딥식 상태를 바꾸지 못했습니다.';
+        }
+        changed();
+        return snapshot();
+      }, function () {
+        s.busy = false; s.errorKind = 'network'; s.error = '웹딥식 요청을 보내지 못했습니다.';
+        changed();
+        return snapshot();
+      });
+    }
+
     return {
       snapshot: snapshot,
       load: load,
+      setWebDeepseek: setWebDeepseek,
       add: add,
       drop: drop,
       clear: clear,
@@ -1796,6 +1997,7 @@
       removeKind: removeKind,
       removeRoute: removeRoute,
       removeMemoryRow: removeMemoryRow,
+      removeAdvisor: removeAdvisor,
       selectTab: function (tab) {
         if (!ROUTING_TABS.some(function (t) { return t[0] === tab; })) return snapshot();
         s.tab = tab;
@@ -1882,7 +2084,13 @@
       // older response's pending/draft reset.
       if (c.snapshot().busy && ['select-profile', 'apply-card', 'reset-memory', 'preview', 'apply', 'reapply',
         'clear', 'clear-cancel', 'clear-confirm', 'drop', 'reload-state'].indexOf(act) >= 0) return;
-      if (act === 'tab') {
+      if (act === 'web-deepseek-on' || act === 'web-deepseek-off') {
+        if (c.snapshot().busy) return;
+        c.setWebDeepseek(act === 'web-deepseek-on').then(function () {
+          var statusTarget = root.querySelector('#pf-web-status');
+          if (statusTarget && focusLost()) statusTarget.focus({ preventScroll: true });
+        });
+      } else if (act === 'tab') {
         var tab = str(t.getAttribute('data-tab'));
         c.selectTab(tab);
         var tabTarget = root.querySelector('#pf-tab-' + tab);
@@ -2025,6 +2233,35 @@
           c.setDraft('agent:' + agent, { thinking: str(t.value) });
           if (cutAt > 0) c.add({ kind: 'setAgentPin', agentId: agent, pin: { provider: pinValue.slice(0, cutAt), modelId: pinValue.slice(cutAt + 1), thinking: t.value } });
         }
+      } else if (act === 'route-backup') {
+        var backupRoute = str(t.getAttribute('data-route'));
+        var backupSlash = backupRoute.indexOf('/');
+        var backupProfile = profileOf(c.snapshot().view, str(c.snapshot().shown));
+        if (backupSlash > 0 && backupProfile && t.value !== '__direct__') {
+          c.setDraft('backup:' + str(backupProfile.omoProfile) + ':' + backupRoute, null);
+          c.add({
+            kind: 'setRoleBackup', profileKey: str(backupProfile.omoProfile),
+            section: backupRoute.slice(0, backupSlash), role: backupRoute.slice(backupSlash + 1), alias: str(t.value)
+          });
+        }
+      } else if (act === 'backup-provider' || act === 'backup-model' || act === 'backup-thinking') {
+        var backupBox = t.closest('[data-backup-route]');
+        var directRoute = str(t.getAttribute('data-route'));
+        var directProfile = profileOf(c.snapshot().view, str(c.snapshot().shown));
+        var directSlash = directRoute.indexOf('/');
+        if (!backupBox || !directProfile || directSlash < 1) return;
+        var bp = selectVal(backupBox.querySelector('[data-pf="backup-provider"]'));
+        var bm = selectVal(backupBox.querySelector('[data-pf="backup-model"]'));
+        var bt = selectVal(backupBox.querySelector('[data-pf="backup-thinking"]'));
+        if (act === 'backup-provider') { bp = str(t.value); bm = ''; bt = ''; }
+        else if (act === 'backup-model') { bm = str(t.value); bt = ''; }
+        else bt = str(t.value);
+        c.setDraft('backup:' + str(directProfile.omoProfile) + ':' + directRoute, { provider: bp, model: bm, thinking: bt });
+        var directChange = { kind: 'setRoleBackup', profileKey: str(directProfile.omoProfile),
+          section: directRoute.slice(0, directSlash), role: directRoute.slice(directSlash + 1) };
+        if (!bp) c.add(Object.assign(directChange, { alias: '' }));
+        else if (bm && bt) c.add(Object.assign(directChange, { provider: bp, model: bareModel(bm), thinking: bt }));
+        else c.removeRoute(directChange.section, directChange.role, directChange.profileKey, 'setRoleBackup');
       } else if (act === 'route-provider' || act === 'route-model' || act === 'route-thinking') {
         var route = t.getAttribute('data-route');
         var row = t.closest('[data-pf-route]');
@@ -2142,6 +2379,23 @@
         if (sumModel) c.add({ kind: 'setSummarizer', modelId: sumModel });
         else if (!sumProv) c.add({ kind: 'setSummarizer', modelId: '' });
         else { c.removeKind('setSummarizer'); c.touch(); }
+      } else if (act === 'advisor-provider' || act === 'advisor-model' || act === 'advisor-thinking') {
+        var advisor = str(t.getAttribute('data-advisor'));
+        var advBox = t.closest('[data-pf-advisor]');
+        if (!advisor || !advBox) return;
+        var ap = selectVal(advBox.querySelector('[data-pf="advisor-provider"]'));
+        var am = selectVal(advBox.querySelector('[data-pf="advisor-model"]'));
+        var at = selectVal(advBox.querySelector('[data-pf="advisor-thinking"]'));
+        // Same order as a role row: a service change clears model and effort, a model change takes its first level.
+        if (act === 'advisor-provider') { ap = str(t.value); am = ''; at = ''; }
+        else if (act === 'advisor-model') {
+          am = str(t.value);
+          var advCand = memoryRowCandidates(c.snapshot().view, true).filter(function (x) { return x.model === am; })[0];
+          at = advCand && advCand.levels.length ? advCand.levels[0] : '';
+        } else at = str(t.value);
+        c.setDraft('advisor:' + advisor, { provider: ap, model: am, thinking: at });
+        if (ap && am && at) c.add({ kind: 'setAdvisor', advisor: advisor, provider: ap, model: am, thinking: at });
+        else { c.removeAdvisor(advisor); c.touch(); }
       } else if (act === 'memory-mode' || act === 'memory-service' || act === 'memory-model' || act === 'memory-thinking') {
         var memRow = t.closest('[data-pf-memory]');
         var key = memRow ? str(memRow.getAttribute('data-pf-memory')) : str(t.getAttribute('data-memory'));

@@ -1,0 +1,59 @@
+/* Approved title-index journey; existing neutral product tokens only. */
+.sh-shell[data-view="plans"] > .sh-side, .sh-shell[data-view="plans"] > .sh-edge,
+.sh-shell[data-view="plans"][data-side] .sh-topen { display: none; }
+.rm-catalogue .more { margin-inline-start: 0; max-inline-size: 100%; border-color: var(--ctl-edge); }
+.rm-catalogue { max-inline-size: 1184px; margin-inline: auto; padding: var(--sp-8) var(--sp-6); font-size: var(--fs-lg); line-height: 1.5; word-break: keep-all; overflow-wrap: anywhere; }
+.rmi-head, .rmi-stage-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
+.rm-catalogue .rmi-title { font-size: 32px; line-height: 1.25; margin: 0; text-wrap: pretty; }
+.rmi-head { margin-bottom: var(--sp-8); }
+.rmi-topic + .rmi-topic, .rmi-track + .rmi-track { margin-top: var(--sp-8); }
+.rm-catalogue h2 { font-size: 25.6px; font-weight: var(--fw-semibold); line-height: 1.25; margin: 0 0 var(--sp-4); }
+.rmi-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }
+.rmi-card { display: flex; align-items: center; min-block-size: 80px; inline-size: 100%; padding: var(--sp-4) var(--sp-6); border: 1px solid var(--ctl-edge); border-radius: var(--r-md); background: var(--c-elev); color: var(--fg); text-align: start; font: inherit; font-size: 18px; font-weight: var(--fw-semibold); line-height: 1.5; text-wrap: pretty; word-break: keep-all; overflow-wrap: anywhere; cursor: pointer; }
+.rm-catalogue button, .rm-catalogue summary, .rm-catalogue input, .rm-catalogue select { min-block-size: 44px; }
+.rmi-card:hover, .rmi-suggestions [role=option]:hover, .rmi-suggestions [aria-selected=true], .rmi-tools > summary:hover { background: var(--fill-hover); }
+.rmi-card:active, .rmi-suggestions [role=option]:active { background: var(--fill-press); color: var(--fg); }
+.rm-catalogue :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.rm-catalogue ::selection { background: var(--fill-sel); color: var(--fg); }
+.rmi-tools { margin-top: var(--sp-8); }
+.rmi-tools > summary, .rmi-evidence > summary { cursor: pointer; padding-block: var(--sp-2); }
+.rmi-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 240px); gap: var(--sp-4); padding-block: var(--sp-4); }
+.rmi-fields label { display: block; margin-bottom: var(--sp-2); color: var(--muted); font-size: 14px; }
+.rmi-fields input, .rmi-fields select { inline-size: 100%; min-inline-size: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--ctl-edge); border-radius: var(--r-xs); background: var(--c-elev); color: var(--fg); font: inherit; caret-color: var(--accent); }
+.rmi-fields input::placeholder { color: var(--muted); opacity: 1; }
+.rmi-suggestions, .rmi-tasks { list-style: none; padding: 0; margin: 0; }
+.rmi-suggestions [role=option] { min-height: 44px; padding: var(--sp-3); margin-top: var(--sp-2); background: var(--c-elev); cursor: pointer; }
+.rmi-suggestions [aria-selected=true] { background: var(--fill-sel); font-weight: var(--fw-semibold); }
+.rmi-suggestions [aria-selected=true]::before { content: "✓ "; }
+.rmi-empty { padding-block: var(--sp-8); }
+.rmi-footer { margin-top: var(--sp-8); padding-top: var(--sp-4); border-top: 1px solid var(--ctl-edge); }
+.rmi-back { margin-bottom: var(--sp-4); }
+.rmi-track { margin-top: var(--sp-8); }
+.rmi-stage { padding-bottom: var(--sp-6); border-bottom: 1px solid var(--ctl-edge); }
+.rmi-stage + .rmi-stage { padding-top: var(--sp-6); }
+.rm-catalogue .rmi-stage h2 { font-size: 25.6px; line-height: 1.25; margin: 0 0 var(--sp-2); font-weight: var(--fw-semibold); text-wrap: pretty; }
+.rmi-track-label { color: var(--muted); font-size: 14px; margin-bottom: var(--sp-4); }
+.rmi-stage p { max-inline-size: 70ch; margin: 0 0 var(--sp-3); }
+.rmi-state, .rmi-meta, .rmi-tasks li > span { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+.rmi-tasks { margin-block: var(--sp-4); display: grid; gap: var(--sp-4); }
+.rmi-tasks li { display: flex; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
+.rmi-tasks strong { font-weight: var(--fw-medium); max-inline-size: 65ch; }
+.rmi-evidence .rm-conds, .rmi-evidence .rm-plan-list { gap: var(--sp-3); margin-block: var(--sp-3); }
+:is(.rmi-evidence, .rm-connected-plans-view, .rm-catalogue .rm-sheet-body) .rm-plan-list,
+.rm-connected-plans-list, .rm-cplan-row { grid-template-columns: minmax(0, 1fr); min-inline-size: 0; }
+:is(.rmi-evidence, .rm-connected-plans-view, .rm-catalogue .rm-sheet-body) .rm-plan-item { min-inline-size: 0; }
+:is(.rmi-evidence, .rm-connected-plans-view, .rm-catalogue .rm-sheet-body) .path { flex-wrap: wrap; padding-left: 0; line-height: 1.5; }
+:is(.rmi-evidence, .rm-connected-plans-view, .rm-catalogue .rm-sheet-body) .path code { flex: 1 1 16rem; font-size: inherit; line-height: inherit; }
+.rm-connected-plans-view .more { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; padding: var(--sp-2) var(--sp-3); }
+.rm-connected-plans-view .plan-link { min-inline-size: 0; overflow-wrap: anywhere; }
+@media (max-width: 1100px) { .rmi-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) {
+  .rm-catalogue { padding: var(--sp-6) var(--sp-4); font-size: 22.667px; }
+  .rm-catalogue .rmi-title { font-size: 40px; }
+  .rm-catalogue h2 { font-size: 32px; }
+  .rm-catalogue .rmi-stage h2 { font-size: 32px; }
+  .rmi-cards, .rmi-fields { grid-template-columns: minmax(0, 1fr); }
+  .rmi-card { min-block-size: 72px; font-size: 22.667px; padding: var(--sp-4); }
+  .rmi-state, .rmi-meta, .rmi-track-label, .rmi-fields label, .rmi-tasks li > span { font-size: 20px; }
+  .rm-catalogue .more, .rmi-evidence { font-size: 20px; line-height: 1.5; }
+}

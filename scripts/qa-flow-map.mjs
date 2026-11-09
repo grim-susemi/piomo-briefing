@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 import { launch, listProfilePids, isPidAlive, watchCsp, axSnapshot, unnamedInteractive } from './cdp.mjs';
 import { createBoardServer } from '../src/server.mjs';
@@ -33,16 +34,32 @@ const REGISTRY = path.join(ROOT, 'test/fixtures/profiles/registry');
 const RULES = path.join(ROOT, 'test/fixtures/profiles/flow-map.rules.json');
 const AX_ALLOWLIST = path.join(ROOT, 'scripts/qa-ax-allowlist.json');
 const INVENTORY = path.join(ROOT, 'src/profiles/inventory.json');
-if (!process.env.OMO_STABLE_PLUGIN) throw new Error('set OMO_STABLE_PLUGIN to the pinned plugin dir');
-const PLUGIN = path.join(process.env.OMO_STABLE_PLUGIN, 'extensions', 'omo.js');
+function resolvePluginPath() {
+  try {
+    const inv = JSON.parse(fs.readFileSync(INVENTORY, 'utf8'));
+    const envDir = process.env.OMO_STABLE_PLUGIN;
+    if (envDir) {
+      const candidate = path.join(envDir, 'extensions', 'omo.js');
+      if (fs.existsSync(candidate) && crypto.createHash('sha256').update(fs.readFileSync(candidate)).digest('hex') === inv.sources?.omo?.sha256) {
+        return candidate;
+      }
+    }
+    const pinnedPath = inv.sources?.omo?.path;
+    if (pinnedPath && fs.existsSync(pinnedPath) && crypto.createHash('sha256').update(fs.readFileSync(pinnedPath)).digest('hex') === inv.sources?.omo?.sha256) {
+      return pinnedPath;
+    }
+  } catch {}
+  if (process.env.OMO_STABLE_PLUGIN) return path.join(process.env.OMO_STABLE_PLUGIN, 'extensions', 'omo.js');
+  throw new Error('set OMO_STABLE_PLUGIN to the pinned plugin dir');
+}
 const VM_FILE = path.join(ROOT, 'test/fixtures/view-model-board.json');
 const LIVE_HOMES = ['C:/Users/USER/.omo', 'C:/Users/USER/.omo-stable-500/home/.omo', 'C:/Users/USER/.omo-original/home/.omo', 'C:/Users/USER/.somo/home/.omo'];
 const LIVE_BOARD = [47317, 47326];
 const PS_STYLE = { bom: true, eol: '\r\n', indent: '    ', keySep: ':  ', trailingNewline: true };
 const FIXED_NOW = Date.parse('2026-10-20T12:00:00Z');
 const TOKEN = 'piomo-t8-flow-map-token';
-const REGIONS = ['status', 'guide', 'cards', 'detail', 'roles', 'lane', 'main', 'summarizer', 'apply', 'message'];
-const TASKS = {
+export const REGIONS = ['status', 'guide', 'cards', 'detail', 'roles', 'lane', 'main', 'summarizer', 'apply', 'message'];
+export const TASKS = {
   role: ['card:experimental-custom', 'role:agents/explore:service', 'role:agents/explore:model', 'role:agents/explore:effort', 'apply:detail'],
   profile: ['apply:card:gpt-deepseek'],
   memory: ['memory:kibitzer:mode', 'memory:kibitzer:service', 'memory:kibitzer:model', 'memory:kibitzer:effort', 'apply:detail'],
@@ -57,7 +74,9 @@ const STATIC_COPY = ['현재 전역 적용', '전역 적용 중', '권장 배치
 // Shown only in states the three tasks do not reach (no extra roles in the shared fixture, no refused memory apply);
 // the node test 'layout: every Must have 4 string is on the board word for word' renders them.
 const CONDITIONAL_COPY = ['추가 설정', '실패 · 보류 유지: '].map(copy => RAW_CONDITIONAL_NAME_COPY[copy] || RAW_STATUS_COPY[copy] || copy);
+export { STATIC_COPY, CONDITIONAL_COPY };
 
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 const argv = process.argv.slice(2);
 const arg = (name, fallback = '') => {
   const i = argv.indexOf(name);
@@ -74,28 +93,41 @@ const KEEP = argv.includes('--keep');
 const SHOTS = arg('--shots') ? path.resolve(arg('--shots')) : '';
 const shotIndex = [];
 const PORT_BASE = Number(process.env.OMO_BRIEFING_PORT_BASE || 47540);
-if (!OUT) {
-  console.error('usage: node scripts/qa-flow-map.mjs --out <dir> [--sizes 1180x700,1600x900] [--reference <flow-map.json>] [--keep]');
-  process.exit(2);
+if (isMain) {
+  resolvePluginPath();
+  if (!OUT) {
+    console.error('usage: node scripts/qa-flow-map.mjs --out <dir> [--sizes 1180x700,1600x900] [--reference <flow-map.json>] [--keep]');
+    process.exit(2);
+  }
+  if (!Number.isInteger(PORT_BASE) || PORT_BASE < 1024 || PORT_BASE + 4 > 65535 || (PORT_BASE <= LIVE_BOARD[1] && PORT_BASE + 4 >= LIVE_BOARD[0])) {
+    console.error(`OMO_BRIEFING_PORT_BASE=${PORT_BASE}: needs 5 ports outside the live board's ${LIVE_BOARD.join('-')}`);
+    process.exit(2);
+  }
+  fs.mkdirSync(OUT, { recursive: true });
+  if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 }
-if (!Number.isInteger(PORT_BASE) || PORT_BASE < 1024 || PORT_BASE + 4 > 65535 || (PORT_BASE <= LIVE_BOARD[1] && PORT_BASE + 4 >= LIVE_BOARD[0])) {
-  console.error(`OMO_BRIEFING_PORT_BASE=${PORT_BASE}: needs 5 ports outside the live board's ${LIVE_BOARD.join('-')}`);
-  process.exit(2);
-}
-fs.mkdirSync(OUT, { recursive: true });
-if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+export function computeSourceProvenance() {
+  const pageDir = path.join(ROOT, 'src/page');
+  const files = fs.readdirSync(pageDir).filter((f) => /\.(js|css)$/.test(f)).sort().map((f) => 'src/page/' + f)
+    .concat(['src/page/generated/page.min.js', 'src/page/generated/view.min.js', 'src/page/generated/profiles-view.min.js', 'src/page-script.mjs', 'src/profiles-script.mjs', 'src/render.mjs', 'src/server.mjs', 'src/server-host.mjs']);
+  const map = {};
+  for (const f of files) map[f] = sha256(fs.readFileSync(path.join(ROOT, f)));
+  let head = 'unknown';
+  try { head = execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(); } catch {}
+  return { sourceHash: sha256(JSON.stringify(map)), head };
+}
 const slash = (p) => path.resolve(p).replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
 // The Assert-FixtureRootIsSafe rule (capture.ps1:70): a root that is, contains or sits inside a live home is refused.
-function assertFixtureRoot(root) {
+export function assertFixtureRoot(root) {
   const r = slash(root);
   for (const home of LIVE_HOMES.map(slash)) {
     if (r === home || r.startsWith(home + '/') || home.startsWith(r + '/')) throw new Error(`fixture root ${root} touches live home ${home}`);
   }
 }
 
-function seedHomes(root) {
+export function seedHomes(root) {
   assertFixtureRoot(root);
   const primary = path.join(root, 'primary');
   const stable = path.join(root, 'stable');
@@ -116,7 +148,7 @@ function seedHomes(root) {
 
 // Page-side helpers, installed once per document. Boxes of step controls are content coordinates inside their nearest
 // scroll container (the WinForms map records them the same way); region boxes are viewport boxes at scroll 0.
-const FLOW_LIB = `(() => {
+export const FLOW_LIB = `(() => {
   const REGIONS = ${JSON.stringify(REGIONS)};
   const box = (r, ox, oy) => ({ x: Math.round(r.left + ox), y: Math.round(r.top + oy), w: Math.round(r.width), h: Math.round(r.height) });
   const q = (id) => document.querySelector('[data-flow="' + id + '"]');
@@ -296,7 +328,7 @@ const FLOW_LIB = `(() => {
 })()`;
 
 // The page-side deadline stays under scripts/cdp.mjs's 15 s call deadline, so a miss names what was awaited.
-function waitFor(page, predicate, what, timeout = 12000) {
+export function waitFor(page, predicate, what, timeout = 12000) {
   return page.eval(`new Promise((resolve, reject) => {
     const check = () => { try { return (${predicate}); } catch (e) { return null; } };
     const hit = check();
@@ -307,7 +339,7 @@ function waitFor(page, predicate, what, timeout = 12000) {
     observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
   })`);
 }
-async function settle(page) {
+export async function settle(page) {
   await page.eval(`document.fonts && document.fonts.ready ? document.fonts.ready.then(() => true) : true`);
   await page.eval(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
   // Theme and fade transitions run up to tokens.css --dur; wait for every finite animation before measuring.
@@ -316,24 +348,25 @@ async function settle(page) {
   await page.eval(`new Promise((resolve) => requestAnimationFrame(() => resolve(true)))`);
 }
 
-async function startBoard(root) {
+export async function startBoard(root, { portBase = PORT_BASE } = {}) {
   const homes = seedHomes(root);
   const inventory = JSON.parse(fs.readFileSync(INVENTORY, 'utf8'));
-  const store = openProfilesStore({ primaryHome: homes.primary, stableHome: homes.stable, mirrorHomes: [], pluginPath: PLUGIN, inventory, now: () => FIXED_NOW });
+  const pluginPath = resolvePluginPath();
+  const store = openProfilesStore({ primaryHome: homes.primary, stableHome: homes.stable, mirrorHomes: [], pluginPath, inventory, now: () => FIXED_NOW });
   const vm = JSON.parse(fs.readFileSync(VM_FILE, 'utf8'));
   const posts = [];
   const server = createBoardServer({
-    portBase: PORT_BASE, portCount: 5, generation: 7, token: TOKEN,
+    portBase, portCount: 5, generation: 7, token: TOKEN,
     getPage: ({ nonce } = {}) => pageHtml(vm, 7, { mode: 'server', token: TOKEN, nonce }),
     getViewModel: () => vm,
     profilesState: () => store.state(),
     onProfiles: (body) => { posts.push(JSON.parse(JSON.stringify(body))); return store.handle(body); },
   });
   const { port } = await server.start();
-  return { url: `http://127.0.0.1:${port}/`, server, posts, fixtureHash: homes.fixtureHash };
+  return { url: `http://127.0.0.1:${port}/`, server, posts, store, homes, fixtureHash: homes.fixtureHash };
 }
 
-async function openScreen(page, url) {
+export async function openScreen(page, url) {
   await page.goto(url);
   await page.eval(FLOW_LIB);
   await waitFor(page, `document.querySelector('[data-sh="view"][data-key="profiles"]')`, 'board shell');
@@ -347,7 +380,7 @@ async function openScreen(page, url) {
 }
 
 // One step = reach the control (scrolls counted), then do what the owner does there and wait for the screen to answer.
-async function perform(page, id, posts, log) {
+export async function perform(page, id, posts, log) {
   console.error('step ' + id);
   const step = await page.eval(`window.__flow.reach(${JSON.stringify(id)})`);
   if (step.missing) return { control: id, missing: true };
@@ -397,13 +430,13 @@ async function perform(page, id, posts, log) {
   return { control: id, preparation: step.preparation, region: step.region, box: step.box, scrolls: step.scrolls, view: step.view, moved: step.moved, disabled: step.disabled, hit, live, result: done };
 }
 
-const rel = (a, b, tol) => {
+export const rel = (a, b, tol) => {
   const d = (b.x + b.w / 2) - (a.x + a.w / 2), e = (b.y + b.h / 2) - (a.y + a.h / 2);
   return { x: Math.abs(d) < tol ? 0 : Math.sign(d), y: Math.abs(e) < tol ? 0 : Math.sign(e) };
 };
-const right = (b) => b.x + b.w, bottom = (b) => b.y + b.h;
+export const right = (b) => b.x + b.w, bottom = (b) => b.y + b.h;
 
-function diff(board, ref, rules, size) {
+export function diff(board, ref, rules, size) {
   const out = {};
   const add = (rule, detail) => { (out[rule].differences ||= []).push(detail); };
   for (const id of Object.keys(rules.rules)) out[id] = { name: rules.rules[id].name, differences: [] };
@@ -488,6 +521,7 @@ async function main() {
   const reference = JSON.parse(fs.readFileSync(REFERENCE, 'utf8'));
   const rules = JSON.parse(fs.readFileSync(RULES, 'utf8'));
   requireF8(rules);
+  const { sourceHash, head } = computeSourceProvenance();
   const allow = JSON.parse(fs.readFileSync(AX_ALLOWLIST, 'utf8'));
   const tempRoot = path.join(os.tmpdir(), 'omo-switcher-tests', 'flow-map-' + Date.now().toString(36));
   assertFixtureRoot(tempRoot);
@@ -500,7 +534,7 @@ async function main() {
     pids = [...new Set([page.pid, ...listProfilePids(page.profileDir)])];
     for (const size of SIZES) {
       await page.client.send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, deviceScaleFactor: 1, mobile: false });
-      const map = { schema: 'flow-map/1', source: 'board', fixtureHash: '', frame: null, regions: [], sections: [], rows: null, tasks: {}, copy: null, log: [] };
+      const map = { schema: 'flow-map/1', source: 'board', sourceHash, head, fixtureHash: '', frame: null, regions: [], sections: [], rows: null, tasks: {}, copy: null, log: [] };
       for (const task of Object.keys(TASKS)) {
         console.error('task ' + size.name + ' ' + task);
         const board = await startBoard(path.join(tempRoot, size.name + '-' + task));
@@ -511,6 +545,25 @@ async function main() {
             const frame = await page.eval(`window.__flow.frame()`);
             map.frame = { width: size.width, height: size.height, ...frame };
             map.regions = await page.eval(`window.__flow.regions()`);
+            // Owner #849 A: the tray follows content and is reached through #main.
+            map.messageAccess = await page.eval(`(() => {
+              const tray = document.querySelector('[data-flow="message"]');
+              const main = document.querySelector('#main');
+              const before = main.scrollTop, windowBefore = window.scrollY;
+              const owners = [];
+              for (let el = tray.parentElement; el; el = el.parentElement) {
+                if (/(auto|scroll)/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight + 1) owners.push(el.id);
+              }
+              tray.scrollIntoView({ block: 'end', behavior: 'instant' });
+              const r = tray.getBoundingClientRect(), m = main.getBoundingClientRect();
+              const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+              const result = { owners, before, after: main.scrollTop,
+                windowBefore, windowAfter: window.scrollY, top: r.top, bottom: r.bottom,
+                mainTop: m.top, mainBottom: m.bottom, visible: r.top >= m.top && r.bottom <= m.bottom + 1,
+                onTop: !!hit && tray.contains(hit) };
+              main.scrollTop = before;
+              return result;
+            })()`);
             map.sections = await page.eval(`window.__flow.sections()`);
             map.layout = await page.eval(`window.__flow.layout()`);
             map.purposeGrid = await measurePurposeGrid(page);
@@ -554,6 +607,8 @@ async function main() {
         }
       }
       const result = diff(map, reference, rules, size.name);
+      result.sourceHash = sourceHash;
+      result.head = head;
       if (map.fixtureHash !== reference.fixtureHash) result.differences.push({ rule: 'fixture', expected: reference.fixtureHash, actual: map.fixtureHash });
       fs.writeFileSync(path.join(OUT, `flow-map.board-${size.name}.json`), JSON.stringify(map, null, 2) + '\n');
       fs.writeFileSync(path.join(OUT, `flow-diff-${size.name}.json`), JSON.stringify(result, null, 2) + '\n');
@@ -573,9 +628,9 @@ async function main() {
     if (!KEEP) fs.rmSync(tempRoot, { recursive: true, force: true });
     report.tempRemoved = !fs.existsSync(tempRoot);
   }
-  if (SHOTS) fs.writeFileSync(path.join(SHOTS, 'index.json'), JSON.stringify({ schema: 'flow-shots/1', count: shotIndex.length, images: shotIndex }, null, 2) + '\n');
+  if (SHOTS) fs.writeFileSync(path.join(SHOTS, 'index.json'), JSON.stringify({ schema: 'flow-shots/1', sourceHash, head, count: shotIndex.length, images: shotIndex }, null, 2) + '\n');
   const violations = csp ? csp.violations : [];
-  fs.writeFileSync(path.join(OUT, 'csp.json'), JSON.stringify({ violations, count: violations.length, notes: csp ? csp.notes.length : 0 }, null, 2) + '\n');
+  fs.writeFileSync(path.join(OUT, 'csp.json'), JSON.stringify({ sourceHash, head, violations, count: violations.length, notes: csp ? csp.notes.length : 0 }, null, 2) + '\n');
   const unnamed = report.ax.reduce((n, a) => n + a.unnamed.length, 0);
   fs.writeFileSync(path.join(OUT, 'ax.txt'), [`allowlist ${path.relative(ROOT, AX_ALLOWLIST).replace(/\\/g, '/')} entries: ${Object.keys(allow.entries || {}).length}`,
     ...report.ax.map((a) => `${a.size} ${a.state}: unnamed interactive nodes outside the allowlist: ${a.unnamed.length}${a.unnamed.length ? ' ' + JSON.stringify(a.unnamed) : ''}`),
@@ -583,9 +638,11 @@ async function main() {
   if (violations.length || unnamed || report.errors.length) failed = true;
   report.ok = !failed;
   report.finishedAt = new Date().toISOString();
+  report.sourceHash = sourceHash;
+  report.head = head;
   fs.writeFileSync(path.join(OUT, 'flow-map-run.json'), JSON.stringify(report, null, 2) + '\n');
   console.log(JSON.stringify({ ok: report.ok, sizes: report.sizes, csp: violations.length, axUnnamed: unnamed, errors: report.errors }, null, 2));
   process.exitCode = report.ok ? 0 : 1;
 }
 
-await main();
+if (isMain) await main();

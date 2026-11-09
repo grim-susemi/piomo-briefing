@@ -6,6 +6,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import { pageHtml } from '../src/render.mjs';
+import { CLASSIC_SCRIPTS, readClassicScript } from '../src/page-script.mjs';
 import { canonicalLf, profilesArtifact, readProfilesScript } from '../src/profiles-script.mjs';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -70,16 +71,17 @@ for (const [name, source, artifact, error] of failures) {
 test('the page ships only the verified body in the old classic-script position and leaves other chunks intact', () => {
   // Given the actual generated page and its readable CSS/other scripts.
   const html = pageHtml(BOARD, 7);
-  const names = ['icons', 'view', 'plan-view', 'workers-view', 'blocks', 'convo-view', 'shell', 'profiles-view', 'alarm', 'annotate', 'cards-view', 'office-assets', 'office-model', 'office-view', 'page'];
+  const names = ['icons', 'view', 'plan-view', 'roadmap-view', 'workers-view', 'blocks', 'convo-view', 'shell', 'profiles-view', 'alarm', 'annotate', 'cards-view', 'office-assets', 'office-model', 'office-view', 'page'];
   // When extracting its ordinary inline scripts.
   const scripts = [...html.matchAll(/<script>\n([\s\S]*?)\n<\/script>/g)].map((match) => match[1]);
-  // Then only the profiles representation differs, at index 7, before page initialization.
+  // Then only the profiles representation differs, at index 8, before page initialization.
   assert.equal(scripts.length, names.length + 1);
   for (const [index, name] of names.entries()) {
-    const expected = name === 'profiles-view' ? PAYLOAD : read('src/page/' + name + '.js');
+    const expected = name === 'profiles-view' ? PAYLOAD :
+      CLASSIC_SCRIPTS.includes(name + '.js') ? readClassicScript(PAGE_DIR, name + '.js') : read('src/page/' + name + '.js');
     assert.equal(scripts[index], expected.replace(/<(\/?script|!--)/gi, '\\x3C$1'), name);
   }
-  const styles = ['tokens', 'page', 'plan-view', 'workers-view', 'alarm', 'shell', 'profiles-view', 'convo', 'blocks', 'annotate', 'cards-view', 'office'];
+  const styles = ['tokens', 'page', 'plan-view', 'roadmap-view', 'workers-view', 'alarm', 'shell', 'profiles-view', 'convo', 'blocks', 'annotate', 'cards-view', 'office'];
   assert.equal(/<style>\n([\s\S]*?)\n<\/style>/.exec(html)[1], styles.map((name) => read('src/page/' + name + '.css').replace(/<\/style/gi, '<\\/style')).join('\n'));
   assert.equal(html.includes(ARTIFACT.split('\n')[0]), false);
 });

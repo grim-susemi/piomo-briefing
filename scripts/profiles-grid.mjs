@@ -140,9 +140,11 @@ export function assertPurposeGrid(result, label, expectedColumns) {
   for (const m of result.expanded) {
     assert.equal(m.span, '1 / -1', `${label} ${m.row}: full span`);
     assert.deepEqual(m.openGroups, [m.group], `${label}: no stale expanded group`);
-    assert.equal(m.widths.length, 3);
-    assert.ok(Math.min(...m.widths) > 0 && Math.max(...m.widths) - Math.min(...m.widths) <= 1, `${label}: select3 ${m.widths}`);
-    assert.deepEqual(m.topmost, [true, true, true], `${label}: select3 topmost`);
+    assert.equal(m.widths.length, 4, 'three primary fields and one explicit backup');
+    const primaryWidths = m.widths.slice(0, 3);
+    assert.ok(Math.min(...primaryWidths) > 0 && Math.max(...primaryWidths) - Math.min(...primaryWidths) <= 1, `${label}: select3 ${m.widths}`);
+    assert.ok(m.widths[3] >= Math.max(...primaryWidths), `${label}: backup field spans the editor`);
+    assert.deepEqual(m.topmost, [true, true, true, true], `${label}: every model field is topmost`);
     assert.equal(m.horizontalScroll, 0);
   }
   for (const [mode, m] of Object.entries(result.navigation)) {

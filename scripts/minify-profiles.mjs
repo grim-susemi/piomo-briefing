@@ -10,8 +10,8 @@ const SOURCE = join(ROOT, 'src', 'page', 'profiles-view.js');
 const OUTPUT = join(ROOT, 'src', 'page', 'generated', 'profiles-view.min.js');
 // This recipe was reviewed for this source, not for arbitrary JavaScript.
 // Primary summaries share main draft values; guide drafts and native focus follow profile/tab scope.
-const REVIEWED_SOURCE = 'b2eedd39fe19b1bc639f4f7966bed4fadcabb3987c90ef0177c314271b001f49';
-const REVIEWED_PAYLOAD = 'bf6a58a95d7e997388ae30a09e918f5a2b15fe5b25d5d56042785390239c1311';
+const REVIEWED_SOURCE = '6c7ab32fbf3c0dca66b491f57fb665eacd874d73872614c5a5986955284dd903';
+const REVIEWED_PAYLOAD = 'f8dacc34b10da880f6e618fb3855fb9306beb3ba33a22d2d1ae99ddc12b6a0b2';
 
 try {
   if (typeof Bun === 'undefined' || Bun.version !== '1.4.0') throw new Error('regeneration requires Bun 1.4.0');
@@ -23,7 +23,7 @@ try {
     entrypoints: [SOURCE],
     target: 'browser',
     format: 'iife',
-    minify: { whitespace: true, identifiers: false, syntax: false },
+    minify: { whitespace: true, identifiers: true, syntax: false },
     env: 'disable',
     splitting: false,
     plugins: [{
@@ -39,7 +39,7 @@ try {
   if (!result.success || result.outputs.length !== 1) throw new Error('profiles compilation failed: ' + result.logs.join('\n'));
   const emitted = canonicalLf(await result.outputs[0].text());
   const suffix = '.call(globalThis);})();\n';
-  if (!emitted.startsWith('(()=>{(function(){(function(g){') ||
+  if (!/^\(\(\)=>\{\(function\(\)\{\(function\([A-Za-z_$][\w$]*\)\{/.test(emitted) ||
       !emitted.endsWith(suffix) || emitted.indexOf(suffix) !== emitted.length - suffix.length) {
     throw new Error('compiler scaffold changed: review classic-script correction');
   }

@@ -155,6 +155,19 @@
   --tabhue-9-bg: light-dark(hsl(270 45% 50% / 13%), hsl(270 50% 70% / 18%));
   --tabhue-10-bg: light-dark(hsl(300 40% 45% / 13%), hsl(300 40% 65% / 18%));
   --tabhue-11-bg: light-dark(hsl(330 45% 48% / 13%), hsl(330 50% 68% / 18%));
+  /* scoped roadmap kanban status colours (DESIGN.md) */
+  --rm-ready: light-dark(#0c7476, #5cc2c4);
+  --rm-ready-tint: light-dark(rgb(12 116 118 / 10%), rgb(92 194 196 / 13%));
+  --rm-running: light-dark(#1f6fd1, #5aa9ff);
+  --rm-running-tint: light-dark(rgb(31 111 209 / 10%), rgb(90 169 255 / 14%));
+  --rm-decision: light-dark(#8a5d00, #e3b955);
+  --rm-decision-tint: light-dark(rgb(196 140 0 / 10%), rgb(227 185 85 / 10%));
+  --rm-blocked: light-dark(#b3372e, #ef8379);
+  --rm-blocked-tint: light-dark(rgb(179 55 46 / 9%), rgb(239 131 121 / 13%));
+  --rm-done: light-dark(#155c33, #6ccb93);
+  --rm-done-tint: light-dark(rgb(29 122 69 / 10%), rgb(108 203 147 / 13%));
+  --rm-lane-bg: light-dark(var(--gray-100), var(--gray-850));
+
 }
 
 /* type: nothing heavier than 600 (the browser's own bold is 700) */

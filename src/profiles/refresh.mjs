@@ -35,11 +35,21 @@ function purposeGroup(section, role) {
   return 'extras';
 }
 
+// An agent missing from the bundle's builtin list is still served when the profile layer declares it
+// (the engine's `agents` record is open: oracle is declared there with its tools) or an agent file defines
+// it (agents/ouroboros.md). The task resolver reads its model from the same layer entry as a builtin's.
+function servedAgent(layer, agentFiles, role) {
+  const entry = layer?.agents?.[role];
+  return agentFiles.includes(role)
+    || (Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry) && entry.disable !== true);
+}
+
 // Every 5.1.44 inventory id appears as a row; absent ported roles stay visible and read-only.
-export function refreshRoutingRows({ inventory, layer = null }) {
+export function refreshRoutingRows({ inventory, layer = null, agentFiles = [] }) {
   const live = Object.fromEntries(['agents', 'categories'].map((section) => [section, new Set(inventoryIds(inventory, section))]));
   const rows = buildRoutingRows({ inventory: ROLE_INVENTORY, layer }).map((row) => {
-    const absent = !live[row.section].has(row.role);
+    const absent = !live[row.section].has(row.role)
+      && !(row.section === 'agents' && servedAgent(layer, agentFiles, row.role));
     return {
       ...row,
       readOnly: absent,

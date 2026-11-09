@@ -262,7 +262,17 @@ test('formatDecideResult failure line', () => {
 
 // ---- concurrency helpers (IPC start signal + bounded timeout, no sleeps) ----
 function runPair(root, textA, textB, { timeoutMs = 30000 } = {}) {
-  return runKids([fork(CHILD, [root, textA, 'sA']), fork(CHILD, [root, textB, 'sB'])], timeoutMs);
+  // These are IPC writer helpers; keep preloads, without starting another test runner.
+  const execArgv = [];
+  for (let i = 0; i < process.execArgv.length; i++) {
+    const arg = process.execArgv[i];
+    if (arg === '--test') continue;
+    if (arg.startsWith('--test-')) {
+      if (!arg.includes('=') && process.execArgv[i + 1] && !process.execArgv[i + 1].startsWith('-')) i++;
+    } else execArgv.push(arg);
+  }
+  const childOptions = { execArgv };
+  return runKids([fork(CHILD, [root, textA, 'sA'], childOptions), fork(CHILD, [root, textB, 'sB'], childOptions)], timeoutMs);
 }
 
 function runKids(kids, timeoutMs) {

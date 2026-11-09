@@ -154,10 +154,15 @@ const BASELINE_PAGE_BYTES = 563709;
 // "퀄리티 좋아지는거면 제한 올려도됨 대신에 마지막엔 최적화 렉 안걸리는 정도로 검수해서 마무리만 하자".
 // OFFICE_ALLOWANCE_BYTES records the measured bytes of the office files (art, model, view, css) as they sit in this page
 // (each script in its 20 B <script>\n...\n</script>\n wrapper, the sheet with its join newline), measured when the office
-// files last changed (plan todo 8, the visual QA round 6 fix); it is taken out of the growth and the 32 KB budget still holds
+// files last changed (plan todo 8, the visual QA round 6 fix); it is taken out of the growth budget
 // for everything else. No further size cap: lag is judged by todo 7 (CPU budget) and F3. The diagnostic prints the
 // current office bytes; re-record the constant under the same decision when the office files change.
 const OFFICE_ALLOWANCE_BYTES = 151700;
+// Owner decision, Discord message 1568084864203366411, 2026-11-06: raise the growth budget.
+// At the decision: rest = 67,945 B, page growth = 219,645 B, office = 151,700 B;
+// headroom = 13,975 B. BASELINE_PAGE_BYTES (563,709) and OFFICE_ALLOWANCE_BYTES
+// (151,700) remain unchanged, and the 2 MiB page cap still applies.
+const GROWTH_BUDGET_BYTES = 81920;
 const OFFICE_FILES = ['office-assets.js', 'office-model.js', 'office-view.js', 'office.css'];
 function officeChunks() {
   return OFFICE_FILES.map((f) => {
@@ -166,7 +171,7 @@ function officeChunks() {
   });
 }
 
-test('fixture page growth over the accepted tree stays within 32 KB (whole page; icon payload printed too)', (t) => {
+test('fixture page growth over the accepted tree stays within 80 KiB (whole page; icon payload printed too)', (t) => {
   const notice = /<!--\nIcons: Lucide[\s\S]*?-->\n/.exec(PAGE)[0];
   const bytes = { sprite: Buffer.byteLength(SPRITE[0]), notice: Buffer.byteLength(notice), script: Buffer.byteLength(read('src/page/icons.js')) };
   bytes.payload = bytes.sprite + bytes.notice + bytes.script;
@@ -180,5 +185,5 @@ test('fixture page growth over the accepted tree stays within 32 KB (whole page;
   bytes.allowance = OFFICE_ALLOWANCE_BYTES;
   bytes.rest = bytes.growth - OFFICE_ALLOWANCE_BYTES;
   t.diagnostic('page growth vs ' + BASELINE_TREE + ': ' + bytes.growth + ' B (office allowance ' + OFFICE_ALLOWANCE_BYTES + ' B, office files now ' + bytes.office + ' B, everything else ' + bytes.rest + ' B)');
-  assert.ok(bytes.rest <= 32 * 1024, JSON.stringify(bytes));
+  assert.ok(bytes.rest <= GROWTH_BUDGET_BYTES, JSON.stringify(bytes));
 });

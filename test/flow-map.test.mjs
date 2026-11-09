@@ -244,20 +244,98 @@ test('F8 checks disclosure, tab preparation, memory document order and only addi
 });
 
 
-test('board: the docked message tray is inside the viewport at both fixture sizes', { timeout: 280000 }, async () => {
+test('board: the message tray sits in flat flow below cards/detail and is reachable inside #main as the sole vertical scroller at both fixture sizes (#849 A)', { timeout: 280000 }, async () => {
   const { execFileSync } = await import('node:child_process');
   const { mkdtempSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
+  const { launch } = await import('../scripts/cdp.mjs');
+  const { startBoard, settle, openScreen } = await import('../scripts/qa-flow-map.mjs');
   const out = mkdtempSync(join(tmpdir(), 'omo-flow-tray-'));
+  let boardServer = null;
+  let page = null;
   try {
     execFileSync(process.execPath, ['scripts/qa-flow-map.mjs', '--out', out], { cwd: process.cwd(), stdio: 'pipe', timeout: 270000 });
+
+    boardServer = await startBoard(join(out, 'verify-board'));
+    page = await launch({ width: 1180, height: 700 });
+
     for (const size of ['1180x700', '1600x900']) {
+      const [w, h] = size.split('x').map(Number);
+      await page.client.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+      await openScreen(page, boardServer.url);
+      await settle(page);
+
       const map = JSON.parse(readFileSync(join(out, `flow-map.board-${size}.json`), 'utf8'));
-      const box = map.regions.find((r) => r.id === 'message').box;
-      assert.ok(box.y >= 0, `${size}: message top ${box.y} is on screen`);
-      assert.ok(box.y + box.h <= map.frame.inner.h + 1, `${size}: message bottom ${box.y + box.h} is inside ${map.frame.inner.h}`);
+      const access = map.messageAccess;
+      assert.deepEqual(access.owners, ['main'], `${size}: only main owns vertical scroll`);
+      assert.ok(access.after > access.before, `${size}: main actually scrolls to the tray`);
+      assert.equal(access.windowAfter, access.windowBefore, `${size}: document does not scroll`);
+      assert.ok(access.visible && access.onTop, `${size}: reached tray is visible and unoccluded`);
+      assert.ok(access.top >= access.mainTop && access.top >= 0, `${size}: tray top is inside main`);
+      assert.ok(access.bottom <= access.mainBottom + 1 && access.bottom <= map.frame.inner.h + 1, `${size}: tray bottom is inside main and viewport`);
+      const cards = map.regions.find((r) => r.id === 'cards').box;
+      const detail = map.regions.find((r) => r.id === 'detail').box;
+      const msgRegion = map.regions.find((r) => r.id === 'message');
+      const box = msgRegion.box;
+      const panesBottom = Math.max(cards.y + cards.h, detail.y + detail.h);
+      assert.equal(msgRegion.inDetail, false, `${size}: message tray is outside .pf-detail`);
+      assert.ok(box.w > 0 && box.h > 0, `${size}: message tray has positive dimensions`);
+      assert.ok(box.y >= cards.y + cards.h && box.y >= detail.y + detail.h, `${size}: message top ${box.y} sits below cards (${cards.y + cards.h}) and detail (${detail.y + detail.h})`);
+      assert.ok(box.y + box.h <= panesBottom + box.h + 48 && box.y + box.h <= map.frame.inner.h * 2, `${size}: message bottom ${box.y + box.h} is reachable within #main scroll extent`);
+      for (const [taskName, steps] of Object.entries(map.tasks)) {
+        for (const step of steps) {
+          assert.equal(step.box.container, '#main', `${size} ${taskName} ${step.control}: #main is the sole vertical scroll container`);
+          assert.ok(step.scrolls <= 1, `${size} ${taskName} ${step.control}: reachable within S <= 1 (got ${step.scrolls})`);
+          for (const mv of step.moved || []) {
+            assert.equal(mv.container, '#main', `${size} ${taskName} ${step.control}: only #main may scroll vertically`);
+          }
+          assert.equal(step.hit && step.hit.onTop, true, `${size} ${taskName} ${step.control}: control is not occluded by tray`);
+          assert.ok(
+            step.live.message.y >= step.live.cards.y + step.live.cards.h &&
+            step.live.message.y >= step.live.detail.y + step.live.detail.h,
+            `${size} ${taskName} ${step.control}: live message tray stays below cards and detail`
+          );
+        }
+      }
+      const roleApply = map.tasks.role.find((s) => s.control === 'apply:detail');
+      assert.ok(roleApply, `${size}: apply:detail step exists`);
+
+      // Measure actual reachability of the message tray in #main:
+      // Scrolling #main to the tray must place the tray fully inside #main's visible extent,
+      // and the tray's bottom in #main's coordinate space must not exceed #main's scrollHeight.
+      const trayReach = await page.eval(`(() => {
+        const main = document.querySelector('#main');
+        const tray = document.querySelector('[data-flow="message"]');
+        if (!main || !tray) return { missing: true };
+
+        const mrBefore = main.getBoundingClientRect();
+        const trBefore = tray.getBoundingClientRect();
+        const trayBottomInMain = (trBefore.bottom - mrBefore.top) + main.scrollTop;
+
+        tray.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+
+        const mr = main.getBoundingClientRect();
+        const tr = tray.getBoundingClientRect();
+        const visibleInMain = tr.top >= mr.top && tr.bottom <= mr.bottom;
+        const reachedBottom = trayBottomInMain <= main.scrollHeight;
+
+        return {
+          missing: false,
+          visibleInMain,
+          reachedBottom,
+          mainScrollTop: main.scrollTop,
+          mainScrollHeight: main.scrollHeight,
+          trayBottomInMain,
+        };
+      })()`);
+
+      assert.equal(trayReach.missing, false, `${size}: #main and message tray must exist in DOM`);
+      assert.equal(trayReach.visibleInMain, true, `${size}: message tray becomes visible inside #main viewport when scrolled into view`);
+      assert.equal(trayReach.reachedBottom, true, `${size}: message tray bottom (${trayReach.trayBottomInMain}) is reachable within #main scroll extent (${trayReach.mainScrollHeight})`);
     }
   } finally {
+    if (page) await page.close().catch(() => {});
+    if (boardServer && boardServer.server) await boardServer.server.close().catch(() => {});
     rmSync(out, { recursive: true, force: true });
   }
 });

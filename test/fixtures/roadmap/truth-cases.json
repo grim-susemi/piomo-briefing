@@ -1,0 +1,280 @@
+{
+  "schemaVersion": 1,
+  "decisionTransition": {
+    "before": {"kind":"decision","gateId":"fixture-gate","decisionId":null,"scope":"fixture scope","operation":"implement"},
+    "after": {"kind":"decision","gateId":"fixture-gate","decisionId":42,"scope":"fixture scope","operation":"implement"},
+    "decision": {"id":42,"scope":"fixture scope","operation":"implement","answer":"approved"}
+  },
+  "cases": [
+    {
+      "id": "ready",
+      "input": {
+        "unfinished": true,
+        "requirements": "met",
+        "decision": "approved",
+        "evidence": "current",
+        "running": false
+      },
+      "expected": {
+        "ready": true,
+        "decisionNeeded": false,
+        "blocked": false,
+        "unknown": false
+      }
+    },
+    {
+      "id": "unasked",
+      "input": {
+        "unfinished": true,
+        "requirements": "met",
+        "decision": "unasked",
+        "evidence": "current",
+        "running": false
+      },
+      "expected": {
+        "ready": false,
+        "decisionNeeded": true,
+        "blocked": false,
+        "unknown": false
+      }
+    },
+    {
+      "id": "open",
+      "input": {
+        "unfinished": true,
+        "requirements": "met",
+        "decision": "open",
+        "evidence": "current",
+        "running": false
+      },
+      "expected": {
+        "ready": false,
+        "decisionNeeded": true,
+        "blocked": false,
+        "unknown": false
+      }
+    },
+    {
+      "id": "held",
+      "input": {
+        "unfinished": true,
+        "requirements": "met",
+        "decision": "held",
+        "evidence": "current",
+        "running": false
+      },
+      "expected": {
+        "ready": false,
+        "decisionNeeded": false,
+        "blocked": false,
+        "unknown": true
+      }
+    },
+    {
+      "id": "reject",
+      "input": {
+        "unfinished": true,
+        "requirements": "met",
+        "decision": "rejected",
+        "evidence": "current",
+        "running": false
+      },
+      "expected": {
+        "ready": false,
+        "decisionNeeded": false,
+        "blocked": true,
+        "unknown": false
+      }
+    },
+    {
+      "id": "unanswered",
+      "input": {
+        "unfinished": true,
+        "requirements": "met",
+        "decision": "unanswered",
+        "evidence": "current",
+        "running": false
+      },
+      "expected": {
+        "ready": false,
+        "decisionNeeded": false,
+        "blocked": false,
+        "unknown": true
+      }
+    },
+    {
+      "id": "owner-and-blocked",
+      "input": {
+        "unfinished": true,
+        "requirements": "blocked",
+        "decision": "open",
+        "evidence": "current",
+        "running": false
+      },
+      "expected": {
+        "ready": false,
+        "decisionNeeded": true,
+        "blocked": true,
+        "unknown": false
+      }
+    },
+    {
+      "id": "owner-and-unknown",
+      "input": {
+        "unfinished": true,
+        "requirements": "met",
+        "decision": "open",
+        "evidence": "missing",
+        "running": false
+      },
+      "expected": {
+        "ready": false,
+        "decisionNeeded": true,
+        "blocked": false,
+        "unknown": true
+      }
+    },
+    {
+      "id": "stale",
+      "input": {
+        "unfinished": true,
+        "requirements": "met",
+        "decision": "approved",
+        "evidence": "stale",
+        "running": false
+      },
+      "expected": {
+        "ready": false,
+        "decisionNeeded": false,
+        "blocked": false,
+        "unknown": true
+      }
+    },
+    {
+      "id": "running",
+      "input": {
+        "unfinished": true,
+        "requirements": "met",
+        "decision": "approved",
+        "evidence": "current",
+        "running": true
+      },
+      "expected": {
+        "ready": false,
+        "decisionNeeded": false,
+        "blocked": false,
+        "unknown": false
+      }
+    },
+    {
+      "id": "exit-unconfirmed",
+      "input": {
+        "unfinished": false,
+        "requirements": "met",
+        "decision": "approved",
+        "evidence": "missing",
+        "running": false
+      },
+      "expected": {
+        "ready": false,
+        "decisionNeeded": false,
+        "blocked": false,
+        "unknown": true
+      }
+    }
+  ],
+  "structuralCases": [
+    {
+      "id": "malformed",
+      "input": {
+        "keys": [
+          "schemaVersion",
+          "bogus"
+        ]
+      },
+      "expected": "reject"
+    },
+    {
+      "id": "duplicate",
+      "input": {
+        "stageIds": [
+          "a",
+          "a"
+        ]
+      },
+      "expected": "reject"
+    },
+    {
+      "id": "cycle",
+      "input": {
+        "edges": [
+          [
+            "a",
+            "b"
+          ],
+          [
+            "b",
+            "a"
+          ]
+        ]
+      },
+      "expected": "reject"
+    },
+    {
+      "id": "path-escape",
+      "input": {
+        "root": "C:/workspace",
+        "path": "C:/workspace/../private/file.md"
+      },
+      "expected": "reject"
+    },
+    {
+      "id": "empty",
+      "input": {
+        "inventory": [],
+        "complete": true
+      },
+      "expected": "no-work"
+    },
+    {
+      "id": "shared-plan",
+      "input": {
+        "stages": [
+          {
+            "path": "C:/workspace/.omo/plans/shared.md",
+            "taskIds": null
+          },
+          {
+            "path": "C:/workspace/.omo/plans/shared.md",
+            "taskIds": null
+          }
+        ]
+      },
+      "expected": "reject"
+    },
+    {
+      "id": "truncated",
+      "input": {
+        "inventory": [
+          "1"
+        ],
+        "tailComplete": false
+      },
+      "expected": "unknown-denominator"
+    },
+    {
+      "id": "wrong-receipt-operation",
+      "input": {
+        "conditionOperation": "accept",
+        "receipt": {
+          "schemaVersion": 1,
+          "result": "pass",
+          "operation": "implement",
+          "subjectHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "checkedAt": "2026-11-05T00:00:00Z"
+        }
+      },
+      "expected": "reject"
+    }
+  ]
+}

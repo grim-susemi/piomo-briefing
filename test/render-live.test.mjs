@@ -165,12 +165,12 @@ test('pageHtml inlines every page module and the first-paint model, with generat
   const html = pageHtml(vm, 4, { mode: 'server' });
   assert.match(html, /<meta name="omo-briefing-generation" content="4">/);
   assert.match(html, /<meta name="omo-briefing-mode" content="server">/);
-  const order = ['BriefIcons', 'BriefView', 'BriefPlanView', 'BriefWorkersView', 'BriefBlocks', 'BriefConvo', 'BriefShell', 'BriefProfiles', 'BriefAlarm', 'BriefAnnotate', 'BriefCards', 'BriefOfficeArt', 'BriefOffice', 'BriefOfficeView', 'BriefPage'].map((name) => html.search(new RegExp('\\bg\\.' + name + '\\s*=')));
-  assert.ok(order.every((i) => i > 0), `all fifteen modules are inline: ${order}`);
+  const order = ['BriefIcons', 'BriefView', 'BriefPlanView', 'BriefRoadmapView', 'BriefWorkersView', 'BriefBlocks', 'BriefConvo', 'BriefShell', 'BriefProfiles', 'BriefAlarm', 'BriefAnnotate', 'BriefCards', 'BriefOfficeArt', 'BriefOffice', 'BriefOfficeView', 'BriefPage'].map((name) => html.search(new RegExp('\\.' + name + '\\s*=')));
+  assert.ok(order.every((i) => i > 0), `all sixteen modules are inline: ${order}`);
   assert.deepEqual(order, [...order].sort((a, b) => a - b), 'icons.js first, page.js last');
   for (const css of ['.plan-view', '.w-row', '.alarm-sound', '.sh-shell', '.pf-sec', '.cv-page', '.ann-tray', '.mcards-root', '.of-stage']) assert.ok(html.includes(css), css);
   assert.doesNotMatch(html, /alarm-band|alarm-row|--alarm-h/, 'the page contains no removed-band markup, styles or offsets');
-  assert.equal((html.match(/<script>/g) ?? []).length, 16, 'fifteen modules + first paint');
+  assert.equal((html.match(/<script>/g) ?? []).length, 17, 'sixteen modules + first paint');
   assert.ok(!html.includes('</script><script>alert(1)'));
   assert.equal(pageHtml(vm, null, { mode: 'file' }).includes('omo-briefing-generation'), false);
 });
@@ -225,7 +225,7 @@ test('pageHtml server mode stamps the style and every script with the same nonce
   const served = pageHtml(vm, 4, { mode: 'server', token: 't', nonce: PAGE_NONCE });
   const fileTags = pageTags(file), servedTags = pageTags(served);
   assert.equal(servedTags.filter((t) => t.startsWith('<style')).length, 1, 'one combined style');
-  assert.equal(servedTags.filter((t) => t.startsWith('<script')).length, 16, 'fifteen modules + the first paint');
+  assert.equal(servedTags.filter((t) => t.startsWith('<script')).length, 17, 'sixteen modules + the first paint');
   assert.equal(servedTags.length, fileTags.length, 'the nonce changes no tag count');
   for (const tag of servedTags) assert.ok(tag.includes(`nonce="${PAGE_NONCE}"`), `missing nonce: ${tag.slice(0, 40)}`);
   assert.equal(pageHtml(vm, 4, { mode: 'file', nonce: PAGE_NONCE }), file, 'file mode ignores the nonce');
@@ -890,16 +890,20 @@ const readData = (root) => {
 };
 // Publish the same template with both renderers (fresh copies, so both get seq 1).
 async function publishBoth(t, template) {
+  console.error('C_CAP2', JSON.stringify({ phase: 'prepare', template, atMs: Math.round(performance.now()) }));
   const O = await oracle();
   const a = tmp(t, 'omo-cap2-o-'), b = tmp(t, 'omo-cap2-n-');
   nodeFs.cpSync(template, a, { recursive: true });
   nodeFs.cpSync(template, b, { recursive: true });
+  console.error('C_CAP2', JSON.stringify({ phase: 'accepted-publish', atMs: Math.round(performance.now()) }));
   const ro = O.render.renderPage(O.store.openStore(a), NOW, { isAlive: () => false, sleep: () => {} });
+  console.error('C_CAP2', JSON.stringify({ phase: 'candidate-publish', atMs: Math.round(performance.now()) }));
   const rn = renderPage(openStore(b), NOW, { isAlive: () => false, sleep: () => {}, fold: false });
   assert.equal(ro.ok, true, 'oracle published');
   assert.equal(rn.ok, true, 'new renderer published');
   const o = readData(a), n = readData(b);
   assert.equal(o.vm.seq, n.vm.seq, 'same final seq');
+  console.error('C_CAP2', JSON.stringify({ phase: 'complete', atMs: Math.round(performance.now()) }));
   return { o, n, newRoot: b };
 }
 const strip = (vm) => {
@@ -1094,7 +1098,10 @@ for (const [name, c] of Object.entries(LEGACY_CASES)) {
   test(`C-CAP2 legacy drops never grow a card: ${name} at the oracle boundary fits whenever the accepted renderer fits`, async () => {
     const O = await oracle();
     const opts = { isAlive: () => false, stateDir: 'C:/board/state' };
-    const o = (n) => O.render.buildViewModel(memSnap(n, c), NOW, opts);
+    const o = (n) => {
+      console.error('C_CAP2', JSON.stringify({ phase: 'legacy-boundary', name, n, atMs: Math.round(performance.now()) }));
+      return O.render.buildViewModel(memSnap(n, c), NOW, opts);
+    };
     const chipless = (vm) => vm.sessions.every((s) => !s.chips.includes(OMITTED_CHIP));
     // two boundaries of the accepted renderer: the largest N it fits untrimmed, and the largest N it fits after its own trimming
     for (const [label, ok] of [['untrimmed', (vm) => memFits(memSize(vm)) && chipless(vm)], ['after its own trim', (vm) => memFits(memSize(vm))]]) {

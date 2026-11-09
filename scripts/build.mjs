@@ -6,6 +6,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { readProfilesScript } from '../src/profiles-script.mjs';
+import { CLASSIC_SCRIPTS, readClassicScript } from '../src/page-script.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = dirname(HERE);
@@ -34,6 +35,7 @@ try {
   }
   // Validate the staged pair, not just the working source, before touching old dist.
   readProfilesScript(join(STAGE, 'src', 'page'));
+  for (const name of CLASSIC_SCRIPTS) readClassicScript(join(STAGE, 'src', 'page'), name);
   for (const f of listJs(STAGE)) {
     const r = spawnSync(process.execPath, ['--check', f], { encoding: 'utf8' });
     if (r.status !== 0) throw new Error('syntax check failed: ' + f + '\n' + (r.stderr || r.stdout));

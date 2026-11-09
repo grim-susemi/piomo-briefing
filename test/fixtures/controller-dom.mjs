@@ -62,6 +62,7 @@ class Element {
   set value(v) { this._value = String(v ?? ''); }
   get classes() { return new Set((this.attrs.class || '').split(/\s+/).filter(Boolean)); }
   get ownerDocument() { return this.win.document; }
+  get parentElement() { return this.parentNode?.nodeType === 1 ? this.parentNode : null; }
   get id() { return this.attrs.id || ''; }
   set id(v) { this.attrs.id = v; }
   get className() { return this.attrs.class || ''; }
@@ -151,9 +152,10 @@ export function memoryStorage() {
   return { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), size: () => m.size };
 }
 export function makeController({ protocol = 'http:', token = 'tok-1', generation = null, sessionStorage = memoryStorage(),
-  localStorage = memoryStorage(), abort = false, modules = ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'annotate'], configure } = {}) {
+  localStorage = memoryStorage(), abort = false, modules = ['icons', 'view', 'plan-view', 'convo-view', 'shell', 'annotate'], scriptBodies = {}, configure } = {}) {
   let clock = 1000;
   let uuid = 0;
+  const microtasks = [];
   const timers = [], intervals = [], fetches = [], errors = [], reloads = [], sources = [], rendered = [], scrolls = [];
   const ctx = {
     rects: new Map(), scrolled: [], innerWidth: 1440, innerHeight: 900, scrollY: 0,
@@ -163,6 +165,7 @@ export function makeController({ protocol = 'http:', token = 'tok-1', generation
     setTimeout(fn, ms) { const t = { fn, ms, at: clock + ms }; timers.push(t); return t; },
     clearTimeout(t) { const i = timers.indexOf(t); if (i >= 0) timers.splice(i, 1); },
     setInterval(fn, ms) { intervals.push({ fn, ms }); return intervals.length; },
+    queueMicrotask(fn) { microtasks.push(fn); },
     addEventListener() {}, matchMedia: () => ({ matches: ctx.innerWidth < 900 }),
     scrollTo(x, y) { ctx.scrollY = y; scrolls.push(y); },
     selection: { isCollapsed: true, toString: () => '', rangeCount: 0, removeAllRanges() { this.isCollapsed = true; } },
@@ -196,9 +199,9 @@ export function makeController({ protocol = 'http:', token = 'tok-1', generation
     };
   }
   vm.createContext(ctx);
-  for (const name of modules) vm.runInContext(fs.readFileSync(new URL('../../src/page/' + name + '.js', import.meta.url), 'utf8'), ctx, { filename: name + '.js' });
+  for (const name of modules) vm.runInContext(scriptBodies[name] ?? fs.readFileSync(new URL('../../src/page/' + name + '.js', import.meta.url), 'utf8'), ctx, { filename: name + '.js' });
   configure?.(ctx, rendered);
-  vm.runInContext(fs.readFileSync(new URL('../../src/page/page.js', import.meta.url), 'utf8'), ctx, { filename: 'page.js' });
+  vm.runInContext(scriptBodies.page ?? fs.readFileSync(new URL('../../src/page/page.js', import.meta.url), 'utf8'), ctx, { filename: 'page.js' });
   const page = ctx.BriefPage; page.state.now = () => clock;
   const byId = new Proxy({}, { get: (_, id) => document.getElementById(id) });
   const fire = (target, type, props = {}) => {
@@ -217,17 +220,29 @@ export function makeController({ protocol = 'http:', token = 'tok-1', generation
     }
     return ev;
   };
+  const flushMicrotasks = () => { while (microtasks.length) microtasks.shift()(); };
+  const advance = ms => {
+    const until = clock + ms;
+    for (;;) {
+      timers.sort((a, b) => a.at - b.at);
+      if (!timers.length || timers[0].at > until) break;
+      const t = timers.shift(); clock = t.at; t.fn();
+    }
+    clock = until;
+  };
   return {
     page, ctx, byId, app: byId.app, document, timers, intervals, fetches, errors, reloads, rendered, scrolls, sources,
     selection: ctx.selection, status: byId['live-status'], badge: byId['new-badge'], link: byId['live-link'], fire,
-    advance(ms) {
-      const until = clock + ms;
-      for (;;) {
-        timers.sort((a, b) => a.at - b.at);
-        if (!timers.length || timers[0].at > until) break;
-        const t = timers.shift(); clock = t.at; t.fn();
-      }
-      clock = until;
+    flushMicrotasks,
+    toggleDetails(details) {
+      const summary = details.querySelector('summary');
+      assert.ok(summary, 'details has its actual summary');
+      const event = fire(summary, 'click', { isTrusted: true });
+      if (!event.defaultPrevented) details.open = !details.open;
+      flushMicrotasks();
+      advance(0);
+      return event;
     },
+    advance,
   };
 }

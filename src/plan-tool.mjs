@@ -23,6 +23,7 @@ import {
   validatePlanBrief, planIdOf, rootAndSlugOf, PLAN_BRIEF_PARAMETERS, PLAN_BRIEF_DESCRIPTION,
 } from './plan-schema.mjs';
 import { computePlanStatus, findPlanForSession, readWithPolicy } from './plan-status.mjs';
+import { refreshRoadmapStatuses } from './roadmap-status.mjs';
 
 export const PLAN_REV_SCHEMA = 'omo-plan/1';
 export const PLAN_CHIP_NO_SUMMARY = '계획 요약 없음';
@@ -332,6 +333,15 @@ export function createPlanTool(opts) {
   async function settle() {
     if (!isEnabled()) return [];
     const t = nowMs();
+    try {
+      const roadmaps = await refreshRoadmapStatuses(store, { now: t, sleep: opts.sleep, canWrite: isEnabled });
+      if (!isEnabled()) return [];
+      if (roadmaps.changed) await publish();
+      onRecover('roadmap:refresh');
+    } catch (err) {
+      if (!isEnabled()) return [];
+      onError('roadmap:refresh', err);
+    }
     const meta = getMeta();
     let plans = [];
     try {

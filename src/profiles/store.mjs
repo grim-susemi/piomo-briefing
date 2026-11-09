@@ -45,6 +45,9 @@ import {
 import { composeHomeRegistry, getCommonServedModels, supportStatusFor, validateSelection } from './registry.mjs';
 import { allocationGuideRows, chatGptPickerModels, recommendationGuide, refreshRoutingRows } from './refresh.mjs';
 import { compareRecommendation, getRecommendationManifestShape } from './recommend.mjs';
+import { webDeepseekState, webDeepseekDeclaration, setWebDeepseek } from './web-deepseek.mjs';
+import { ROLE_BACKUP_FILE, readRoleBackups, roleBackup, setRoleBackup } from './role-backup.mjs';
+import { ADVISOR_FILE, readAdvisors, setAdvisorModel } from './oracle-advisors.mjs';
 
 export const PRIMARY_HOME_DEFAULT = 'C:/Users/USER/.omo-stable-500/home/.omo';
 // Both mirror homes are absent on disk (2026-10-30), so the board has no mirror default.
@@ -77,9 +80,9 @@ const AGENT_ENTRY_KEYS = new Set(['description', 'prompt', 'model', 'models', 'r
   'reasoningEffort', 'tools', 'execution_mode', 'background', 'max_depth', 'allowed_subagents',
   'disallowed_tools', 'max_turns', 'temperature', 'disable', 'permission', 'prompt_append']);
 const PRIMARY_AGENT_KEYS = new Set(AGENT_IDS);
-const CHANGE_KINDS = new Set(['selectProfile', 'setRoute', 'setMain', 'setModelProfile',
+const CHANGE_KINDS = new Set(['selectProfile', 'setRoute', 'setRoleBackup', 'setMain', 'setModelProfile',
   'setSummarizer', 'setMemoryRow', 'setAgentLane', 'setAgentPin', 'resetAgentMemory',
-  'migrateReviewerKeys']);
+  'migrateReviewerKeys', 'setAdvisor']);
 const BODY_KEYS = ['action', 'changes', 'expected', 'rosterRevision'];
 const SHA256 = /^[0-9a-f]{64}$/;
 const RETRY_DELAYS_MS = [10, 20, 40, 80, 160];
@@ -241,11 +244,13 @@ function targetSpecs(roots, fs) {
     { id: 'agent/settings.json', root: 'primary', rel: 'agent/settings.json', kind: 'json', backup: 'senpi-settings', optional: false },
     { id: 'agent/models.json', root: 'primary', rel: 'agent/models.json', kind: 'json', backup: 'models', optional: true, neverWrite: true },
     { id: 'runtime/native-profile-switcher-main.json', root: 'primary', rel: 'runtime/native-profile-switcher-main.json', kind: 'json', backup: 'main', optional: true },
+    { id: ROLE_BACKUP_FILE, root: 'primary', rel: ROLE_BACKUP_FILE, kind: 'json', backup: 'role-backups', optional: true },
     { id: 'native-profile-selection.json', root: 'primary', rel: 'native-profile-selection.json', kind: 'json', backup: 'selection', optional: true },
     { id: 'agent/native-profile-selection.json', root: 'primary', rel: 'agent/native-profile-selection.json', kind: 'json', backup: 'agent-selection', optional: true },
     { id: 'stable/omo.jsonc', root: 'stable', rel: 'omo.jsonc', kind: 'jsonc', backup: 'stable-omo', optional: true },
     { id: 'stable/agent/models.json', root: 'stable', rel: 'agent/models.json', kind: 'json', backup: 'stable-models', optional: true, neverWrite: true },
     { id: 'agent/primary-agents/roster.json', root: 'stable', rel: 'agent/primary-agents/roster.json', kind: 'roster', backup: 'roster', optional: true },
+    { id: ADVISOR_FILE, root: 'primary', rel: ADVISOR_FILE, kind: 'json', backup: 'oracle-advisor-routing', optional: true },
   ];
   // One home for both roles: its omo.jsonc is already the primary target, so a stable copy would write the same file twice.
   if (homeKey(roots.primaryHome) === homeKey(roots.stableHome)) {
@@ -417,6 +422,7 @@ function changeError(change, index) {
   const allowed = {
     selectProfile: ['kind', 'profileKey'],
     setRoute: ['kind', 'profileKey', 'section', 'role', 'provider', 'model', 'thinking', 'alias'],
+    setRoleBackup: ['kind', 'profileKey', 'section', 'role', 'alias', 'provider', 'model', 'thinking'],
     setMain: ['kind', 'provider', 'model', 'thinking', 'profileKey'],
     setModelProfile: ['kind', 'selection', 'literal', 'profileKey'],
     setSummarizer: ['kind', 'modelId'],
@@ -425,6 +431,7 @@ function changeError(change, index) {
     setAgentPin: ['kind', 'agentId', 'pin'],
     resetAgentMemory: ['kind', 'agentId'],
     migrateReviewerKeys: ['kind', 'preimageSha256'],
+    setAdvisor: ['kind', 'advisor', 'provider', 'model', 'thinking'],
   }[change.kind];
   const unknown = Object.keys(change).filter((key) => !allowed.includes(key));
   if (unknown.length > 0) return `${at}.${unknown[0]} is not allowed`;
@@ -558,7 +565,7 @@ export function openProfilesStore(options = {}) {
     return join(roots.primaryHome, 'agent');
   }
 
-  function getHomeRegistry(homeKey) {
+  function baseHomeRegistry(homeKey) {
     if (options.registries) {
       const reg = options.registries[homeKey] ?? (options.registries.get ? options.registries.get(homeKey) : null);
       if (reg) return reg;
@@ -567,6 +574,15 @@ export function openProfilesStore(options = {}) {
       return options.composer(agentDirOf(homeKey));
     }
     return composeHomeRegistry(agentDirOf(homeKey), { lib: options.lib, timeoutMs: options.timeoutMs });
+  }
+  function getHomeRegistry(homeKey) {
+    const registry = baseHomeRegistry(homeKey);
+    const model = webDeepseekDeclaration(join(agentDirOf(homeKey), 'web-deepseek'));
+    if (!model || registry.unknown) return registry;
+    const modelId = `${model.provider}/${model.id}`;
+    return { ...registry, models: [...registry.models.filter((item) => item.modelId !== modelId),
+      { provider: model.provider, modelId, friendlyName: model.name,
+        reasoning: model.reasoning, levels: ['off'] }] };
   }
 
   function getRequiredHomes() {
@@ -615,16 +631,30 @@ export function openProfilesStore(options = {}) {
         models.push({ provider, id });
       }
     }
-    return chatGptPickerModels({ registryModels: models }).map((id) => ({
+    const picks = chatGptPickerModels({ registryModels: models }).map((id) => ({
       provider: CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE,
       model: `${CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE}/${id}`,
     }));
+    const webModel = webDeepseekDeclaration(join(agentDir, 'web-deepseek'));
+    if (webModel) picks.push({ provider: webModel.provider, model: `${webModel.provider}/${webModel.id}`, levels: ['off'] });
+    return picks;
+  }
+
+  // Agent definition files the engine serves besides its builtins (agents/<id>.md, e.g. ouroboros).
+  function agentFiles() {
+    try {
+      return fs.readdirSync(join(roots.primaryHome, 'agent', 'agents'))
+        .filter((name) => name.endsWith('.md')).map((name) => name.slice(0, -3));
+    } catch (error) {
+      if (error?.code === 'ENOENT') return [];
+      throw error;
+    }
   }
 
   function routingRowsFor(inventory, layer) {
     if (!inventory) return buildRoutingRows({ inventory: ROLE_INVENTORY, layer });
     try {
-      return refreshRoutingRows({ inventory, layer });
+      return refreshRoutingRows({ inventory, layer, agentFiles: agentFiles() });
     } catch {
       return buildRoutingRows({ inventory: ROLE_INVENTORY, layer });
     }
@@ -824,10 +854,16 @@ export function openProfilesStore(options = {}) {
     const config = configFile?.value ?? null;
     const settings = settingsFile?.value ?? null;
     const sidecar = sidecarFile?.value ?? null;
+    const roleBackupsFile = files.get(ROLE_BACKUP_FILE);
+    let roleBackups = { version: 1, profiles: {} };
+    let roleBackupsError = roleBackupsFile?.error?.message ?? null;
+    try { roleBackups = readRoleBackups(roleBackupsFile?.value); }
+    catch (error) { roleBackupsError = error.message; }
     const rosterRead = readRoster(agentDir, { fs });
     const layer = layerOf(config, profile);
     const catalog = config?.['[native]']?.models ?? config?.['[senpi]']?.models ?? null;
     const warnings = [];
+    if (roleBackupsError) warnings.push(`role backups: ${roleBackupsError}`);
     if (rosterRead.warning) warnings.push(rosterRead.warning.message ?? rosterRead.warning);
     if (configFile?.error) warnings.push(`omo.jsonc: ${configFile.error.message}`);
     if (settingsFile?.error) warnings.push(`agent/settings.json: ${settingsFile.error.message}`);
@@ -869,6 +905,15 @@ export function openProfilesStore(options = {}) {
     // provider (registry.mjs validateSelection). The view flags a saved main model outside the catalog with it.
     const withMainServed = (main) => withSupport(main, getFullModelId(main.effective.provider, main.effective.model));
 
+    const advisorFile = files.get(ADVISOR_FILE);
+    let advisorRows = [];
+    let advisorError = advisorFile?.error?.message ?? null;
+    if (!advisorError) {
+      try { advisorRows = readAdvisors(advisorFile?.value).map((row) => withSupport(row, row.model)); }
+      catch (error) { advisorError = error.message; }
+    }
+    if (advisorError) warnings.push(`oracle advisors: ${advisorError}`);
+
     const rows = routingRowsFor(inventoryRaw, layer).map((row) => {
       const entry = layer?.[row.section]?.[row.role];
       const model = isPlainObject(entry) ? entry.model ?? null : null;
@@ -878,6 +923,7 @@ export function openProfilesStore(options = {}) {
         ...row,
         model,
         reasoning,
+        backup: roleBackup(roleBackups, profile?.omoProfile, row.section, row.role, catalog),
       }, canonical);
     });
     const manifestRead = readRecommendationManifest();
@@ -1083,7 +1129,8 @@ export function openProfilesStore(options = {}) {
         const model = isPlainObject(entry) ? entry.model ?? null : null;
         const reasoning = isPlainObject(entry) ? entry.reasoning ?? entry.variant ?? null : null;
         const canonical = model && catalog?.[model]?.model ? catalog[model].model : model;
-        return withSupport({ ...row, model, reasoning }, canonical);
+        return withSupport({ ...row, model, reasoning,
+          backup: roleBackup(roleBackups, pProfile?.omoProfile, row.section, row.role, catalog) }, canonical);
       });
       const pRec = attachRecommendations(pRows, catalog, pLayer, manifestRead.manifest, layerPath(config, pProfile));
       const pMainOverride = pProfile ? readMainOverride(sidecar, pProfile.omoProfile) : null;
@@ -1094,6 +1141,8 @@ export function openProfilesStore(options = {}) {
       const pModelProfile = settings ? getModelProfileSettings(config ?? {}, pProfile?.omoProfile ?? '') : null;
       const pMemory = memoryFor(pProfile);
       return {
+        primaryBackups: Object.fromEntries(AGENT_IDS.map((id) =>
+          [id, roleBackup(roleBackups, pProfile?.omoProfile, 'primary', id, catalog)])),
         routing: { rows: pRows, layer: pLayer, recommendation: pRec },
         main: pMain,
         modelProfile: pModelProfile,
@@ -1165,6 +1214,8 @@ export function openProfilesStore(options = {}) {
       targets: targetsView,
       applyJournal: journalView(),
       warnings,
+      webDeepseek: webDeepseekState(join(agentDir, 'web-deepseek')),
+      advisors: { file: ADVISOR_FILE, exists: Boolean(advisorFile?.exists), rows: advisorRows, error: advisorError },
     };
     return redact(view);
   }
@@ -1333,6 +1384,52 @@ export function openProfilesStore(options = {}) {
         context.configTouched = true;
         break;
       }
+      case 'setRoleBackup': {
+        if (!config) return refusal('MISSING_CONFIG', 'omo.jsonc is missing');
+        const profileKey = change.profileKey ?? activeProfile(context.files)?.omoProfile;
+        if (!PROFILE_META.some((p) => p.omoProfile === profileKey)
+          || !isPlainObject(config.profiles?.[profileKey])) return refusal('BAD_REQUEST', 'Unknown backup profile.');
+        if (!['primary', 'agents', 'categories'].includes(change.section)
+          || !(change.section === 'primary' ? AGENT_IDS : ROLE_INVENTORY[change.section] ?? []).includes(change.role)) {
+          return refusal('BAD_REQUEST', 'Invalid role backup selection.');
+        }
+        const catalog = (config['[senpi]'] ?? config['[native]'])?.models;
+        const direct = ['provider', 'model', 'thinking'].some(key => Object.hasOwn(change, key));
+        let selection;
+        let definition;
+        if (direct) {
+          if (Object.hasOwn(change, 'alias')
+            || ['provider', 'model', 'thinking'].some(key => typeof change[key] !== 'string' || !change[key].trim())) {
+            return refusal('BAD_REQUEST', 'Choose backup service, model and reasoning explicitly.');
+          }
+          const fullModel = getFullModelId(change.provider, change.model);
+          definition = { model: fullModel, reasoning: change.thinking };
+          selection = { provider: change.provider, model: getModelIdWithoutProvider(fullModel), thinking: change.thinking };
+        } else {
+          if (typeof change.alias !== 'string') return refusal('BAD_REQUEST', 'Invalid backup alias.');
+          definition = change.alias ? catalog?.[change.alias] : null;
+        }
+        if (direct || change.alias) {
+          if (!isPlainObject(definition)) return refusal('BAD_REQUEST', 'Choose a registered model alias.');
+          if (change.section === 'primary' && change.role === 'hephaestus'
+            && !getModelIdWithoutProvider(definition.model).startsWith('gpt-')) {
+            return refusal('BAD_REQUEST', 'Hephaestus accepts GPT models only.');
+          }
+          if (definition.model?.startsWith('opencode-go/') && !/\/(?:ocg-)?muse-/i.test(definition.model)) {
+            return refusal('BAD_REQUEST', 'opencode-go supports Muse backup selections only.');
+          }
+          const homes = getRequiredHomes();
+          const valid = validateSelection({
+            kind: 'role', homes, model: direct ? definition.model : change.alias,
+            provider: direct ? change.provider : undefined,
+            effort: definition.reasoning ?? definition.variant ?? '',
+            registries: Object.fromEntries(homes.map((home) => [home, getHomeRegistry(home)])), catalog,
+          });
+          if (!valid.ok) return refusal(valid.code, 'This backup is not served by every required home.');
+        }
+        setRoleBackup({ selections: context.roleBackups, profileKey, section: change.section, role: change.role, alias: change.alias, selection });
+        break;
+      }
       case 'setMain': {
         if (!settings) return refusal('MISSING_CONFIG', 'agent/settings.json is missing');
         const profile = change.profileKey ? getProfile(change.profileKey)
@@ -1491,6 +1588,22 @@ export function openProfilesStore(options = {}) {
           agents: { ...roster.value.agents, [change.agentId]: { ...agent, rev: agent.rev + 1 } },
         };
         roster.touched = true;
+        break;
+      }
+      case 'setAdvisor': {
+        if (!isPlainObject(context.advisors.value)) return refusal('MISSING_CONFIG', `${ADVISOR_FILE} is missing`);
+        const model = change.model.includes('/') ? change.model : `${change.provider}/${change.model}`;
+        const homes = getRequiredHomes();
+        const valid = validateSelection({
+          kind: 'role', homes, provider: change.provider, model, effort: change.thinking,
+          registries: Object.fromEntries(homes.map((home) => [home, getHomeRegistry(home)])),
+        });
+        if (!valid.ok) return refusal(valid.code, 'This advisor model is not served by every required home.', { home: valid.home });
+        try {
+          context.advisors.value = setAdvisorModel(context.advisors.value, { advisor: change.advisor, model, thinking: change.thinking });
+        } catch (error) {
+          return refusal(error.code === 'ADVISOR_FAMILY' ? 'ADVISOR_FAMILY' : 'BAD_REQUEST', error.message);
+        }
         break;
       }
       case 'migrateReviewerKeys': {
@@ -1658,6 +1771,16 @@ export function openProfilesStore(options = {}) {
     const settings = { value: clone(settingsFile.value) };
     const sidecarFile = files.get('runtime/native-profile-switcher-main.json');
     const sidecar = { value: sidecarFile?.exists ? clone(sidecarFile.value) : {} };
+    const roleBackupsFile = files.get(ROLE_BACKUP_FILE);
+    if (roleBackupsFile?.error) return refusal('INVALID_CONFIG', 'The backup selections file cannot be read.');
+    let roleBackups;
+    try { roleBackups = readRoleBackups(roleBackupsFile?.value); }
+    catch (error) { return refusal('INVALID_CONFIG', error.message); }
+    const advisorFile = files.get(ADVISOR_FILE);
+    if (advisorFile?.error && body.changes.some((change) => change.kind === 'setAdvisor')) {
+      return refusal('INVALID_CONFIG', `${ADVISOR_FILE}: ${advisorFile.error.message}`);
+    }
+    const advisors = { value: advisorFile?.exists && !advisorFile.error ? clone(advisorFile.value) : null };
     const selections = new Map();
     for (const id of ['native-profile-selection.json', 'agent/native-profile-selection.json']) {
       const file = files.get(id);
@@ -1665,7 +1788,7 @@ export function openProfilesStore(options = {}) {
     }
     const rosterRead = readRoster(agentDir, { fs });
     const context = {
-      files, config, settings, sidecar, selections, warnings: [],
+      files, config, settings, sidecar, roleBackups, advisors, selections, warnings: [],
       roster: { value: clone(rosterRead.roster), touched: false, warning: rosterRead.warning },
       configTouched: false, configReplaced: false, nextConfig: null,
       selectedProfile: null, main: null, mainOverrides: [],
@@ -1741,6 +1864,12 @@ export function openProfilesStore(options = {}) {
     }
     if (!deepEqual(sidecarFile?.value ?? {}, sidecar.value)) {
       next.set('runtime/native-profile-switcher-main.json', { value: sidecar.value, kind: 'json' });
+    }
+    if (!deepEqual(readRoleBackups(roleBackupsFile?.value), roleBackups)) {
+      next.set(ROLE_BACKUP_FILE, { value: roleBackups, kind: 'json' });
+    }
+    if (advisors.value && !deepEqual(advisorFile.value, advisors.value)) {
+      next.set(ADVISOR_FILE, { value: advisors.value, kind: 'json' });
     }
     for (const [id, value] of selections) {
       if (!deepEqual(files.get(id)?.value, value)) {
@@ -2216,6 +2345,13 @@ export function openProfilesStore(options = {}) {
     // never thrown, so the board's write slot always settles. The envelope is the
     // board's {status, json} contract.
     handle(body) {
+      if (body?.action === 'apply' && Array.isArray(body.changes) && body.changes.length === 1
+        && body.changes[0]?.kind === 'setWebDeepseekEnabled') {
+        if (!isPlainObject(body.expected) || Object.keys(body.expected).length !== 0 || body.rosterRevision !== 0) {
+          return { status: 400, json: { ok: false, code: 'BAD_WEB_DEEPSEEK_REQUEST' } };
+        }
+        return setWebDeepseek(join(agentDir, 'web-deepseek'), body.changes[0]);
+      }
       try {
         const result = body?.action === 'preview' ? preview(body) : apply(body);
         if (result.ok) return { status: 200, json: result };

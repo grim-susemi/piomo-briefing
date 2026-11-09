@@ -672,8 +672,8 @@ test('a11y: every select and input has a visible label and an accessible name', 
   const html = P.render(STATE, live());
   const { labels, controls } = labelledControls(html);
   const selects = controls.filter((c) => c.tag === 'select');
-  assert.equal(selects.length, 51, 'the fixture renders 51 selects');
-  assert.equal(controls.length, 53, '51 selects + 1 text input + the global search');
+  assert.equal(selects.length, 62, '51 original selects plus 11 explicit backup selections');
+  assert.equal(controls.length, 64, '62 selects + 1 text input + the global search');
   assert.equal(controls.filter((c) => c.pf === 'routing-search').length, 1);
   for (const c of controls) {
     const name = c.aria || c.ref || labels.get(c.id) || '';
@@ -681,6 +681,7 @@ test('a11y: every select and input has a visible label and an accessible name', 
     if (c.tag === 'select') assert.ok((labels.get(c.id) || '').trim(), `${c.id} has no visible label`);
   }
   const byPf = (pf) => controls.filter((c) => c.pf === pf);
+  assert.equal(byPf('route-backup').length, STATE.routing.rows.length + 4);
   for (const pre of ['route', 'main']) {
     for (const c of byPf(pre + '-provider')) assert.equal(labels.get(c.id), '1. 구독 서비스');
     for (const c of byPf(pre + '-model')) assert.equal(labels.get(c.id), '2. AI 모델');
@@ -856,7 +857,7 @@ test('selects: every control titles its selected label and declares an ellipsis'
   const P = load();
   const html = P.render(STATE, live());
   const tags = [...html.matchAll(/<select\b([^>]*)>/g)].map((m) => m[1]);
-  assert.equal(tags.length, 51);
+  assert.equal(tags.length, 62);
   for (const attrs of tags) assert.match(attrs, /\btitle="[^"]+"/, 'select without a full-value title');
   const model = /<select[^>]*data-pf="route-model"[^>]*>/.exec(html)[0];
   assert.match(model, /title="[^"]*·[^"]*\/[^"]*"/, 'model title carries alias and full id');
@@ -1510,7 +1511,7 @@ test('pin hint: GPT 계열만 sits inside the pin label before the thinking cont
   const pin = agent.indexOf('id="pf-agent-pin-hephaestus"');
   const hint = agent.indexOf('pf-hint');
   const think = agent.indexOf('id="pf-agent-pin-thinking-hephaestus"');
-  assert.equal((agent.match(/pf-hint/g) || []).length, 1);
+  assert.equal((agent.match(/pf-hint/g) || []).length, 2, 'pin constraint and selection-only backup hint');
   assert.ok(pin < hint && hint < think, 'hint is after the pin select and before the thinking select');
 });
 

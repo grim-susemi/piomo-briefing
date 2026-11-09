@@ -623,20 +623,67 @@ test('effective unknown providers are unavailable and an unreadable roster is un
 test('real state(): a 5.1.44-absent role is read-only, labelled and keeps its config', (t) => {
   const fx = makeFixture(t);
   const state = fx.store.state();
-  const oracle = rowOf(state, 'agents', 'oracle');
-  assert.ok(oracle, 'oracle row stays visible');
-  assert.equal(oracle.readOnly, true);
-  assert.equal(oracle.absentIn, REAL_INVENTORY.version);
-  assert.equal(oracle.stateLabel, `${REAL_INVENTORY.version}에 없음`);
-  assert.equal(oracle.model, 'sol', 'the configured alias is kept');
-  assert.deepEqual(oracle.config, state.routing.layer.agents.oracle, 'the layer config is preserved');
+  const fast = rowOf(state, 'categories', 'fast-explore');
+  assert.ok(fast, 'fast-explore row stays visible');
+  assert.equal(fast.readOnly, true);
+  assert.equal(fast.absentIn, REAL_INVENTORY.version);
+  assert.equal(fast.stateLabel, `${REAL_INVENTORY.version}에 없음`);
   assert.equal(rowOf(state, 'agents', 'explore').readOnly, false, 'live role stays editable');
   assert.equal(rowOf(state, 'agents', 'explore').stateLabel, null);
 
   const html = loadView().render(state, liveEdit());
   assert.ok(textOf(html).includes(`absent: ${REAL_INVENTORY.version}`));
-  assert.match(html, /data-pf-route="agents\/oracle"/);
-  assert.doesNotMatch(html, /data-route="agents\/oracle"/, 'an absent role renders no edit controls');
+  assert.match(html, /data-pf-route="categories\/fast-explore"/);
+  assert.doesNotMatch(html, /data-route="categories\/fast-explore"/, 'an absent role renders no edit controls');
+});
+
+test('real state(): the declared oracle and a file-defined ouroboros render service, model and effort controls', (t) => {
+  const fx = makeFixture(t);
+  fs.mkdirSync(path.join(fx.primary, 'agent', 'agents'), { recursive: true });
+  fs.writeFileSync(path.join(fx.primary, 'agent', 'agents', 'ouroboros.md'), '---\ndescription: fixture\n---\n');
+  const state = fx.store.state();
+  const oracle = rowOf(state, 'agents', 'oracle');
+  assert.equal(oracle.readOnly, false);
+  assert.equal(oracle.absentIn, null);
+  assert.equal(oracle.model, 'sol', 'the configured alias is kept');
+  assert.deepEqual(oracle.config, state.routing.layer.agents.oracle, 'the layer config is preserved');
+  assert.equal(rowOf(state, 'agents', 'ouroboros').readOnly, false);
+
+  const html = loadView().render(state, liveEdit());
+  for (const role of ['oracle', 'ouroboros']) {
+    for (const part of ['provider', 'model', 'thinking']) {
+      assert.match(html, new RegExp(`data-pf="route-${part}" id="pf-route-agents-${role}-${part}"`), `${role} ${part}`);
+    }
+  }
+});
+
+test('real state(): each Oracle advisor offers only its own family and shows its saved pin', (t) => {
+  const fx = makeFixture(t);
+  const file = path.join(fx.primary, 'agent', 'oracle-advisor', 'routing.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({
+    v: 1,
+    profiles: {
+      claude: { model: 'anthropic-subscription/claude-opus-5-5:max', family: 'claude' },
+      gpt: { model: 'chatgpt-subscription/gpt-6-astra:high', family: 'gpt' },
+    },
+    by_family: { claude: { work: 'gpt', completion: 'gpt' }, gpt: { work: 'claude', completion: 'claude' }, other: { work: 'claude', completion: 'gpt' } },
+    by_agent: {}, by_nature: { design: 'claude', lowlevel: 'gpt' },
+  }));
+  const state = fx.store.state();
+  assert.deepEqual(state.advisors.rows.map((row) => [row.name, row.family, row.model, row.thinking]), [
+    ['claude', 'claude', 'anthropic-subscription/claude-opus-5-5', 'max'],
+    ['gpt', 'gpt', 'chatgpt-subscription/gpt-6-astra', 'high'],
+  ]);
+  const html = loadView().render(state, liveEdit());
+  const box = (name) => new RegExp(`data-pf-advisor="${name}"[\\s\\S]*?</select></label></div></div>`).exec(html)[0];
+  const claudeModels = [...box('claude').matchAll(/data-pf="advisor-model"[\s\S]*?<\/select>/g)][0][0];
+  const gptModels = [...box('gpt').matchAll(/data-pf="advisor-model"[\s\S]*?<\/select>/g)][0][0];
+  assert.match(claudeModels, /value="anthropic-subscription\/claude-opus-5-5"[^>]* selected/);
+  assert.doesNotMatch(claudeModels, /gpt-/, 'the Claude advisor lists no GPT model');
+  assert.match(gptModels, /value="chatgpt-subscription\/gpt-6-astra"[^>]* selected/);
+  assert.doesNotMatch(gptModels, /claude/, 'the GPT advisor lists no Claude model');
+  assert.match(box('claude'), /data-pf="advisor-thinking"[\s\S]*?value="max" selected/);
 });
 
 test('real state(): the guide pins both 5.1.44 sources and rows carry real recommendation statuses', (t) => {

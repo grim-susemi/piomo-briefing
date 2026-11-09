@@ -296,7 +296,7 @@ test('badge apply keeps the chosen sub-tab and opened details', () => {
   const sid = FIXTURE.sessions.find(s => s.tab === '진행 중').id;
   e.page.open(sid, 'ov');
   const detail = e.byId.main.querySelector('details');
-  assert.ok(detail); detail.open = true; e.fire(detail, 'toggle');
+  assert.ok(detail); detail.open = false; e.toggleDetails(detail);
   const key = detail.getAttribute('data-open-key');
   e.page.receive({ ...clone(FIXTURE), seq: 3 });
   e.badge.listeners.click();

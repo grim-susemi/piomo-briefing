@@ -935,7 +935,8 @@
     if (!root || typeof root.setAttribute !== 'function') return;
     var view = viewOf(st);
     var side0 = root.getAttribute('data-side'), peek0 = root.getAttribute('data-peek');
-    var side = st.sideOpen === false ? 'closed' : 'open', peek = st.peek === true ? 'true' : 'false';
+    var catalogue = view === 'plans' && Boolean(g.BriefRoadmapIndex);
+    var side = catalogue || st.sideOpen === false ? 'closed' : 'open', peek = !catalogue && st.peek === true ? 'true' : 'false';
     root.setAttribute('data-side', side);
     root.setAttribute('data-peek', peek);
     root.setAttribute('data-view', view);

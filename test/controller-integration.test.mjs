@@ -345,7 +345,7 @@ test('details toggles, including annotation preview, survive main region refresh
   click(e, '[data-ann-act="list"]');
   for (const d of e.byId.main.querySelectorAll('details')) {
     assert.match(d.getAttribute('data-open-key'), /^cv:s1:/);
-    d.open = !d.open; e.fire(d, 'toggle');
+    e.toggleDetails(d);
   }
   const before = { ...e.page.state.ui.expanded };
   e.advance(600); e.page.receive(model(2, session({ headline: 'new headline' })));
@@ -359,7 +359,7 @@ test('overview held-details toggles persist through the shipped renderer', () =>
   e.page.receive(model(1, s));
   const details = e.byId.main.querySelector('.held-decs');
   assert.equal(details.getAttribute('data-open-key'), 'cv:s1:held');
-  details.open = true; e.fire(details, 'toggle');
+  details.open = false; e.toggleDetails(details);
   e.advance(600); e.page.receive(model(2, { ...s, headline: 'updated' }));
   assert.equal(e.byId.main.querySelector('.held-decs').open, true);
   assert.match(e.ctx.BriefView.renderOverview(model(2, s), {}), /<details class="held-decs" data-open-key="cv:s1:held"><summary>/);
@@ -502,6 +502,82 @@ test('generation reload keeps annotation drafts and the existing request without
   click(next, '[data-ann-act="send"]');
   assert.equal(posts(next)[0].opts.body, body);
   reply(posts(next)[0], 200, { ok: true }); await flush();
+});
+
+test('generation reload restores the focused reply composer after its model renders', () => {
+  const storage = memoryStorage();
+  const s = session({ answerKinds: ['option', 'text'], status: 'needs_decision', tab: 'waiting',
+    decisions: [{ id: 13, sessionId: 's1', question: 'Reply?', options: { A: { text: 'Yes' } }, answered: false, closed: false }] });
+  const e = makeController({ generation: 8, sessionStorage: storage });
+  e.page.receive(model(1, s, { gen: 8 }));
+  click(e, '[data-act="ans-reply"][data-id="13"]');
+  const input = e.app.querySelector('textarea[data-draft="13"]');
+  assert.ok(input);
+  input.value = 'draft before reload'; e.fire(input, 'input'); input.focus();
+  const where = input.getAttribute('data-where');
+  e.page.receive(model(2, s, { gen: 9 }));
+  assert.equal(e.reloads.length, 0);
+  e.document.activeElement = e.document.body;
+  e.fire(input, 'focusout', { relatedTarget: e.document.body });
+  e.advance(100);
+  assert.equal(e.reloads.length, 1);
+  const next = makeController({ generation: 9, sessionStorage: storage });
+  next.page.receive(model(3, s, { gen: 9 }));
+  const restored = next.app.querySelector('textarea[data-draft="13"][data-where="' + where + '"]');
+  assert.ok(restored);
+  assert.equal(next.page.state.ui.answers['13'].draft, 'draft before reload');
+  assert.equal(restored.textContent, 'draft before reload');
+  assert.equal(next.document.activeElement, restored, 'the original composer regains focus');
+  assert.equal(next.reloads.length, 0);
+});
+
+test('generation reload eventually restores a focused dirty composer without blur', () => {
+  const storage = memoryStorage();
+  const s = session({ answerKinds: ['text'], status: 'needs_decision', tab: 'waiting',
+    decisions: [{ id: 13, sessionId: 's1', question: 'Reply?', options: { A: { text: 'Yes' } }, answered: false, closed: false }] });
+  const e = makeController({ generation: 8, sessionStorage: storage });
+  e.page.receive(model(1, s, { gen: 8 }));
+  click(e, '[data-act="ans-reply"][data-id="13"]');
+  const input = e.app.querySelector('textarea[data-draft="13"]');
+  input.value = 'draft'; e.fire(input, 'input'); input.focus();
+  e.page.receive(model(2, s, { gen: 9 }));
+  assert.equal(e.reloads.length, 0);
+  e.advance(450);
+  input.value = 'draft updated'; e.fire(input, 'input');
+  e.advance(450);
+  assert.equal(e.reloads.length, 0, 'typing restarts the release delay');
+  e.advance(450);
+  assert.equal(e.reloads.length, 1, 'focused composer must not block the generation reload forever');
+  const next = makeController({ generation: 9, sessionStorage: storage });
+  next.page.receive(model(3, s, { gen: 9 }));
+  assert.equal(next.page.state.ui.answers['13'].draft, 'draft updated');
+  assert.equal(next.document.activeElement, next.app.querySelector('textarea[data-draft="13"]'));
+  assert.equal(next.reloads.length, 0);
+});
+
+test('generation reload restores an empty composer but respects a later focus move', () => {
+  for (const moveFocus of [false, true]) {
+    const storage = memoryStorage();
+    const s = session({ answerKinds: ['text'], status: 'needs_decision', tab: 'waiting',
+      decisions: [{ id: 13, sessionId: 's1', question: 'Reply?', options: { A: { text: 'Yes' } }, answered: false, closed: false }] });
+    const e = makeController({ generation: 8, sessionStorage: storage });
+    e.page.receive(model(1, s, { gen: 8 }));
+    click(e, '[data-act="ans-reply"][data-id="13"]');
+    const input = e.app.querySelector('textarea[data-draft="13"]');
+    input.focus();
+    e.page.receive(model(2, s, { gen: 9 }));
+    if (moveFocus) {
+      const button = e.app.querySelector('[data-act="ans-reply"][data-id="13"]');
+      button.focus(); e.fire(button, 'focusin');
+    } else e.document.activeElement = e.document.body;
+    e.fire(input, 'focusout'); e.advance(100);
+    assert.equal(e.reloads.length, 1);
+    const next = makeController({ generation: 9, sessionStorage: storage });
+    next.page.receive(model(3, s, { gen: 9 }));
+    const restored = next.app.querySelector('textarea[data-draft="13"]');
+    if (moveFocus) assert.equal(next.document.activeElement, next.document.body);
+    else { assert.ok(restored); assert.equal(next.document.activeElement, restored); }
+  }
 });
 
 test('regions: a newer generation requested while busy reloads on release even with no pending model', () => {
@@ -1188,4 +1264,201 @@ test('fold retry focus: a completed request cannot reopen the conversation the u
   assert.equal(e.byId.main.innerHTML, content);
   assert.equal(e.document.activeElement, outside);
   assert.deepEqual(e.errors, []);
+});
+
+
+test('task 4: sheet interaction, tabs, keyboard navigation, focus trap, Escape/close, background inert, and vanishing card fallback', () => {
+  const e = makeController({
+    modules: ['icons', 'view', 'plan-view', 'roadmap-view', 'workers-view', 'convo-view', 'shell', 'annotate'],
+  });
+
+  const roadmaps = [{
+    roadmapId: 'rm_test',
+    projectionPath: '/path/test.json',
+    revision: 1,
+    checkedAt: new Date(1000).toISOString(),
+    stale: false,
+    error: null,
+    tracks: [{ id: 'T', label: 'Track T', stageIds: ['S1', 'S2'] }],
+    stages: [
+      {
+        id: 'S1', label: '단계 1', goal: '1단계 목표', sourceId: 'T',
+        requirementsKnown: true,
+        requires: [{ kind: 'decision', gateId: 'g1', decisionId: 10, state: 'open', scope: '범위 1', operation: 'scope' }],
+        accepts: [{ kind: 'receipt', path: '/rec/1.json', operation: 'accept', state: 'pass' }],
+        plans: [],
+        progress: { denominator: 2, doneConfirmed: 0, conflicts: 0 },
+        ready: true,
+      },
+      {
+        id: 'S2', label: '단계 2', goal: '2단계 목표', sourceId: 'T',
+        requirementsKnown: true, requires: [], accepts: [], plans: [],
+        progress: { denominator: 1, doneConfirmed: 0, conflicts: 0 },
+        ready: true,
+      }
+    ],
+  }];
+
+  e.page.receive({ seq: 1, gen: 9, generatedAt: 1000, sessions: [], roadmaps });
+
+  // 1. Switch to plans view
+  click(e, '#rail [data-key="plans"]');
+  assert.equal(e.page.state.ui.view, 'plans');
+
+  // Verify sheet is not open initially and no elements are inert
+  assert.equal(e.byId.main.querySelector('.rm-sheet-dialog[open]'), null, 'sheet not open initially');
+  assert.equal(e.byId.main.querySelectorAll('[inert]').length, 0, 'no background elements inert');
+
+  // 2. Open S1 sheet by clicking card button
+  const card1 = e.byId.main.querySelector('[data-act="exp"][data-key="rm-stage:rm_test:S1"]');
+  assert.ok(card1, 'card button exists');
+  card1.focus();
+  assert.equal(e.document.activeElement, card1);
+  click(e, '[data-act="exp"][data-key="rm-stage:rm_test:S1"]');
+
+  // Verify sheet opened
+  const sheet = e.byId.main.querySelector('.rm-sheet-dialog[open]');
+  assert.ok(sheet, 'sheet is open');
+  assert.equal(sheet.getAttribute('data-rm-detail'), 'S1');
+  assert.ok(sheet.getAttribute('aria-modal') === 'true', 'aria-modal is true');
+
+  // Verify focus moved into sheet (to active tab or close button)
+  assert.ok(sheet.contains(e.document.activeElement), 'focus moved into sheet upon open');
+
+  // Verify background elements are marked inert
+  const inerts = e.byId.main.querySelectorAll('[inert]');
+  assert.ok(inerts.length > 0, 'background elements are inert while sheet is open');
+
+  // 3. Tab switching via click
+  const tabEv = sheet.querySelector('.rm-sheet-tab[data-tab="evidence"]');
+  assert.ok(tabEv, 'evidence tab button exists');
+  e.fire(tabEv, 'click');
+  assert.equal(e.page.state.ui.roadmapTab, 'evidence');
+  const curSheet = e.byId.main.querySelector('.rm-sheet-dialog[open]');
+  assert.ok(curSheet.querySelector('#rm-panel-evidence') && curSheet.querySelector('#rm-panel-evidence').getAttribute('hidden') === null, 'evidence panel is visible');
+  assert.ok(curSheet.querySelector('#rm-panel-summary') && curSheet.querySelector('#rm-panel-summary').hasAttribute('hidden'), 'summary panel is hidden');
+
+  // 4. Tab switching via keyboard (ArrowRight from evidence to history)
+  const tabEvCur = curSheet.querySelector('.rm-sheet-tab[data-tab="evidence"]');
+  tabEvCur.focus();
+  e.fire(tabEvCur, 'keydown', { key: 'ArrowRight' });
+  assert.equal(e.page.state.ui.roadmapTab, 'history');
+  const curSheet2 = e.byId.main.querySelector('.rm-sheet-dialog[open]');
+  assert.ok(curSheet2.querySelector('#rm-panel-history') && curSheet2.querySelector('#rm-panel-history').getAttribute('hidden') === null, 'history panel is visible');
+  assert.equal(curSheet2.querySelector('.rm-sheet-empty-history').textContent, '기록 없음');
+
+  // Home key moves to first tab (summary)
+  const tabHist = curSheet2.querySelector('.rm-sheet-tab[data-tab="history"]');
+  tabHist.focus();
+  e.fire(tabHist, 'keydown', { key: 'Home' });
+  assert.equal(e.page.state.ui.roadmapTab, 'summary');
+  const curSheet3 = e.byId.main.querySelector('.rm-sheet-dialog[open]');
+  assert.ok(curSheet3.querySelector('#rm-panel-summary') && curSheet3.querySelector('#rm-panel-summary').getAttribute('hidden') === null, 'summary panel is visible');
+
+  // The fixture does not implement the browser's default Tab action; emulate only
+  // that default after dispatch, while the controller handles boundary wrapping.
+  const closeControl = curSheet3.querySelector('.rm-sheet-close-btn');
+  closeControl.id = 'sheet-close';
+  const panel = curSheet3.querySelector('#rm-panel-summary');
+  panel.innerHTML += '<button id="panel-first">first</button><button id="panel-last">last</button><div inert><button id="inert-button">inert</button></div><div hidden><button id="hidden-button">hidden</button></div>';
+  const tabOrder = [closeControl, curSheet3.querySelector('#rm-tab-summary'), panel.querySelector('#panel-first'), panel.querySelector('#panel-last')];
+  const visited = [e.document.activeElement.id];
+  for (const shiftKey of [false, false, false, true]) {
+    const before = e.document.activeElement;
+    const ev = e.fire(before, 'keydown', { key: 'Tab', shiftKey });
+    if (!ev.defaultPrevented) {
+      const next = tabOrder.indexOf(before) + (shiftKey ? -1 : 1);
+      if (tabOrder[next]) tabOrder[next].focus();
+    }
+    visited.push(e.document.activeElement.id);
+  }
+  assert.deepEqual(visited, ['rm-tab-summary', 'panel-first', 'panel-last', 'sheet-close', 'panel-last']);
+
+  // 5. Close sheet via visible 닫기 button
+  const curSheetLatest = e.byId.main.querySelector('.rm-sheet-dialog[open]');
+  const closeBtn = curSheetLatest.querySelector('.rm-sheet-close-btn');
+  assert.ok(closeBtn, 'close button exists');
+  e.fire(closeBtn, 'click');
+
+  assert.equal(e.byId.main.querySelector('.rm-sheet-dialog[open]'), null, 'sheet is closed');
+  assert.equal(e.byId.main.querySelectorAll('[inert]').length, 0, 'background is no longer inert');
+  assert.equal(e.document.activeElement, e.byId.main.querySelector('[data-act="exp"][data-key="rm-stage:rm_test:S1"]'), 'focus returned to opening card button');
+
+  // 6. Open sheet again and close via Escape key
+  click(e, '[data-act="exp"][data-key="rm-stage:rm_test:S1"]');
+  const sheet2 = e.byId.main.querySelector('.rm-sheet-dialog[open]');
+  assert.ok(sheet2, 'sheet reopened');
+  e.fire(e.document.activeElement, 'keydown', { key: 'Escape' });
+  assert.equal(e.byId.main.querySelector('.rm-sheet-dialog[open]'), null, 'sheet closed on Escape');
+  assert.equal(e.document.activeElement, e.byId.main.querySelector('[data-act="exp"][data-key="rm-stage:rm_test:S1"]'), 'focus returned on Escape');
+
+  // 7. Vanishing card fallback: open S1, then model updates and S1 is gone (only S2 remains)
+  click(e, '[data-act="exp"][data-key="rm-stage:rm_test:S1"]');
+  assert.ok(e.byId.main.querySelector('.rm-sheet-dialog[open]'), 'sheet is open before vanishing update');
+
+  const updatedRoadmaps = [{
+    roadmapId: 'rm_test',
+    projectionPath: '/path/test.json',
+    revision: 2,
+    checkedAt: new Date(2000).toISOString(),
+    stale: false,
+    error: null,
+    tracks: [{ id: 'T', label: 'Track T', stageIds: ['S2'] }],
+    stages: [
+      {
+        id: 'S2', label: '단계 2', goal: '2단계 목표', sourceId: 'T',
+        requirementsKnown: true, requires: [], accepts: [], plans: [],
+        progress: { denominator: 1, doneConfirmed: 0, conflicts: 0 },
+        ready: true,
+      }
+    ],
+  }];
+
+  e.advance(600);
+  e.page.receive({ seq: 2, gen: 9, generatedAt: 2000, sessions: [], roadmaps: updatedRoadmaps });
+
+  const vanishedSheet = e.byId.main.querySelector('.rm-sheet-dialog[open]');
+  assert.ok(vanishedSheet, 'sheet remains open after stage vanished');
+  assert.match(vanishedSheet.textContent, /이 단계는 갱신으로 사라졌습니다/);
+  assert.ok(vanishedSheet.contains(e.document.activeElement), 'notice receives focus inside the sheet');
+  e.fire(vanishedSheet.querySelector('.rm-sheet-close-btn'), 'click');
+  assert.equal(e.byId.main.querySelector('.rm-sheet-dialog[open]'), null, 'notice closes on request');
+  const activeEl = e.document.activeElement;
+  assert.ok(activeEl, 'an element has focus');
+  assert.ok(e.byId.main.contains(activeEl), 'focus is not on a detached node');
+  assert.ok(
+    activeEl.classList.contains('rm-title') || activeEl.classList.contains('rm-col-title') || activeEl.tagName.startsWith('H'),
+    'focus returned to a surviving plans heading: ' + (activeEl.className || activeEl.tagName)
+  );
+  click(e, '[data-act="exp"][data-key="rm-stage:rm_test:S2"]');
+  e.advance(600);
+  e.page.receive({ seq: 3, gen: 9, generatedAt: 3000, sessions: [], roadmaps: [] });
+  const emptyNotice = e.byId.main.querySelector('.rm-sheet-dialog[open]');
+  assert.match(emptyNotice.textContent, /이 단계는 갱신으로 사라졌습니다/);
+  e.fire(e.document.activeElement, 'keydown', { key: 'Escape' });
+  assert.equal(e.byId.main.querySelector('.rm-sheet-dialog[open]'), null);
+  assert.equal(e.document.activeElement, e.byId.main.querySelector('.rm-title'));
+
+  // 8. Purity check: clicking card or tab made zero server POSTs or decisions
+  const nonDataFetches = e.fetches.filter(f => f.url !== '/data.json');
+  assert.equal(nonDataFetches.length, 0, 'zero mutation POST or decision calls');
+  assert.deepEqual(e.errors, []);
+});
+
+test('attention jump respects both reduced-motion preference values', () => {
+  for (const reduced of [true, false]) {
+    const e = makeController({ modules: ['icons', 'view', 'plan-view', 'roadmap-view', 'workers-view', 'convo-view', 'shell', 'annotate'] });
+    e.ctx.matchMedia = query => ({ matches: query === '(prefers-reduced-motion: reduce)' && reduced });
+    e.page.receive({ seq: 1, gen: 9, generatedAt: 1000, sessions: [], roadmaps: [{
+      roadmapId: 'rm', tracks: [{ id: 'T', stageIds: ['S'] }],
+      stages: [{ id: 'S', requirementsKnown: true, requires: [], accepts: [], plans: [], progress: { denominator: 1, doneConfirmed: 0, conflicts: 0 }, ready: true }]
+    }] });
+    click(e, '#rail [data-key="plans"]');
+    const attention = e.byId.main.querySelector('#rm-attention');
+    assert.ok(attention);
+    let options;
+    attention.scrollIntoView = value => { options = value; };
+    click(e, '[data-act="rm-attn-jump"]');
+    assert.equal(options.behavior, reduced ? 'auto' : 'smooth');
+  }
 });

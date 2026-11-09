@@ -42,6 +42,7 @@ import { openProfilesStore } from './src/profiles/store.mjs';
 import { getMementoApi } from './src/memento-bridge.mjs';
 import { createWorkersLive } from './src/workers-live.mjs';
 import { createPlanTool } from './src/plan-tool.mjs';
+import { createRoadmapTool } from './src/roadmap-tool.mjs';
 import { createAskBridge } from './src/ask-bridge.mjs';
 import { setError, clearError, errorsOf, normalizeErrors } from './src/errors.mjs';
 import {
@@ -309,6 +310,7 @@ export function createBriefingExtension(opts = {}) {
     const boardLink = () => (host && host.status().url) || pagePath;
     let workersLive = null; // live worker rows from the task bus (src/workers-live.mjs)
     let planTool = null; // plan_brief (src/plan-tool.mjs), rebuilt per session id
+    let roadmapTool = null;
     let rpcOff = null; // unsubscribe of the one task-bus subscription
     let earlyRpc = null; // newest task snapshot that arrived before the session existed
     let shuttingDown = false;
@@ -1069,6 +1071,7 @@ export function createBriefingExtension(opts = {}) {
         deliverer = null;
         mirror = null;
         planTool = null;
+        roadmapTool = null;
         askBridge = null;
         active = false;
       }));
@@ -1111,6 +1114,13 @@ export function createBriefingExtension(opts = {}) {
           return planTool.definition.execute(id, params, ...rest);
         },
       });
+      pi.registerTool({
+        ...roadmapTool.definition,
+        execute: (id, params) => {
+          if (!active || !roadmapTool) throw new Error('브리핑이 이 세션에서 준비되지 않았습니다.');
+          return roadmapTool.definition.execute(id, params);
+        },
+      });
     }
 
     function within(promise, ms) {
@@ -1138,6 +1148,9 @@ export function createBriefingExtension(opts = {}) {
     const profilesStore = (opts.createProfilesStore ?? openProfilesStore)(profilesStoreOptions);
     function setupLive(ctx) {
       profilesCtx = ctx;
+      roadmapTool = createRoadmapTool({
+        store, sessionId: sid, cwd: ctx.cwd, isEnabled: enabled, publish: () => refresh(), now: nowFn,
+      });
       planTool = (opts.createPlanTool ?? createPlanTool)({
         store,
         sessionId: sid,

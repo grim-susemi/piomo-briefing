@@ -1,0 +1,1011 @@
+{
+  "schema": 1,
+  "seq": 20,
+  "gen": 9,
+  "generatedAt": 1792204200000,
+  "summary": {
+    "openDecisions": 2,
+    "blocked": 0,
+    "stale": 0
+  },
+  "readErrors": [],
+  "server": null,
+  "waiting": [
+    {
+      "key": "d301",
+      "kind": "decision",
+      "id": 301,
+      "sessionId": "fx-sess-beta-active",
+      "title": "평면 섹션과 단일 뷰포트 전환",
+      "tabLabel": "뷰포트전환",
+      "tabNumber": 201,
+      "paneId": "w2-p1",
+      "text": "비활성 세션의 기본 표시 상태는 어떻게 둘까요?",
+      "at": 1792202400000
+    },
+    {
+      "key": "d302",
+      "kind": "decision",
+      "id": 302,
+      "sessionId": "fx-sess-beta-active",
+      "title": "평면 섹션과 단일 뷰포트 전환",
+      "tabLabel": "뷰포트전환",
+      "tabNumber": 201,
+      "paneId": "w2-p1",
+      "text": "측정행 높이와 섹션 간격 값을 입력해 주세요",
+      "at": 1792203000000
+    }
+  ],
+  "sessions": [
+    {
+      "id": "fx-sess-alpha-done",
+      "project": "proj-alpha",
+      "cwd": "D:/work/proj-alpha",
+      "title": "이전 배포 검증 완료",
+      "paneId": "w1-p1",
+      "tabId": "w1:t101",
+      "tabLabel": "배포검증",
+      "tabNumber": 101,
+      "answerKinds": [
+        "option",
+        "text",
+        "annotation"
+      ],
+      "workName": "release-verify",
+      "status": "done",
+      "statusKey": "done",
+      "tab": "끝남",
+      "chips": [],
+      "headline": "격리 패키지 빌드 및 스모크 검증 통과",
+      "lastActivityAt": 1792197000000,
+      "lastBriefAt": 1792197000000,
+      "changesNew": false,
+      "changes": [
+        {
+          "text": "패키지 매니페스트 정합성 확인",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "D:/work/proj-alpha/.omo/evidence/release-verify/task-1/check.txt",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "정적 자산 해시 검증 통과",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "D:/work/proj-alpha/.omo/evidence/release-verify/task-2/assets.txt",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "회귀 테스트 스위트 42건 통과",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "D:/work/proj-alpha/.omo/evidence/release-verify/task-3/test.txt",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "문서 링크 정리",
+          "truth": "reported",
+          "applied": "none",
+          "evidenceState": "ok"
+        }
+      ],
+      "done": [
+        {
+          "text": "초기 스키마 점검 완료",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "D:/work/proj-alpha/.omo/evidence/release-verify/task-0/schema.txt",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "릴리스 노트 초안 작성",
+          "truth": "reported",
+          "applied": "none",
+          "evidenceState": "ok"
+        }
+      ],
+      "next": "",
+      "heldCount": 0,
+      "decisions": [
+        {
+          "id": 201,
+          "sessionId": "fx-sess-alpha-done",
+          "question": "아카이브 보관 주기를 며칠로 둘까요?",
+          "options": {
+            "A": {
+              "text": "14일",
+              "consequence": "최근 2주 기록만 유지"
+            },
+            "B": {
+              "text": "30일",
+              "consequence": "월간 점검 기록까지 유지"
+            }
+          },
+          "recommend": "B",
+          "reason": "월간 회고 시 참조 필요",
+          "blocks": false,
+          "createdAt": 1792193400000,
+          "source": "brief",
+          "answered": true,
+          "closed": false,
+          "questionPrompt": false,
+          "answer": {
+            "option": "B",
+            "text": "",
+            "at": 1792194200000
+          },
+          "receipt": {
+            "deliveredAt": 1792194300000
+          },
+          "delivery": "전달됨 ⏱09:15"
+        }
+      ],
+      "notes": [],
+      "flow": [
+        {
+          "label": "수집",
+          "state": "done"
+        },
+        {
+          "label": "검증",
+          "state": "done"
+        },
+        {
+          "label": "보고",
+          "state": "done"
+        }
+      ],
+      "reports": [],
+      "auto": {
+        "stage": "완료",
+        "todoCurrent": "-",
+        "todoNext": "-",
+        "todoDone": 4,
+        "todoTotal": 4,
+        "workers": {
+          "running": 0,
+          "done": 2,
+          "error": 0
+        }
+      },
+      "live": {
+        "workers": [
+          {
+            "id": "st_fx_done_01",
+            "name": "정적 자산 검사기",
+            "kind": "quick",
+            "model": "Flash 4",
+            "state": "done",
+            "step": "",
+            "startedAt": "2026-10-17T00:10:00.000Z",
+            "endedAt": "2026-10-17T00:25:00.000Z",
+            "updatedAt": "2026-10-17T00:25:00.000Z",
+            "stale": false,
+            "todo": null
+          }
+        ]
+      },
+      "plan": null,
+      "alive": false,
+      "briefSeq": 4,
+      "briefPath": "D:/work/fixture-home/primary/.omo/agent/briefing/state/sessions/fx-sess-alpha-done/briefs/000004.json",
+      "sessionFile": "D:/work/fixture-home/primary/.senpi/agent/sessions/--D--work-proj-alpha--/2026-10-17T00-00-00-000Z_fx-sess-alpha-done.jsonl",
+      "todo": {
+        "items": [
+          {
+            "text": "패키지 매니페스트 확인",
+            "status": "completed"
+          },
+          {
+            "text": "정적 자산 해시 검증",
+            "status": "completed"
+          }
+        ],
+        "more": 0
+      },
+      "attachments": [
+        {
+          "label": "대화 id",
+          "path": "fx-sess-alpha-done"
+        },
+        {
+          "label": "세션 파일",
+          "path": "D:/work/fixture-home/primary/.senpi/agent/sessions/--D--work-proj-alpha--/2026-10-17T00-00-00-000Z_fx-sess-alpha-done.jsonl"
+        }
+      ],
+      "blockSources": {
+        "head": {
+          "paths": [
+            "D:/work/fixture-home/primary/.senpi/agent/sessions/--D--work-proj-alpha--/2026-10-17T00-00-00-000Z_fx-sess-alpha-done.jsonl"
+          ]
+        }
+      }
+    },
+    {
+      "id": "fx-sess-beta-active",
+      "project": "proj-beta",
+      "cwd": "D:/work/proj-beta",
+      "title": "평면 섹션과 단일 뷰포트 전환",
+      "paneId": "w2-p1",
+      "tabId": "w2:t201",
+      "tabLabel": "뷰포트전환",
+      "tabNumber": 201,
+      "answerKinds": [
+        "option",
+        "text",
+        "annotation"
+      ],
+      "workName": "flat-viewport-layout",
+      "status": "needs_decision",
+      "statusKey": "needs_decision",
+      "tab": "나를 기다림",
+      "chips": [
+        "작업 중"
+      ],
+      "headline": "공통 카드 소비 화면을 평면 섹션으로 바꾸고 #main 단일 스크롤로 통합하는 중",
+      "lastActivityAt": 1792203960000,
+      "lastBriefAt": 1792203840000,
+      "changesNew": true,
+      "changes": [
+        {
+          "text": "소비 화면 인벤토리와 허용 스크롤 목록 작성",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "D:/work/proj-beta/.omo/evidence/flat-viewport-layout/task-5/inventory.json",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "프로필 내부 중첩 스크롤과 F5 비용 측정",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "D:/work/proj-beta/scripts/qa-readability.mjs",
+          "evidenceState": "changed"
+        },
+        {
+          "text": "보고서 6종 블록 및 결정 입력 양식 연결",
+          "truth": "reported",
+          "applied": "none",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "오프라인 및 더티 폼 보존 케이스 정리",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "D:/work/proj-beta/test/readability.test.mjs",
+          "evidenceState": "ok"
+        }
+      ],
+      "done": [
+        {
+          "text": "기존 셸 탭 및 레일 탐색 구조 점검",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "D:/work/proj-beta/.omo/evidence/flat-viewport-layout/task-1/shell.txt",
+          "evidenceState": "ok"
+        },
+        {
+          "text": "토큰 스케일과 행 높이 기준 확정",
+          "truth": "unverified",
+          "applied": "none",
+          "evidenceState": "ok"
+        }
+      ],
+      "next": "평면 섹션 CSS 적용 후 두 해상도에서 F5 <= 1 검증",
+      "heldCount": 1,
+      "decisions": [
+        {
+          "id": 301,
+          "sessionId": "fx-sess-beta-active",
+          "question": "비활성 세션의 기본 표시 상태는 어떻게 둘까요?",
+          "options": {
+            "A": {
+              "text": "한 줄 요약행으로 접기",
+              "consequence": "활성 세션이 첫 160px 안에 바로 보임"
+            },
+            "B": {
+              "text": "첫 세션만 강제 펼침",
+              "consequence": "완료된 첫 세션이 화면 상단을 차지함"
+            },
+            "C": {
+              "text": "모두 펼침",
+              "consequence": "스크롤 비용이 크게 증가함"
+            }
+          },
+          "recommend": "A",
+          "reason": "활성 작업 우선 노출과 스크롤 예산 준수",
+          "blocks": true,
+          "createdAt": 1792202400000,
+          "source": "brief",
+          "answered": false,
+          "closed": false,
+          "questionPrompt": false,
+          "answer": null,
+          "receipt": null
+        },
+        {
+          "id": 302,
+          "sessionId": "fx-sess-beta-active",
+          "question": "측정행 높이와 섹션 간격 값을 입력해 주세요",
+          "options": {},
+          "recommend": "",
+          "reason": "기본 토큰 값을 확인하고 한 번에 반영",
+          "blocks": false,
+          "fields": [
+            {
+              "id": "row_px",
+              "label": "측정행 높이",
+              "kind": "number",
+              "min": 16,
+              "max": 32,
+              "step": 4
+            },
+            {
+              "id": "sec_gap",
+              "label": "섹션 간격",
+              "kind": "choice",
+              "options": [
+                "4px",
+                "8px",
+                "12px"
+              ]
+            },
+            {
+              "id": "layout_note",
+              "label": "비고 메모",
+              "kind": "text",
+              "maxLen": 80
+            }
+          ],
+          "createdAt": 1792203000000,
+          "source": "plan",
+          "answered": false,
+          "closed": false,
+          "questionPrompt": false,
+          "answer": null,
+          "receipt": null
+        },
+        {
+          "id": 303,
+          "sessionId": "fx-sess-beta-active",
+          "question": "보류된 안내 배너 문구 검토",
+          "options": {
+            "A": {
+              "text": "간결한 상태 문구 유지",
+              "consequence": "한 줄 안에 표시됨"
+            }
+          },
+          "recommend": "A",
+          "reason": "줄바꿈 최소화",
+          "blocks": false,
+          "createdAt": 1792200600000,
+          "source": "brief",
+          "answered": false,
+          "closed": true,
+          "held": {
+            "at": null
+          },
+          "questionPrompt": false,
+          "answer": null,
+          "receipt": null
+        },
+        {
+          "id": 304,
+          "sessionId": "fx-sess-beta-active",
+          "question": "표 가로 스크롤 처리 방식",
+          "options": {
+            "A": {
+              "text": "표 컨테이너만 가로 스크롤 허용",
+              "consequence": "본문 세로 스크롤과 분리됨"
+            },
+            "B": {
+              "text": "열 숨김",
+              "consequence": "데이터 일부가 보이지 않음"
+            }
+          },
+          "recommend": "A",
+          "reason": "정보 누락 없이 본문 단일 세로 스크롤 유지",
+          "blocks": false,
+          "createdAt": 1792198800000,
+          "source": "brief",
+          "answered": true,
+          "closed": false,
+          "questionPrompt": false,
+          "answer": {
+            "option": "A",
+            "text": "",
+            "at": 1792199200000
+          },
+          "receipt": null,
+          "delivery": "대기: 작업이 끝나면 전달"
+        }
+      ],
+      "notes": [
+        {
+          "key": "a-11111111-2222-4333-8444-555555555551",
+          "at": 1792203600000,
+          "preview": "## 상황판 피드백: 뷰포트전환 #201 | 평면 섹션과 단일 뷰포트 전환\n\n**보낸 곳:** 상황판 → 개요",
+          "delivery": "전달됨 ⏱10:50"
+        },
+        {
+          "key": "a-11111111-2222-4333-8444-555555555552",
+          "at": 1792203900000,
+          "preview": "## 상황판 피드백: 뷰포트전환 #201 | 평면 섹션과 단일 뷰포트 전환\n\n### 1. [질문] 스크롤 소유권",
+          "delivery": "대기: 작업이 끝나면 전달"
+        }
+      ],
+      "flow": [
+        {
+          "label": "인벤토리",
+          "state": "done"
+        },
+        {
+          "label": "베이스라인",
+          "state": "doing"
+        },
+        {
+          "label": "평면화",
+          "state": "todo"
+        },
+        {
+          "label": "수용검증",
+          "state": "todo"
+        }
+      ],
+      "reports": [
+        {
+          "id": "rep-readability-1",
+          "title": "소비 화면 구조 및 스크롤 측정 보고",
+          "summary": "여섯 가지 보고서 블록(표, 막대 그래프, 항목, 단계 흐름, 확인 목록, 선택지 비교)과 결정 연결 상태를 한 화면에서 검증합니다.",
+          "at": 1792203800000,
+          "decisionId": 301,
+          "status": "결정 기다림",
+          "images": [
+            {
+              "src": "assets/84fecfda2b6702dc6015b4307ae048524399b4d6493664f11ecc3fc124a7ce37.png",
+              "alt": "시안 A: 한 줄 요약행과 평면 섹션",
+              "option": "A",
+              "w": 200,
+              "h": 125,
+              "path": "D:/work/proj-beta/.omo/evidence/flat-viewport-layout/shots/opt-a.png"
+            },
+            {
+              "src": "assets/ef2c2b08fcc42806091d2ff820a307b0cac8847ad356d6f22a3d25d55f956d4d.jpg",
+              "alt": "시안 B: 첫 세션 강제 펼침",
+              "option": "B",
+              "w": 200,
+              "h": 125,
+              "path": "D:/work/proj-beta/.omo/evidence/flat-viewport-layout/shots/opt-b.jpg"
+            },
+            {
+              "src": "assets/5742432ff85d373b5d81f8fc2206ebf4626a6ba9bd067a4a205e7a84f9762489.webp",
+              "alt": "시안 C: 전체 펼침",
+              "option": "C",
+              "w": 200,
+              "h": 125,
+              "path": "D:/work/proj-beta/.omo/evidence/flat-viewport-layout/shots/opt-c.webp"
+            }
+          ],
+          "blocks": [
+            {
+              "kind": "table",
+              "title": "소비 화면별 스크롤 소유 현황",
+              "columns": [
+                "화면",
+                "컨테이너",
+                "세로 스크롤",
+                "목표 비용"
+              ],
+              "rows": [
+                [
+                  "개요",
+                  "#main",
+                  1,
+                  1
+                ],
+                [
+                  "프로필 설정",
+                  ".pf-detail / .pf-roles",
+                  3,
+                  1
+                ],
+                [
+                  "대화 상세",
+                  "#main",
+                  1,
+                  1
+                ]
+              ]
+            },
+            {
+              "kind": "bars",
+              "title": "영역별 이동 거리",
+              "unit": "px",
+              "items": [
+                {
+                  "label": "프로필 목록",
+                  "value": 601
+                },
+                {
+                  "label": "라우팅 편집기",
+                  "value": 296
+                },
+                {
+                  "label": "본문 기본",
+                  "value": 120
+                }
+              ]
+            },
+            {
+              "kind": "kv",
+              "title": "측정 기준 요약",
+              "items": [
+                {
+                  "key": "상단 기준",
+                  "value": "첫 160 CSS px (20px × 8행)"
+                },
+                {
+                  "key": "단일 소유자",
+                  "value": "#main 세로 스크롤만 허용"
+                }
+              ]
+            },
+            {
+              "kind": "flow",
+              "title": "검증 단계 흐름",
+              "steps": [
+                {
+                  "label": "인벤토리 고정",
+                  "state": "done"
+                },
+                {
+                  "label": "베이스라인 측정",
+                  "state": "doing"
+                },
+                {
+                  "label": "평면 섹션 구현",
+                  "state": "todo"
+                },
+                {
+                  "label": "F5 수용 검증",
+                  "state": "todo"
+                }
+              ]
+            },
+            {
+              "kind": "checklist",
+              "title": "수용 기준 점검표",
+              "items": [
+                {
+                  "id": "chk-main-owner",
+                  "text": "#main 유일 세로 스크롤 소유자 확인",
+                  "checked": true
+                },
+                {
+                  "id": "chk-nested-zero",
+                  "text": "내부 고정높이 세로 스크롤 0개 확인",
+                  "checked": false
+                },
+                {
+                  "id": "chk-top8-title",
+                  "text": "활성 제목 160px 이내 노출 확인",
+                  "checked": false
+                }
+              ]
+            },
+            {
+              "kind": "compare",
+              "title": "접힘 정책 비교",
+              "decision": 301,
+              "rows": [
+                {
+                  "label": "초기 상단 가시성",
+                  "A": "즉시 보임 (S=0)",
+                  "B": "스크롤 필요 (S>=1)",
+                  "C": "스크롤 필요 (S>=2)"
+                },
+                {
+                  "label": "비활성 공간 소비",
+                  "A": "요약 1행",
+                  "B": "첫 카드 전체",
+                  "C": "모든 카드 전체"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "auto": {
+        "stage": "실행",
+        "todoCurrent": "5. 소비 화면 인벤토리 고정",
+        "todoNext": "6. 평면 섹션과 단일 뷰포트 구현",
+        "todoDone": 1,
+        "todoTotal": 4,
+        "workers": {
+          "running": 2,
+          "done": 1,
+          "error": 1
+        }
+      },
+      "live": {
+        "workers": [
+          {
+            "id": "st_fx_run_01",
+            "name": "소비 화면 인벤토리 수집기",
+            "kind": "visual-engineering",
+            "model": "Argon 4",
+            "state": "running",
+            "step": "read · src/page/profiles-view.css",
+            "startedAt": "2026-10-17T02:10:00.000Z",
+            "updatedAt": "2026-10-17T02:29:00.000Z",
+            "childSessionId": "fx-child-0001",
+            "stale": false,
+            "todo": {
+              "items": [
+                {
+                  "text": "소비자 경계 열거",
+                  "status": "completed"
+                },
+                {
+                  "text": "스크롤 소유자 스캔",
+                  "status": "in_progress"
+                },
+                {
+                  "text": "베이스라인 저장",
+                  "status": "pending"
+                }
+              ],
+              "total": 3,
+              "more": 0,
+              "done": 1
+            }
+          },
+          {
+            "id": "st_fx_run_02",
+            "name": "지연된 작업자 점검",
+            "kind": "deep-low",
+            "model": "Sol 6",
+            "state": "running",
+            "step": "wait · fixture response",
+            "startedAt": "2026-10-17T01:40:00.000Z",
+            "updatedAt": "2026-10-17T02:00:00.000Z",
+            "childSessionId": "fx-child-0002",
+            "stale": true,
+            "todo": null
+          },
+          {
+            "id": "st_fx_err_03",
+            "name": "이전 레이아웃 비교기",
+            "kind": "quick",
+            "model": "Flash 4",
+            "state": "error",
+            "step": "nested scroller detected in #pf-sec-profiles",
+            "startedAt": "2026-10-17T01:20:00.000Z",
+            "endedAt": "2026-10-17T01:35:00.000Z",
+            "updatedAt": "2026-10-17T01:35:00.000Z",
+            "stale": false,
+            "todo": null
+          },
+          {
+            "id": "st_fx_done_04",
+            "name": "토큰 규격 검증기",
+            "kind": "quick",
+            "model": "Flash 4",
+            "state": "done",
+            "step": "",
+            "startedAt": "2026-10-17T01:00:00.000Z",
+            "endedAt": "2026-10-17T01:15:00.000Z",
+            "updatedAt": "2026-10-17T01:15:00.000Z",
+            "stale": false,
+            "todo": null
+          }
+        ]
+      },
+      "plan": {
+        "planId": "herdr-dag-active-tracking-w2",
+        "source": {
+          "slug": "herdr-dag-active-tracking",
+          "path": "D:/work/proj-beta/.omo/plans/herdr-dag-active-tracking.md"
+        },
+        "stage": "running",
+        "stageNote": "Wave 2 진행 중 · 작업 5 인벤토리 고정 단계",
+        "goal": "상황판의 중첩 카드를 평면 섹션으로 바꾸고 #main 단일 세로 스크롤과 F5 <= 1을 달성한다",
+        "ideal": [
+          {
+            "id": "IS-3",
+            "text": "섹션 헤더+평면 행, 활성만 기본 펼침"
+          },
+          {
+            "id": "IS-4",
+            "text": "단일 본문 스크롤과 지정 흐름 비용 1 이하"
+          }
+        ],
+        "components": [
+          {
+            "id": "overview",
+            "label": "개요·대화",
+            "text": "중첩 카드 제거 및 평면 요약행"
+          },
+          {
+            "id": "profiles",
+            "label": "프로필·에이전트",
+            "text": "내부 세로 스크롤 제거 및 단일 뷰포트"
+          },
+          {
+            "id": "blocks",
+            "label": "계획·작업자·보고서",
+            "text": "공통 섹션 헤더와 인라인 상세"
+          }
+        ],
+        "waves": [
+          {
+            "n": 1,
+            "label": "인벤토리와 베이스라인"
+          },
+          {
+            "n": 2,
+            "label": "평면 구현과 수용 검증"
+          }
+        ],
+        "tasks": [
+          {
+            "id": "5",
+            "wave": 1,
+            "label": "소비 화면 인벤토리 고정",
+            "what": "익명 fixture와 qa-readability 베이스라인",
+            "done": "inventory/before/failures 기록",
+            "deps": [],
+            "state": "doing"
+          },
+          {
+            "id": "6",
+            "wave": 2,
+            "label": "평면 섹션과 단일 뷰포트",
+            "what": "공통 카드 평면화 및 #main 스크롤 통합",
+            "done": "readability.test.mjs 통과",
+            "deps": [
+              "5"
+            ],
+            "state": "todo"
+          },
+          {
+            "id": "7",
+            "wave": 2,
+            "label": "F5와 시각·기능 수용 검증",
+            "what": "두 해상도 F5 <= 1 및 시각 검토",
+            "done": "flow-diff 및 visual PASS",
+            "deps": [
+              "6"
+            ],
+            "state": "todo"
+          },
+          {
+            "id": "8",
+            "wave": 2,
+            "label": "패키지와 복귀 문서",
+            "what": "격리 설치 검증 및 복귀 안내",
+            "done": "readability-install 통과",
+            "deps": [
+              "7"
+            ],
+            "state": "stopped"
+          },
+          {
+            "id": "9",
+            "wave": 2,
+            "label": "최종 게이트 감리",
+            "what": "독립 게이트 검토",
+            "done": "F1~F4 승인",
+            "deps": [
+              "8"
+            ],
+            "state": "todo"
+          }
+        ],
+        "questions": [
+          {
+            "id": "Q1",
+            "text": "비활성 세션 기본 상태는 무엇인가요?",
+            "state": "open",
+            "decisionId": 301
+          },
+          {
+            "id": "Q2",
+            "text": "프로필 재생성 도구는 무엇을 쓰나요?",
+            "state": "answered",
+            "answer": "Bun 1.4.0 고정 레시피",
+            "by": "owner",
+            "option": "A"
+          }
+        ],
+        "outOfScope": [
+          "메멘토 전용 카드 콘텐츠 재설계",
+          "사무실 전용 캔버스 자산 재설계"
+        ]
+      },
+      "alive": true,
+      "briefSeq": 5,
+      "briefPath": "D:/work/fixture-home/primary/.omo/agent/briefing/state/sessions/fx-sess-beta-active/briefs/000005.json",
+      "sessionFile": "D:/work/fixture-home/primary/.senpi/agent/sessions/--D--work-proj-beta--/2026-10-17T02-00-00-000Z_fx-sess-beta-active.jsonl",
+      "todo": {
+        "items": [
+          {
+            "text": "소비 화면 인벤토리 고정",
+            "status": "in_progress"
+          },
+          {
+            "text": "평면 섹션과 단일 뷰포트 구현",
+            "status": "pending"
+          },
+          {
+            "text": "F5와 시각·기능 수용 검증",
+            "status": "pending"
+          }
+        ],
+        "more": 1
+      },
+      "attachments": [
+        {
+          "label": "대화 id",
+          "path": "fx-sess-beta-active"
+        },
+        {
+          "label": "세션 파일",
+          "path": "D:/work/fixture-home/primary/.senpi/agent/sessions/--D--work-proj-beta--/2026-10-17T02-00-00-000Z_fx-sess-beta-active.jsonl"
+        },
+        {
+          "label": "계획 파일",
+          "path": "D:/work/proj-beta/.omo/plans/herdr-dag-active-tracking.md"
+        },
+        {
+          "label": "증거",
+          "path": "D:/work/proj-beta/.omo/evidence/flat-viewport-layout/task-5/inventory.json"
+        }
+      ],
+      "blockSources": {
+        "head": {
+          "paths": [
+            "D:/work/fixture-home/primary/.senpi/agent/sessions/--D--work-proj-beta--/2026-10-17T02-00-00-000Z_fx-sess-beta-active.jsonl"
+          ]
+        },
+        "change/5/0": {
+          "paths": [
+            "D:/work/proj-beta/.omo/evidence/flat-viewport-layout/task-5/inventory.json"
+          ]
+        },
+        "change/5/1": {
+          "paths": [
+            "D:/work/proj-beta/scripts/qa-readability.mjs"
+          ]
+        }
+      }
+    },
+    {
+      "id": "fx-sess-gamma-running",
+      "project": "proj-gamma",
+      "cwd": "D:/work/proj-gamma",
+      "title": "실시간 워커 스트림 수집",
+      "paneId": "w3-p2",
+      "tabId": "w3:t305",
+      "tabLabel": "워커수집",
+      "tabNumber": 305,
+      "answerKinds": [
+        "option",
+        "text",
+        "annotation"
+      ],
+      "workName": "worker-stream-sync",
+      "status": "in_progress",
+      "statusKey": "in_progress",
+      "tab": "진행 중",
+      "chips": [
+        "작업 중"
+      ],
+      "headline": "하위 작업자 이벤트 스트림을 집계하여 상태 행을 갱신하는 중",
+      "lastActivityAt": 1792204140000,
+      "lastBriefAt": 1792204080000,
+      "changesNew": true,
+      "changes": [
+        {
+          "text": "이벤트 버퍼 링 구조체 작성",
+          "truth": "evidence",
+          "applied": "candidate",
+          "evidence": "D:/work/proj-gamma/src/stream-ring.mjs",
+          "evidenceState": "ok"
+        }
+      ],
+      "done": [],
+      "next": "스트림 끊김 복구 시험 추가",
+      "heldCount": 0,
+      "decisions": [],
+      "notes": [],
+      "flow": [
+        {
+          "label": "버퍼 구현",
+          "state": "done"
+        },
+        {
+          "label": "스트림 연결",
+          "state": "doing"
+        }
+      ],
+      "reports": [],
+      "openQuestion": {
+        "text": "스트림 버퍼 기본 크기를 256으로 유지할까요?",
+        "at": 1792204110000,
+        "paneId": "w3-p2"
+      },
+      "auto": {
+        "stage": "실행",
+        "todoCurrent": "2. 스트림 연결",
+        "todoNext": "3. 복구 시험",
+        "todoDone": 1,
+        "todoTotal": 3,
+        "workers": {
+          "running": 1,
+          "done": 0,
+          "error": 0
+        }
+      },
+      "live": {
+        "workers": [
+          {
+            "id": "st_fx_gamma_01",
+            "name": "스트림 파서 구현",
+            "kind": "deep-low",
+            "model": "Sol 6",
+            "state": "running",
+            "step": "test · test/stream.test.mjs",
+            "startedAt": "2026-10-17T02:20:00.000Z",
+            "updatedAt": "2026-10-17T02:29:30.000Z",
+            "childSessionId": "fx-child-0301",
+            "stale": false,
+            "todo": {
+              "items": [
+                {
+                  "text": "파서 토큰화",
+                  "status": "completed"
+                },
+                {
+                  "text": "경계 케이스 시험",
+                  "status": "in_progress"
+                }
+              ],
+              "total": 2,
+              "more": 0,
+              "done": 1
+            }
+          }
+        ]
+      },
+      "plan": null,
+      "alive": true,
+      "briefSeq": 2,
+      "briefPath": "D:/work/fixture-home/primary/.omo/agent/briefing/state/sessions/fx-sess-gamma-running/briefs/000002.json",
+      "sessionFile": "D:/work/fixture-home/primary/.senpi/agent/sessions/--D--work-proj-gamma--/2026-10-17T02-15-00-000Z_fx-sess-gamma-running.jsonl",
+      "todo": {
+        "items": [
+          {
+            "text": "버퍼 구현",
+            "status": "completed"
+          },
+          {
+            "text": "스트림 연결",
+            "status": "in_progress"
+          },
+          {
+            "text": "복구 시험",
+            "status": "pending"
+          }
+        ],
+        "more": 0
+      },
+      "attachments": [
+        {
+          "label": "대화 id",
+          "path": "fx-sess-gamma-running"
+        }
+      ],
+      "blockSources": {}
+    }
+  ]
+}
