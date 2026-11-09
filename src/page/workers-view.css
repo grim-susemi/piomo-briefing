@@ -24,7 +24,12 @@
 .w-stale .w-step { color: var(--yellow); font-weight: var(--fw-semibold); }
 .w-error .w-step { color: var(--red); }
 .w-row .w-todo-btn { flex: none; margin: 0; }
-.w-todos { flex: 0 0 100%; order: 9; list-style: none; margin: 2px 0 4px; padding: 2px 0 2px 6px; border-left: var(--hair) solid var(--c-line-strong); font-size: var(--fs-sm); line-height: 18px; }
+.cv-page .w-block { border-top: 0; padding-top: 0; margin-top: 0; }
+.cv-page .w-sum { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); }
+.cv-page .w-rows { border-top: var(--hair) solid var(--line); }
+.cv-page .w-row { min-height: 40px; padding: var(--sp-1) var(--sp-2) var(--sp-1) 24px; border-bottom: var(--hair) solid var(--line); border-radius: 0; }
+.cv-page .w-row + .w-row { margin-top: 0; }
+.w-todos { flex: 0 0 100%; order: 9; list-style: none; margin: 2px 0 4px; padding: var(--sp-1) 0 2px var(--sp-2); border-top: var(--hair) solid var(--line); font-size: var(--fs-sm); line-height: 18px; }
 .w-todo { display: flex; align-items: baseline; gap: 4px; padding: 0 6px; border-radius: var(--r-xs); }
 .w-tsym { flex: none; width: 1.2em; text-align: center; }
 .w-ttext { min-width: 0; overflow-wrap: anywhere; }

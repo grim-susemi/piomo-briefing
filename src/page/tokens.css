@@ -189,9 +189,9 @@ button, input, select, textarea { font-family: inherit; }
   }
 }
 
-/* Home only: other surfaces keep the 11px desktop tokens they were laid out for. */
+/* Adopted proposal A (#1105, applied board-wide by #1136): desktop text never goes below 12px. */
 @media (min-width: 600px) {
-  .overview {
+  :root {
     --fs-2xs: 12px;
     --fs-xs: 12px;
   }

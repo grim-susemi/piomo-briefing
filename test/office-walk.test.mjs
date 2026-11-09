@@ -182,7 +182,7 @@ test('the boss cat stands at the lounge door of the shown floor in its gold crow
   assert.equal(office.querySelectorAll('.of-desk').length, floor.desks.length);
   assert.deepEqual(Object.keys(e.ctx.__office.desks).sort(), floor.desks.map((d) => d.id).sort());
   assert.match(office.querySelector('.of-card small').textContent, new RegExp('작업자 ' + (floor.desks.length - 1) + '명'));
-  assert.match(office.querySelectorAll('.of-box h3 small')[2].textContent, new RegExp('^' + floor.desks.length + '명'));
+  assert.match(office.querySelectorAll('.of-box h2 .cnt')[2].textContent, new RegExp('^' + floor.desks.length + '명'));
 });
 
 test('arrow keys and W/A/S/D step one walk tile along the map axes, each one el.animate() of 140 ms; a blocked tile refuses the step', async () => {

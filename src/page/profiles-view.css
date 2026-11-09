@@ -33,7 +33,7 @@
   white-space: nowrap;
   border: 0;
 }
-.pf-title { margin: 0; font-size: var(--fs-xl); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-title { margin: 0; font-size: var(--fs-2xl); line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pf-keep { white-space: nowrap; }
 .pf-active { color: var(--c-fg-2); font-size: var(--fs-sm); font-weight: var(--fw-medium); }
 
@@ -183,7 +183,8 @@
   border-bottom: var(--hair) solid var(--c-line-soft);
 }
 .pf-sec-t { min-width: 0; display: grid; gap: 1px; }
-.pf-sec-t h2 { margin: 0; font-size: var(--fs-lg); line-height: 1.35; }
+.pf-sec-t h2 { margin: 0; font-size: 18px; line-height: 1.3; }
+#pf-sec-profiles > .pf-sec-h .pf-tag { display: none; }
 .pf-sec-s { margin: 0; color: var(--c-fg-3); font-size: var(--fs-sm); }
 .pf-sec-r { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
 .pf-count {
@@ -291,10 +292,23 @@
 .pf-agent.pf-route { display: block; padding: 0; border: 0; border-radius: var(--r-md); }
 .pf-agent-editor { display: grid; gap: var(--sp-2); padding: var(--sp-2); min-width: 0; }
 .pf-agent-editor[hidden] { display: none; }
-.pf-routing-tools { padding: var(--sp-2) var(--sp-2) 0; min-width: 0; }
-.pf-routing-tools > label { display: block; font-size: var(--fs-sm); margin-bottom: var(--sp-1); }
-.pf-routing-tools > input { box-sizing: border-box; width: 100%; min-width: 0; }
-.pf-routing-tabs { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-2); }
+.pf-routing-tools { padding: var(--sp-1) var(--sp-2) 0; min-width: 0; }
+.pf-routing-tools > label { display: block; font-size: var(--fs-sm); margin-bottom: 2px; }
+.pf-routing-tools > input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: var(--ctl-h);
+  min-height: var(--ctl-h);
+  padding: 0 var(--sp-2);
+  border: var(--hair) solid var(--ctl-edge);
+  border-radius: var(--r-lg);
+  background: var(--c-main);
+  color: var(--c-fg);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+.pf-routing-tabs { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-1); }
 .pf-routing-tabs [role="tab"] { cursor: pointer; color: inherit; background: transparent; border: 1px solid var(--c-line); border-radius: 4px; padding: 5px 8px; }
 .pf-routing-tabs [aria-selected="true"] { background: var(--fill-sel); font-weight: var(--fw-medium); border-color: currentColor; }
 .pf-routing-tabs [role="tab"]:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
@@ -376,7 +390,7 @@
   .pf-card-en { display: none; }
   .pf-card-main, .pf-card-svc { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 }
-.pf-dt { margin: 0; font-size: var(--fs-lg); line-height: 1.35; }
+.pf-dt { margin: 0; font-size: 18px; line-height: 1.3; }
 .pf-du { margin: 0; color: var(--c-fg-2); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: break-word; }
 .pf-cap { margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); color: var(--c-fg-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
 /* the WinForms routing box scrolls on its own and ends where the detail pane's view ends (the pane less its title, usage
@@ -558,6 +572,7 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-route-id > .pf-chip { display: inline-block; overflow: hidden; text-overflow: ellipsis; }
 .pf-route-ko { font-weight: var(--fw-medium); }
 .pf-route-en { color: var(--c-fg-3); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+[data-pf-route] > .pf-route-id > .pf-route-en { display: none; }
 .pf-rec-off { color: var(--c-fg-3); font-size: var(--fs-2xs); overflow-wrap: anywhere; }
 
 /* main, lane, summarizer, memory */
@@ -732,6 +747,14 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
   .pf-btn { transition: none; }
   .pf-pulse { animation-duration: 2.4s; }
 }
-/* Manual provider actions share the section's scroll owner and remain touch-sized. */
-.pf-web-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.pf-web-actions .pf-btn { min-height: 44px; }
+/* Manual provider actions share the section's scroll owner and remain touch-sized on phone. */
+.pf-web { display: grid; gap: 2px; padding: var(--sp-1) 0; }
+.pf-web-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); min-width: 0; }
+.pf-web-row h2 { margin: 0; font-size: 18px; line-height: 1.3; display: inline-flex; align-items: center; gap: var(--sp-2); }
+.pf-web-status { margin: 0; display: inline-flex; align-items: center; }
+.pf-web-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+.pf-web-actions .pf-btn { min-height: var(--ctl-h); }
+.pf-web-fold { margin-top: 2px; }
+.pf-web-fold > summary { min-height: var(--ctl-h); padding: 2px 0; }
+.pf-web-fold .fold-body { display: grid; gap: var(--sp-1); padding: var(--sp-1) 0 var(--sp-1) var(--sp-5); }
+.pf-web-fold .pf-note { margin: 0; }

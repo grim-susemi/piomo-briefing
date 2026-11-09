@@ -68,7 +68,7 @@ test('real annotation consumes a heading drag click without changing the pending
   const first = JSON.parse(posts(e)[0].opts.body);
   await replyPost(posts(e)[0], 409, { ok: false, code: 'BUSY' });
   await replyState(e);
-  const heading = e.byId.main.querySelector('.mcards-heading');
+  const heading = e.byId.main.querySelector('.mc-h1');
   e.fire(heading, 'mousedown', { clientX: 20, clientY: 20 });
   e.fire(heading, 'mousemove', { clientX: 40, clientY: 40 });
   const bandCreated = !!e.document.querySelector('.band');

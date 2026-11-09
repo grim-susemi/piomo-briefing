@@ -99,8 +99,9 @@
   box-shadow: var(--sh-shade); transition: none;
 }
 /* the width handle: dragged, or focused and moved with the arrow keys (shell.js bind) */
-.sh-rz { position: absolute; z-index: 3; top: 0; right: -3px; bottom: 0; width: 6px; cursor: col-resize; }
-.sh-rz:hover, .sh-rz:focus-visible, .sh-shell.is-resizing .sh-rz { background: var(--c-line-strong); }
+.sh-rz { position: absolute; z-index: 3; top: 0; right: -12px; bottom: 0; width: 24px; cursor: col-resize; }
+.sh-rz::after { content: ""; position: absolute; top: 0; bottom: 0; left: 9px; width: 6px; }
+.sh-rz:hover::after, .sh-rz:focus-visible::after, .sh-shell.is-resizing .sh-rz::after { background: var(--c-line-strong); }
 .sh-shell.is-resizing { cursor: col-resize; user-select: none; }
 .sh-head {
   flex: none; display: flex; align-items: center; gap: var(--sp-2); height: var(--sh-bar-h); padding: 0 var(--sp-2) 0 var(--sp-4);
@@ -118,9 +119,8 @@
 }
 .sh-back:hover { background: var(--hov); color: var(--tx); }
 .sh-shell[data-view="archive"] .sh-back { display: flex; }
-/* the search box's visible label (visual-qa C7); the placeholder keeps the scope */
+/* the search box's label stays in the DOM for accessibility/tests while page.css .sh-srch::before draws the visible heading */
 .sh-qlbl { display: none; margin: var(--sp-1) var(--sp-4) 2px; color: var(--tx2); font-size: var(--fs-xs); font-weight: var(--fw-medium); line-height: 16px; }
-.sh-shell[data-view="conv"] .sh-qlbl, .sh-shell[data-view="archive"] .sh-qlbl { display: block; }
 .sh-srch {
   display: none; flex: none; align-items: center; gap: 6px; margin: 2px 10px 6px; padding: 0 8px;
   border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--tx2); font-size: var(--fs-sm);
@@ -141,43 +141,43 @@
 }
 .sh-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; padding-bottom: var(--sp-4); }
 
-/* sections and rows: quiet section heads (their chevron shows on hover and focus), 32 px rows, the selected row filled */
+/* sections and rows: A section heads, one-line rows with hairline separators, the selected row filled */
 .sh-sec { margin-top: var(--sp-4); }
 .sh-sec:first-child { margin-top: var(--sp-2); }
 .sh-sh {
-  display: flex; align-items: center; gap: var(--sp-1); width: calc(100% - var(--sp-4)); height: var(--ctl-h); margin: 0 var(--sp-2); padding: 0 var(--sp-2);
-  border: 0; border-radius: var(--r-md); background: none; color: var(--tx3); font-size: var(--fs-sm); font-weight: var(--fw-medium); text-align: left;
+  display: flex; align-items: center; gap: var(--sp-2); width: calc(100% - var(--sp-4)); min-height: var(--ctl-h); margin: 0 var(--sp-2) var(--sp-1); padding: 0 var(--sp-2);
+  border: 0; border-radius: var(--r-md); background: none; color: var(--tx); font-size: var(--fs-base); font-weight: var(--fw-semibold); line-height: 1.3; text-align: left;
 }
-.sh-sh:hover { color: var(--tx2); }
-.sh-cnt { color: var(--tx2); font-weight: var(--fw-regular); font-variant-numeric: tabular-nums; }
-.sh-ch { display: inline-flex; color: var(--tx3); opacity: 0; transition: opacity var(--dur) var(--ease-out); }
+.sh-sh:hover { background: var(--hov); }
+.sh-cnt { color: var(--tx2); font-size: var(--fs-sm); font-weight: var(--fw-regular); font-variant-numeric: tabular-nums; }
+.sh-ch { display: inline-flex; margin-left: auto; color: var(--tx3); opacity: 0; transition: opacity var(--dur) var(--ease-out); }
 .sh-sh:hover .sh-ch, .sh-sh:focus-visible .sh-ch { opacity: 1; }
-.sh-nav { padding: 0 var(--sp-2); }
+.sh-nav { padding: 0 var(--sp-2); border-top: var(--hair) solid var(--line); }
 .sh-empty { margin: var(--sp-1) var(--sp-4); color: var(--tx3); font-size: var(--fs-sm); }
-.sh-row { display: flex; align-items: center; min-height: var(--row-h); border-radius: var(--r-md); color: var(--tx); transition: background-color var(--dur) var(--ease-out); }
+.sh-row { display: flex; align-items: center; min-height: 36px; border-bottom: var(--hair) solid var(--line); border-radius: var(--r-md); color: var(--tx); transition: background-color var(--dur) var(--ease-out); }
 .sh-row:hover, .sh-row:focus-within { background: var(--hov); }
 .sh-row.sel, .sh-row.sel:hover { background: var(--sel); box-shadow: inset 0 0 0 1px var(--ctl-edge); }
 .sh-row.sel .sh-t { color: var(--tx); font-weight: var(--fw-medium); }
 .sh-tg {
-  flex: none; display: grid; place-items: center; width: var(--sp-5); height: var(--sp-5); padding: 0; border: 0; border-radius: var(--r-xs);
+  flex: none; display: grid; place-items: center; width: var(--sp-6); height: var(--sp-6); padding: 0; border: 0; border-radius: var(--r-xs);
   background: none; color: var(--tx3);
 }
 button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 .sh-go {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); min-height: var(--row-h); padding: 0 var(--sp-2) 0 var(--sp-1);
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); min-height: 36px; padding: 0 var(--sp-2) 0 var(--sp-1);
   border: 0; border-radius: inherit; background: none; color: inherit; font-size: var(--fs-base); text-align: left;
 }
 .sh-gone .sh-go { cursor: default; }
 /* the only ellipsis in the sidebar: one-line row titles, each with its full text in a title attribute */
 .sh-t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.sh-sub { margin-left: var(--sp-2); color: var(--tx3); font-size: var(--fs-sm); }
+.sh-sub { flex: none; margin-left: auto; color: var(--tx3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sh-fold { flex: none; color: var(--tx3); font-size: var(--fs-base); white-space: nowrap; }
 .sh-gone .sh-t { color: var(--tx3); font-style: italic; }
-.sh-fav { display: none; flex: none; padding: var(--sp-1); border: 0; border-radius: var(--r-xs); background: none; color: var(--tx3); line-height: 0; }
+.sh-fav { display: none; flex: none; min-width: var(--sp-6); min-height: var(--sp-6); padding: var(--sp-1); border: 0; border-radius: var(--r-xs); background: none; color: var(--tx3); line-height: 0; }
 .sh-fav:hover { color: var(--tx); }
 .sh-fav[aria-pressed="true"] { color: var(--yellow); } /* the star outline turns filled (page.css .ic-fill) */
-.sh-row:hover .sh-fav, .sh-row:focus-within .sh-fav { display: block; }
-.sh-row:hover .sh-bdg, .sh-row:focus-within .sh-bdg { display: none; }
+.sh-row:hover .sh-fav, .sh-row:focus-within .sh-fav { display: grid; place-items: center; }
+.sh-row:hover .sh-sub, .sh-row:focus-within .sh-sub { display: none; }
 .sh-kids { padding-left: var(--sp-4); }
 .sh-kid .sh-go { min-height: var(--ctl-h); color: var(--tx2); font-size: var(--fs-sm); }
 .sh-ki { flex: none; display: grid; place-items: center; width: var(--sp-5); color: var(--tx3); }
@@ -192,40 +192,43 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 }
 .sh-ico-n { background: var(--sh-hue-bg, var(--fill-soft)); color: var(--sh-hue, var(--tx3)); }
 .sh-ico:not(.sh-ico-n) { background: none; }
+.sh-row:not(.sh-kid) > span.sh-tg, button.sh-go > .sh-ico:not(.sh-ico-n), .sh-it > .sh-ico:not(.sh-ico-n) { display: none; }
 /* row and tab badges wear page.css's semantic chip tints (a solid fill would swallow the yellow 🔔) */
 .sh-bdg {
-  flex: none; padding: 0 6px; border-radius: 9px; background: var(--yellow-bg); color: var(--c-amber-text);
-  font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 16px; white-space: nowrap;
+  flex: none; padding: 0 6px; border-radius: var(--r-xs); background: var(--yellow-bg); color: var(--c-amber-text);
+  font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 18px; white-space: nowrap;
 }
 .sh-bdg-r { background: var(--red-bg); color: var(--red); }
 .sh-bdg-g { background: var(--green-bg); color: var(--green); }
 .sh-bdg-q { background: var(--spy-bg); color: var(--tx); }
+.sh-bdg-t { background: var(--teal-bg); color: var(--teal); }
+.sh-bdg-d { background: var(--gray-bg); color: var(--gray); }
 
-/* inbox, plans: item cards with the conversation's colour on the left; the inbox groups are filled like the tabs */
-.sh-ptabs { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; gap: var(--sp-1); padding: 0 var(--sp-3) var(--sp-2); background: var(--side); }
+/* inbox, plans: one-line / hairline rows; the inbox groups are filled like the tabs */
+.sh-ptabs { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; gap: var(--sp-1); padding: 0 var(--sp-3) var(--sp-2); border-bottom: var(--hair) solid var(--line); background: var(--side); }
 .sh-pt {
-  padding: 2px var(--sp-2); border: 0; border-radius: var(--r-md); background: none; color: var(--tx2); font-size: var(--fs-sm); white-space: nowrap;
+  min-height: var(--sp-6); padding: 2px var(--sp-2); border: 0; border-radius: var(--r-md); background: none; color: var(--tx2); font-size: var(--fs-sm); white-space: nowrap;
   transition: background-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
 }
 .sh-pt:hover { background: var(--hov); color: var(--tx); }
 .sh-pt.on, .sh-pt.on:hover { background: var(--sel); color: var(--tx); font-weight: var(--fw-medium); box-shadow: inset 0 0 0 1px var(--ctl-edge); }
 .sh-it {
-  display: flex; align-items: flex-start; gap: var(--sp-2); width: calc(100% - var(--sp-4)); margin: 0 var(--sp-2) 2px; padding: var(--sp-2);
-  border: 0; border-left: 3px solid var(--sh-hue, var(--c-line-strong)); border-radius: var(--r-md); background: none; color: var(--tx); text-align: left;
+  display: flex; align-items: flex-start; gap: var(--sp-2); width: calc(100% - var(--sp-4)); min-height: 40px; margin: 0 var(--sp-2); padding: var(--sp-2);
+  border: 0; border-bottom: var(--hair) solid var(--line); border-radius: var(--r-md); background: none; color: var(--tx); text-align: left;
   transition: background-color var(--dur) var(--ease-out);
 }
 .sh-it:hover { background: var(--hov); }
-.sh-itb { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.sh-itb { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .sh-k { color: var(--tx3); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .sh-iq { font-size: var(--fs-base); overflow-wrap: anywhere; }
 .sh-w { color: var(--tx3); font-size: var(--fs-xs); overflow-wrap: anywhere; }
 .sh-ans { color: var(--green); font-weight: var(--fw-semibold); }
 /* 수신함 보류 / 다시 열기 (server page): beside the item button, never inside it */
-.sh-iw { margin-bottom: 2px; }
-.sh-iw > .sh-it { margin-bottom: 0; }
-.sh-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); margin: 0 var(--sp-2) 0 calc(2 * var(--sp-2) + 3px); }
+.sh-iw { border-bottom: var(--hair) solid var(--line); }
+.sh-iw > .sh-it { margin-bottom: 0; border-bottom: 0; }
+.sh-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); margin: 0 var(--sp-2) var(--sp-2) calc(2 * var(--sp-2)); }
 .sh-act {
-  padding: 2px var(--sp-2); border: var(--hair) solid var(--c-line-strong); border-radius: var(--r-md); background: none; color: var(--tx2); font-size: var(--fs-sm);
+  min-height: var(--sp-6); padding: 2px var(--sp-2); border: var(--hair) solid var(--c-line-strong); border-radius: var(--r-md); background: none; color: var(--tx2); font-size: var(--fs-sm);
   transition: background-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
 }
 .sh-act:hover { background: var(--hov); color: var(--tx); }
@@ -233,10 +236,10 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 .sh-err { color: var(--red); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 
 /* 홈 counts, 설정 */
-.sh-home { padding-top: var(--sp-2); }
+.sh-home { padding-top: var(--sp-2); border-top: 0; }
 .sh-hr {
-  display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--row-h); padding: 0 var(--sp-2);
-  border: 0; border-radius: var(--r-md); background: none; color: var(--tx); font-size: var(--fs-base); text-align: left;
+  display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 36px; padding: 0 var(--sp-2);
+  border: 0; border-bottom: var(--hair) solid var(--line); border-radius: var(--r-md); background: none; color: var(--tx); font-size: var(--fs-base); text-align: left;
   transition: background-color var(--dur) var(--ease-out);
 }
 .sh-hr:hover { background: var(--hov); }
@@ -244,11 +247,11 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 .sh-hl { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .sh-num { font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
 .sh-set { padding: var(--sp-1) var(--sp-4); }
-.sh-seth { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-4) 0 var(--sp-2); color: var(--tx3); font-size: var(--fs-sm); font-weight: var(--fw-medium); }
-.sh-setr { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0; }
+.sh-seth { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-4) 0 var(--sp-2); color: var(--tx); font-size: var(--fs-base); font-weight: var(--fw-semibold); line-height: 1.3; }
+.sh-setr { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0; padding-bottom: var(--sp-3); border-bottom: var(--hair) solid var(--line); }
 .sh-hint { color: var(--tx2); font-size: var(--fs-xs); }
-.sh-legend { display: grid; gap: var(--sp-1); margin: 0; font-size: var(--fs-sm); } /* page.css .legend-list: no bullets */
-.sh-legend li { overflow-wrap: anywhere; }
+.sh-legend { display: grid; gap: 0; margin: 0; border-top: var(--hair) solid var(--line); font-size: var(--fs-sm); } /* page.css .legend-list: no bullets */
+.sh-legend li { padding: var(--sp-1) 0; border-bottom: var(--hair) solid var(--line); overflow-wrap: anywhere; }
 
 /* tab bar: 30 px tabs on the page surface, the selected one filled, a hairline under the bar */
 .sh-tabs {
@@ -278,7 +281,7 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
 .tt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tb-pin { display: inline-flex; color: var(--tx3); }
 .tb-x {
-  flex: none; display: grid; place-items: center; width: var(--sp-5); height: var(--sp-5); margin-right: var(--sp-1); padding: 0;
+  flex: none; display: grid; place-items: center; width: var(--sp-6); height: var(--sp-6); margin-right: var(--sp-1); padding: 0;
   border: 0; border-radius: var(--r-xs); background: none; color: inherit; opacity: 0;
 }
 .tb:hover .tb-x, .tb.on .tb-x, .tb-x:focus-visible { opacity: .7; }
@@ -335,8 +338,8 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
   :root { --sh-rail-gap: var(--sp-2); }
   .sh-k, .sh-iq, .sh-w { word-break: keep-all; overflow-wrap: anywhere; text-wrap: balance; }
   .sh-n { top: auto; right: -2px; bottom: -4px; line-height: 18px; } /* the larger phone count sits on the corner, off the icon */
-  .sh-ib, .sh-topen, .sh-tadd, .sh-chip, .sh-sh, .sh-tg, .sh-fav, .sh-pt, .sh-act, .tb-x, .copy { min-width: var(--hit); min-height: var(--hit); }
-  .sh-back, .sh-row, .sh-go, .sh-kid .sh-go, .sh-hr, .tb { min-height: var(--hit); }
+  .sh-ib, .sh-topen, .sh-tadd, .sh-chip, .sh-sh, .sh-tg, .sh-fav, .sh-pt, .sh-act, .tb-x, .copy, .sh-set .alarm-sound { min-width: var(--hit); min-height: var(--hit); }
+  .sh-back, .sh-row, .sh-go, .sh-kid .sh-go, .sh-hr, .tb, .sh-shell .sh-q { min-height: var(--hit); }
   .sh-back { margin-bottom: var(--sp-2); }
   .sh-flt, .sh-ptabs, .sh-acts, .sh-row, .sh-tabs { gap: var(--sp-2); }
   .sh-scroll, .sh-nav, .sh-kids { display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -359,6 +362,17 @@ button.sh-tg:hover { background: var(--hov); color: var(--tx); }
   .sh-row:has(> .sh-go > .sh-fold) .sh-ico { min-width: var(--sp-4); }
   .sh-row:has(> .sh-go > .sh-fold) .sh-ki { width: var(--sp-4); }
   .sh-row:has(> .sh-go > .sh-fold) .sh-fold { font-size: var(--fs-sm); }
+  /* phone: the conversation name owns the first line; status chip, fold label and time move under it
+   * (review B-01: on one line they left the name 19-31 px of a 243 px row) */
+  .sh-go:has(> .sh-bdg) {
+    display: grid; grid-template-columns: auto auto auto minmax(0, 1fr); grid-template-areas: "i t t t" ". b f s";
+    column-gap: var(--sp-1); row-gap: 2px; align-items: center; padding-block: var(--sp-1);
+  }
+  .sh-go:has(> .sh-bdg) > .sh-ico { grid-area: i; }
+  .sh-go:has(> .sh-bdg) > .sh-t { grid-area: t; }
+  .sh-go:has(> .sh-bdg) > .sh-bdg { grid-area: b; justify-self: start; }
+  .sh-go:has(> .sh-bdg) > .sh-fold { grid-area: f; }
+  .sh-go:has(> .sh-bdg) > .sh-sub { grid-area: s; justify-self: end; }
 }
 /* reduced motion (visual-qa G4): no slide; shell.js sync() cross-fades the part that changed instead; colour fades stay */
 @media (prefers-reduced-motion: reduce) {

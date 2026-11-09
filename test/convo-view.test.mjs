@@ -265,7 +265,7 @@ test('sub-tab bar: 개요 계획 작업자 결정 보고서 in order with counts
 
 // ---- header ------------------------------------------------------------------------------------------------------------
 
-test('page header: tab-number icon, label, topic, plan name, time, focus button, the old card header chips and the cwd row', () => {
+test('page header: one h1 title, one summary line (chips, project, plan, tab number, time, focus button), and the cwd row', () => {
   const ctx = load();
   const s = clone(A);
   s.chips = ['작업 중', '오래됨', '이 대화는 예전 세대라 실시간 상황판을 맡지 않음 · 대화를 재시작하면 최신 상황판이 열림', '새 칩'];
@@ -274,13 +274,15 @@ test('page header: tab-number icon, label, topic, plan name, time, focus button,
   const root = parse(render(ctx, s, 'ov'));
   const head = block(root, 'head');
   assert.equal(head.tag, 'header');
+  assert.ok(hasCls(head, 'pagehead'), 'uses shared .pagehead');
   const ico = cls(head, 'cv-ico')[0];
-  assert.equal(text(ico), '185');
+  assert.equal(text(ico), '#185');
   assert.ok(hasCls(ico, 'sh-h' + ((185 * 5) % 12)), 'the tab bar colour (shell.js hueOf)');
   const h1 = els(head, (e) => e.tag === 'h1')[0];
   assert.equal(text(h1), '상황판제작');
   assert.equal(h1.attrs.title, '상황판제작 #185 · 상황판 v6 대화 페이지');
-  assert.equal(flatShown(cls(head, 'cv-sub')[0]), '상황판 v6 대화 페이지[list-todo] briefing-board-redesign');
+  assert.equal(cls(head, 'cv-sub').length, 0, 'no duplicate title sub-header below h1');
+  assert.equal(flatShown(cls(head, 'cv-plan')[0]), '[list-todo] briefing-board-redesign');
   assert.equal(shown(cls(head, 'time')[0]), '[clock] ' + hhmm(A.lastActivityAt));
   assert.ok(shown(cls(head, 'cv-cwd')[0]).startsWith('[folder]'), 'the cwd row');
   assert.deepEqual(attrs(head, 'data-act', 'focus').map((b) => b.attrs['data-session']), [A.id]);
@@ -297,7 +299,7 @@ test('page header: tab-number icon, label, topic, plan name, time, focus button,
   const loose = parse(render(ctx, { ...clone(C), tabNumber: null, tabId: '' }, 'ov'));
   assert.equal(text(cls(loose, 'cv-ico')[0]), '·');
   assert.equal(text(els(loose, (e) => e.tag === 'h1')[0]), '옛 설치 점검');
-  assert.equal(flat(cls(loose, 'cv-sub')[0]), '창 w2-p3');
+  assert.equal(flat(cls(loose, 'cv-pane')[0]), '창 w2-p3');
   assert.equal(attrs(loose, 'data-act', 'focus').length, 0);
 });
 
@@ -326,18 +328,18 @@ test('개요: 지금/다음 callout, flow chips with →, four summary cards wit
   assert.deepEqual(card('dec'), ['[bell] 결정', '2 대기 · 4 답함']);
   assert.deepEqual(card('rep'), ['[file-text] 보고서', '3 · ' + A.reports[0].title]);
   assert.equal(cls(p, 'grid4').length, 1);
-  // open decision cards with answer boxes (dec/<id>), after the sent lines of answers not yet delivered
+  // open decision cards with answer boxes (dec/<id>) first, then the sent lines of answers still on their way; a settled one stays in the evidence fold
   const kit = ctx.BriefView.kit;
   for (const id of [97, 98]) {
     const el = block(p, 'dec/' + id);
     assert.equal(cls(el, 'dcard').length, 1);
     assert.equal(attrs(el, 'data-ans', String(id)).length, 1, 'answer box #' + id);
   }
-  assert.deepEqual(cls(p, 'dsent').map((e) => e.attrs['data-block']), ['dec/91', 'dec/94', 'dec/100']);
+  assert.deepEqual(cls(p, 'dsent').map((e) => e.attrs['data-block']), ['dec/91', 'dec/100', 'dec/94']);
   const html = render(ctx, A, 'ov');
   assert.ok(html.includes(kit.sentLine(A.decisions.find((d) => d.id === 91)).replace(/^<p/, '<p data-block="dec/91"')));
   // #90 was delivered: it shows again only while this page follows its own send
-  assert.deepEqual(cls(parse(render(ctx, A, 'ov', { answers: { 90: { phase: 'sent' } } })), 'dsent').map((e) => e.attrs['data-block']), ['dec/90', 'dec/91', 'dec/94', 'dec/100']);
+  assert.deepEqual(cls(parse(render(ctx, A, 'ov', { answers: { 90: { phase: 'sent' } } })), 'dsent').map((e) => e.attrs['data-block']), ['dec/90', 'dec/91', 'dec/100', 'dec/94']);
   assert.ok(flat(p).includes('질문창으로 옮김 · 여기서 답할 것 없음'));
   // the open-question line is the old card's markup
   const oq = (h) => /<p class="oq">[\s\S]*?<\/p>/.exec(h)[0];
@@ -345,17 +347,28 @@ test('개요: 지금/다음 callout, flow chips with →, four summary cards wit
   assert.ok(marks(oq(render(ctx, B, 'ov'))).includes('답할 창: <code>[app-window] 문서 #184</code> (읽기 전용): <span class="oq-t">문서 말투는 존댓말로 할까요?</span>'));
 });
 
-test('개요: 최근 변화 open and 한 일 closed; kit rows keep their chips and every row with evidence has its path and copy in a collapsed .dt', () => {
+test('an answer on its way stays above the evidence fold even when the owner closed that fold', () => {
+  const ctx = load();
+  const ui = { answers: { 90: { phase: 'sent' } }, expanded: { ['cv:' + A.id + ':fold']: false } };
+  const root = parse(render(ctx, A, 'ov', ui));
+  const fold = cls(root, 'cv-ev-fold')[0];
+  assert.ok(fold && !Object.hasOwn(fold.attrs, 'open'), 'the saved closed choice is kept');
+  assert.deepEqual(cls(cls(root, 'cv-sec-dec')[0], 'dsent').map((e) => e.attrs['data-block']), ['dec/90', 'dec/91', 'dec/100']);
+  assert.deepEqual(cls(fold, 'dsent').map((e) => e.attrs['data-block']), ['dec/94'], 'only the settled line stays folded');
+  assert.deepEqual(cls(parse(render(ctx, A, 'ov', { answers: {} })), 'cv-ev-fold').flatMap((f) => cls(f, 'dsent')).map((e) => e.attrs['data-block']), ['dec/94'], 'an answer taken in the question window is settled history');
+});
+
+test('개요: 최근 변화 and 한 일 start collapsed inside 근거와 기록; kit rows keep their chips and every row with evidence has its path and copy in a collapsed .dt', () => {
   const ctx = load();
   const kit = ctx.BriefView.kit;
   const html = render(ctx, A, 'ov');
   const p = panel(parse(html));
   const secs = cls(p, 'cv-sec');
-  const sec = (title) => secs.find((d) => shown(d.kids[0]).startsWith(title));
-  assert.ok(Object.hasOwn(sec('[plus] 새로 바뀜').attrs, 'open'), '최근 변화 is open');
-  assert.ok(!Object.hasOwn(sec('[check] 한 일').attrs, 'open'), '한 일 is closed');
-  assert.equal(flatShown(sec('[plus] 새로 바뀜').kids[0]), '[plus] 새로 바뀜 3');
-  assert.equal(flatShown(sec('[check] 한 일').kids[0]), '[check] 한 일 2');
+  const sec = (title) => secs.find((d) => flatShown(d.kids[0]).includes(title));
+  assert.ok(!Object.hasOwn(sec('[plus] 새로 바뀜').attrs, 'open'), '최근 변화 starts collapsed by default');
+  assert.ok(!Object.hasOwn(sec('[check] 한 일').attrs, 'open'), '한 일 starts collapsed by default');
+  assert.equal(flatShown(sec('[plus] 새로 바뀜').kids[0]), '[chevron-right] [plus] 새로 바뀜 3');
+  assert.equal(flatShown(sec('[check] 한 일').kids[0]), '[chevron-right] [check] 한 일 2');
   const rows = [...A.changes.map((c, i) => ['chg', 'change/12/' + i, c]), ...A.done.map((c, i) => ['done', 'done/12/' + i, c])];
   for (const [kind, id, item] of rows) {
     const li = block(p, id);
@@ -409,7 +422,7 @@ test('개요: 보낸 피드백 lists notes[] with their delivery strings; 이 �
   const p = panel(parse(render(ctx, A, 'ov')));
   const notes = cls(p, 'cv-notes')[0];
   assert.ok(!Object.hasOwn(notes.attrs, 'open'));
-  assert.equal(flatShown(notes.kids[0]), '[send] 보낸 피드백 4');
+  assert.equal(flatShown(notes.kids[0]), '[chevron-right] [send] 보낸 피드백 4');
   const CLASS = { '전달됨': 's-done', '전달 중': 'x-busy', '대기: 작업이 끝나면 전달': 'x-stale', '대기: 그 대화가 다시 열리면 전달': 'x-stale' };
   for (const n of A.notes) {
     const li = block(notes, 'note/' + n.key);
@@ -420,11 +433,11 @@ test('개요: 보낸 피드백 lists notes[] with their delivery strings; 이 �
     assert.ok(hasCls(chip, CLASS[n.delivery.replace(/ ⏱\d\d:\d\d$/, '')]), n.delivery);
   }
   const none = cls(parse(render(ctx, B, 'ov')), 'cv-notes')[0];
-  assert.deepEqual([flatShown(none.kids[0]), text(cls(none, 'cv-empty')[0])], ['[send] 보낸 피드백 0', '아직 보낸 피드백 없음']);
+  assert.deepEqual([flatShown(none.kids[0]), text(cls(none, 'cv-empty')[0])], ['[chevron-right] [send] 보낸 피드백 0', '아직 보낸 피드백 없음']);
   const att = cls(p, 'att')[0];
   assert.equal(att.tag, 'details');
   assert.ok(!Object.hasOwn(att.attrs, 'open'));
-  assert.equal(shown(att.kids[0]), `[paperclip] 이 대화 자료 ${A.attachments.length} (AI에게 "이거 고쳐줘" 할 때 같이 붙음)`);
+  assert.equal(flatShown(att.kids[0]), `[chevron-right] [paperclip] 이 대화 자료 ${A.attachments.length} (AI에게 "이거 고쳐줘" 할 때 같이 붙음)`);
   const rows = cls(att, 'path');
   assert.deepEqual(rows.map((r) => r.attrs['data-block']), A.attachments.map((_, n) => 'att/' + n), 'C-VM order');
   rows.forEach((r, n) => {
@@ -502,33 +515,43 @@ test('계획: a conversation running another one\'s plan shows the plan link lin
 
 // ---- 작업자 ------------------------------------------------------------------------------------------------------------
 
-test('작업자: BriefWorkersView.render output unchanged except one data-block="wk/<id>" per row', () => {
+test('작업자: section h2 + active BriefWorkersView rows on top, finished workers in a collapsed .fold with data-block="wk/<id>"', () => {
   const ctx = load();
   const expanded = { 'worker:st_01a14958': true };
   const html = render(ctx, A, 'wk', { expanded });
   const p = panel(parse(html));
+  assert.equal(flat(cls(p, 'sec-h2')[0]), '작업자 ' + A.live.workers.length);
   const rows = cls(p, 'w-row');
   assert.equal(rows.length, A.live.workers.length);
   for (const r of rows) assert.equal(r.attrs['data-block'], 'wk/' + r.attrs['data-worker']);
-  const inner = /<section class="cv-panel"[^>]*>([\s\S]*)<\/section><\/div>$/.exec(html)[1];
-  assert.equal(inner.replace(/ data-block="wk\/[^"]*"/g, ''), ctx.BriefWorkersView.render(A.live, WALL, { esc: ctx.BriefView.escapeHtml, expanded }));
+  const wkFold = cls(p, 'cv-wk-fold')[0];
+  assert.ok(wkFold && !Object.hasOwn(wkFold.attrs, 'open'), 'finished workers start collapsed in .fold');
+  assert.equal(cls(wkFold, 'w-row').length, 2, 'done workers are inside the fold');
   assert.equal(cls(p, 'w-todos').length, 1, 'the todo toggle still expands');
   assert.equal(flat(panel(parse(render(ctx, B, 'wk')))), '작업자 없음');
 });
 
 // ---- 결정 --------------------------------------------------------------------------------------------------------------
 
-test('결정: open cards, 보류됨 with 다시 열기, and the 결정 기록 table (# / 질문 / 내 답 / 결과 / 전달)', () => {
+test('결정: section h2, open cards, 보류됨 fold with 다시 열기, and 결정 기록 fold with a one-row-per-decision table (# / 질문 / 내 답 / 결과 / 전달)', () => {
   const ctx = load();
   const p = panel(parse(render(ctx, A, 'dec')));
+  assert.equal(flat(cls(p, 'sec-h2')[0]), '결정 2');
   for (const id of [97, 98]) assert.equal(cls(block(p, 'dec/' + id), 'dcard').length, 1);
-  assert.equal(cls(p, 'dsent').length, 0, 'the table carries the delivery here');
+  assert.equal(cls(p, 'dsent').length, 0, 'the history list carries the delivery here');
   const held = cls(p, 'held-decs')[0];
-  assert.equal(flat(held.kids[0]), '보류됨 1개');
+  assert.ok(!Object.hasOwn(held.attrs, 'open'), '보류됨 starts collapsed');
+  assert.equal(flatShown(held.kids[0]), '[chevron-right] 보류됨 1개');
   assert.deepEqual(attrs(block(held, 'dec/92'), 'data-act', 'ans-reopen').map((b) => b.attrs['data-id']), ['92']);
+  const histFold = cls(p, 'cv-hist-fold')[0];
+  assert.ok(histFold && !Object.hasOwn(histFold.attrs, 'open'), '결정 기록 starts collapsed');
   const table = cls(p, 'cv-hist')[0];
-  assert.deepEqual(els(table, (e) => e.tag === 'th').map(text), ['#', '질문', '내 답', '결과', '전달']);
-  const rows = els(table, (e) => e.tag === 'tr' && e.attrs['data-block']);
+  assert.equal(table.tag, 'table');
+  const heads = els(table, (e) => e.tag === 'th');
+  assert.deepEqual(heads.map(text), ['#', '질문', '내 답', '결과', '전달'], 'each history field keeps its column heading');
+  assert.ok(heads.every((h) => h.attrs.scope === 'col'), 'headings label their columns for assistive tech');
+  const rows = cls(table, 'cv-hist-row');
+  assert.ok(rows.every((r) => r.tag === 'tr' && r.kids.every((k) => k.tag === 'td')));
   assert.deepEqual(rows.map((r) => r.attrs['data-block']), ['dec/90', 'dec/91', 'dec/94', 'dec/100']);
   assert.deepEqual(rows.map((r) => r.kids.map(shown)), [
     ['#90', '알림 띠는 어디에 둘까요?', 'A · 탭 바 위', '레일과 사이드바를 가리지 않음', A.decisions[0].delivery.replace('⏱', '[clock]')],
@@ -542,10 +565,12 @@ test('결정: open cards, 보류됨 with 다시 열기, and the 결정 기록 ta
   const s = clone(A);
   delete s.decisions[0].delivery;
   s.decisions[1].delivery = '';
-  const rows2 = els(cls(panel(parse(render(ctx, s, 'dec'))), 'cv-hist')[0], (e) => e.tag === 'tr' && e.attrs['data-block']);
+  const rows2 = cls(cls(panel(parse(render(ctx, s, 'dec'))), 'cv-hist')[0], 'cv-hist-row');
   assert.deepEqual(rows2.slice(0, 2).map((r) => shown(r.kids[4])), ['전달됨 [clock]' + hhmm(A.decisions[0].receipt.deliveredAt), '전달 기다림']);
   const empty = panel(parse(render(ctx, B, 'dec')));
-  assert.deepEqual(empty.kids.map(text), ['답을 기다리는 결정 없음', '결정 기록', '아직 답한 결정 없음']);
+  assert.ok(flat(empty).includes('답을 기다리는 결정 없음'));
+  assert.ok(flat(empty).includes('결정 기록'));
+  assert.ok(flat(empty).includes('아직 답한 결정 없음'));
 });
 
 // ---- 보고서 ------------------------------------------------------------------------------------------------------------
@@ -680,7 +705,7 @@ test('every data-block follows the C-BLOCK grammar, is unique on its page, and t
     for (const k of Object.keys(s.blockSources)) assert.ok(drawn.has(k), `${s.id}: blockSources ${k} is on a page`);
   }
   const ov = blocks(parse(render(ctx, A, 'ov')));
-  assert.deepEqual(ov.slice(0, 7), ['head', 'now', 'flow', 'card/plan', 'card/wk', 'card/dec', 'card/rep']);
+  assert.deepEqual(ov.slice(0, 9), ['head', 'dec/97', 'dec/98', 'dec/91', 'dec/100', 'now', 'flow', 'card/plan', 'card/wk'], 'open decisions first, then answers still on their way');
 });
 
 test('hostile model strings are escaped in text and attributes; images only from assets/<64 hex>.<png|jpg|webp>', () => {
@@ -834,10 +859,10 @@ test('sections take the owner\'s open/closed toggles from ui.expanded (cv:<sid>:
   const key = (part) => 'cv:' + A.id + ':' + part;
   const opened = (root) => Object.fromEntries(attrs(root, 'data-open-key').map((e) => [e.attrs['data-open-key'], Object.hasOwn(e.attrs, 'open')]));
   const def = opened(parse(render(ctx, A, 'ov')));
-  assert.deepEqual([def[key('chg')], def[key('done')], def[key('notes')], def[key('att')], def[key('dt/change/12/0')]], [true, false, false, false, false]);
-  const ui = { expanded: { [key('chg')]: false, [key('done')]: true, [key('att')]: true, [key('dt/change/12/0')]: true, [key('notes')]: 'yes' } };
+  assert.deepEqual([def[key('chg')], def[key('done')], def[key('notes')], def[key('att')], def[key('dt/change/12/0')]], [false, false, false, false, false]);
+  const ui = { expanded: { [key('chg')]: true, [key('done')]: true, [key('att')]: true, [key('dt/change/12/0')]: true, [key('notes')]: 'yes' } };
   const got = opened(parse(render(ctx, A, 'ov', ui)));
-  assert.deepEqual([got[key('chg')], got[key('done')], got[key('notes')], got[key('att')], got[key('dt/change/12/0')]], [false, true, false, true, true]);
+  assert.deepEqual([got[key('chg')], got[key('done')], got[key('notes')], got[key('att')], got[key('dt/change/12/0')]], [true, true, false, true, true]);
 });
 
 test('counts come from the rows themselves, not from summary fields', () => {

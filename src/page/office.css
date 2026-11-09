@@ -3,8 +3,8 @@
  * colours are art and live in office-view.js / office-assets.js. Wide: scene | rail, with the toolbar, the floor picker and
  * the floor card floating over the scene as in the mockup; narrow: the toolbar and the folded picker above the scene, the
  * card under it, then the rail, so nothing covers a desk, a cat or the floor. The scene's motion is at the end of this sheet. */
-.of { container-type: inline-size; box-sizing: border-box; height: 100%; color: var(--c-fg); }
-.of-body { display: grid; gap: var(--sp-3); box-sizing: border-box; padding: var(--sp-3); }
+.of { container-type: inline-size; box-sizing: border-box; padding: var(--sp-3) var(--sp-4) var(--sp-8); color: var(--c-fg); }
+.of-body { display: grid; gap: var(--sp-4); box-sizing: border-box; align-items: start; }
 .of-stage { position: relative; overflow: hidden; border-radius: var(--r-xl); background: var(--c-sunk); box-shadow: 0 0 0 var(--hair) var(--c-line-strong); }
 .of-pan { display: contents; }
 /* the scene is night in both themes, so the few tokens this sheet paints into it (hover, press, focus, the belt's done
@@ -29,12 +29,13 @@
 .of-wave.of-done rect { stroke: var(--c-gray); }
 .of-wave.of-done text { fill: var(--c-gray); }
 
-.of-head, .of-floors, .of-card { position: absolute; box-sizing: border-box; border-radius: var(--r-xl); background: var(--c-pop); box-shadow: var(--shadow-pop); }
-/* the toolbar: the title and the 공개 모드 switch (page.js data-act="office-public"; aria-checked is ui.publicMode) */
-.of-head { left: var(--sp-3); top: var(--sp-3); display: flex; align-items: center; gap: var(--sp-2); margin: 0; padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3); border-radius: var(--r-md); }
-.of-title { margin: 0; font-size: var(--fs-base); font-weight: var(--fw-semibold); }
-.of-pub { position: relative; display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--ctl-h); padding: 0 var(--sp-2); border: 0; border-radius: var(--r-md);
+/* the page header: h1 '사무실', the one-line summary (.sumline) and the 공개 모드 switch (page.js data-act="office-public") */
+.of-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-4); margin: 0 0 var(--sp-3); }
+.of-title { margin: 0; font-size: var(--fs-2xl); font-weight: var(--fw-semibold); line-height: 1.25; }
+.of-sum { margin: 0; color: var(--c-fg-2); font-size: var(--fs-md); font-weight: var(--fw-regular); }
+.of-pub { position: relative; display: inline-flex; align-items: center; gap: var(--sp-2); margin-left: auto; min-height: var(--ctl-h); padding: 0 var(--sp-2); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md);
   background: none; color: var(--c-fg-2); font: inherit; font-size: var(--fs-sm); white-space: nowrap; cursor: pointer; }
+.of-floors, .of-card { position: absolute; box-sizing: border-box; border-radius: var(--r-xl); background: var(--c-pop); box-shadow: var(--shadow-pop); }
 .of-sw { position: relative; flex: none; width: var(--sp-6); height: var(--sp-4); border-radius: var(--r-full); background: var(--fill-sel); }
 .of-sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: var(--sp-3); height: var(--sp-3); border-radius: var(--r-full); background: var(--c-fg-3);
   transition: transform var(--dur) var(--ease-out); }
@@ -70,12 +71,13 @@
 /* with a talk dialog open (office-view.js quiet()) the card's 대화 열기 takes the dialog's outline look: one filled at most */
 .of-open.is-quiet { border: var(--hair) solid var(--ctl-edge); background: none; color: var(--c-fg); font-weight: var(--fw-regular); }
 
-.of-rail { display: grid; align-content: start; gap: var(--sp-3); }
-.of-box { margin: 0; padding: var(--sp-3); border-radius: var(--r-xl); background: var(--c-elev); box-shadow: var(--shadow-card), 0 0 0 var(--hair) var(--c-line); }
-.of-box h3 { display: flex; align-items: baseline; gap: var(--sp-2); margin: 0 0 var(--sp-2); font-size: var(--fs-base); }
-.of-box h3 small { margin-left: auto; color: var(--c-fg-3); font-size: var(--fs-sm); font-weight: var(--fw-regular); }
-.of-list, .of-log { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.of-it { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--sp-2); width: 100%; padding: var(--sp-1) var(--sp-2); border: 0;
+.of-rail { display: grid; align-content: start; gap: var(--sp-4); }
+.of-box { margin: 0; padding: 0; background: none; box-shadow: none; }
+.of-box h2 { display: flex; align-items: baseline; gap: var(--sp-2); margin: 0 0 var(--sp-2); font-size: 18px; font-weight: var(--fw-semibold); line-height: 1.3; }
+.of-box h2 .cnt { margin-left: auto; color: var(--c-fg-3); font-size: var(--fs-base); font-weight: var(--fw-regular); font-variant-numeric: tabular-nums; }
+.of-list, .of-log { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; border-top: var(--hair) solid var(--c-line); }
+.of-list > li, .of-log > li { border-bottom: var(--hair) solid var(--c-line); }
+.of-it { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px var(--sp-2); width: 100%; min-height: 40px; padding: var(--sp-1) var(--sp-2); border: 0;
   border-radius: var(--r-md); background: none; color: var(--c-fg); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; }
 .of-it-t { min-width: 0; font-size: var(--fs-base); font-weight: var(--fw-medium); word-break: keep-all; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .of-it-m { grid-column: 1 / -1; color: var(--c-fg-3); font-size: var(--fs-xs); word-break: keep-all; overflow-wrap: anywhere; }
@@ -85,9 +87,9 @@
 .of-st.is-wait { background: linear-gradient(var(--c-amber-tint), var(--c-amber-tint)), var(--c-elev); color: var(--c-amber); }
 .of-st.is-err { background: linear-gradient(var(--c-red-tint), var(--c-red-tint)), var(--c-elev); color: var(--c-red); }
 .of-st.is-rest { background: linear-gradient(var(--c-gray-tint), var(--c-gray-tint)), var(--c-elev); color: var(--c-gray); }
-.of-log li { display: flex; gap: var(--sp-2); padding: 2px var(--sp-2); color: var(--c-fg-2); font-size: var(--fs-base); word-break: keep-all; overflow-wrap: anywhere; }
+.of-log li { display: flex; align-items: center; gap: var(--sp-2); min-height: 40px; padding: var(--sp-1) var(--sp-2); color: var(--c-fg-2); font-size: var(--fs-base); word-break: keep-all; overflow-wrap: anywhere; }
 .of-log b { flex: none; color: var(--c-fg); font-variant-numeric: tabular-nums; }
-.of-empty { margin: 0; padding: 0 var(--sp-2); color: var(--c-fg-3); font-size: var(--fs-base); }
+.of-empty { margin: 0; padding: var(--sp-2) 0; color: var(--c-fg-3); font-size: var(--fs-sm); }
 
 /* the talk dialog (office-view.js): the rail's first box. The cat's face, name, floor and state, the info rows, the
  * decisions to answer (view.js's answer box in page.css's .ans-* look), the note box and 대화 열기. The region and the
@@ -133,17 +135,16 @@
 .of-tk-ta:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; }
 
 @container (min-width: 1040px) {
-  .of-body { height: 100%; grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: minmax(0, 1fr); }
-  .of-rail { min-height: 0; overflow: auto; }
+  .of-body { grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
+  .of-stage { position: sticky; top: var(--sp-3); }
 }
 @container (max-width: 1039px) {
   .of-rail { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
   .of-talk { grid-column: 1 / -1; }
-  /* the stage holds the rows around the scene: the toolbar beside the folded picker, the scene, the card */
-  .of-stage { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--sp-2); overflow: visible;
+  /* the stage holds the rows around the scene: the folded picker, the scene, the card */
+  .of-stage { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--sp-2); overflow: visible;
     border-radius: 0; background: none; box-shadow: none; }
-  .of-head, .of-floors, .of-card { position: static; }
-  .of-head { justify-content: space-between; }
+  .of-floors, .of-card { position: static; }
   .of-floors { width: auto; max-height: none; overflow: visible; padding: var(--sp-1); }
   .of-floors h3 { display: none; }
   .of-floors:not(.is-open) .of-flist { display: none; }
@@ -161,9 +162,10 @@
   .of-scene { width: 720px; max-width: none; max-height: none; }
 }
 @media (max-width: 599px) {
-  .of-fl, .of-ftog, .of-it, .of-open, .of-tk-x, .of-tk-new, .of-tk-open, .of-tk-send { min-height: var(--hit); }
-  /* the switch keeps the toolbar one control high: its touch target grows to --hit around it, invisibly */
-  .of-pub::before { content: ""; position: absolute; inset: calc((var(--ctl-h) - var(--hit)) / 2) 0; }
+  .of { padding: var(--sp-2) var(--sp-3) var(--sp-6); }
+  .of-title { font-size: 28px; }
+  .of-box h2 { font-size: var(--fs-xl); }
+  .of-fl, .of-ftog, .of-it, .of-open, .of-pub, .of-tk-x, .of-tk-new, .of-tk-open, .of-tk-send { min-height: var(--hit); }
   /* a phone-wide card would only show the start of the tab label and cwd; the conversation view has them */
   .of-where { display: none; }
 }

@@ -217,7 +217,6 @@
   position: fixed;
   inset: 0;
   background: var(--c-shadow-strong);
-  backdrop-filter: blur(1px);
 }
 .rm-sheet-container {
   position: relative;

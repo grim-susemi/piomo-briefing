@@ -770,10 +770,9 @@
     container.textContent = '';
     var root = node('section', 'mcards-root');
     root.ariaLabel = '메멘토 카드';
-    var head = node('header', 'mcards-head');
+    var head = node('header', 'mcards-head pagehead');
     var titleBlock = node('div', 'mcards-titleblock');
-    titleBlock.appendChild(node('h2', 'mcards-heading', '메멘토'));
-    var summary = node('p', 'mcards-summary', '카드를 불러오는 중이에요');
+    var summary = node('p', 'mcards-summary sumline num', '카드를 불러오는 중이에요');
     titleBlock.appendChild(summary);
     head.appendChild(titleBlock);
     root.appendChild(head);

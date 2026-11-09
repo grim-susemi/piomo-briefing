@@ -1547,15 +1547,17 @@
     var busy = edit.busy === true;
     var canWrite = edit.live === true && installed && !busy;
     return '<section class="pf-sec pf-web" id="pf-sec-web-deepseek" aria-label="웹딥식 수동 제어">' +
-      '<h2>웹딥식</h2><p role="status" id="pf-web-status" tabindex="-1">' +
+      '<div class="pf-web-row"><h2>웹딥식 <span class="cnt num">' + active + '</span></h2>' +
+      '<p class="pf-web-status" role="status" id="pf-web-status" tabindex="-1">' +
       chip(enabled ? 'pf-c-green' : 'pf-c-gray', label) + '</p>' +
-      '<p>로그인된 Orca DeepSeek 탭이 필요합니다. 켜기는 사용 허용이며 gateway는 모델 요청 때만 실행됩니다.</p>' +
-      '<p>끄기는 새 호출을 막고 이 기능의 요청만 취소합니다. 사용자 브라우저와 다른 세션은 유지됩니다.</p>' +
       '<div class="pf-web-actions">' +
       button('web-deepseek-on', ' aria-label="웹딥식 켜기"', '켜기', !canWrite || enabled, 'pf-btn' + (!enabled ? ' pf-btn-primary' : '')) +
       button('web-deepseek-off', ' aria-label="웹딥식 끄기"', '끄기', !canWrite || !enabled, 'pf-btn' + (enabled ? ' pf-btn-primary' : '')) +
       button('reload-state', ' aria-label="웹딥식 상태 새로고침"', '상태 새로고침', busy, 'pf-btn') +
-      '</div></section>';
+      '</div></div>' +
+      '<details class="fold pf-web-fold"><summary>' + ic('chevron-right', 'ic-xs chev') + ' <span>작동 방식 안내</span></summary>' +
+      '<div class="fold-body"><p class="pf-note">로그인된 Orca DeepSeek 탭이 필요합니다. 켜기는 사용 허용이며 gateway는 모델 요청 때만 실행됩니다.</p>' +
+      '<p class="pf-note">끄기는 새 호출을 막고 이 기능의 요청만 취소합니다. 사용자 브라우저와 다른 세션은 유지됩니다.</p></div></details></section>';
   }
 
   function side(view, edit) {

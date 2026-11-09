@@ -1,4 +1,7 @@
 /* Existing alarm sound preference control, using the shared page tokens. */
-.alarm-sound { display: inline-flex; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-2); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); font-size: var(--fs-sm); line-height: 22px; }
+.alarm-sound { display: inline-flex; align-items: center; gap: var(--sp-1); min-height: 24px; padding: 0 var(--sp-2); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); font-size: var(--fs-sm); line-height: 22px; }
 .alarm-sound:hover { background: var(--fill-hover); color: var(--c-fg); }
 .alarm-sound.is-off { color: var(--muted); }
+@media (max-width: 599px) {
+  .alarm-sound { min-height: var(--hit); min-width: var(--hit); }
+}

@@ -247,17 +247,18 @@
   function header(s, U, now) {
     var K = kit();
     var label = str(s.tabLabel), title = str(s.title) || '(제목 없음)';
-    var n = whole(s.tabNumber);
-    var topic = label ? title : str(s.paneId) ? '창 ' + str(s.paneId) : '';
-    var plan = planName(s);
-    var html = '<header class="cv-head" data-block="head"><div class="cv-top">' +
-      (n === null ? '<span class="cv-ico" aria-hidden="true">·</span>'
-        : '<span class="cv-ico sh-h' + hue(n) + '" role="img" aria-label="탭 ' + esc(n) + '" title="탭 #' + esc(n) + '">' + esc(n) + '</span>') +
-      '<div class="cv-names"><h1 class="cv-h1" title="' + esc(K.whereLabel(s)) + '">' + esc(label || title) + '</h1>' +
-      (topic || plan ? '<p class="cv-sub">' + (topic ? '<span>' + esc(topic) + '</span>' : '') +
-        (plan ? '<span class="cv-plan">' + ic('list-todo') + ' ' + esc(plan) + '</span>' : '') + '</p>' : '') + '</div>' +
-      '<span class="time">' + ic('clock', 'ic-xs') + ' ' + esc(when(s.lastActivityAt != null ? s.lastActivityAt : s.lastBriefAt, now)) + '</span>' + focusBtn(s, U) + '</div>' +
-      '<div class="ch cv-chips">' + statusChips(s) + '</div>';
+    var n = whole(s.tabNumber), proj = str(s.project), plan = planName(s);
+    var numHtml = n !== null
+      ? '<span class="cv-ico num sh-h' + hue(n) + '" role="img" aria-label="탭 ' + esc(n) + '" title="탭 #' + esc(n) + '">#' + esc(n) + '</span>'
+      : '<span class="cv-ico" aria-hidden="true">·</span>' + (str(s.paneId) ? '<span class="meta cv-pane">창 ' + esc(str(s.paneId)) + '</span>' : '');
+    var html = '<header class="cv-head pagehead" data-block="head"><div class="cv-top">' +
+      '<h1 class="cv-h1 home-h1" title="' + esc(K.whereLabel(s)) + '">' + esc(label || title) + '</h1>' +
+      '<div class="sumline cv-sumline"><span class="ch cv-chips">' + statusChips(s) + '</span>' +
+      (proj ? '<span class="meta cv-proj">' + esc(proj) + '</span>' : '') +
+      (plan ? '<span class="meta cv-plan">' + ic('list-todo', 'ic-xs') + ' ' + esc(plan) + '</span>' : '') +
+      numHtml +
+      '<span class="time meta num">' + ic('clock', 'ic-xs') + ' ' + esc(when(s.lastActivityAt != null ? s.lastActivityAt : s.lastBriefAt, now)) + '</span>' +
+      focusBtn(s, U) + '</div></div>';
     if (str(s.cwd)) html += '<p class="kv path cv-cwd"><span class="sym">' + ic('folder', 'ic-sm') + '</span><code>' + esc(s.cwd) + '</code>' + K.copyBtn(s.cwd) + '</p>';
     return html + '</header>';
   }
@@ -331,7 +332,10 @@
     return { title: str(s.title) || '(제목 없음)', workName: str(s.workName), paneId: str(s.paneId), tabLabel: str(s.tabLabel), tabNumber: num(s.tabNumber),
       tabId: str(s.tabId), sessionId: str(s.id), __now: now };
   }
-  // open decision cards with their answer boxes, after the sent lines when withSent (the old card's decision block)
+  // open decision cards with their answer boxes; sent lines and questionPrompt notes live in the evidence fold unless withSent is true
+  function convoDecisionCard(d, view, U, s) {
+    return kit().decisionCard(d, view, answerU(d, U), s).replace(/<div class="dline from">[\s\S]*?<\/div>/, '');
+  }
   function decisionBlock(s, U, now, withSent) {
     var K = kit(), view = cardView(s, now);
     var open = openDecs(s), sent = withSent && U.live ? sentDecs(s, U) : [];
@@ -339,9 +343,18 @@
     if (!U.live && open.length) html += '<p class="note ro">이 페이지는 보기 전용입니다 - 답은 아무 대화창에 /decide 로, 또는 실시간 상황판에서</p>';
     if (open.length || sent.length) {
       html += '<div class="decs">' + sent.map(function (d) { return withBlock(K.sentLine(d), decBlock(d)); }).join('') +
-        open.map(function (d) { return '<div class="cv-dc"' + blockAttr(decBlock(d)) + '>' + K.decisionCard(d, view, answerU(d, U), s) + holdRow(d, s, U, 'dc') + '</div>'; }).join('') + '</div>';
+        open.map(function (d) { return '<div class="cv-dc"' + blockAttr(decBlock(d)) + '>' + convoDecisionCard(d, view, U, s) + holdRow(d, s, U, 'dc') + '</div>'; }).join('') + '</div>';
     }
-    if (decisions(s).some(function (d) { return d.questionPrompt; })) html += '<p class="muted">질문창으로 옮김 · 여기서 답할 것 없음</p>';
+    if (withSent && decisions(s).some(function (d) { return d.questionPrompt; })) html += '<p class="muted">질문창으로 옮김 · 여기서 답할 것 없음</p>';
+    return html;
+  }
+  function sentFoldBlock(s, U, shown) {
+    var K = kit(), sent = (U.live ? sentDecs(s, U) : []).filter(function (d) { return shown.indexOf(d) < 0; });
+    var qMoved = decisions(s).some(function (d) { return d.questionPrompt; });
+    if (!sent.length && !qMoved) return '';
+    var html = '';
+    if (sent.length) html += '<div class="decs cv-sent-decs">' + sent.map(function (d) { return withBlock(K.sentLine(d), decBlock(d)); }).join('') + '</div>';
+    if (qMoved) html += '<p class="muted">질문창으로 옮김 · 여기서 답할 것 없음</p>';
     return html;
   }
   // a change or done row: kit.row with its truth/applied chips; the evidence path moves into the row's collapsed 상세
@@ -363,8 +376,8 @@
     });
     if (!rows.length) return '';
     var title = chg ? (s.changesNew ? ic('plus', 'ic-sm') + ' 새로 바뀜' : ic('refresh-cw', 'ic-sm') + ' 최근 변화') : ic('check', 'ic-sm') + ' 한 일';
-    return '<details class="cv-sec"' + openAttr(U, sid, part, chg) + '><summary>' + title + ' <span class="cv-n">' + rows.length + '</span></summary>' +
-      '<ul class="rows">' + rows.join('') + '</ul></details>';
+    return '<details class="fold cv-sec"' + openAttr(U, sid, part, false) + '><summary>' + ic('chevron-right', 'ic-xs chev') + ' <span>' + title + '</span> <span class="cv-n num">' + rows.length + '</span></summary>' +
+      '<div class="fold-body"><ul class="srows rows">' + rows.join('') + '</ul></div></details>';
   }
   function deliveryChip(text, receipt) {
     var t = str(text) || (obj(receipt) ? '전달됨 ⏱' + hhmm(receipt.deliveredAt) : '전달 기다림');
@@ -375,27 +388,58 @@
     if (!Array.isArray(s.notes)) return '';
     var sid = str(s.id);
     var list = s.notes.filter(function (n) { return !!obj(n); });
-    return '<details class="cv-sec cv-notes"' + openAttr(U, sid, 'notes', false) + '><summary>' + ic('send', 'ic-sm') + ' 보낸 피드백 <span class="cv-n">' + list.length + '</span></summary>' +
-      (list.length ? '<ul class="rows">' + list.map(function (n) {
+    return '<details class="fold cv-sec cv-notes"' + openAttr(U, sid, 'notes', false) + '><summary>' + ic('chevron-right', 'ic-xs chev') + ' <span>' + ic('send', 'ic-sm') + ' 보낸 피드백</span> <span class="cv-n num">' + list.length + '</span></summary>' +
+      '<div class="fold-body">' + (list.length ? '<ul class="srows rows">' + list.map(function (n) {
         var key = str(n.key);
-        return '<li class="row cv-note"' + blockAttr(SAFE_ID.test(key) ? 'note/' + key : '') + '><span class="time">' + ic('clock', 'ic-xs') + ' ' + esc(when(n.at, now)) + '</span>' +
+        return '<li class="srow-li row cv-note"' + blockAttr(SAFE_ID.test(key) ? 'note/' + key : '') + '><span class="time num">' + ic('clock', 'ic-xs') + ' ' + esc(when(n.at, now)) + '</span>' +
           '<span class="rt">' + esc(n.preview) + '</span>' + deliveryChip(n.delivery, null) + '</li>';
-      }).join('') + '</ul>' : '<p class="muted cv-empty">아직 보낸 피드백 없음</p>') + '</details>';
+      }).join('') + '</ul>' : '<p class="muted cv-empty">아직 보낸 피드백 없음</p>') + '</div></details>';
   }
   function attachmentsSection(s, U) {
     if (!Array.isArray(s.attachments)) return '';
     var K = kit(), sid = str(s.id), rows = [];
     s.attachments.forEach(function (a, n) {
       if (!obj(a) || !str(a.path)) return;
-      rows.push('<div class="path"' + blockAttr('att/' + n) + '><span class="lb">' + esc(str(a.label) || '자료') + '</span><code>' + esc(a.path) + '</code>' + K.copyBtn(a.path) + '</div>');
+      rows.push('<div class="path srow-li"' + blockAttr('att/' + n) + '><span class="lb">' + esc(str(a.label) || '자료') + '</span><code>' + esc(a.path) + '</code>' + K.copyBtn(a.path) + '</div>');
     });
     if (!rows.length) return '';
-    return '<details class="att"' + openAttr(U, sid, 'att', false) + '><summary>' + ic('paperclip', 'ic-sm') + ' 이 대화 자료 ' + rows.length + ' (AI에게 "이거 고쳐줘" 할 때 같이 붙음)</summary>' +
-      rows.join('') + '</details>';
+    return '<details class="fold cv-sec att"' + openAttr(U, sid, 'att', false) + '><summary>' + ic('chevron-right', 'ic-xs chev') + ' <span>' + ic('paperclip', 'ic-sm') + ' 이 대화 자료 ' + rows.length + ' (AI에게 "이거 고쳐줘" 할 때 같이 붙음)</span></summary>' +
+      '<div class="fold-body srows">' + rows.join('') + '</div></details>';
+  }
+  function ovFoldSummary(s) {
+    var parts = ['근거와 기록'];
+    var chg = arr(s.changes).filter(obj).length, done = arr(s.done).filter(obj).length;
+    var ans = answeredDecs(s).length, held = heldDecs(s).length;
+    var notes = Array.isArray(s.notes) ? s.notes.filter(obj).length : 0;
+    var att = Array.isArray(s.attachments) ? s.attachments.filter(function (a) { return obj(a) && str(a.path); }).length : 0;
+    if (chg) parts.push((s.changesNew ? '새로 바뀜 ' : '최근 변화 ') + chg);
+    if (done) parts.push('한 일 ' + done);
+    if (ans) parts.push('결정 기록 ' + ans);
+    if (held) parts.push('보류 ' + held);
+    if (notes) parts.push('피드백 ' + notes);
+    if (att) parts.push('자료 ' + att);
+    return parts.join(' · ');
   }
   function overview(s, U, now, counts) {
-    return nowCallout(s) + flowStrip(s) + summaryCards(s, counts) + openQuestion(s, U, now) + decisionBlock(s, U, now, true) +
-      rowsSection(s, 'chg', U) + rowsSection(s, 'done', U) + notesSection(s, U, now) + attachmentsSection(s, U);
+    var sid = str(s.id), open = openDecs(s), oq = openQuestion(s, U, now);
+    // answers still on their way stay under the open decisions, outside the evidence fold, whatever the owner last chose for it
+    var onWay = (U.live ? sentDecs(s, U) : []).filter(function (d) {
+      var a = obj(own(U.answers, str(d.id)));
+      return (!!a && (a.phase === 'sending' || a.phase === 'sent')) || str(d.delivery) !== '질문창에서 답 받음';
+    });
+    var decHtml = decisionBlock(s, U, now, false);
+    var onWayHtml = onWay.length ? '<div class="decs cv-sent-decs">' + onWay.map(function (d) { return withBlock(kit().sentLine(d), decBlock(d)); }).join('') + '</div>' : '';
+    var sentOnly = !open.length && !oq;
+    var topDec = oq || decHtml || onWayHtml
+      ? '<section class="sec cv-sec-dec"><h2 class="sec-h2">' + (sentOnly ? '보낸 답' : '결정 대기') + ' <span class="cnt num">' + (sentOnly ? onWay.length : open.length) + '</span></h2>' + oq + decHtml + onWayHtml + '</section>'
+      : '';
+    var nowSec = '<section class="sec cv-sec-now"><h2 class="sec-h2">지금 상태 <span class="cnt num">' + esc(counts.plan || String(workerList(s).length || 1)) + '</span></h2>' +
+      nowCallout(s) + flowStrip(s) + summaryCards(s, counts) + '</section>';
+    var evInner = sentFoldBlock(s, U, onWay) + rowsSection(s, 'chg', U) + rowsSection(s, 'done', U) + notesSection(s, U, now) + attachmentsSection(s, U);
+    var evFold = evInner
+      ? '<details class="fold cv-sec cv-ev-fold"' + openAttr(U, sid, 'fold', false) + '><summary>' + ic('chevron-right', 'ic-xs chev') + ' <span>' + esc(ovFoldSummary(s)) + '</span></summary><div class="fold-body">' + evInner + '</div></details>'
+      : '';
+    return topDec + nowSec + evFold;
   }
 
   // ---- 계획 --------------------------------------------------------------------------------------------------------------
@@ -429,14 +473,16 @@
     var auto = obj(s.auto);
     if (!auto) return '';
     var w = obj(auto.workers) || {};
-    return '<details class="cv-sec cv-auto"' + openAttr(U, str(s.id), 'auto', false) + '><summary>' + ic('settings', 'ic-sm') + ' 자동 정보 <span class="muted">(절차 진행, 목표 달성 아님)</span></summary>' +
-      '<p class="kv"><span class="sym">' + ic('target', 'ic-sm') + '</span>작업: [' + esc(s.workName || '-') + '] · 단계 ' + esc(auto.stage || '-') + '</p>' +
+    return '<details class="fold cv-sec cv-auto"' + openAttr(U, str(s.id), 'auto', false) + '><summary>' + ic('chevron-right', 'ic-xs chev') + ' <span>' + ic('settings', 'ic-sm') + ' 자동 정보 <span class="muted">(절차 진행, 목표 달성 아님)</span></span></summary>' +
+      '<div class="fold-body"><p class="kv"><span class="sym">' + ic('target', 'ic-sm') + '</span>작업: [' + esc(s.workName || '-') + '] · 단계 ' + esc(auto.stage || '-') + '</p>' +
       '<p class="kv"><span class="sym">' + ic('list-todo', 'ic-sm') + '</span>todo 현재: ' + esc(auto.todoCurrent || '-') + ' · 다음: ' + esc(auto.todoNext || '-') +
       ' · ' + esc(num(auto.todoDone) == null ? '-' : auto.todoDone) + '/' + esc(num(auto.todoTotal) == null ? '-' : auto.todoTotal) + '</p>' +
-      '<p class="kv"><span class="sym">' + ic('users', 'ic-sm') + '</span>작업자 실행 ' + esc(num(w.running) || 0) + ' · 완료 ' + esc(num(w.done) || 0) + ' · 오류 ' + esc(num(w.error) || 0) + '</p></details>';
+      '<p class="kv"><span class="sym">' + ic('users', 'ic-sm') + '</span>작업자 실행 ' + esc(num(w.running) || 0) + ' · 완료 ' + esc(num(w.done) || 0) + ' · 오류 ' + esc(num(w.error) || 0) + '</p></div></details>';
   }
   function planPanel(s, U, now) {
     var pv = g.BriefPlanView, plan = obj(s.plan), link = obj(s.planLink);
+    var p = progress(s, true);
+    var cnt = p ? p.done + '/' + p.total : plan ? String(arr(plan.components).length || 1) : link ? '1' : '';
     var html = '';
     if (plan && pv) html += '<div class="plan-host">' + pv.render(plan, now, { esc: kit().esc, expanded: U.expanded,
       answerBox: U.live && U.decision ? function (id) {
@@ -452,7 +498,10 @@
       var fb = fallback(s);
       html += fb || (link ? '' : '<p class="muted cv-empty">이 대화에는 계획이 없어</p>');
     }
-    return html + autoInfo(s, U);
+    var head = (plan || link || html.indexOf('class="cv-fb"') >= 0)
+      ? '<h2 class="sec-h2">계획' + (cnt ? ' <span class="cnt num">' + esc(cnt) + '</span>' : '') + '</h2>'
+      : '';
+    return (head ? '<div class="sec cv-sec-plan">' + head + html + '</div>' : html) + autoInfo(s, U);
   }
 
   // ---- 작업자 ------------------------------------------------------------------------------------------------------------
@@ -462,11 +511,25 @@
       return SAFE_ID.test(id) ? '<li class="w-row' + cls + '" data-block="wk/' + id + '" data-worker="' + id + '"' : m;
     });
   }
+  function isFinishedWorker(w) {
+    var st = str(w && w.state);
+    return st === 'done' || st === 'cancelled' || st === 'lost';
+  }
   function workersPanel(s, U) {
-    var wv = g.BriefWorkersView;
-    if (!wv || !workerList(s).length) return '<p class="muted cv-empty">작업자 없음</p>';
-    // the pulse phase and elapsed text follow the wall clock, not the age of the data (= view.js liveBlocks)
-    return workerBlocks(wv.render(s.live, typeof U.wallNow === 'number' ? U.wallNow : Date.now(), { esc: kit().esc, expanded: U.expanded }));
+    var wv = g.BriefWorkersView, list = workerList(s);
+    if (!wv || !list.length) return '<p class="muted cv-empty">작업자 없음</p>';
+    var wall = typeof U.wallNow === 'number' ? U.wallNow : Date.now();
+    var opts = { esc: kit().esc, expanded: U.expanded };
+    var active = list.filter(function (w) { return !isFinishedWorker(w); });
+    var done = list.filter(isFinishedWorker);
+    var html = '<div class="sec cv-sec-wk"><h2 class="sec-h2">작업자 <span class="cnt num">' + list.length + '</span></h2>';
+    if (active.length) html += workerBlocks(wv.render({ workers: active }, wall, opts));
+    if (done.length) {
+      html += '<details class="fold cv-sec cv-wk-fold"' + openAttr(U, str(s.id), 'wk-done', false) + '>' +
+        '<summary>' + ic('chevron-right', 'ic-xs chev') + ' <span>끝난 작업자 ' + done.length + '명 · 근거와 기록</span></summary>' +
+        '<div class="fold-body">' + workerBlocks(wv.render({ workers: done }, wall, opts)) + '</div></details>';
+    }
+    return html + '</div>';
   }
 
   // ---- 결정 --------------------------------------------------------------------------------------------------------------
@@ -474,34 +537,39 @@
   function heldSection(s, U) {
     var held = heldDecs(s);
     if (!held.length) return '';
-    return '<details class="held-decs"' + openAttr(U, str(s.id), 'held', false) + '><summary>보류됨 ' + held.length + '개</summary>' +
-      held.map(function (d) {
+    return '<details class="fold cv-sec held-decs"' + openAttr(U, str(s.id), 'held', false) + '><summary>' + ic('chevron-right', 'ic-xs chev') + ' <span>보류됨 ' + held.length + '개</span></summary>' +
+      '<div class="fold-body">' + held.map(function (d) {
         var a = obj(own(U.answers, str(d.id))) || {};
         return '<p' + blockAttr(decBlock(d)) + '>#' + esc(d.id) + ' ' + esc(d.question) +
           (U.live ? ' <button type="button" class="ans-write" data-act="ans-reopen" data-id="' + esc(d.id) + '">다시 열기</button>' : '') +
           (str(a.error) ? ' <span role="alert">' + esc(a.error) + '</span>' : '') + '</p>';
-      }).join('') + '</details>';
+      }).join('') + '</div></details>';
   }
-  function historyTable(s) {
-    var list = answeredDecs(s);
-    var html = '<h3 class="cv-h3">결정 기록</h3>';
-    if (!list.length) return html + '<p class="muted cv-empty">아직 답한 결정 없음</p>';
-    return html + '<table class="t cv-hist"><thead><tr><th scope="col">#</th><th scope="col">질문</th><th scope="col">내 답</th><th scope="col">결과</th><th scope="col">전달</th></tr></thead><tbody>' +
-      list.map(function (d) {
-        var a = obj(d.answer) || {}, opt = str(a.option), reply = str(a.text);
-        var o = opt ? obj(own(obj(d.options) || {}, opt)) : null;
-        var mine = opt ? opt + (o && str(o.text) ? ' · ' + str(o.text) : '')
-          : obj(a.values) ? arr(d.fields).map(function (f) { return str(f.label) + '=' + String(own(a.values, f.id)); }).join(', ')
-          : reply ? '답글 “' + reply + '”' : '답 받음';
-        return '<tr' + blockAttr(decBlock(d)) + '><td data-label="#">#' + esc(d.id) + '</td><td data-label="질문">' + esc(d.question) + '</td>' +
-          '<td data-label="내 답" class="ok2">' + esc(mine) + '</td><td data-label="결과">' + esc(o && str(o.consequence) ? o.consequence : '-') + '</td>' +
-          '<td data-label="전달">' + deliveryChip(d.delivery, d.receipt) + '</td></tr>';
-      }).join('') + '</tbody></table>';
+  function historyTable(s, U) {
+    var list = answeredDecs(s), qMoved = decisions(s).some(function (d) { return d.questionPrompt; });
+    var body = (qMoved ? '<p class="muted">질문창으로 옮김 · 여기서 답할 것 없음</p>' : '') +
+      (!list.length ? '<p class="muted cv-empty">아직 답한 결정 없음</p>'
+        : '<table class="t cv-hist"><thead><tr><th scope="col">#</th><th scope="col">질문</th><th scope="col">내 답</th><th scope="col">결과</th><th scope="col">전달</th></tr></thead><tbody>' + list.map(function (d) {
+          var a = obj(d.answer) || {}, opt = str(a.option), reply = str(a.text);
+          var o = opt ? obj(own(obj(d.options) || {}, opt)) : null;
+          var mine = opt ? opt + (o && str(o.text) ? ' · ' + str(o.text) : '')
+            : obj(a.values) ? arr(d.fields).map(function (f) { return str(f.label) + '=' + String(own(a.values, f.id)); }).join(', ')
+            : reply ? '답글 “' + reply + '”' : '답 받음';
+          return '<tr class="cv-hist-row"' + blockAttr(decBlock(d)) + '><td class="cv-hist-id meta num" data-label="#">#' + esc(d.id) + '</td>' +
+            '<td class="cv-hist-q" data-label="질문">' + esc(d.question) + '</td>' +
+            '<td class="cv-hist-a ok2" data-label="내 답">' + esc(mine) + '</td>' +
+            '<td class="cv-hist-c meta" data-label="결과">' + esc(o && str(o.consequence) ? o.consequence : '-') + '</td>' +
+            '<td class="cv-hist-d" data-label="전달">' + deliveryChip(d.delivery, d.receipt) + '</td></tr>';
+        }).join('') + '</tbody></table>');
+    return '<details class="fold cv-sec cv-hist-fold"' + openAttr(U, str(s.id), 'hist', false) + '>' +
+      '<summary>' + ic('chevron-right', 'ic-xs chev') + ' <span class="cv-h3">결정 기록</span> <span class="cnt num">' + list.length + '</span></summary>' +
+      '<div class="fold-body">' + body + '</div></details>';
   }
   function decisionsPanel(s, U, now) {
-    var html = decisionBlock(s, U, now, false);
-    if (!openDecs(s).length) html += '<p class="muted cv-empty">답을 기다리는 결정 없음</p>';
-    return html + heldSection(s, U) + historyTable(s);
+    var open = openDecs(s);
+    var html = '<div class="sec cv-sec-dec"><h2 class="sec-h2">결정 <span class="cnt num">' + open.length + '</span></h2>' + decisionBlock(s, U, now, false);
+    if (!open.length) html += '<p class="muted cv-empty">답을 기다리는 결정 없음</p>';
+    return html + heldSection(s, U) + historyTable(s, U) + '</div>';
   }
 
   // ---- 보고서 ------------------------------------------------------------------------------------------------------------
@@ -576,9 +644,9 @@
       line += holdRow(d, s, U, 'rep') || '<p class="rep-hold"><button type="button" class="ans-write" data-act="ans-hold" data-id="' + esc(d.id) +
         '" data-where="rep">보류</button>' + (ps.error ? ' <span class="ans-err" role="alert">' + esc(ps.error) + '</span>' : '') + '</p>';
     }
-    var html = '<section class="rep"' + blockAttr(okId ? 'rep/' + rid : '') + '><div class="rep-head"><span class="cv-bulb" aria-hidden="true">' + ic('file-text', 'ic-md') + '</span><div class="rep-ht">' +
+    var html = '<section class="rep srow-li"' + blockAttr(okId ? 'rep/' + rid : '') + '><div class="rep-head"><span class="cv-bulb" aria-hidden="true">' + ic('file-text', 'ic-md') + '</span><div class="rep-ht">' +
       '<p class="rep-t"><b>' + esc(str(r.title) || '(제목 없음)') + '</b>' + chip(own(REPORT_STATUS, status) || 'x-info', status) +
-      '<span class="time">' + ic('clock', 'ic-xs') + ' ' + esc(when(r.at, now)) + '</span></p>' +
+      '<span class="time num">' + ic('clock', 'ic-xs') + ' ' + esc(when(r.at, now)) + '</span></p>' +
       (d ? '<p class="rep-dq">' + ic('bell') + ' #' + esc(d.id) + ' ' + esc(d.question) + '</p>' : '') + line +
       (str(r.summary) ? '<p class="rep-sum">' + esc(r.summary) + '</p>' : '') +
       (pins ? '<p class="rep-hint">' + ic('map-pin') + ' ' + esc(PIN_HINT) + '</p>' : '') + '</div></div>';
@@ -595,7 +663,8 @@
   function reportsPanel(s, U, now) {
     var list = reportsOf(s);
     if (!list.length) return '<p class="muted cv-empty">보고서 없음</p>';
-    return list.map(function (r) { return reportHtml(s, r, U, now); }).join('');
+    return '<div class="sec cv-sec-rep"><h2 class="sec-h2">보고서 <span class="cnt num">' + list.length + '</span></h2><div class="srows cv-reps">' +
+      list.map(function (r) { return reportHtml(s, r, U, now); }).join('') + '</div></div>';
   }
 
   // ---- page --------------------------------------------------------------------------------------------------------------

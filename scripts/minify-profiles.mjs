@@ -10,8 +10,9 @@ const SOURCE = join(ROOT, 'src', 'page', 'profiles-view.js');
 const OUTPUT = join(ROOT, 'src', 'page', 'generated', 'profiles-view.min.js');
 // This recipe was reviewed for this source, not for arbitrary JavaScript.
 // Primary summaries share main draft values; guide drafts and native focus follow profile/tab scope.
-const REVIEWED_SOURCE = '6c7ab32fbf3c0dca66b491f57fb665eacd874d73872614c5a5986955284dd903';
-const REVIEWED_PAYLOAD = 'f8dacc34b10da880f6e618fb3855fb9306beb3ba33a22d2d1ae99ddc12b6a0b2';
+// Full-A (2026-11-09): markup/class-only change (webDeepseek head row + fold); no new top-level bindings, this, eval or strictness-sensitive syntax.
+const REVIEWED_SOURCE = 'b6e6c2d8b9e2444d97bdd3d5e942b615d5cf97be4883999c2591d8db1e5a5a98';
+const REVIEWED_PAYLOAD = '29abd936adec94741e7b6683758143262006954fd621a6bd9861c67eec5efe93';
 
 try {
   if (typeof Bun === 'undefined' || Bun.version !== '1.4.0') throw new Error('regeneration requires Bun 1.4.0');

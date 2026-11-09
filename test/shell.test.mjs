@@ -892,14 +892,15 @@ test('regression R1: first start and unusable prefs mark nothing seen; unopened 
     const st = S.reduce(undefined, { type: 'load', json, known: ['done'], now: NOW });
     assert.deepEqual(plain(st.seen), {}, JSON.stringify(json));
     assert.deepEqual(plain(S.inbox(one, st).done.map((x) => x.s.id)), ['done'], JSON.stringify(json));
-    assert.equal(S.badge(one, st), 1, JSON.stringify(json));
+    assert.equal(S.badge(one, st), 0, JSON.stringify(json));
   }
   const fresh = S.reduce(undefined, { type: 'load', json: null, known: IDS, now: NOW });
   assert.deepEqual(plain(S.inbox(fixture(), fresh).done.map((x) => x.s.id)), ['e-done', 'p185', 'g-old'], 'every finished conversation counts until opened');
-  assert.equal(S.badge(fixture(), fresh), 7);
+  assert.equal(S.badge(fixture(), fresh), 4);
   const opened = S.reduce(fresh, { type: 'open', sid: 'e-done', now: NOW + 1 });
   assert.deepEqual(plain(opened.seen), { 'e-done': NOW + 1 }, 'seen holds only what the owner opened');
-  assert.equal(S.badge(fixture(), opened), 6);
+  assert.deepEqual(plain(S.inbox(fixture(), opened).done.map((x) => x.s.id)), ['p185', 'g-old']);
+  assert.equal(S.badge(fixture(), opened), 4);
   assert.deepEqual(plain(S.reduce(opened, { type: 'active', sid: 'e-done', now: NOW + 2 }).seen), { 'e-done': NOW + 2 });
 });
 
@@ -1007,9 +1008,9 @@ test('rail: home first, then every destination, a spacer and settings; sidebar c
   assert.match(marks(S.sideFrame(st)), /data-sh="toggleSide"[^>]*>\[panel-left-close\]/, 'the header control closes');
   assert.match(marks(S.tabs(fixture(), S.reduce(st, { type: 'toggleSide' }))), /^<button[^>]*class="sh-topen"[^>]*>\[panel-left-open\]/, 'the tab-bar control opens');
   assert.deepEqual(all(html, /class="sh-tip"[^>]*>([^<]*)</g), ['홈', '대화', '수신함', '계획', '사무실', '메멘토', '닫힌 창', '프로필·에이전트', '설정']);
-  assert.match(html, /data-key="inbox" aria-label="수신함 6개"/, 'the count is spoken, not shown in the tooltip');
+  assert.match(html, /data-key="inbox" aria-label="수신함 기다리는 것 4개"/, 'the waiting count is spoken, not shown in the tooltip');
   assert.match(marks(html), /\[archive\]<\/span><span class="sh-tip"[^>]*>닫힌 창<\/span><\/button><button[^>]*data-key="profiles"[\s\S]*?\[users\]<\/span><span class="sh-tip"[^>]*>프로필·에이전트<\/span><\/button><span class="sh-rsp" aria-hidden="true"><\/span><button[^>]*data-key="settings"/);
-  assert.match(html, /<span class="sh-n" aria-hidden="true">6<\/span>/);
+  assert.match(html, /<span class="sh-n" aria-hidden="true">4<\/span>/);
   assert.match(html, /class="sh-rb on" data-sh="view" data-key="conv"/);
   assert.equal((html.match(/<button /g) || []).length, 9, 'every destination, no rail toggle or second panel');
 });
@@ -1023,7 +1024,7 @@ test('regression R4: the inbox tooltip is exactly 수신함 while its badge carr
   assert.doesNotMatch(S.rail({ sessions: [] }, S.defaults()), /sh-n|수신함 0/, 'nothing waiting: no badge, plain label');
 });
 
-test('inbox badge = open decisions + blocked + open questions + unseen finished, never held or answered ones', () => {
+test('inbox badge = open decisions + blocked + open questions, never done-check, held or answered ones', () => {
   const S = load().BriefShell;
   const model = fixture();
   let st = base(S);
@@ -1033,10 +1034,11 @@ test('inbox badge = open decisions + blocked + open questions + unseen finished,
   ]);
   assert.deepEqual(plain(ib.done.map((x) => x.s.id)), ['e-done', 'p185'], 'g-old was seen after it finished');
   assert.deepEqual(plain(ib.ans.map((x) => x.kind)), ['#90', '#80']);
-  assert.equal(S.badge(model, st), 6);
+  assert.equal(S.badge(model, st), 4);
   st = S.reduce(st, { type: 'open', sid: 'e-done', now: NOW + 1 });
-  assert.equal(S.badge(model, st), 5, 'opening a finished conversation marks it seen');
-  assert.match(S.rail(model, st), /<span class="sh-n" aria-hidden="true">5<\/span>/);
+  assert.deepEqual(plain(S.inbox(model, st).done.map((x) => x.s.id)), ['p185'], 'opening a finished conversation marks it seen');
+  assert.equal(S.badge(model, st), 4, 'opening a finished conversation leaves the waiting badge count unchanged');
+  assert.match(S.rail(model, st), /<span class="sh-n" aria-hidden="true">4<\/span>/);
   const quiet = { generatedAt: NOW, sessions: [{ id: 'q', alive: true, tab: '진행 중', decisions: [{ id: 1, held: true, closed: true }, { id: 2, answered: true }] }] };
   assert.equal(S.badge(quiet, st), 0);
   assert.doesNotMatch(S.rail(quiet, st), /sh-n/);
@@ -1062,6 +1064,7 @@ test('💬 대화 view: 즐겨찾기, 열린 탭 with kids, 최근 항목 and th
   assert.match(html, /data-sid="a185" data-sub="dec">/);
   assert.match(html, /<div class="sh-row sh-kid sh-prev">.*?data-sid="p185">/);
   assert.match(html, /<span class="sh-ico sh-ico-n sh-h1" aria-hidden="true">185<\/span>/, 'hue from the tab number (185 * 5 mod 12 = 1)');
+  assert.match(marks(html), /data-sid="d012"><span class="sh-ico sh-ico-n sh-h0" aria-hidden="true">12<\/span><span class="sh-bdg sh-bdg-t">진행 중<\/span><span class="sh-t" title="Docs #12 · Docs pass">Docs<\/span><span class="sh-sub">10분 전<\/span><\/button>/, 'one-line row: status chip, title once, time');
 });
 
 test('수신함 on the server page: 보류 with its confirm row on open decisions, 다시 열기 in 보류됨, badge never counts held', () => {

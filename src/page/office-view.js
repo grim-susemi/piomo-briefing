@@ -1131,8 +1131,10 @@
   // the left wall's screen: the whole office now (the mockup's 오늘의 사무실 screen, with the board's own counts)
   function drawStats(v) {
     var sc = v.scene, dec = arr(sc.ceo && sc.ceo.items).filter(function (it) { return it.sub === 'dec'; }).length;
+    var ceoN = sc.ceo ? sc.ceo.count : 0, alertsN = arr(sc.alerts).length;
     var lines = ['사무실 전체', '층 ' + sc.floors.length + '개 · 작업자 ' + arr(sc.people).length + '명', dec ? '결정 대기 ' + dec + '건' : '결정 대기 없음'];
     v.wallL.forEach(function (t, i) { txt(t, cut(lines[i], 11, 128)); });
+    facts(v.sum, ['층 ' + sc.floors.length + '개', '작업자 ' + arr(sc.people).length + '명', ceoN ? '대표님 할 일 ' + ceoN + '건' : '대표님 할 일 없음', alertsN ? '알림 ' + alertsN + '건' : ''].filter(Boolean));
   }
   function drawFloor(v, f) {
     var sc = v.scene, pub = v.ui.publicMode === true, people = {}, labels = [], sid = f ? f.sid : null;
@@ -1260,8 +1262,9 @@
   }
   // a rail box: its title with a count, a one-line note while it has one (empty, or the rest), and its keyed rows
   function section(parent, title, tag, counted) {
-    var s = h('section', 'of-box', parent), t = h('h3', '', s, title);
-    return { s: s, count: counted ? h('small', '', t, '') : null, list: h(tag, tag === 'ol' ? 'of-log' : 'of-list', s), note: null, more: null };
+    var s = h('section', 'sec of-box', parent), t = h('h2', '', s, title);
+    if (counted) t.appendChild(doc.createTextNode(' '));
+    return { s: s, count: counted ? h('span', 'cnt num', t, '') : null, list: h(tag, 'srows ' + (tag === 'ol' ? 'of-log' : 'of-list'), s), note: null, more: null };
   }
   function note(b, which, text, after) {
     if (text && !b[which]) b[which] = b.s.insertBefore(h('p', 'of-empty', null, text), after ? null : b.list);
@@ -1269,15 +1272,15 @@
     if (b[which]) txt(b[which], text);
   }
   function item(it) {
-    var li = h('li', ''), b = el('button', { type: 'button', class: 'of-it', 'data-sh': 'open', 'data-sid': it.act[0], 'data-sub': it.act[1] || null }, li, true);
+    var li = h('li', 'srow-li'), b = el('button', { type: 'button', class: 'of-it', 'data-sh': 'open', 'data-sid': it.act[0], 'data-sub': it.act[1] || null }, li, true);
     h('span', 'of-it-t', b, it.title);
     if (it.state) h('span', 'of-st is-' + it.tone, b, it.state);
     if (it.meta) h('span', 'of-it-m', b, it.meta);
     return li;
   }
   function logRow(it) {
-    var li = h('li', '');
-    if (it.time) h('b', '', li, it.time);
+    var li = h('li', 'srow-li');
+    if (it.time) h('b', 'num', li, it.time);
     h('span', '', li, it.text);
     return li;
   }
@@ -1317,6 +1320,7 @@
       }), function (it) { return it.act[0] + '|' + it.id; }), item);
       var log = f ? arr(sc.log).filter(function (l) { return l.sid === f.sid; }) : [];
       var ms = function (l) { var t = typeof l.at === 'number' ? l.at : Date.parse(str(l.at)); return isFinite(t) ? t : 0; };
+      txt(b.log.count, log.length + '건');
       note(b.log, 'note', log.length ? '' : '이 층의 기록이 아직 없어요');
       rows(v, 'log', b.log.list, keyed(log.map(function (l, i) { return { l: l, i: i }; }).sort(function (x, y) { return (ms(y.l) - ms(x.l)) || (x.i - y.i); }).slice(0, 8).map(function (x) {
         return { time: clock(x.l.at), text: x.l.kind === 'worker' ? (x.l.text || '작업자') + ' · ' + word(WORKER_WORD, x.l.state) : x.l.text };
@@ -1333,6 +1337,12 @@
     set(root, 'tabindex', '-1');
     var v = { root: root, sid: null, keys: {}, units: {}, pills: {}, boxes: [], rows: {}, pass: 0, floor: undefined, dim: null, noFloor: null, cardParts: null,
       walk: null, walkKey: null, off: {}, order: [], fresh: true, f: null, talk: { id: null, sid: null, el: null, parts: null, asks: {} } };
+    v.head = h('header', 'pagehead of-head', root);
+    h('h1', 'home-h1 of-title', v.head, '사무실');
+    v.sum = h('p', 'sumline num of-sum', v.head);
+    v.pub = el('button', { type: 'button', class: 'of-pub', role: 'switch', 'aria-checked': 'false', 'data-act': 'office-public', title: '말풍선, 탭 이름, 작업 폴더를 숨겨요' }, v.head, true);
+    el('span', { class: 'of-sw', 'aria-hidden': 'true' }, v.pub, true);
+    h('span', '', v.pub, '공개 모드');
     // .of-pan: nothing of its own wide (display: contents); narrow, the scene's frame; on a phone, the scene pans sideways
     var body = h('div', 'of-body', root), stage = h('div', 'of-stage', body), pan = h('div', 'of-pan', stage);
     v.pan = pan;
@@ -1359,11 +1369,6 @@
     el('polygon', { points: CROWN, fill: '#ffcf5a' }, me.head);
     v.me = { g: me.walk.parentNode, walk: me.walk, pos: me.pos, tile: -1, to: null, path: null, anim: null };
     v.top = el('g', { class: 'of-l-top', 'aria-hidden': 'true' }, v.svg);
-    v.head = h('div', 'of-head', stage);
-    h('h2', 'of-title', v.head, '사무실');
-    v.pub = el('button', { type: 'button', class: 'of-pub', role: 'switch', 'aria-checked': 'false', 'data-act': 'office-public', title: '말풍선, 탭 이름, 작업 폴더를 숨겨요' }, v.head, true);
-    el('span', { class: 'of-sw', 'aria-hidden': 'true' }, v.pub, true);
-    h('span', '', v.pub, '공개 모드');
     v.picker = el('nav', { class: 'of-floors', 'aria-label': '층 고르기' }, stage, true);
     v.ftog = el('button', { type: 'button', class: 'of-ftog', 'aria-expanded': 'false', 'aria-controls': 'of-flist' }, v.picker, true);
     v.ftogParts = { no: h('span', 'of-no', v.ftog), ft: h('span', 'of-ft', v.ftog), fs: h('span', 'of-fs', v.ftog, '층 고르기') };
@@ -1371,12 +1376,11 @@
     v.pickOpen = false;
     h('h3', '', v.picker, '층 고르기 · 대화 1개 = 1층');
     v.flist = el('div', { class: 'of-flist', id: 'of-flist' }, v.picker, true);
-    // in reading order before the scene: narrow, they are the rows above it
-    stage.insertBefore(v.head, pan);
+    // in reading order before the scene: narrow, it sits above it
     stage.insertBefore(v.picker, pan);
     v.card = h('div', 'of-card', stage);
     v.rail = h('div', 'of-rail', body);
-    v.box = { todo: section(v.rail, '대표님 할 일', 'ul', true), alert: section(v.rail, '알림', 'ul', true), people: section(v.rail, '사무실 사람들', 'ul', true), log: section(v.rail, '활동 로그', 'ol', false) };
+    v.box = { todo: section(v.rail, '대표님 할 일', 'ul', true), alert: section(v.rail, '알림', 'ul', true), people: section(v.rail, '사무실 사람들', 'ul', true), log: section(v.rail, '활동 로그', 'ol', true) };
     // the overlays keep their CSS size while the scene scales, so a new stage size settles the labels again
     if (typeof g.ResizeObserver === 'function') new g.ResizeObserver(function () { stopped(v); }).observe(stage);
     root.addEventListener('click', function (ev) {

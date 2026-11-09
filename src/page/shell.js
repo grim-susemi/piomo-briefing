@@ -38,8 +38,8 @@
  *     Below 900 px Escape shuts the open overlay (unpeek, preventDefault) unless a dialog is open (the annotation
  *     composer sits above it and takes Escape first); crossing 900 px re-applies sync()'s inert cover.
  *     hooks.narrow() / hooks.now() default to matchMedia('(max-width: 899px)') and Date.now().
- *   g.BriefShell.inbox(model, st) -> {wait, done, ans, held}; badge(model, st) = wait + done items (the inbox count; held
- *     decisions never count, C-HOLD 4). On the server page (st.live) every open decision in 'wait' carries 보류
+ *   g.BriefShell.inbox(model, st) -> {wait, done, ans, held}; badge(model, st) = wait items (the waiting inbox count; held
+ *     decisions never count, C-HOLD 4; done-check stays visible inside inboxView). On the server page (st.live) every open decision in 'wait' carries 보류
  *     (data-act="ans-hold", data-where="inbox") and, while st.answers[id].confirm.hold, the hold confirm row; 'held'
  *     items carry 다시 열기 (data-act="ans-reopen"). page.js handles those clicks.
  *   g.BriefShell.restore(storage?) / persist(storage?, st): v2 preferences, with read-only v1 fallback; never throw
@@ -629,8 +629,7 @@
   }
   function inbox(model, st) { return inboxOf(context(model), st); }
   function badge(model, st) {
-    var ib = inbox(model, st);
-    return ib.wait.length + ib.done.length;
+    return inbox(model, st).wait.length;
   }
 
   // ---- pieces of markup -------------------------------------------------------------------------------------------
@@ -670,7 +669,8 @@
     if (isBlocked(s)) return '<span class="sh-bdg sh-bdg-r">막힘</span>';
     if (obj(s.openQuestion)) return '<span class="sh-bdg sh-bdg-q">질문</span>';
     if (unseen(s, st)) return '<span class="sh-bdg sh-bdg-g">확인</span>';
-    return '';
+    if (tabOf(s) === 'run') return '<span class="sh-bdg sh-bdg-t">진행 중</span>';
+    return '<span class="sh-bdg sh-bdg-d">끝남</span>';
   }
   function favBtn(sid, st) {
     var on = st.favs.indexOf(sid) >= 0;
@@ -679,18 +679,18 @@
   }
 
   function foldMark(s) { return obj(s.folded) ? '<span class="sh-fold">접힘</span>' : ''; }
-  // o.flat: no kids toggle; o.sub: the grey text after the name ('' = none)
+  // o.flat: no kids toggle; o.sub: the grey time/subtext after the name ('' = none)
   function row(s, st, c, o) {
     var id = s.id;
     var kids = !o.flat && isAlive(s);
     var open = kids && expanded(st, id);
-    var sub = o.sub !== undefined ? o.sub : (isAlive(s) && str(s.tabLabel) ? str(s.title) : '');
+    var sub = o.sub !== undefined ? o.sub : ago(s.lastActivityAt, c.now);
     var html = '<div class="sh-row' + (shownOf(st, st.active) === id ? ' sel' : '') + (c.isPrev(s) ? ' sh-prev' : '') + '" data-row="' + esc(id) + '">' +
       (kids ? '<button type="button" class="sh-tg" data-sh="expand" data-sid="' + esc(id) + '" aria-expanded="' + open + '" aria-label="' +
         (open ? '접기' : '펼치기') + '">' + ic(open ? 'chevron-down' : 'chevron-right', 'ic-xs') + '</button>' : '<span class="sh-tg" aria-hidden="true"></span>') +
-      '<button type="button" class="sh-go" data-sh="open" data-sid="' + esc(id) + '">' + icon(s, c) +
-      '<span class="sh-t" title="' + esc(fullOf(s)) + '">' + esc(nameOf(s)) + (sub ? '<span class="sh-sub">' + esc(sub) + '</span>' : '') + '</span>' +
-      foldMark(s) + rowBadge(s, st) + '</button>' + favBtn(id, st) + '</div>';
+      '<button type="button" class="sh-go" data-sh="open" data-sid="' + esc(id) + '">' + icon(s, c) + rowBadge(s, st) +
+      '<span class="sh-t" title="' + esc(fullOf(s)) + '">' + esc(nameOf(s)) + '</span>' +
+      foldMark(s) + (sub ? '<span class="sh-sub">' + esc(sub) + '</span>' : '') + '</button>' + favBtn(id, st) + '</div>';
     if (open) html += '<div class="sh-kids" role="group" aria-label="' + esc(nameOf(s)) + ' 펼침">' + kidRows(s, c, st) + '</div>';
     return html;
   }
@@ -848,7 +848,7 @@
     var html = '';
     RAIL.forEach(function (r) {
       var count = r[0] === 'inbox' && n ? '<span class="sh-n" aria-hidden="true">' + (n > 99 ? '99+' : n) + '</span>' : '';
-      html += btn(r[0], r[1], r[2], st.view === r[0], count, count ? r[2] + ' ' + n + '개' : '');
+      html += btn(r[0], r[1], r[2], st.view === r[0], count, count ? r[2] + ' 기다리는 것 ' + n + '개' : '');
     });
     return html + '<span class="sh-rsp" aria-hidden="true"></span>' + btn('settings', 'settings', '설정', st.view === 'settings');
   }

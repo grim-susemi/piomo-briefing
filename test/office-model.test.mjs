@@ -86,14 +86,15 @@ test('a worker bubble is that worker step', () => {
   for (const d of workers) assert.equal(d.bubble, steps[d.id], d.id);
 });
 
-test('the ceo count equals the inbox badge and matches its items', () => {
-  // Given the board, When the scene is built, Then ceo.count is BriefShell.badge and items are the inbox wait + done
+test('the ceo count matches its items: the inbox wait + done (the rail badge counts wait only since full-A)', () => {
+  // Given the board, When the scene is built, Then ceo.count is the inbox wait + done and items are exactly those
   const { vm, ui } = input();
   const ctx = load();
   const scene = sceneOf(ctx, vm, ui);
-  assert.equal(scene.ceo.count, ctx.BriefShell.badge(vm, ui));
   const inbox = ctx.BriefShell.inbox(vm, ui);
+  assert.equal(scene.ceo.count, inbox.wait.length + inbox.done.length);
   assert.equal(scene.ceo.items.length, inbox.wait.length + inbox.done.length);
+  assert.equal(ctx.BriefShell.badge(vm, ui), inbox.wait.length);
 });
 
 test('hostile text reaches the scene only as the plain string it was', () => {

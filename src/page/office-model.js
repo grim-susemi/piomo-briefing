@@ -195,7 +195,7 @@
       arr(s.changes).filter(obj).forEach(function (c) { log.push({ sid: sid, kind: 'change', text: str(c.text), at: Number(s.lastActivityAt) || 0 }); });
       arr(s.done).filter(obj).forEach(function (d) { log.push({ sid: sid, kind: 'done', text: str(d.text), at: Number(s.lastActivityAt) || 0 }); });
     });
-    return { floors: floors, ceo: { items: items, count: g.BriefShell.badge(vm, ui) }, alerts: alerts, people: people, log: log };
+    return { floors: floors, ceo: { items: items, count: items.length }, alerts: alerts, people: people, log: log };
   }
   g.BriefOffice = { scene: scene, layout: layout, map: MAP, near: near, talk: talk };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

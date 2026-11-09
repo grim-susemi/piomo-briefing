@@ -1,14 +1,14 @@
 /* Plan colors: green=done, teal=doing/current, gray=todo, gray dashed=stopped, red=blocked. */
 .plan-view { min-width: 0; margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
 .plan-summary-line { position: relative; display: block; min-width: 0; line-height: 19px; height: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.plan-summary-line:last-child { padding-right: 88px; color: var(--muted); font-size: 12px; }
+.plan-summary-line:last-child { padding-right: 88px; color: var(--muted); font-size: var(--fs-sm); }
 .plan-summary-line .plan-toggle { position: absolute; top: 1px; right: 0; margin: 0; }
 .plan-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .plan-head .plan-toggle { margin: 0 0 0 auto; }
 .plan-path { display: flex; align-items: baseline; gap: 5px; margin: 3px 0; color: var(--muted); }
 .plan-path code { min-width: 0; overflow-wrap: anywhere; }
 .plan-path .copy { flex: none; }
-.plan-stage-note, .plan-checked { margin: 2px 0; color: var(--muted); font-size: 12px; }
+.plan-stage-note, .plan-checked { margin: 2px 0; color: var(--muted); font-size: var(--fs-sm); }
 .plan-goal { margin: 6px 0; overflow-wrap: anywhere; }
 .plan-components { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 6px; padding: 0; list-style: none; }
 .plan-components .plan-box { flex: 1 1 170px; }
@@ -17,20 +17,20 @@
 .plan-lane { position: relative; min-width: 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: var(--sp-1) 0; background: transparent; box-shadow: none; }
 .plan-lane-arrow { position: absolute; top: 6px; right: -19px; color: var(--muted); line-height: 1; }
 .plan-lane.is-current { border-top-color: var(--teal); }
-.plan-wave-head { margin: 0 0 5px; font-size: 12px; overflow-wrap: anywhere; }
-.plan-now { display: inline-block; padding: 0 4px; border-radius: 4px; background: var(--teal-bg); color: var(--teal); font-size: 11px; }
+.plan-wave-head { margin: 0 0 5px; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.plan-now { display: inline-block; padding: 0 4px; border-radius: 4px; background: var(--teal-bg); color: var(--teal); font-size: var(--fs-xs); }
 .plan-boxes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; margin: 0; padding: 0; list-style: none; }
 .plan-box { min-width: 0; padding: 4px 6px; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; box-shadow: none; color: var(--gray); }
 .plan-box.p-done { border-top-color: var(--green); background: transparent; color: var(--green); }
 .plan-box.p-doing { border-top-color: var(--teal); background: transparent; color: var(--teal); }
 .plan-box.p-stopped { border-style: dashed; border-width: 1px 0 0 0; border-color: var(--gray); background: transparent; color: var(--gray); }
 .plan-box.p-blocked { border-top-color: var(--red); background: transparent; color: var(--red); }
-.plan-box-id { display: block; font-size: 12px; }
+.plan-box-id { display: block; font-size: var(--fs-sm); }
 .plan-box-label { display: block; max-width: 7em; min-height: 2.9em; line-height: 1.45; overflow-wrap: anywhere; font-weight: 600; }
-.plan-deps { display: block; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
-.plan-empty-wave { color: var(--muted); font-size: 11px; }
-.plan-label { margin: 8px 0 3px; font-size: 12px; color: var(--muted); }
-.plan-task-table, .plan-qa-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+.plan-deps { display: block; font-size: var(--fs-xs); color: var(--muted); overflow-wrap: anywhere; }
+.plan-empty-wave { color: var(--muted); font-size: var(--fs-xs); }
+.plan-label { margin: 8px 0 3px; font-size: var(--fs-sm); color: var(--muted); }
+.plan-task-table, .plan-qa-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: var(--fs-sm); }
 .plan-task-table th, .plan-task-table td, .plan-qa-table th, .plan-qa-table td { padding: 4px 5px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .plan-task-table th, .plan-qa-table th { color: var(--muted); font-weight: 600; }
 .plan-task-table th:nth-child(1) { width: 76px; }
@@ -45,15 +45,15 @@
 .plan-other-tasks[hidden], .plan-out-list[hidden] { display: none; }
 .plan-question-answer code { white-space: nowrap; }
 .plan-question-answer .ans-box { margin-top: 0; }
-.plan-answer-copy { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
-.plan-answer-copy code { font-size: 11px; }
+.plan-answer-copy { display: block; margin-top: 2px; color: var(--muted); font-size: var(--fs-xs); }
+.plan-answer-copy code { font-size: var(--fs-xs); }
 .plan-question.is-open .plan-question-text { font-weight: 600; }
 .plan-ideal, .plan-out-list { margin: 3px 0; padding-left: 20px; overflow-wrap: anywhere; }
-.plan-ideal b { font-size: 11px; color: var(--muted); }
+.plan-ideal b { font-size: var(--fs-xs); color: var(--muted); }
 .plan-out { margin-top: 5px; }
 .plan-view .plan-toggle { margin-left: 0; }
-.plan-legend { margin: 7px 0 0; color: var(--muted); font-size: 11px; }
-.plan-link { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--accent); font-size: 12px; text-decoration: none; }
+.plan-legend { margin: 7px 0 0; color: var(--muted); font-size: var(--fs-xs); }
+.plan-link { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--accent); font-size: var(--fs-sm); text-decoration: none; }
 .plan-link:hover { text-decoration: underline; }
 
 @media (max-width: 599px) {
