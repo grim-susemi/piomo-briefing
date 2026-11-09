@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "feature": "switcher-oracle-ouroboros-advisors",
+  "baseline": "preserve/backup-direct-fields-20261108 final candidate (installed generation35 input; the 12 files of that archive applied)",
+  "baseline_note": "Apply after ../backup-direct-fields-20261108/changes.patch on its recorded baseline",
+  "scope": "Only this feature delta; not a merge of shared pending work",
+  "installed_generation": "generation-000036",
+  "installed_at": "2026-11-09T06:40:49.463Z",
+  "deployed_changed_files": [
+    "src/page/generated/profiles-view.min.js",
+    "src/page/profiles-view.js",
+    "src/profiles/oracle-advisors.mjs",
+    "src/profiles/refresh.mjs",
+    "src/profiles/store.mjs"
+  ],
+  "files": [
+    {
+      "path": "scripts/minify-profiles.mjs",
+      "baseline_sha256": "e1b26d8533b87ac0515487c5c8b93b327a120670c722696c384cf9729674d7d5",
+      "candidate_sha256": "89368bd539cf4797da21288c4460f788205962331cb5bf92ad9bd5ff26d84ba3"
+    },
+    {
+      "path": "src/page/generated/profiles-view.min.js",
+      "baseline_sha256": "675094dd18634fb911c49f3a00ce46bb325f601661e3fbbd6043bb2ed430a312",
+      "candidate_sha256": "1173b74497f154fef94fbd54bd7b922e44e31b254dce8c03058609c32148bb0a"
+    },
+    {
+      "path": "src/page/profiles-view.js",
+      "baseline_sha256": "1d5fd055fbae9ba6d6a2d6c13d869401d9653d390725806e66cdcc8a3b0d717a",
+      "candidate_sha256": "6c7ab32fbf3c0dca66b491f57fb665eacd874d73872614c5a5986955284dd903"
+    },
+    {
+      "path": "src/profiles/oracle-advisors.mjs",
+      "baseline_sha256": null,
+      "candidate_sha256": "45a3ea9f5a90f57fac4dd72d225707f68d0d92a805f19546c0054635c22b56c6"
+    },
+    {
+      "path": "src/profiles/refresh.mjs",
+      "baseline_sha256": "5b7ccfebc74de2387d998dbc1de323c820c48db93f3e5477fb15f99ba35e098a",
+      "candidate_sha256": "f0fad08daeee8597041e432d89aec09067d0350a613f6dea8f8bb9128c37c229"
+    },
+    {
+      "path": "src/profiles/store.mjs",
+      "baseline_sha256": "3f18244b7e3a86df74b81fd5b13faa130a4e64b54eae039d061127563f21927b",
+      "candidate_sha256": "3bf8dc8adca1e2adf508671a21fe3c617e83c80eed55912ee43159a30bc6cd71"
+    },
+    {
+      "path": "test/profiles-refresh.test.mjs",
+      "baseline_sha256": "ae4acada3ef3b0e119a68e89eb08b65b832e9296da426d3201bc69164aeeb9ed",
+      "candidate_sha256": "efd6697ec523262597f8e05d5299e53184776884226f2fc2d2ed57b97acdba39"
+    },
+    {
+      "path": "test/profiles-state-render.test.mjs",
+      "baseline_sha256": "8ae0e10ceea6cb1e57215359ba2854577e3616f76a4e9053a7bd341b8583455a",
+      "candidate_sha256": "4d28ddb9ff5a4248a4331d4c6d8f4bde9653f72ddbea0bef9a8e593e29111337"
+    },
+    {
+      "path": "test/profiles-store.test.mjs",
+      "baseline_sha256": "473292bf83e46dbf3082beb50458bc332701ee1c894b337d31a5ee7d9651ce63",
+      "candidate_sha256": "f83f6bf8fc43fd7090755a4ab29f0138308553000c099a0d02974fab58761d25"
+    }
+  ]
+}
