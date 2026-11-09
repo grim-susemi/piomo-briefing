@@ -460,35 +460,80 @@
     return html;
   }
 
-  function card(n, ui, now) {
-    var live = !!ui.live, focus = ui.focus;
-    var s = n.raw;
-    var expanded = ui.expanded;
+  function statusKeyOf(s) {
     var key = str(s.statusKey) || (s.status === 'blocked' ? 'blocked' : s.status === 'done' ? 'done' : 'in_progress');
-    if (!own(STATUS_LABEL, key)) key = 'in_progress';
+    return own(STATUS_LABEL, key) ? key : 'in_progress';
+  }
+
+  function extraChipsOf(s) {
     var extra = arr(s.chips).filter(function (c) { return typeof c === 'string'; });
     if (s.autoSummary) extra.push('자동 요약');
     if (s.answerTrimmed) extra.push('답 자동 줄임');
+    return extra;
+  }
+
+  function chipsHtmlOf(key, extra) {
+    return chip('s-' + key, STATUS_LABEL[key]) + extra.map(function (c) {
+      if (own(EXTRA_CHIP, c) === 'x-stale x-server-stale') return '<span class="chip x-stale x-server-stale" style="white-space:normal;word-break:keep-all;overflow-wrap:anywhere" title="설치된 상황판보다 예전 세대인 대화입니다. 대화를 재시작하면 최신 세대가 실시간 상황판을 맡습니다.">' + esc(c) + '</span>';
+      return chip(own(EXTRA_CHIP, c) || 'x-info', c);
+    }).join('');
+  }
+
+  function openPageBtn(sid) {
+    return '<button type="button" class="more" data-sh="open" data-sid="' + esc(sid) + '">대화 페이지 열기</button>';
+  }
+
+  function workerSummaryText(s) {
+    var wv = g.BriefWorkersView;
+    var live = obj(s.live);
+    if (wv && typeof wv.summary === 'function' && live && arr(live.workers).length) return wv.summary(live);
+    var ws = live ? arr(live.workers).filter(obj) : [];
+    if (!ws.length) return '';
+    var run = 0, done = 0;
+    ws.forEach(function (w) {
+      if (w.state === 'running' && w.stale !== true) run++;
+      else if (w.state === 'done') done++;
+    });
+    return '작업자 ' + ws.length + ' · 진행 ' + run + ' · 끝 ' + done;
+  }
+
+  function foldSummaryLabel(s, liveHtml, changes, held) {
+    var parts = ['근거와 기록'];
+    if (obj(s.plan) || obj(s.planLink)) parts.push('계획');
+    if (changes.length) parts.push(s.changesNew ? '새로 바뀜' : '최근 변화');
+    var wsum = workerSummaryText(s);
+    if (wsum) parts.push(wsum);
+    else if (liveHtml && !obj(s.plan) && !obj(s.planLink)) parts.push('작업자');
+    if (held.length) parts.push('보류 ' + held.length);
+    return parts.join(' · ');
+  }
+
+  function card(n, ui, now, opts) {
+    var live = !!ui.live, focus = ui.focus;
+    var s = n.raw;
+    var expanded = ui.expanded;
+    var o = obj(opts) || {};
+    var hideTitle = o.hideTitle === true;
+    var hideHeadline = o.hideHeadline === true;
+    var key = statusKeyOf(s);
+    var extra = extraChipsOf(s);
     var view = { title: str(s.title) || '(제목 없음)', workName: str(s.workName), paneId: str(s.paneId), tabLabel: str(s.tabLabel), tabNumber: num(s.tabNumber), tabId: str(s.tabId), sessionId: str(s.id), __now: now };
     var fview = view;
 
     var html = '<article class="card st-' + key + '" id="' + n.dom + '" data-card="' + esc(n.id) + '">' +
-      '<div class="ch">' + chip('s-' + key, STATUS_LABEL[key]) +
-      extra.map(function (c) {
-        if (own(EXTRA_CHIP, c) === 'x-stale x-server-stale') return '<span class="chip x-stale x-server-stale" style="white-space:normal;word-break:keep-all;overflow-wrap:anywhere" title="설치된 상황판보다 예전 세대인 대화입니다. 대화를 재시작하면 최신 세대가 실시간 상황판을 맡습니다.">' + esc(c) + '</span>';
-        return chip(own(EXTRA_CHIP, c) || 'x-info', c);
-      }).join('') +
+      '<div class="ch">' + chipsHtmlOf(key, extra) +
+      '<span class="meta proj-tag">' + esc(n.project) + '</span>' +
       (view.workName ? '<span class="tag">[' + esc(view.workName) + ']</span>' : '') +
-      '<span class="title">' + whereLabelHtml(view, 'ic-sm') + '</span>' + focusBtn(fview, { live: live, focus: focus }) +
+      (hideTitle ? '' : '<span class="title">' + whereLabelHtml(view, 'ic-sm') + '</span>') +
+      focusBtn(fview, { live: live, focus: focus }) + openPageBtn(n.id) +
       '<span class="time">' + ic('clock', 'ic-xs') + ' ' + esc(when(s.lastActivityAt != null ? s.lastActivityAt : s.lastBriefAt, now)) + '</span></div>' +
-      '<p class="hl"><span class="sym">' + ic('chevron-right', 'ic-sm') + '</span>' + esc(s.headline || '아직 보고 없음') + '</p>';
+      (hideHeadline ? '' : '<p class="hl"><span class="sym">' + ic('chevron-right', 'ic-sm') + '</span>' + esc(s.headline || '아직 보고 없음') + '</p>');
     var folded = obj(s.folded);
     if (folded) {
       var fr = num(folded.reports), fd = num(folded.decisions);
       html += '<p class="note cv-fold-counts">보고서 ' + esc(fr === null || fr < 0 ? 0 : Math.floor(fr)) + '개 · 결정 ' +
         esc(fd === null || fd < 0 ? 0 : Math.floor(fd)) + '개</p>';
     }
-    html += liveBlocks(s, n, ui, now);
 
     var q = obj(s.openQuestion);
     if (q) {
@@ -502,13 +547,6 @@
         (q.builtin === true ? '<p class="oq-builtin">터미널에서 답하세요 - 이 질문은 하네스 기본 질문창이라 상황판에서 닫을 수 없어요</p>' : '');
     }
 
-    var changes = arr(s.changes);
-    if (changes.length) {
-      var kc = 'more-ch:' + n.id, oc = !!own(expanded, kc);
-      html += '<div class="blk"><p class="lbl">' + (s.changesNew ? ic('plus') + ' 새로 바뀜' : ic('refresh-cw') + ' 최근 변화') + '</p><ul class="rows">' +
-        changes.slice(0, oc ? changes.length : 3).map(function (c) { return row('chg', c); }).join('') + '</ul>' +
-        moreBtn(kc, Math.max(0, changes.length - 3), oc) + '</div>';
-    }
     var decs = openDecisions(s);
     var sent = ui.live === true ? sentDecisions(s, ui) : [];
     if (decs.length || sent.length) {
@@ -517,10 +555,24 @@
         decs.slice(0, od ? decs.length : 2).map(function (d) { return decisionCard(d, view, ui, s); }).join('') +
         moreBtn(kd, Math.max(0, decs.length - 2), od) + '</div>';
     }
+    if (arr(s.decisions).some(function (d) { return obj(d) && d.questionPrompt; })) {
+      html += '<p class="muted">질문창으로 옮김 · 여기서 답할 것 없음</p>';
+    }
+
+    var liveHtml = liveBlocks(s, n, ui, now);
+    var changes = arr(s.changes);
+    var chgHtml = '';
+    if (changes.length) {
+      var kc = 'more-ch:' + n.id, oc = !!own(expanded, kc);
+      chgHtml = '<div class="blk"><p class="lbl">' + (s.changesNew ? ic('plus') + ' 새로 바뀜' : ic('refresh-cw') + ' 최근 변화') + '</p><ul class="rows">' +
+        changes.slice(0, oc ? changes.length : 3).map(function (c) { return row('chg', c); }).join('') + '</ul>' +
+        moreBtn(kc, Math.max(0, changes.length - 3), oc) + '</div>';
+    }
     var held = arr(s.decisions).filter(function (d) { return obj(d) && d.held; });
+    var heldHtml = '';
     if (held.length) {
       var heldKey = 'cv:' + n.id + ':held';
-      html += '<details class="held-decs"' + (ui.detailKeys ? ' data-open-key="' + esc(heldKey) + '"' + (own(expanded, heldKey) === true ? ' open' : '') : '') + '><summary>보류됨 ' + held.length + '개</summary>' +
+      heldHtml = '<details class="held-decs"' + (ui.detailKeys ? ' data-open-key="' + esc(heldKey) + '"' + (own(expanded, heldKey) === true ? ' open' : '') : '') + '><summary>보류됨 ' + held.length + '개</summary>' +
         held.map(function (d) {
           var a = obj(own(ui.answers, str(d.id))) || {};
           return '<p>#' + esc(d.id) + ' ' + esc(d.question) +
@@ -528,13 +580,17 @@
             (str(a.error) ? ' <span role="alert">' + esc(a.error) + '</span>' : '') + '</p>';
         }).join('') + '</details>';
     }
-    if (arr(s.decisions).some(function (d) { return obj(d) && d.questionPrompt; })) {
-      html += '<p class="muted">질문창으로 옮김 · 여기서 답할 것 없음</p>';
-    }
     var kx = 'detail:' + n.id, ox = !!own(expanded, kx);
-    html += '<button type="button" class="detail-btn" data-act="exp" data-key="' + esc(kx) + '" aria-expanded="' + (ox ? 'true' : 'false') + '">' +
-      ic(ox ? 'chevron-down' : 'chevron-right', 'ic-xs') + ' ' + (ox ? '자세히 닫기' : '자세히') + '</button>';
-    if (ox) html += detail(s, now);
+    var detailHtml = '<button type="button" class="detail-btn" data-act="exp" data-key="' + esc(kx) + '" aria-expanded="' + (ox ? 'true' : 'false') + '">' +
+      ic(ox ? 'chevron-down' : 'chevron-right', 'ic-xs') + ' ' + (ox ? '자세히 닫기' : '자세히') + '</button>' +
+      (ox ? detail(s, now) : '');
+
+    var foldKey = 'fold:' + n.id;
+    var foldOpen = own(expanded, foldKey) === true;
+    html += '<details class="fold"' + (ui.detailKeys ? ' data-open-key="' + esc(foldKey) + '"' + (foldOpen ? ' open' : '') : '') + '>' +
+      '<summary>' + ic('chevron-right', 'ic-xs chev') + ' <span>' + esc(foldSummaryLabel(s, liveHtml, changes, held)) + '</span></summary>' +
+      '<div class="fold-body">' + liveHtml + chgHtml + heldHtml + detailHtml + '</div></details>';
+
     return html + '</article>';
   }
 
@@ -545,6 +601,40 @@
       map.get(n.project).push(n);
     });
     return order.map(function (p) { return { project: p, items: map.get(p) }; });
+  }
+
+  function homeGroupOf(n, u) {
+    var s = n.raw;
+    var st = str(s.statusKey) || str(s.status);
+    var sent = u && u.live === true ? sentDecisions(s, u) : [];
+    if (openDecisions(s).length > 0 || !!obj(s.openQuestion) || st === 'needs_decision' || s.status === 'needs_decision' || n.tab === 'wait' && sent.length > 0) {
+      return 'wait';
+    }
+    if (arr(s.chips).indexOf('오래됨') >= 0) return 'stale';
+    if (st === 'blocked' || s.status === 'blocked') return 'block';
+    if (st === 'done' || s.status === 'done' || st === 'done_no_evidence' || s.status === 'done_no_evidence' || st === 'recheck' || s.status === 'recheck') {
+      return 'done';
+    }
+    return 'live';
+  }
+
+  function sessionRow(n, u, now, isStaleRow) {
+    var s = n.raw;
+    var key = statusKeyOf(s);
+    var sk = 'sess:' + n.id, sv = own(u.expanded, sk);
+    var sessIsOpen = typeof sv === 'boolean' ? sv : false;
+    var rowChip = isStaleRow ? chip('x-stale', '오래됨') : chip('s-' + key, STATUS_LABEL[key]);
+    var wsum = workerSummaryText(s) || '작업자 없음';
+    var timeStr = when(s.lastActivityAt != null ? s.lastActivityAt : s.lastBriefAt, now);
+    return '<li class="srow-li"><details class="sess"' + (sessIsOpen ? ' open' : '') + ' data-open-key="' + esc(sk) + '">' +
+      '<summary class="sessh"><span class="chev-slot">' + ic('chevron-right', 'ic-xs chev') + '</span>' +
+      rowChip +
+      '<span class="title sessh-w">' + whereLabelHtml(s, 'ic-sm') + '</span>' +
+      '<span class="rh"><span class="sym">' + ic('chevron-right', 'ic-sm') + '</span>' + esc(s.headline || '아직 보고 없음') + '</span>' +
+      '<span class="rw meta num">' + esc(wsum) + '</span>' +
+      '<span class="rp meta">' + esc(n.project) + '</span>' +
+      '<span class="rtime time num">' + ic('clock', 'ic-xs') + ' ' + esc(timeStr) + '</span></summary>' +
+      '<div class="rbody">' + card(n, u, now, { hideTitle: true, hideHeadline: true }) + '</div></details></li>';
   }
 
   var LEGEND = [
@@ -561,6 +651,13 @@
     ['x-err', '오류 있음', '이 대화를 처리하다 오류가 났음(예: 다른 곳이 상황판을 쓰는 중이라 갱신을 건너뜀). 다음에 잘 처리되면 사라짐']
   ];
 
+  var HOME_SECTIONS = [
+    ['wait', 'h-wait', '나를 기다림'],
+    ['block', 'h-block', '막힘'],
+    ['live', 'h-live', '진행 중'],
+    ['done', 'h-done', '끝남 확인']
+  ];
+
   // kit: the card list's own building blocks for the conversation page (convo-view.js), the same functions with the same output
   function renderOverview(viewModel, uiState) {
     var vm = obj(viewModel) || {}, ui = obj(uiState) || {};
@@ -569,48 +666,44 @@
     var u = { expanded: obj(ui.expanded) || {}, byId: byId, wallNow: num(ui.wallNow), detailKeys: true,
       live: ui.live === true, focus: obj(ui.focus), answers: obj(ui.answers) || {}, decs: decisionIndex(sessions) };
     var open = 0, blocked = 0, stale = 0;
+    var groups = { wait: [], block: [], live: [], done: [], stale: [] };
     sessions.forEach(function (n) {
       open += openDecisions(n.raw).length;
       if (n.raw.statusKey === 'blocked' || n.raw.status === 'blocked') blocked++;
       if (arr(n.raw.chips).indexOf('오래됨') >= 0) stale++;
+      groups[homeGroupOf(n, u)].push(n);
     });
-    var html = '<div class="overview"><header class="sum"><p class="sumline">결정 대기 ' + open + ' · 막힘 ' + blocked +
+    var now = toMs(vm.generatedAt);
+    var html = '<div class="overview"><header class="sum pagehead"><h1 class="home-h1">홈</h1><p class="sumline">결정 대기 ' + open + ' · 막힘 ' + blocked +
       ' · 오래됨 ' + stale + ' · ' + ic('clock', 'ic-sm') + ' 마지막 갱신 ' + hhmm(vm.generatedAt) + '</p><p class="note">브리핑이 켜진 대화 ' +
       sessions.length + '개만 보입니다 - 설치 전부터 열려 있던 대화는 새로 열어야 나타납니다</p></header>';
-    if (!sessions.length) html += '<div class="empty">' + ic('inbox') + '<p class="big">아직 보고 없음</p><p class="muted">브리핑이 켜진 대화가 작업 턴을 끝내면 여기에 카드가 생깁니다</p></div>';
+    if (!sessions.length) return html + '<div class="empty">' + ic('inbox') + '<p class="big">아직 보고 없음</p><p class="muted">브리핑이 켜진 대화가 작업 턴을 끝내면 여기에 카드가 생깁니다</p></div></div>';
     if (!u.live && open) html += '<p class="note ro">이 페이지는 보기 전용입니다 - 답은 아무 대화창에 /decide 로, 또는 실시간 상황판에서</p>';
-    groupByProject(sessions).forEach(function (grp) {
-      var projWait = 0, projActive = 0;
-      grp.items.forEach(function (n) {
-        var s = n.raw, st = str(s.statusKey) || str(s.status);
-        var wait = openDecisions(s).length > 0 || st === 'blocked' || s.status === 'blocked' || !!obj(s.openQuestion);
-        var active = wait || st === 'in_progress' || s.status === 'in_progress' || st === 'needs_decision';
-        if (wait) projWait++;
-        var sk = 'sess:' + n.id, sv = own(u.expanded, sk);
-        if (typeof sv === 'boolean' ? sv : active) projActive++;
-      });
-      var pk = 'proj:' + grp.project, pv = own(u.expanded, pk);
-      var projIsOpen = typeof pv === 'boolean' ? pv : projActive > 0;
-      html += '<details class="proj"' + (projIsOpen ? ' open' : '') + ' data-open-key="' + esc(pk) + '"><summary class="projh">' + ic('folder') + ' ' + esc(grp.project) +
-        ' <span class="sessh-b">' + grp.items.length + '</span>' +
-        (projWait ? ' <span class="sessh-b sessh-bad">확인 ' + projWait + '</span>' : '') + '</summary>';
-      grp.items.forEach(function (n) {
-        var s = n.raw, st = str(s.statusKey) || str(s.status);
-        var openCount = openDecisions(s).length;
-        var isBlocked = st === 'blocked' || s.status === 'blocked';
-        var isActive = openCount > 0 || isBlocked || !!obj(s.openQuestion) || st === 'in_progress' || s.status === 'in_progress' || st === 'needs_decision';
-        var sk = 'sess:' + n.id, sv = own(u.expanded, sk);
-        var sessIsOpen = typeof sv === 'boolean' ? sv : isActive;
-        var sessh = '<span class="sessh-w">' + esc(whereLabel(n.raw)) + '</span>' +
-          (openCount ? '<span class="sessh-b">결정 ' + openCount + '</span>' : '') +
-          (isBlocked ? '<span class="sessh-b sessh-bad">막힘</span>' : '');
-        html += '<details class="sess"' + (sessIsOpen ? ' open' : '') + '>' +
-          '<summary class="sessh">' + sessh + '</summary>' +
-          '<button type="button" class="more" data-sh="open" data-sid="' + esc(n.id) + '">대화 페이지 열기 · ' +
-          whereLabelHtml(n.raw, 'ic-xs') + '</button>' + card(n, u, toMs(vm.generatedAt)) + '</details>';
-      });
-      html += '</details>';
+    HOME_SECTIONS.forEach(function (sec) {
+      var key = sec[0], hid = sec[1], label = sec[2], list = groups[key];
+      if (!list.length) return;
+      html += '<section class="sec sec-' + key + '" aria-labelledby="' + hid + '"><h2 id="' + hid + '">' + label +
+        ' <span class="cnt num">' + list.length + '</span></h2>';
+      if (key === 'wait') {
+        list.forEach(function (n) { html += card(n, u, now, {}); });
+      } else {
+        html += '<ul class="srows">' + list.map(function (n) { return sessionRow(n, u, now, false); }).join('') + '</ul>';
+      }
+      html += '</section>';
     });
+    if (groups.stale.length) {
+      var staleKey = 'sec:stale', staleOpen = own(u.expanded, staleKey) === true;
+      html += '<section class="sec sec-stale" aria-labelledby="h-stale"><details class="stale"' +
+        (staleOpen ? ' open' : '') + ' data-open-key="' + staleKey + '"><summary class="staleh"><h2 id="h-stale">' +
+        ic('chevron-right', 'ic-xs chev') + ' 오래됨 <span class="cnt num">' + groups.stale.length + '</span></h2>' +
+        '<span class="meta">한 시간 넘게 새 보고가 없는 대화 · 프로젝트별로 펼쳐 봅니다</span></summary>';
+      groupByProject(groups.stale).forEach(function (grp) {
+        html += '<div class="stale-proj" data-project="' + esc(grp.project) + '"><p class="projh">' + ic('folder') + ' ' + esc(grp.project) +
+          ' <span class="sessh-b num">' + grp.items.length + '</span></p><ul class="srows">' +
+          grp.items.map(function (n) { return sessionRow(n, u, now, true); }).join('') + '</ul></div>';
+      });
+      html += '</details></section>';
+    }
     return html + '</div>';
   }
 

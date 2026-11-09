@@ -2,6 +2,7 @@
 (function (g) {
   'use strict';
   function bind(root, page, main) {
+    if (g.BriefRoadmapData) g.BriefRoadmapData.bind(root, page);
     var ui = page.state.ui, composing = false;
     function listen(type, handler, capture) {
       root.addEventListener(type, function (ev) { ui = page.state.ui; handler(ev); }, capture);
@@ -20,7 +21,8 @@
     }
     function open(id, search, push) {
       var roadmaps = page.state.model && page.state.model.roadmaps || [];
-      if (!roadmaps.some(function (rm) { return rm.roadmapId === id; })) return;
+      if (!roadmaps.some(function (rm) { return rm.roadmapId === id; }) &&
+        !(page.state.model.roadmapCatalogue && /^rm[a-f0-9]{12}$/.test(id))) return;
       if (push) {
         ui.catalogueReturn = { id: id, search: search, scroll: main.scrollTop };
         g.history.replaceState(Object.assign({}, g.history.state, { briefingCatalogue: true, roadmap: null }), '');
@@ -40,7 +42,7 @@
         ui.catalogueTools = true; ui.catalogueSuggestions = true; refresh();
         var input = main.querySelector('#rmi-query'); if (input) input.focus();
       } else if (act === 'rmi-clear') {
-        ui.catalogueQuery = ''; ui.catalogueTopic = 'all'; ui.catalogueActive = -1; refresh();
+        ui.catalogueQuery = ''; ui.catalogueTopic = 'all'; ui.catalogueActive = -1; ui.roadmapSearchPage = 0; refresh();
         main.querySelector('#rmi-query').focus();
       }
     });
@@ -54,13 +56,13 @@
       }
     }, true);
     function search(t) {
-      ui.catalogueQuery = t.value; ui.catalogueSuggestions = true; ui.catalogueActive = -1; refresh();
+      ui.catalogueQuery = t.value; ui.catalogueSuggestions = true; ui.catalogueActive = -1; ui.roadmapSearchPage = 0; refresh();
     }
     listen('compositionstart', function (ev) { if (ev.target.id === 'rmi-query') composing = true; });
     listen('compositionend', function (ev) { if (ev.target.id === 'rmi-query') { composing = false; search(ev.target); } });
     listen('input', function (ev) { if (ev.target.id === 'rmi-query' && !composing && !ev.isComposing) search(ev.target); });
     listen('change', function (ev) {
-      if (ev.target.id === 'rmi-topic') { ui.catalogueTopic = ev.target.value; ui.catalogueSuggestions = false; refresh(); }
+      if (ev.target.id === 'rmi-topic') { ui.catalogueTopic = ev.target.value; ui.catalogueSuggestions = false; ui.roadmapSearchPage = 0; refresh(); }
     });
     listen('keydown', function (ev) {
       if (ev.target.id !== 'rmi-query' || composing || ev.isComposing) return;

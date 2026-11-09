@@ -43,61 +43,65 @@ test('automatic disclosures collapse on completion; only actual user choices per
     })`);
     const snapshot = () => page.eval(`({
       expanded: {...BriefPage.state.ui.expanded},
-      gammaProject: document.querySelector('[data-open-key="proj:proj-gamma"]').open,
-      gammaSession: document.querySelector('[data-card="fx-sess-gamma-running"]').closest('details').open,
-      alphaProject: document.querySelector('[data-open-key="proj:proj-alpha"]')?.open ?? null,
-      alphaSession: document.querySelector('[data-card="fx-sess-alpha-done"]')?.closest('details').open ?? null
+      gammaWaitingCard: !!document.querySelector('.sec-wait [data-card="fx-sess-gamma-running"]'),
+      gammaFold: document.querySelector('[data-open-key="fold:fx-sess-gamma-running"]')?.open ?? null,
+      gammaSession: document.querySelector('[data-card="fx-sess-gamma-running"]')?.closest('details.sess')?.open ?? null,
+      staleSection: document.querySelector('[data-open-key="sec:stale"]')?.open ?? null,
+      alphaSession: document.querySelector('[data-card="fx-sess-alpha-done"]')?.closest('details.sess')?.open ?? null
     })`);
     const done = { ...gamma, status: 'done', statusKey: 'done', decisions: [], openQuestion: null };
-    await inject([gamma], 2);
+    const alphaStale = { ...alpha, status: 'in_progress', statusKey: 'in_progress', chips: ['오래됨'] };
+    await inject([gamma], 0);
     let s = await snapshot();
-    assert.equal(s.gammaProject, true);
-    assert.equal(s.gammaSession, true);
+    assert.equal(s.gammaWaitingCard, true);
+    assert.equal(s.gammaFold, false);
+    assert.equal(s.gammaSession, null);
     const initialExpanded = s.expanded;
     // Check collapse first so mutation testing reports the user-visible failure directly.
     await inject([done], 0);
     s = await snapshot();
-    assert.equal(s.gammaProject, false, 'automatically opened project must collapse when its session is done');
-    assert.equal(s.gammaSession, false, 'automatically opened session must collapse when done');
+    assert.equal(s.gammaWaitingCard, false, 'completed session leaves the waiting card section');
+    assert.equal(s.gammaSession, false, 'completed session row is collapsed by default');
     assert.deepEqual(initialExpanded, {}, 'active render must not record disclosure preferences');
     assert.deepEqual(s.expanded, {}, 'render must not record disclosure preferences');
 
-    const alphaActive = { ...alpha, status: 'in_progress', statusKey: 'in_progress' };
-    await inject([gamma, alphaActive], 4);
+    await inject([gamma, alphaStale], 0);
     const click = async (selector) => {
       const point = await page.eval(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView(); const r = e.getBoundingClientRect(); return {x:r.left + r.width / 2, y:r.top + r.height / 2}; })()`);
       await page.client.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
       await page.client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
       await page.eval('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
     };
-    await click('[data-open-key="proj:proj-alpha"] > summary');
+    await click('[data-open-key="sec:stale"] > summary');
+    await click('[data-open-key="sec:stale"] > summary');
     s = await snapshot();
-    assert.equal(s.expanded['proj:proj-alpha'], false, 'explicit close must be recorded');
-    await click('[data-open-key="proj:proj-alpha"] > summary');
-    await click('[data-open-key="proj:proj-alpha"] details.sess > summary');
+    assert.equal(s.expanded['sec:stale'], false, 'explicit close must be recorded');
+    await click('[data-open-key="sec:stale"] > summary');
+    await click('[data-open-key="sess:fx-sess-alpha-done"] > summary');
+    await click('[data-open-key="sess:fx-sess-alpha-done"] > summary');
     s = await snapshot();
     assert.equal(s.expanded['sess:fx-sess-alpha-done'], false, 'explicit session close must be recorded');
-    await click('[data-open-key="proj:proj-alpha"] details.sess > summary');
+    await click('[data-open-key="sess:fx-sess-alpha-done"] > summary');
     s = await snapshot();
-    assert.deepEqual(s.expanded, { 'proj:proj-alpha': true, 'sess:fx-sess-alpha-done': true });
-    await inject([done, alpha], 2);
+    assert.deepEqual(s.expanded, { 'sec:stale': true, 'sess:fx-sess-alpha-done': true });
+    await inject([done, alphaStale], 2);
     s = await snapshot();
-    assert.equal(s.gammaProject, false);
+    assert.equal(s.gammaWaitingCard, false);
     assert.equal(s.gammaSession, false);
-    assert.equal(s.alphaProject, true);
+    assert.equal(s.staleSection, true);
     assert.equal(s.alphaSession, true);
-    assert.deepEqual(s.expanded, { 'proj:proj-alpha': true, 'sess:fx-sess-alpha-done': true });
+    assert.deepEqual(s.expanded, { 'sec:stale': true, 'sess:fx-sess-alpha-done': true });
 
     await page.eval(`document.getElementById('app').addEventListener('click', function (event) {
-      if (event.target.closest('[data-open-key="proj:proj-gamma"] > summary')) event.preventDefault();
+      if (event.target.closest('[data-open-key="sess:fx-sess-gamma-running"] > summary')) event.preventDefault();
     })`);
-    await click('[data-open-key="proj:proj-gamma"] > summary');
+    await click('[data-open-key="sess:fx-sess-gamma-running"] > summary');
     s = await snapshot();
-    assert.equal(s.gammaProject, false, 'a later listener cancels the native default toggle');
-    await inject([done, alpha], 0);
+    assert.equal(s.gammaSession, false, 'a later listener cancels the native default toggle');
+    await inject([done, alphaStale], 0);
     s = await snapshot();
-    assert.equal(s.gammaProject, false, 'a cancelled native choice must not reopen the project on refresh');
-    assert.deepEqual(s.expanded, { 'proj:proj-alpha': true, 'sess:fx-sess-alpha-done': true });
+    assert.equal(s.gammaSession, false, 'a cancelled native choice must not reopen the session row on refresh');
+    assert.deepEqual(s.expanded, { 'sec:stale': true, 'sess:fx-sess-alpha-done': true });
   } finally {
     if (page) await page.close();
     server.closeAllConnections();

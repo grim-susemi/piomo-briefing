@@ -393,7 +393,11 @@
     });
 
     // 2. Stage plans from roadmaps
-    arr(roadmaps).forEach(function (rm) {
+    var connected = Array.isArray(vm.roadmapPlans) ? vm.roadmapPlans.flatMap(function (item) {
+      return item.refs.map(function (ref) { return { roadmapId: ref.roadmapId,
+        stages: [{ id: ref.stageId, label: ref.stageLabel, plans: [Object.assign({}, item.plan, { taskIds: ref.taskIds, errors: ref.errors })] }] }; });
+    }) : roadmaps;
+    arr(connected).forEach(function (rm) {
       arr(rm.stages).forEach(function (st) {
         arr(st.plans).forEach(function (pref) {
           var pid = flat(pref.planId), rawPath = flat(pref.path), np = normPath(rawPath), slug = slugOfPath(rawPath);
@@ -561,6 +565,8 @@
       var entries = placed.order;
       return g.BriefRoadmapIndex.render(roadmaps, ui, {
         esc: e, entries: entries, readErrors: rmReadErrors, legacy: !hasRoadmapsProp || !Array.isArray(vm.roadmaps), progress: progressText,
+        topics: vm.roadmapTopics, total: vm.roadmapCatalogue && vm.roadmapCatalogue.total,
+        loading: vm.roadmapLoad && vm.roadmapLoad.loading, loadError: vm.roadmapLoad && vm.roadmapLoad.error, matchedCount: vm.roadmapLoad && vm.roadmapLoad.total,
         matchPlan: function (p) { return matchPlan(p, board); },
         condition: function (c, rm) { return renderCondition(c, rm, indexCtx); },
         planItem: function (p) { return renderPlanItem(p, indexCtx); },
@@ -731,5 +737,13 @@
     return html;
   }
 
-  g.BriefRoadmapView = { FILTERS: FILTERS, COLUMNS: COLUMNS, render: render, countsOf: countsOf, filterStages: filterStages, progressText: progressText, placeStages: placeStages };
+  g.BriefRoadmapView = { FILTERS: FILTERS, COLUMNS: COLUMNS, render: function (model, ui) {
+    var paged = g.BriefRoadmapData ? g.BriefRoadmapData.view(model, ui) : model;
+    var nav = g.BriefRoadmapData ? g.BriefRoadmapData.controls(paged) : '', body = render(paged, ui);
+    // Paging belongs inside the catalogue, after the search/topic tools; detail status follows its heading.
+    var footer = body.indexOf('<footer class="rmi-footer">'), heading = body.indexOf('</h1>');
+    if (nav && footer >= 0) return body.slice(0, footer) + nav + body.slice(footer);
+    if (nav && ui.catalogueSelected && heading >= 0) return body.slice(0, heading + 5) + nav + body.slice(heading + 5);
+    return nav + body;
+  }, countsOf: countsOf, filterStages: filterStages, progressText: progressText, placeStages: placeStages };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

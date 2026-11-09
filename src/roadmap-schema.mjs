@@ -1,6 +1,6 @@
 // Structural boundary for roadmap projection v1. No file or owner state is inferred here.
 export const ROADMAP_LIMITS = Object.freeze({
-  bytes: 256 * 1024, roadmaps: 8, tracks: 6, stages: 40, sources: 16, plans: 4, conditions: 16,
+  bytes: 256 * 1024, tracks: 6, stages: 40, sources: 16, plans: 4, conditions: 16,
   vmBytes: 2 * 1024 * 1024,
 });
 export const ROADMAP_OPERATIONS = Object.freeze(['implement', 'install', 'publish', 'accept', 'other']);

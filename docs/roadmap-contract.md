@@ -29,7 +29,7 @@ Condition = { kind: "stage", id }
 Operation = "implement" | "install" | "publish" | "accept" | "other"
 ```
 
-투영은 최대 8개, 각 파일은 UTF-8 256KiB 이하, 트랙은 6개 이하, 단계는 40개 이하, 단계별 계획은 4개 이하, 조건과 근거는 각각 16개 이하다. 전체 VM은 기존 2MiB 한도를 유지한다. 초과하면 이유와 경로를 표시하고 이전 유효 스냅샷을 보존한다. 조용히 자르지 않는다.
+등록 개수는 페이지 용량과 분리한다. 각 투영 파일은 UTF-8 256KiB 이하, 트랙은 6개 이하, 단계는 40개 이하, 단계별 계획은 4개 이하, 조건과 근거는 각각 16개 이하다. 게시 VM은 기존 2MiB 한도를 유지하고 제목 목록과 전역 연결 계획 목록은 각각 128KiB 이하의 페이지로 나눈다. 개별 로드맵 상세는 2MiB 이하로 제한한다. 초과하면 이유와 경로를 표시하고 이전 유효 스냅샷을 보존한다. 조용히 자르지 않는다.
 
 경로는 입력 프로젝트 루트 안 정규화된 절대경로다. 원문은 `.omo/drafts/*.md`, 계획은 `.omo/plans/*.md` 또는 `.omo/drafts/*.md`, 영수증은 `.omo/` 아래 명시 파일이다. `..`, 심볼릭 링크나 junction을 통한 탈출, 임의 URI를 거부한다. 결정은 해당 프로젝트와 세션의 소유권을 확인한다.
 
@@ -65,7 +65,7 @@ sources는 해당 단계 및 연결 source의 `{id,sha256}`를 ID 오름차순�
 
 `roadmap_brief({projectionPath,expectedRevision})`는 경로만 받아 등록한다. expectedRevision은 등록 기록 자체가 없을 때만 null이다. 갱신·재등록·등록 해제는 현재 양의 정수 revision과 정확히 일치해야 한다. 등록 해제는 `{projectionPath,expectedRevision,unregister:true}`로 요청한다. 해제는 registered=false인 기록을 남기고 revision을 증가시킨다. 같은 경로를 다시 등록할 때도 해제 기록의 revision을 사용하므로 오래된 등록·해제가 새 등록을 덮을 수 없다. 현재 revision에서 내용과 검증 증거가 같은 재등록은 같은 revision을 반환한다. 오래된 expectedRevision은 내용이 같아도 거부한다.
 
-모든 등록 경로는 정규화된 realpath로 식별한다. Windows에서는 경로 ID를 계산할 때 대소문자를 구별하지 않는다. 전역 roadmaps/registry.lock을 배타 생성해 CAS 검사, 전체 개수·용량 검사와 definition.json의 원자적 replace를 같은 임계구역에 둔다. 다른 writer가 있으면 BUSY를 반환하고 상태를 바꾸지 않는다. 종료한 프로세스의 선점은 기존 store.reclaimStale 규칙으로만 회수한다. 원문·투영·결정·답·status.json은 등록 해제에서도 보존한다.
+모든 등록 경로는 정규화된 realpath로 식별한다. Windows에서는 경로 ID를 계산할 때 대소문자를 구별하지 않는다. 전역 roadmaps/registry.lock을 배타 생성해 CAS 검사, 개별 저장 레코드 용량 검사와 definition.json의 원자적 replace를 같은 임계구역에 둔다. 다른 writer가 있으면 BUSY를 반환하고 상태를 바꾸지 않는다. 종료한 프로세스의 선점은 기존 store.reclaimStale 규칙으로만 회수한다. 원문·투영·결정·답·status.json은 등록 해제에서도 보존한다.
 
 새 승인은 `roadmap_brief({projectionPath,expectedRevision,requestGate:{stageId,gateId}})`라는 별도 명시 요청으로만 질문한다. 현재 투영을 먼저 등록해야 하고 해당 gate의 decisionId는 null이어야 한다. 질문 요청은 투영을 수정하거나 decisionId를 자동 연결하지 않는다. 반환된 실제 decisionId를 에이전트가 같은 stageId·gateId·scope·operation으로 투영에 넣고 현재 revision으로 다시 등록한다. 같은 단계의 같은 gateId는 갱신 때 scope·operation을 바꿀 수 없다.
 
@@ -75,7 +75,9 @@ sources는 해당 단계 및 연결 source의 `{id,sha256}`를 ID 오름차순�
 
 수집기는 `roadmapDecisionEvidence({definition,stage,store},gate)`로 unasked/open/held/approved/rejected/unknown을 읽는다. source="roadmap"의 정확한 binding이 있고 실제 answers/<id>.json의 A/B 응답이 있어야만 approved/rejected다. 답 없는 폐쇄와 비정형 기존 결정은 unknown이다. 등록 시 읽은 evidence.decisions의 bindingState는 승인 상태가 아니므로 수집할 때 현재 답·보류·폐쇄를 다시 읽는다. 영수증의 실제 subjectHash 재계산과 계획 inventory coverage 판정은 작업 3의 수집 경계에서 수행하며 등록 결과 자체는 수용 통과를 뜻하지 않는다.
 
-scope는 NFC 1~120자, headingPath는 최대 6개 segment(각 1~200자), taskIds는 최대 400개 정규 작업 ID다. sources는 근거 한도 16개를 따른다. 동일 계획의 반복 참조와 taskIds는 canonical path 기준으로 중복 제거하되 서로 다른 단계의 명시 소속은 보존한다. 조건별 requires·accepts 배열은 각각 16개 이하다. 원문·계획 읽기는 파일당 2MiB, 투영·영수증 읽기는 파일당 256KiB로 제한한다. 등록 시 기존 게시 VM bytes와 활성 definition 전체 예상 bytes를 합산해 2MiB를 넘으면 LIMIT로 거절한다. 이는 보수적인 등록 예약 한도이며 작업 3·4의 최종 결합 VM 한도 검사를 대체하지 않는다.
+scope는 NFC 1~120자, headingPath는 최대 6개 segment(각 1~200자), taskIds는 최대 400개 정규 작업 ID다. sources는 근거 한도 16개를 따른다. 동일 계획의 반복 참조와 taskIds는 canonical path 기준으로 중복 제거하되 서로 다른 단계의 명시 소속은 보존한다. 조건별 requires·accepts 배열은 각각 16개 이하다. 원문·계획 읽기는 파일당 2MiB, 투영·영수증 읽기는 파일당 256KiB로 제한한다. 등록 레코드는 실제 저장 형식으로 2MiB 이하인지 검사한다.
+
+목록과 상세는 전체 로드맵 모델의 SHA256과 코드 세대로 식별한 불변 스냅샷 폴더 `roadmap-data/<key>/`에 저장한다. HTTP는 같은 출처 확인을 거친 JSON만 제공하고, 파일 스냅샷은 옆의 classic script를 읽는다. 제목 검색과 주제 선택은 전체 등록 로드맵에 적용한다. 제목·주제·상태만 담은 128KiB 이하 검색 색인을 모든 쪽에 걸쳐 순차 검색하며, 현재 색인 쪽과 128KiB 이하 결과 쪽만 보관한다. 전역 주제 목록도 128KiB 이하로 나누고 모든 주제를 이전·다음 주제 쪽으로 선택할 수 있다. 화면에 표시하는 제목과 주제의 공백 정규화는 기존과 동일하다. 세대·스냅샷·종류·ID가 다른 늦은 응답은 무시한다. 선택한 검색 결과는 해당 로드맵의 상세만 읽는다. 전역 중복 제거한 연결 계획도 쪽을 나누고, 매우 많은 단계에서 공유하는 계획의 참조는 다음 쪽으로 이어진다. 옛 파일 스냅샷을 보존하려면 `roadmap-data/`도 함께 보존한다. 기존 스냅샷이 참조하는 불변 파일은 자동 삭제하지 않는다.
 
 ## 경로 CLI와 수집기 인터페이스
 

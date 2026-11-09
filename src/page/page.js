@@ -631,6 +631,9 @@
     if (el.getAttribute('type') === 'radio' || el.getAttribute('type') === 'checkbox') key.push(el.getAttribute('value'));
     var group = el.closest('[data-block],[data-card],[data-row],[data-tab],[data-decision]');
     if (group) ['data-block', 'data-card', 'data-row', 'data-tab', 'data-decision'].forEach(function (n) { key.push(group.getAttribute(n)); });
+    // Status regrouping reorders home rows. A row summary has no identity of its own, so it takes its disclosure's key;
+    // controls inside the row keep their own identity and survive the row moving to another group.
+    if (el.tagName === 'SUMMARY' && el.parentElement && el.parentElement.hasAttribute('data-open-key')) key.push(el.parentElement.getAttribute('data-open-key'));
     return JSON.stringify(key);
   }
   function region(name, el, html) {

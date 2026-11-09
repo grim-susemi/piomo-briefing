@@ -267,7 +267,7 @@ test('prototype-like names render as ordinary text', () => {
     let html;
     assert.doesNotThrow(() => { html = renderAllTabs(view, m, { expanded: expandAll(m) }); }, name);
     assert.equal(Object.keys(cards(html)).length, 6, name + ' cards');
-    assert.ok(marks(html).includes('[folder] ' + name), name + ' group heading');
+    assert.ok(marks(html).includes('<span class="meta proj-tag">' + view.escapeHtml(name) + '</span>'), name + ' project label');
     assert.ok(!html.includes('[native code]'), name + ' leaks prototype');
     assert.ok(!html.includes('/decide 12' + name), name + ' recommend');
     assert.equal(typeof view.renderOverview(m, { tab: name }), 'string');
@@ -394,9 +394,9 @@ test('a title with no break opportunity wraps in the overview: page.css breaks t
   s.title = 'W'.repeat(300);
   const html = loadView().renderOverview(model, {});
   assert.ok(html.startsWith('<div class="overview">'));
-  assert.ok(html.includes('<button type="button" class="more" data-sh="open" data-sid="' + s.id + '">대화 페이지 열기 · '), 'the open button is a .more child of div.overview');
-  assert.match(marks(html), new RegExp('대화 페이지 열기 · [^<]*' + s.title + '</button>'), 'it carries the whole title');
-  assert.match(marks(cards(html)[s.id]), new RegExp('<span class="title">[^<]*' + s.title + '</span>'), 'so does the card header');
+  assert.ok(html.includes('<button type="button" class="more" data-sh="open" data-sid="' + s.id + '">대화 페이지 열기</button>'), 'the open button carries data-sh="open" and data-sid without repeating the title');
+  assert.doesNotMatch(marks(html), new RegExp('대화 페이지 열기 · [^<]*' + s.title + '</button>'), 'the open button does not repeat the title');
+  assert.match(marks(cards(html)[s.id]), new RegExp('<span class="title">[^<]*' + s.title + '</span>'), 'the card header carries the whole title');
   const title = cssRule('src/page/page.css', '.title');
   assert.match(title, /min-width: 0/, 'a .ch flex item may shrink below its longest word');
   const shared = /\.title,\s*\.overview > \.more,\s*\.cv-page \.cv-h1\s*\{([^}]*)\}/.exec(fs.readFileSync(path.join(ROOT, 'src/page/page.css'), 'utf8'));
@@ -709,3 +709,178 @@ test('hostile fixture strings stay text per surface: title, headline, decision q
       'structure matches NEUTRAL: ' + s);
   }
 });
+
+// ---- Proposal A home screen layout and behaviour --------------------------------------------------------------------
+
+test('home Proposal A: h1 "홈" precedes summary line, and status sections render in order 나를 기다림 -> 막힘 -> 진행 중 -> 끝남 확인 -> 오래됨 with counts', () => {
+  const view = loadView();
+  const m = {
+    generatedAt: FIXTURE.generatedAt,
+    sessions: [
+      { id: 'done-1', project: 'proj-a', title: '끝난 대화', status: 'done', statusKey: 'done', chips: [], headline: 'h1', decisions: [] },
+      { id: 'stale-run', project: 'proj-b', title: '오래된 진행 대화', status: 'in_progress', statusKey: 'in_progress', chips: ['오래됨'], headline: 'h2', decisions: [] },
+      { id: 'live-1', project: 'proj-a', title: '진행 대화', status: 'in_progress', statusKey: 'in_progress', chips: ['작업 중'], headline: 'h3', decisions: [] },
+      { id: 'block-1', project: 'proj-b', title: '막힌 대화', status: 'blocked', statusKey: 'blocked', chips: [], headline: 'h4', decisions: [] },
+      { id: 'wait-stale', project: 'proj-c', title: '오래된 결정 대기', status: 'needs_decision', statusKey: 'needs_decision', chips: ['오래됨'], headline: 'h5',
+        decisions: [{ id: 1, question: 'q', options: { A: { text: 'a', consequence: 'c' } }, recommend: 'A', answered: false, closed: false }] },
+      { id: 'recheck-1', project: 'proj-a', title: '재확인 대화', status: 'recheck', statusKey: 'recheck', chips: [], headline: 'h6', decisions: [] },
+      { id: 'noev-1', project: 'proj-a', title: '근거 없는 끝', status: 'done_no_evidence', statusKey: 'done_no_evidence', chips: [], headline: 'h7', decisions: [] },
+    ],
+  };
+  const html = view.renderOverview(m, { live: true });
+  const h1At = html.indexOf('<h1 class="home-h1">홈</h1>');
+  const sumAt = html.indexOf('<p class="sumline">');
+  assert.ok(h1At > 0 && h1At < sumAt, 'h1 "홈" precedes the summary line');
+
+  const headings = [...html.matchAll(/<h2 id="(h-[a-z]+)">([\s\S]*?)<\/h2>/g)].map((x) => [
+    x[1],
+    marks(x[2]).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(),
+  ]);
+  assert.deepEqual(headings, [
+    ['h-wait', '나를 기다림 1'],
+    ['h-block', '막힘 1'],
+    ['h-live', '진행 중 1'],
+    ['h-done', '끝남 확인 3'],
+    ['h-stale', '[chevron-right] 오래됨 1'],
+  ]);
+});
+
+test('home Proposal A: a stale in_progress conversation lands in 오래됨 (precedence over blocked/live/done) and is closed by default; waiting with 오래됨 stays in 나를 기다림', () => {
+  const view = loadView();
+  const m = {
+    generatedAt: FIXTURE.generatedAt,
+    sessions: [
+      { id: 's-wait-stale', project: 'p1', title: '기다리는 오래된 대화', status: 'in_progress', statusKey: 'in_progress', chips: ['오래됨'],
+        decisions: [{ id: 10, question: 'q', options: { A: { text: 'yes', consequence: 'ok' } }, recommend: 'A', answered: false, closed: false }] },
+      { id: 's-run-stale', project: 'p1', title: '진행 중이지만 오래됨', status: 'in_progress', statusKey: 'in_progress', chips: ['오래됨'], decisions: [] },
+      { id: 's-blk-stale', project: 'p2', title: '막혔고 오래됨', status: 'blocked', statusKey: 'blocked', chips: ['오래됨'], decisions: [] },
+      { id: 's-done-stale', project: 'p2', title: '끝났고 오래됨', status: 'done', statusKey: 'done', chips: ['오래됨'], decisions: [] },
+    ],
+  };
+  const html = view.renderOverview(m, { live: true });
+  const waitSec = /<section class="sec sec-wait"[\s\S]*?<\/section>/.exec(html)?.[0] || '';
+  const staleSec = /<section class="sec sec-stale"[\s\S]*?<\/section>/.exec(html)?.[0] || '';
+
+  assert.ok(waitSec.includes('data-card="s-wait-stale"'), 'waiting conversation with 오래됨 chip stays in 나를 기다림');
+  assert.ok(!staleSec.includes('data-card="s-wait-stale"'));
+  assert.equal(/<section class="sec sec-(?:block|live|done)"/.test(html), false, 'stale non-waiting conversations do not appear in blocked, live, or done sections');
+
+  assert.match(staleSec, /<details class="stale" data-open-key="sec:stale">/, 'the outer 오래됨 details is closed by default');
+  for (const id of ['s-run-stale', 's-blk-stale', 's-done-stale']) {
+    assert.ok(staleSec.includes('data-card="' + id + '"'), id + ' lands in 오래됨');
+    assert.match(staleSec, new RegExp('<details class="sess" data-open-key="sess:' + id + '">'), id + ' row is closed by default');
+  }
+});
+
+test('home Proposal A: waiting conversation renders as an open card with decision buttons before the closed 근거와 기록 fold, persisted via data-open-key', () => {
+  const ctx = vm.createContext({});
+  for (const f of ['icons.js', 'view.js', 'plan-view.js', 'workers-view.js']) {
+    vm.runInContext(fs.readFileSync(path.join(ROOT, 'src/page', f), 'utf8'), ctx, { filename: f });
+  }
+  const s = clone(FIXTURE.sessions.find((x) => x.id === 's-a1'));
+  s.live = {
+    workers: Array.from({ length: 20 }, (_, i) => ({
+      id: 'w-' + i, name: '작업자 ' + i, kind: 'deep-low', state: 'done', startedAt: 1000, endedAt: 2000, updatedAt: 2000,
+    })),
+  };
+  s.decisions.push({ id: 99, question: '보류된 질문', options: { A: { text: 'a' } }, answered: false, closed: true, held: true });
+  const m = { generatedAt: FIXTURE.generatedAt, sessions: [s] };
+
+  const html = ctx.BriefView.renderOverview(m, { live: true, wallNow: FIXTURE.generatedAt });
+  const cardHtml = cards(html)['s-a1'];
+  assert.ok(cardHtml, 'waiting session renders an article.card');
+  assert.ok(!/<details class="sess[^"]*"[^>]*>[\s\S]*?data-card="s-a1"/.test(html), 'waiting card is directly open, not wrapped in a closed row');
+
+  const titlePos = cardHtml.indexOf('class="title"');
+  const hlPos = cardHtml.indexOf('class="hl"');
+  const pickPos = cardHtml.indexOf('data-act="ans-pick"');
+  const foldPos = cardHtml.indexOf('<details class="fold" data-open-key="fold:s-a1"><summary>');
+  const workerPos = cardHtml.indexOf('data-worker="w-0"');
+  const chgPos = cardHtml.indexOf('class="row chg"');
+  const heldPos = cardHtml.indexOf('class="held-decs"');
+  const detailBtnPos = cardHtml.indexOf('class="detail-btn"');
+
+  assert.ok(titlePos > 0 && titlePos < hlPos, 'title comes before headline');
+  assert.ok(hlPos < pickPos, 'headline comes before decision buttons');
+  assert.ok(pickPos < foldPos, 'decision buttons come BEFORE the 근거와 기록 fold');
+  assert.ok(foldPos < workerPos && foldPos < chgPos && foldPos < heldPos && foldPos < detailBtnPos,
+    'workers, changes, held decisions, and 자세히 button all sit inside the 근거와 기록 fold after the decision buttons');
+  assert.match(cardHtml, /근거와 기록 · 새로 바뀜 · 작업자 20 · 진행 0 · 끝 20 · 보류 1/);
+
+  const openedHtml = ctx.BriefView.renderOverview(m, { live: true, expanded: { 'fold:s-a1': true } });
+  assert.ok(cards(openedHtml)['s-a1'].includes('<details class="fold" data-open-key="fold:s-a1" open>'), 'data-open-key fold:s-a1 persists open state');
+});
+
+test('home Proposal A: each conversation title appears exactly once in home markup outside .dcard blocks, and page.css hides .overview .dcard .dline.from', () => {
+  const view = loadView();
+  const m = clone(FIXTURE);
+  m.sessions.forEach((s, idx) => { s.title = '고유제목_' + idx + '_끝'; });
+  const html = view.renderOverview(m, { live: true, expanded: expandAll(m) });
+  const withoutDcards = html.replace(/<div class="dcard[\s\S]*?<\/div><!--dcard-->/g, '');
+
+  for (const s of m.sessions) {
+    assert.equal(count(withoutDcards, new RegExp(s.title, 'g')), 1, s.id + ' (' + s.title + ') appears exactly once in home markup outside .dcard');
+    assert.ok(html.includes('<button type="button" class="more" data-sh="open" data-sid="' + s.id + '">대화 페이지 열기</button>'),
+      s.id + ' open button keeps data-sh="open" and data-sid without repeating the title');
+  }
+  const hideRule = cssRule('src/page/page.css', '.overview .dcard .dline.from');
+  assert.ok(hideRule && /display:\s*none/.test(hideRule), 'page.css hides .overview .dcard .dline.from in the home overview');
+  assert.ok(!fs.readFileSync(path.join(ROOT, 'src/page/convo.css'), 'utf8').includes('.dline.from'), 'convo.css does not hide .dline.from');
+});
+
+test('home Proposal A: non-waiting rows are closed by default, show status/title/headline/worker summary/project/time, and sess:<id> overrides open/closed state', () => {
+  const view = loadView();
+  const html = view.renderOverview(FIXTURE, { live: true });
+  // In FIXTURE: s-a2 is in_progress (live), s-c2 is done, s-c1 is stale
+  for (const id of ['s-a2', 's-c2', 's-c1']) {
+    const m = new RegExp('<details class="sess"([^>]*)data-open-key="sess:' + id + '"[^>]*>([\\s\\S]*?)<\\/details>\\s*<\\/li>').exec(html);
+    assert.ok(m, 'row rendered for ' + id);
+    assert.ok(!/\bopen\b/.test(m[1]), id + ' row is closed by default');
+    const summary = /<summary class="sessh">([\s\S]*?)<\/summary>/.exec(m[2])?.[1] || '';
+    const s = FIXTURE.sessions.find((x) => x.id === id);
+    assert.ok(summary.includes(s.title), id + ' summary shows title');
+    assert.ok(summary.includes(s.headline), id + ' summary shows headline');
+    assert.ok(summary.includes('class="rw meta num"'), id + ' summary shows worker summary slot');
+    assert.ok(summary.includes('<span class="rp meta">' + s.project + '</span>'), id + ' summary shows project');
+    assert.ok(summary.includes('class="rtime time num"'), id + ' summary shows time');
+  }
+
+  const overridden = view.renderOverview(FIXTURE, { live: true, expanded: { 'sess:s-a2': true, 'sess:s-c2': false } });
+  assert.match(overridden, /<details class="sess" open data-open-key="sess:s-a2">/);
+  assert.match(overridden, /<details class="sess" data-open-key="sess:s-c2">/);
+});
+
+test('home Proposal A: 오래됨 conversations are grouped by project with project name and count inside the closed stale fold', () => {
+  const view = loadView();
+  const m = {
+    generatedAt: FIXTURE.generatedAt,
+    sessions: [
+      { id: 'st-1', project: '알파 프로젝트', title: '오래된 일 1', status: 'in_progress', chips: ['오래됨'], headline: 'h1', decisions: [] },
+      { id: 'st-2', project: '베타 프로젝트', title: '오래된 일 2', status: 'done', chips: ['오래됨'], headline: 'h2', decisions: [] },
+      { id: 'st-3', project: '알파 프로젝트', title: '오래된 일 3', status: 'blocked', chips: ['오래됨'], headline: 'h3', decisions: [] },
+    ],
+  };
+  const html = view.renderOverview(m, {});
+  const staleSec = /<section class="sec sec-stale"[\s\S]*?<\/section>/.exec(html)?.[0] || '';
+  assert.match(staleSec, /<details class="stale" data-open-key="sec:stale">/);
+  const projs = [...staleSec.matchAll(/<div class="stale-proj" data-project="([^"]*)"><p class="projh">([\s\S]*?)<\/p><ul class="srows">([\s\S]*?)<\/ul><\/div>/g)];
+  assert.equal(projs.length, 2, 'two project groups inside 오래됨');
+  assert.equal(projs[0][1], '알파 프로젝트');
+  assert.match(marks(projs[0][2]), /\[folder\] 알파 프로젝트 <span class="sessh-b num">2<\/span>/);
+  assert.deepEqual([...projs[0][3].matchAll(/data-card="([^"]*)"/g)].map((x) => x[1]), ['st-1', 'st-3']);
+  assert.equal(projs[1][1], '베타 프로젝트');
+  assert.match(marks(projs[1][2]), /\[folder\] 베타 프로젝트 <span class="sessh-b num">1<\/span>/);
+  assert.deepEqual([...projs[1][3].matchAll(/data-card="([^"]*)"/g)].map((x) => x[1]), ['st-2']);
+});
+
+test('tokens.css raises desktop (min-width: 600px) --fs-2xs and --fs-xs to 12px while keeping phone (max-width: 599px) 15/17px rules intact', () => {
+  const css = noComments('src/page/tokens.css');
+  const phone = atBlock(css, '@media (max-width: 599px)');
+  assert.match(phone.inside, /--fs-2xs:\s*15px/);
+  assert.match(phone.inside, /--fs-xs:\s*15px/);
+  assert.match(phone.inside, /--fs-base:\s*17px/);
+  const desktop = atBlock(css, '@media (min-width: 600px)');
+  assert.match(desktop.inside, /--fs-2xs:\s*12px/);
+  assert.match(desktop.inside, /--fs-xs:\s*12px/);
+});
+

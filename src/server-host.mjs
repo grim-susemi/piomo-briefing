@@ -40,7 +40,8 @@ import http from 'node:http';
 import { join, resolve as resolvePath } from 'node:path';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { createBoardServer as defaultCreateBoardServer } from './server.mjs';
-import { isPidAlive } from './store.mjs';
+import { isPidAlive, openStore } from './store.mjs';
+import { publishRoadmaps } from './roadmap-publication.mjs';
 
 export const SERVER_LOCK = 'server.lock';
 export const SERVER_JSON = 'server.json';
@@ -433,7 +434,7 @@ export function createServerHost(options) {
     const full = typeof d.buildFull === 'function' && typeof d.project === 'function'
       ? await d.buildFull(snap, now) : await d.buildViewModel(snap, now);
     const vm = typeof d.buildFull === 'function' && typeof d.project === 'function'
-      ? await d.project(full, now) : full;
+      ? await d.project(publishRoadmaps(full, openStore(stateDir)), now) : publishRoadmaps(full, openStore(stateDir));
     const cards = Array.isArray(full?.sessions) ? full.sessions : [];
     e.fullById = new Map(cards.map((s) => [s.id, s]));
     // Asset authorization includes reports hidden by folding or capping in the board projection.
@@ -835,6 +836,7 @@ export function createServerHost(options) {
       getPage: async ({ nonce } = {}) => e.driver.getPage(await buildVm(e), e.token, nonce),
       getViewModel: () => buildVm(e),
       getConvo: (sid) => getConvo(e, sid),
+      roadmapStateDir: stateDir,
       token: e.token,
       assetsDir: join(stateDir, 'assets'),
       assetAllowed: (name) => assetAllowed(e, name),

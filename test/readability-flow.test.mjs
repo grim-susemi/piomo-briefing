@@ -78,7 +78,7 @@ const SPACE_CONTRACT_PROBE = `(() => {
       const main = document.getElementById('main');
       if (!main) return { ok: false, reason: 'missing #main' };
       const mr = main.getBoundingClientRect();
-      const firstOpenCard = main.querySelector('details.sess[open] .card');
+      const firstOpenCard = main.querySelector('.sec-wait .card, details.sess[open] .card');
       const titleEl = firstOpenCard ? (firstOpenCard.querySelector('.ch') || firstOpenCard.querySelector('.title')) : null;
       if (!titleEl || !isVisible(titleEl)) return { ok: false, reason: 'missing visible open session title' };
       const tr = titleEl.getBoundingClientRect();
@@ -233,9 +233,10 @@ const SPACE_CONTRACT_PROBE = `(() => {
         '#rail .sh-rb',
         '.sh-topen',
         '.sh-tadd',
-        '.overview > .proj > .projh',
+        '.fold > summary',
+        '.stale > .staleh',
         '.overview .sess > .sessh',
-        '.overview .sess > .more',
+        '.overview .card .more',
         '.detail-btn',
         '.copy',
         '.ans-opt',
@@ -367,7 +368,7 @@ test('W2 readability-flow: F5 <= 1, occlusion 0, active title within top 8 rows,
           // Before switching to profiles on the first task, verify initial overview active title is within top 8 rows (160px)
           if (taskName === 'role') {
             await page.goto(board.url);
-            await waitFor(page, `document.getElementById('main') && document.querySelector('#main details.sess[open] .card')`, 'overview active session');
+            await waitFor(page, `document.getElementById('main') && document.querySelector('#main .sec-wait .card, #main details.sess[open] .card')`, 'overview active session');
             await settle(page);
             await page.eval(SPACE_CONTRACT_PROBE);
             const ovTop8 = await page.eval(`window.__w2Space.measureOverviewTop8()`);
@@ -578,10 +579,16 @@ test('W2 responsive 390x844 and 1024x768 (light + dark): single vertical scroll 
             BriefPage.state.ui.active = null;
             BriefPage.state.ui.tabs = [];
             BriefPage.state.ui.peek = false;
+            for (const d of document.querySelectorAll('#main details[data-open-key]')) {
+              BriefPage.state.ui.expanded[d.getAttribute('data-open-key')] = true;
+            }
             BriefPage.render();
           })()`);
-          await waitFor(page, `document.getElementById('main') && document.querySelector('#main details.sess[open] .card')`, 'overview active session');
+          await waitFor(page, `document.getElementById('main') && document.querySelector('#main .sec-wait .card, #main details.sess[open] .card')`, 'overview active session');
           await page.eval(`(() => {
+            for (const d of document.querySelectorAll('#main details[data-open-key]')) {
+              BriefPage.state.ui.expanded[d.getAttribute('data-open-key')] = true;
+            }
             for (const b of document.querySelectorAll('#main .detail-btn[aria-expanded="false"]')) b.click();
           })()`);
           await settle(page);
@@ -595,13 +602,13 @@ test('W2 responsive 390x844 and 1024x768 (light + dark): single vertical scroll 
           assert.deepEqual(ov.nonFlatSections, [], `${size.name} ${theme} overview: non-flat sections must be empty`);
           assert.deepEqual(ov.undersized, [], `${size.name} ${theme} overview: hit targets below ${size.isPhone ? 44 : 24}px: ${JSON.stringify(ov.undersized)}`);
           if (size.isPhone) {
-            for (const reqSel of ['#rail .sh-rb', '.sh-topen', '.sh-tadd', '.overview > .proj > .projh', '.overview .sess > .sessh', '.overview .sess > .more', '.detail-btn', '.copy', '.ans-opt', '.ans-write']) {
+            for (const reqSel of ['#rail .sh-rb', '.sh-topen', '.sh-tadd', '.fold > summary', '.overview .sess > .sessh', '.overview .card .more', '.detail-btn', '.copy', '.ans-opt', '.ans-write']) {
               assert.ok(ov.targets[reqSel] && ov.targets[reqSel].minHeight >= 44, `${size.name} ${theme} overview: ${reqSel} must be >= 44px, got ${JSON.stringify(ov.targets[reqSel])}`);
             }
           }
 
           // 2. Convo page
-          await page.eval(`document.querySelector('.overview .sess > .more').click()`);
+          await page.eval(`document.querySelector('.overview .card .more[data-sh="open"]').click()`);
           await waitFor(page, `document.querySelector('#main .cv-page')`, 'convo page');
           await settle(page);
           await page.eval(SPACE_CONTRACT_PROBE);

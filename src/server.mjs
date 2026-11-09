@@ -44,6 +44,7 @@ import { open as openFile, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { timingSafeEqual, createHash, randomBytes } from 'node:crypto';
 import { ASSET_NAME_RE, MIME, MAX_IMAGE_BYTES, sniffImage } from './assets.mjs';
+import { readRoadmapArtifact } from './roadmap-publication.mjs';
 
 const HOST = '127.0.0.1';
 const MAX_CLIENTS = 16;
@@ -120,6 +121,7 @@ export function createBoardServer(options) {
     getPage,
     getViewModel,
     getConvo,
+    roadmapStateDir,
     generation,
     portBase,
     portCount = 10,
@@ -550,7 +552,7 @@ export function createBoardServer(options) {
       plain(res, 405, 'method not allowed', { Allow: writeHandler ? 'POST' : 'GET' });
       return;
     }
-    if (GATED_PATHS.has(pathname) || pathname.startsWith(ASSET_PREFIX) || pathname.startsWith(CONVO_PREFIX)) {
+    if (GATED_PATHS.has(pathname) || pathname.startsWith(ASSET_PREFIX) || pathname.startsWith(CONVO_PREFIX) || pathname.startsWith('/roadmap-data/')) {
       const site = req.headers['sec-fetch-site'];
       if (site !== undefined && !SITE_OK.has(site)) {
         plain(res, 403, 'forbidden origin');
@@ -599,6 +601,12 @@ export function createBoardServer(options) {
         await serveEvents(req, res);
         return;
       default:
+        if (pathname.startsWith('/roadmap-data/')) {
+          const text = roadmapStateDir ? readRoadmapArtifact(roadmapStateDir, pathname) : null;
+          if (text === null) plain(res, 404, 'not found');
+          else send(res, 200, 'application/json; charset=utf-8', text);
+          return;
+        }
         if (pathname.startsWith(CONVO_PREFIX)) {
           const sid = pathname.endsWith('.json') ? pathname.slice(CONVO_PREFIX.length, -5) : '';
           if (!CONVO_SID.test(sid) || typeof getConvo !== 'function') {

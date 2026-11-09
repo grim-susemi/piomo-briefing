@@ -154,12 +154,12 @@ test('initial entry active visibility: overview must not force-open inactive fir
     'Inactive (done) first session fx-sess-alpha-done was forced open by isFirst, pushing active sessions off-screen'
   );
 
-  // 2. Active in_progress session fx-sess-gamma-running in proj-gamma must be open by default at initial entry
-  const gammaRunningOpen = /<details class="sess" open><summary class="sessh">[^<]*<span class="sessh-w">[^<]*워커수집[\s\S]*?data-card="fx-sess-gamma-running"/.test(html);
+  // 2. Active waiting session fx-sess-gamma-running (has openQuestion) in sec-wait renders as an open card by default at initial entry
+  const gammaRunningOpen = /<section class="sec sec-wait"[\s\S]*?<article class="card[^"]*"[^>]*data-card="fx-sess-gamma-running"[\s\S]*?<span class="title">[\s\S]*?워커수집/.test(html);
   assert.equal(
     gammaRunningOpen,
     true,
-    'Active running session fx-sess-gamma-running (status=in_progress) was left collapsed at initial entry'
+    'Active waiting session fx-sess-gamma-running was not rendered as an open card at initial entry'
   );
 
   // 3. Preserved user-opened details.sess[open] across refresh when ui.expanded marks a session open

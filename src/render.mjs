@@ -38,6 +38,7 @@ import { waitingItems } from './waiting.mjs';
 import { rootAndSlugOf } from './plan-schema.mjs';
 import { readProfilesScript } from './profiles-script.mjs';
 import { roadmapModels } from './roadmap-model.mjs';
+import { publishRoadmaps } from './roadmap-publication.mjs';
 
 const PAGE_DIR = join(dirname(fileURLToPath(import.meta.url)), 'page');
 const DAY_MS = 24 * 3600 * 1000;
@@ -1220,7 +1221,7 @@ const attrEscape = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').repla
 const PAGE_CSS = ['tokens.css', 'page.css', 'plan-view.css', 'roadmap-view.css', 'roadmap-index.css', 'workers-view.css', 'alarm.css', 'shell.css', 'profiles-view.css', 'convo.css', 'blocks.css', 'annotate.css', 'cards-view.css', 'office.css'];
 // icons.js (the icon helper the templates call), view.js, then the block renderers it calls into, then alarm.js, the
 // office scripts (art, scene model, view), then page.js which wires them together.
-const PAGE_JS = ['icons.js', 'view.js', 'plan-view.js', 'roadmap-view.js', 'roadmap-index.js', 'roadmap-navigation.js', 'workers-view.js', 'blocks.js', 'convo-view.js', 'shell.js', 'profiles-view.js', 'alarm.js', 'annotate.js', 'cards-view.js', 'office-assets.js', 'office-model.js', 'office-view.js', 'page.js'];
+const PAGE_JS = ['icons.js', 'view.js', 'plan-view.js', 'roadmap-search.js', 'roadmap-data.js', 'roadmap-view.js', 'roadmap-index.js', 'roadmap-navigation.js', 'workers-view.js', 'blocks.js', 'convo-view.js', 'shell.js', 'profiles-view.js', 'alarm.js', 'annotate.js', 'cards-view.js', 'office-assets.js', 'office-model.js', 'office-view.js', 'page.js'];
 // The icons the page scripts draw (icons.js): Lucide, one file per icon in assets/icons/lucide, vendored from LUCIDE_COMMIT
 // with the upstream LICENSE (ISC; MIT for the icons derived from Feather). pageHtml inlines them once as a hidden sprite of
 // <symbol id="i-<name>"> that keeps only the shapes' geometry: stroke, size and colour are page.css's (.ic).
@@ -1440,7 +1441,7 @@ function makeRenderer(store, now, opts) {
         isAlive, fs, pendingDeliveries: opts.pendingDeliveries, generation, server: info.server, serverError: info.error, stateDir: store.root,
         full: true,
       });
-      const vm = projectBoardModel(full, now, { fold: opts.fold });
+      const vm = projectBoardModel(publishRoadmaps(full, store), now, { fold: opts.fold });
       vm.seq = seq;
       capSize(vm); // the seq text is part of data.js: confirm the cap on the final text
       if (!canPublish()) throw PAUSED;

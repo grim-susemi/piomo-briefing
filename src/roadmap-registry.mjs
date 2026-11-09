@@ -70,14 +70,11 @@ export function writeRoadmapDefinition(context, definition) {
   // Repeating the current content at its current revision is idempotent.
   if (previous?.registered && previous.projectionHash === candidate.projectionHash
     && JSON.stringify(previous.evidence) === JSON.stringify(candidate.evidence)) return previous;
-  const active = [...records.filter((record) => record.roadmapId !== candidate.roadmapId && record.registered), candidate];
-  if (active.length > ROADMAP_LIMITS.roadmaps) throw new RoadmapError('LIMIT', definition.projectionPath, 'roadmap count exceeds 8');
-  const structuralBytes = Buffer.byteLength(JSON.stringify(active));
-  // Reserve the current published payload plus all definitions. Task 3 also caps the final joined VM.
-  const publishedBytes = Buffer.byteLength(store.readText('data.js', { maxBytes: ROADMAP_LIMITS.vmBytes }) ?? '');
-  if (structuralBytes + publishedBytes > ROADMAP_LIMITS.vmBytes) {
+  // Storage is not a page payload. Bound each record; publication separately bounds each loaded artifact.
+  const structuralBytes = Buffer.byteLength(JSON.stringify(candidate, null, 2) + '\n');
+  if (structuralBytes > ROADMAP_LIMITS.vmBytes) {
     throw new RoadmapError('LIMIT', definition.projectionPath,
-      `projected VM ${structuralBytes + publishedBytes} bytes exceeds ${ROADMAP_LIMITS.vmBytes}`);
+      `registry record ${structuralBytes} bytes exceeds ${ROADMAP_LIMITS.vmBytes}`);
   }
   store.replace(roadmapDefinitionRel(candidate.roadmapId), candidate);
   return candidate;

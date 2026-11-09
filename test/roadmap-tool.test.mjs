@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import { spawnSync, spawn } from 'node:child_process';
 import { openStore } from '../src/store.mjs';
 import { createRoadmapTool } from '../src/roadmap-tool.mjs';
-import { readRoadmaps, roadmapDefinitionRel } from '../src/roadmap-registry.mjs';
+import { readRoadmaps } from '../src/roadmap-registry.mjs';
 import { roadmapDecisionEvidence } from '../src/roadmap-gates.mjs';
 import { ROADMAP_LIMITS } from '../src/roadmap-schema.mjs';
 import { applyBoardAnswer } from '../src/decide.mjs';
@@ -176,20 +176,21 @@ for (const registered of [false, true]) test(`failed atomic replacement preserve
   assert.equal((await s.call({ expectedRevision: registered ? 1 : null })).ok, true);
 });
 
-test('global registration count and projected VM byte limits reject rather than truncate', async (t) => {
+test('later registrations preserve the first eight independently of published payload size', async (t) => {
   const s = roadmapFixture(t);
-  for (let index = 0; index < ROADMAP_LIMITS.roadmaps; index++) {
+  for (let index = 0; index < 8; index++) {
     const file = `${s.root}/.omo/roadmaps/${index}.json`; s.save(s.projection, file);
     assert.equal((await s.call({ projectionPath: file })).ok, true);
   }
   const before = fileTree(s.store.root);
-  assert.equal((await s.call()).errors[0].code, 'LIMIT');
-  assert.deepEqual(fileTree(s.store.root), before);
-  const first = readRoadmaps(s.store)[0];
   s.store.replace('data.js', 'x'.repeat(ROADMAP_LIMITS.vmBytes - 10));
-  s.projection.stages[0].note = 'new'; s.save(s.projection, first.projectionPath);
-  assert.equal((await s.call({ projectionPath: first.projectionPath, expectedRevision: 1 })).errors[0].code, 'LIMIT');
-  assert.equal(s.store.readRecord(roadmapDefinitionRel(first.roadmapId)).revision, 1);
+  for (let index = 8; index < 12; index++) {
+    const file = `${s.root}/.omo/roadmaps/${index}.json`; s.save(s.projection, file);
+    assert.equal((await s.call({ projectionPath: file })).ok, true);
+  }
+  assert.equal(readRoadmaps(s.store).filter((record) => record.registered).length, 12);
+  const after = fileTree(s.store.root);
+  for (const [file, text] of Object.entries(before)) assert.equal(after[file], text);
 });
 
 test('competing processes cannot both replace the same expected revision', { timeout: 15_000 }, async (t) => {

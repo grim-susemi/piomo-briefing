@@ -188,3 +188,11 @@ button, input, select, textarea { font-family: inherit; }
     --rail-btn: 44px;
   }
 }
+
+/* Home only: other surfaces keep the 11px desktop tokens they were laid out for. */
+@media (min-width: 600px) {
+  .overview {
+    --fs-2xs: 12px;
+    --fs-xs: 12px;
+  }
+}

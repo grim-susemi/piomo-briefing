@@ -2,7 +2,7 @@ import * as nodeFs from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
-export const CLASSIC_SCRIPTS = ['page.js', 'view.js'];
+export const CLASSIC_SCRIPTS = ['page.js', 'view.js', 'roadmap-search.js', 'roadmap-data.js'];
 export const CLASSIC_RECIPE = 'bun-1.4.0-classic-v1';
 export const canonical = text => text.replace(/\r\n/g, '\n');
 export const scriptHash = text => createHash('sha256').update(canonical(text)).digest('hex');
