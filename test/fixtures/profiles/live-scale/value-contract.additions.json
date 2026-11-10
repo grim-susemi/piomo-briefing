@@ -1,4 +1,9 @@
 {
   "screen": [],
-  "expected": []
+  "expected": [
+    {
+      "key": "runtime/native-profile-switcher-profile-cards.json",
+      "reason": "Primary-only optional user profile card metadata participates in the store compare-and-swap contract."
+    }
+  ]
 }

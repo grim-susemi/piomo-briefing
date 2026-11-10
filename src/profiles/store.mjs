@@ -38,8 +38,8 @@ import {
   syncStable500RoleModels,
 } from './merge.mjs';
 import {
-  BUILTIN_ROLE_CATEGORIES, CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE, ENGINE_SURFACED_MODELS, PROFILE_META, ROLE_INVENTORY, buildRoutingRows,
-  expandLayerRoles, getFullModelId, getMemoryReasoning, getModelIdWithoutProvider, getProfile,
+  BUILTIN_ROLE_CATEGORIES, CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE, ENGINE_SURFACED_MODELS, ROLE_INVENTORY, buildRoutingRows,
+  expandLayerRoles, getFullModelId, getMemoryReasoning, getModelIdWithoutProvider,
   getProviderChoiceForModel, newRouteRow,
 } from './model.mjs';
 import { composeHomeRegistry, getCommonServedModels, supportStatusFor, validateSelection } from './registry.mjs';
@@ -48,6 +48,10 @@ import { compareRecommendation, getRecommendationManifestShape } from './recomme
 import { webDeepseekState, webDeepseekDeclaration, setWebDeepseek } from './web-deepseek.mjs';
 import { ROLE_BACKUP_FILE, readRoleBackups, roleBackup, setRoleBackup } from './role-backup.mjs';
 import { ADVISOR_FILE, readAdvisors, setAdvisorModel } from './oracle-advisors.mjs';
+import {
+  PROFILE_CARDS_FILE, SUBSCRIPTION_COPY_LIMITATION, readProfileCards, effectiveProfiles,
+  getEffectiveProfile, setProfileCard, addProfile,
+} from './profile-cards.mjs';
 
 export const PRIMARY_HOME_DEFAULT = 'C:/Users/USER/.omo-stable-500/home/.omo';
 // Both mirror homes are absent on disk (2026-10-30), so the board has no mirror default.
@@ -82,7 +86,7 @@ const AGENT_ENTRY_KEYS = new Set(['description', 'prompt', 'model', 'models', 'r
 const PRIMARY_AGENT_KEYS = new Set(AGENT_IDS);
 const CHANGE_KINDS = new Set(['selectProfile', 'setRoute', 'setRoleBackup', 'setMain', 'setModelProfile',
   'setSummarizer', 'setMemoryRow', 'setAgentLane', 'setAgentPin', 'resetAgentMemory',
-  'migrateReviewerKeys', 'setAdvisor']);
+  'migrateReviewerKeys', 'setAdvisor', 'setProfileCard', 'addProfile']);
 const BODY_KEYS = ['action', 'changes', 'expected', 'rosterRevision'];
 const SHA256 = /^[0-9a-f]{64}$/;
 const RETRY_DELAYS_MS = [10, 20, 40, 80, 160];
@@ -272,6 +276,7 @@ function targetSpecs(roots, fs) {
       { id: `${prefix}/commandcode-subscriptions.json`, root: 'mirror', rel: `${label}/commandcode-subscriptions.json`, kind: 'json', backup: `${label}-subscriptions`, optional: true, mirrorRoot: root },
     );
   }
+  specs.push({ id: PROFILE_CARDS_FILE, root: 'primary', rel: PROFILE_CARDS_FILE, kind: 'json', backup: 'profile-cards', optional: true });
   return specs;
 }
 
@@ -432,6 +437,8 @@ function changeError(change, index) {
     resetAgentMemory: ['kind', 'agentId'],
     migrateReviewerKeys: ['kind', 'preimageSha256'],
     setAdvisor: ['kind', 'advisor', 'provider', 'model', 'thinking'],
+    setProfileCard: ['kind', 'profileKey', 'name', 'tag', 'summary'],
+    addProfile: ['kind', 'name', 'tag', 'summary', 'baseProfileKey'],
   }[change.kind];
   const unknown = Object.keys(change).filter((key) => !allowed.includes(key));
   if (unknown.length > 0) return `${at}.${unknown[0]} is not allowed`;
@@ -819,14 +826,25 @@ export function openProfilesStore(options = {}) {
     return visible;
   }
 
+  function profileCardsState(files) {
+    const file = files.get(PROFILE_CARDS_FILE);
+    try {
+      if (file.error) throw file.error;
+      return { cards: readProfileCards(file.exists ? file.value : undefined), writable: true, reason: null };
+    } catch (error) {
+      return { cards: readProfileCards(undefined), writable: false, reason: error.message };
+    }
+  }
+
   function activeProfile(files) {
+    const cards = profileCardsState(files).cards;
     for (const id of ['native-profile-selection.json', 'agent/native-profile-selection.json']) {
       const value = files.get(id)?.value;
       if (!isPlainObject(value)) continue;
       const key = typeof value.key === 'string'
         ? value.key
-        : PROFILE_META.find((profile) => profile.omoProfile === value.profile)?.key;
-      const profile = key ? getProfile(key) : null;
+        : effectiveProfiles(cards).find((profile) => profile.omoProfile === value.profile)?.key;
+      const profile = key ? getEffectiveProfile(key, cards) : null;
       if (profile) return profile;
     }
     return null;
@@ -855,6 +873,8 @@ export function openProfilesStore(options = {}) {
     const settings = settingsFile?.value ?? null;
     const sidecar = sidecarFile?.value ?? null;
     const roleBackupsFile = files.get(ROLE_BACKUP_FILE);
+    const cardState = profileCardsState(files);
+    const profiles = effectiveProfiles(cardState.cards);
     let roleBackups = { version: 1, profiles: {} };
     let roleBackupsError = roleBackupsFile?.error?.message ?? null;
     try { roleBackups = readRoleBackups(roleBackupsFile?.value); }
@@ -863,6 +883,11 @@ export function openProfilesStore(options = {}) {
     const layer = layerOf(config, profile);
     const catalog = config?.['[native]']?.models ?? config?.['[senpi]']?.models ?? null;
     const warnings = [];
+    if (!cardState.writable) warnings.push(`profile cards: ${cardState.reason}`);
+    if (!profile && ['native-profile-selection.json', 'agent/native-profile-selection.json']
+      .some(id => /^native-custom-/.test(files.get(id)?.value?.profile ?? ''))) {
+      warnings.push('The selected custom profile is unavailable in profile cards.');
+    }
     if (roleBackupsError) warnings.push(`role backups: ${roleBackupsError}`);
     if (rosterRead.warning) warnings.push(rosterRead.warning.message ?? rosterRead.warning);
     if (configFile?.error) warnings.push(`omo.jsonc: ${configFile.error.message}`);
@@ -1122,7 +1147,7 @@ export function openProfilesStore(options = {}) {
     }
     const memory = memoryFor(profile);
     const buildProfileDetail = (pMeta) => {
-      const pProfile = getProfile(pMeta.key);
+      const pProfile = pMeta;
       const pLayer = layerOf(config, pProfile);
       const pRows = routingRowsFor(inventoryRaw, pLayer).map((row) => {
         const entry = pLayer?.[row.section]?.[row.role];
@@ -1153,7 +1178,7 @@ export function openProfilesStore(options = {}) {
     };
 
     const details = {};
-    for (const item of PROFILE_META) {
+    for (const item of profiles) {
       details[item.key] = buildProfileDetail(item);
     }
 
@@ -1193,11 +1218,13 @@ export function openProfilesStore(options = {}) {
         }),
       },
       activeProfile: profile ? { key: profile.key, omoProfile: profile.omoProfile } : null,
-      profiles: PROFILE_META.map((item) => ({
+      profileCards: { writable: cardState.writable, reason: cardState.reason, subscriptionCopyLimitation: SUBSCRIPTION_COPY_LIMITATION },
+      profiles: profiles.map((item) => ({
         key: item.key, num: item.num, name: item.name, nameKr: item.nameKr, tag: item.tag,
         omoProfile: item.omoProfile, mainProvider: item.mainProvider, mainModel: item.mainModel,
         mainThinking: item.mainThinking, summary: item.summary,
         current: profile?.key === item.key,
+        custom: item.custom, defaults: item.defaults,
       })),
       routing: { rows, layer, recommendation },
       details,
@@ -1272,7 +1299,7 @@ export function openProfilesStore(options = {}) {
   }
 
   function modelProfileChange(config, change, fallbackProfile) {
-    const profile = change.profileKey ? getProfile(change.profileKey) : fallbackProfile;
+    const profile = fallbackProfile;
     if (!profile) throw new Error('an active profile is required');
     if (typeof change.selection !== 'string') throw new Error('selection is required');
     setModelProfileSelection({
@@ -1319,8 +1346,38 @@ export function openProfilesStore(options = {}) {
   function applyChange(context, change) {
     const { config, settings, sidecar, selections, roster, warnings } = context;
     switch (change.kind) {
+      case 'setProfileCard': {
+        const result = setProfileCard(context.cards, change);
+        if (!result.ok) return result;
+        context.cards = result.cards;
+        context.cardsTouched = true;
+        break;
+      }
+      case 'addProfile': {
+        const sources = new Map(context.files);
+        for (const [id, update] of context.extraUpdates) sources.set(id, { ...sources.get(id), ...update, exists: true });
+        sources.set('omo.jsonc', { ...sources.get('omo.jsonc'), value: saveConfig(config) });
+        sources.set('runtime/native-profile-switcher-main.json', {
+          ...sources.get('runtime/native-profile-switcher-main.json'), value: sidecar.value,
+          exists: Object.keys(sidecar.value).length > 0,
+        });
+        sources.set(ROLE_BACKUP_FILE, { ...sources.get(ROLE_BACKUP_FILE), value: context.roleBackups, exists: true });
+        const result = addProfile(context.cards, change, { files: sources, createdAt: new Date(nowFn()).toISOString() });
+        if (!result.ok) return result;
+        for (const [id, update] of result.updates) {
+          if (id === 'omo.jsonc') {
+            config.profiles[result.profile.omoProfile] = clone(update.value.profiles[result.profile.omoProfile]);
+            context.configTouched = true;
+          } else if (id === 'runtime/native-profile-switcher-main.json') sidecar.value = update.value;
+          else if (id === ROLE_BACKUP_FILE) context.roleBackups = update.value;
+          else context.extraUpdates.set(id, update);
+        }
+        context.cards = result.cards;
+        context.cardsTouched = true;
+        break;
+      }
       case 'selectProfile': {
-        const profile = getProfile(change.profileKey);
+        const profile = getEffectiveProfile(change.profileKey, context.cards);
         if (!profile) return refusal('BAD_REQUEST', `unknown profile ${change.profileKey}`);
         if (!config) return refusal('MISSING_CONFIG', 'omo.jsonc is missing');
         if (!isPlainObject(config.profiles?.[profile.omoProfile])) {
@@ -1373,7 +1430,9 @@ export function openProfilesStore(options = {}) {
 
         let route;
         try {
-          route = routeChange(config, change, context.selectedProfile ?? activeProfile(context.files));
+          const target = getEffectiveProfile(change.profileKey, context.cards);
+          route = routeChange(config, target?.custom ? { ...change, profileKey: target.omoProfile } : change,
+            context.selectedProfile ?? activeProfile(context.files));
         } catch (error) {
           return refusal('BAD_REQUEST', error.message);
         }
@@ -1386,8 +1445,9 @@ export function openProfilesStore(options = {}) {
       }
       case 'setRoleBackup': {
         if (!config) return refusal('MISSING_CONFIG', 'omo.jsonc is missing');
-        const profileKey = change.profileKey ?? activeProfile(context.files)?.omoProfile;
-        if (!PROFILE_META.some((p) => p.omoProfile === profileKey)
+        const target = getEffectiveProfile(change.profileKey, context.cards);
+        const profileKey = target?.omoProfile ?? change.profileKey ?? activeProfile(context.files)?.omoProfile;
+        if (!effectiveProfiles(context.cards).some((p) => p.omoProfile === profileKey)
           || !isPlainObject(config.profiles?.[profileKey])) return refusal('BAD_REQUEST', 'Unknown backup profile.');
         if (!['primary', 'agents', 'categories'].includes(change.section)
           || !(change.section === 'primary' ? AGENT_IDS : ROLE_INVENTORY[change.section] ?? []).includes(change.role)) {
@@ -1432,7 +1492,7 @@ export function openProfilesStore(options = {}) {
       }
       case 'setMain': {
         if (!settings) return refusal('MISSING_CONFIG', 'agent/settings.json is missing');
-        const profile = change.profileKey ? getProfile(change.profileKey)
+        const profile = change.profileKey ? getEffectiveProfile(change.profileKey, context.cards)
           : context.selectedProfile ?? activeProfile(context.files);
         if (!profile) return refusal('BAD_REQUEST', 'an active profile is required');
 
@@ -1486,7 +1546,7 @@ export function openProfilesStore(options = {}) {
       }
       case 'setModelProfile': {
         if (!config) return refusal('MISSING_CONFIG', 'omo.jsonc is missing');
-        const profile = change.profileKey ? getProfile(change.profileKey)
+        const profile = change.profileKey ? getEffectiveProfile(change.profileKey, context.cards)
           : context.selectedProfile ?? activeProfile(context.files);
         if (!profile) return refusal('BAD_REQUEST', 'an active profile is required');
         try {
@@ -1781,6 +1841,10 @@ export function openProfilesStore(options = {}) {
       return refusal('INVALID_CONFIG', `${ADVISOR_FILE}: ${advisorFile.error.message}`);
     }
     const advisors = { value: advisorFile?.exists && !advisorFile.error ? clone(advisorFile.value) : null };
+    const cardState = profileCardsState(files);
+    if (!cardState.writable && body.changes.some(c => c.kind === 'setProfileCard' || c.kind === 'addProfile')) {
+      return refusal('BAD_PROFILE_CARDS', cardState.reason);
+    }
     const selections = new Map();
     for (const id of ['native-profile-selection.json', 'agent/native-profile-selection.json']) {
       const file = files.get(id);
@@ -1792,6 +1856,7 @@ export function openProfilesStore(options = {}) {
       roster: { value: clone(rosterRead.roster), touched: false, warning: rosterRead.warning },
       configTouched: false, configReplaced: false, nextConfig: null,
       selectedProfile: null, main: null, mainOverrides: [],
+      cards: cardState.cards, cardsTouched: false, extraUpdates: new Map(),
     };
 
     for (const change of body.changes) {
@@ -1842,7 +1907,7 @@ export function openProfilesStore(options = {}) {
     }
 
     // Build the intended target values.
-    const next = new Map();
+    const next = new Map(context.extraUpdates);
     const configChanged = context.configTouched || !deepEqual(savedConfig, saveConfig(readConfig(configFile.value)));
     if (configChanged) {
       next.set('omo.jsonc', { value: savedConfig, kind: 'jsonc' });
@@ -1852,7 +1917,8 @@ export function openProfilesStore(options = {}) {
     }
     // WinForms lane mirror (:3755-3757): when the primary registry exists, every
     // lane receives a copy, with the lane's own pre-write backup.
-    const subscriptions = primarySubscriptions();
+    const subscriptions = body.changes.every(c => c.kind === 'setProfileCard' || c.kind === 'addProfile')
+      ? null : primarySubscriptions();
     if (subscriptions !== null) {
       for (const [id, file] of files) {
         if (!id.startsWith('mirror/') || !id.endsWith('/commandcode-subscriptions.json')) continue;
@@ -1865,8 +1931,8 @@ export function openProfilesStore(options = {}) {
     if (!deepEqual(sidecarFile?.value ?? {}, sidecar.value)) {
       next.set('runtime/native-profile-switcher-main.json', { value: sidecar.value, kind: 'json' });
     }
-    if (!deepEqual(readRoleBackups(roleBackupsFile?.value), roleBackups)) {
-      next.set(ROLE_BACKUP_FILE, { value: roleBackups, kind: 'json' });
+    if (!deepEqual(readRoleBackups(roleBackupsFile?.value), context.roleBackups)) {
+      next.set(ROLE_BACKUP_FILE, { value: context.roleBackups, kind: 'json' });
     }
     if (advisors.value && !deepEqual(advisorFile.value, advisors.value)) {
       next.set(ADVISOR_FILE, { value: advisors.value, kind: 'json' });
@@ -1879,8 +1945,9 @@ export function openProfilesStore(options = {}) {
     // Stable-500 role models and memory rows.
     const stableFile = files.get('stable/omo.jsonc');
     if (stableFile?.exists) {
-      let stableConfig = null;
-      let stableTouched = false;
+      let stableConfig = context.extraUpdates.has('stable/omo.jsonc')
+        ? readConfig(context.extraUpdates.get('stable/omo.jsonc').value) : null;
+      let stableTouched = Boolean(stableConfig);
       const selected = context.selectedProfile;
       if (selected) {
         let source = savedConfig;
@@ -1891,7 +1958,7 @@ export function openProfilesStore(options = {}) {
         } catch { selectionProfile = ''; }
         try {
           const synced = syncStable500RoleModels({
-            source, target: clone(stableFile.value), profileKey: selected.omoProfile,
+            source, target: stableConfig ?? clone(stableFile.value), profileKey: selected.omoProfile,
             selectionProfile, switchProfile: true,
           });
           stableConfig = synced.config;
@@ -1940,7 +2007,7 @@ export function openProfilesStore(options = {}) {
       const settingsPart = parts.get('agent/settings.json');
       const mainPart = parts.get('runtime/native-profile-switcher-main.json');
       if (!configPart?.file.exists) continue;
-      const mirrorConfig = readConfig(configPart.file.value);
+      const mirrorConfig = readConfig(context.extraUpdates.get(configPart.id)?.value ?? configPart.file.value);
       let mirrorSettings = settingsPart?.file.exists && isPlainObject(settingsPart.file.value)
         ? clone(settingsPart.file.value) : null;
       let mirrorMain = mainPart?.file.exists ? clone(mainPart.file.value) : {};
@@ -1949,14 +2016,14 @@ export function openProfilesStore(options = {}) {
           state: mirrorMain, profileKey: override.profileKey, main: override.main,
         });
       }
-      let configTouched = false;
+      let configTouched = context.extraUpdates.has(configPart.id);
       let settingsTouched = false;
       let profileSelection = null;
       const warn = (message) => context.warnings.push(`mirror ${label}: ${message}`);
       for (const change of body.changes) {
         try {
           if (change.kind === 'selectProfile') {
-            const profile = getProfile(change.profileKey);
+            const profile = getEffectiveProfile(change.profileKey, context.cards);
             if (!profile || !isPlainObject(mirrorConfig.profiles?.[profile.omoProfile])) {
               warn(`profile ${change.profileKey} is missing; selectProfile skipped`);
               continue;
@@ -1970,10 +2037,12 @@ export function openProfilesStore(options = {}) {
               settingsTouched = true;
             }
           } else if (change.kind === 'setRoute') {
-            routeChange(mirrorConfig, change, mirrorProfile);
+            const target = getEffectiveProfile(change.profileKey, context.cards);
+            routeChange(mirrorConfig, target?.custom ? { ...change, profileKey: target.omoProfile } : change, mirrorProfile);
             configTouched = true;
           } else if (change.kind === 'setModelProfile') {
-            modelProfileChange(mirrorConfig, change, mirrorProfile);
+            modelProfileChange(mirrorConfig, change,
+              change.profileKey ? getEffectiveProfile(change.profileKey, context.cards) : mirrorProfile);
             configTouched = true;
           } else if (change.kind === 'setMemoryRow') {
             memoryRowChange(mirrorConfig, change, mirrorProfile);
@@ -2026,6 +2095,8 @@ export function openProfilesStore(options = {}) {
       }
       next.set('agent/primary-agents/roster.json', { value: context.roster.value, kind: 'roster' });
     }
+
+    if (context.cardsTouched) next.set(PROFILE_CARDS_FILE, { value: context.cards, kind: 'json' });
 
     // Compare-and-swap every target this pipeline read against the page's expected
     // hashes, not only the ones the request would change: the page sends

@@ -150,6 +150,7 @@ test('external memory selector is a separate unproven stored value and never a w
     'runtime/native-profile-switcher-main.json', 'runtime/native-profile-switcher-role-backups.json',
     'native-profile-selection.json', 'agent/native-profile-selection.json',
     'agent/primary-agents/roster.json', 'agent/oracle-advisor/routing.json',
+    'runtime/native-profile-switcher-profile-cards.json',
   ]);
   const state = fx.store.state();
   assert.equal(state.memory.externalSelector.storedValue, 'selector-only-alias');
