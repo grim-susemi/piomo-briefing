@@ -2659,6 +2659,2568 @@
       "value": {
         "id": "pf-summarizer-model-fullid"
       }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-sisyphus"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-hephaestus"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-prometheus"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-atlas"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-explore"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-librarian"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-plan-consultant"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-ouroboros"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-oracle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-plan-reviewer"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-code-reviewer"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-gate-reviewer"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-qa-executor"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-fast-explore"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-quick"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-unspecified-low"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-unspecified-high"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-deep-low"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-deep-high"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-ultrabrain"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-architect"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-visual-engineering"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-artistry"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-writing"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-memory-kibitzer"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-memory-reflection"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-summary"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-synthetic-role-alpha"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-synthetic-role-beta"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-sisyphus"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-hephaestus"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-prometheus"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-atlas"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-explore"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-librarian"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-plan-consultant"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-ouroboros"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-oracle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-plan-reviewer"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-code-reviewer"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-gate-reviewer"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-qa-executor"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-fast-explore"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-quick"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-unspecified-low"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-unspecified-high"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-deep-low"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-deep-high"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-ultrabrain"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-architect"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-visual-engineering"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-artistry"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-writing"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-memory-kibitzer"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-memory-reflection"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-summary"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-synthetic-role-alpha"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-synthetic-role-beta"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-sisyphus"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-hephaestus"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-prometheus"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-atlas"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-explore"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-librarian"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-plan-consultant"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-ouroboros"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-oracle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-plan-reviewer"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-code-reviewer"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-gate-reviewer"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-qa-executor"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-fast-explore"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-quick"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-unspecified-low"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-unspecified-high"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-deep-low"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-deep-high"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-ultrabrain"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-architect"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-visual-engineering"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-artistry"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-writing"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-memory-kibitzer"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-memory-reflection"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-summary"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-synthetic-role-alpha"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-synthetic-role-beta"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-sisyphus"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-hephaestus"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-prometheus"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-atlas"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-explore"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-librarian"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-plan-consultant"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-ouroboros"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-oracle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-plan-reviewer"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-code-reviewer"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-gate-reviewer"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-qa-executor"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-fast-explore"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-quick"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-unspecified-low"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-unspecified-high"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-deep-low"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-deep-high"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-ultrabrain"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-architect"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-visual-engineering"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-artistry"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-writing"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-memory-kibitzer"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-memory-reflection"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-summary"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-synthetic-role-alpha"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-synthetic-role-beta"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-sisyphus"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-hephaestus"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-prometheus"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-atlas"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-explore"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-librarian"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-plan-consultant"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-ouroboros"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-oracle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-plan-reviewer"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-code-reviewer"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-gate-reviewer"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-qa-executor"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-fast-explore"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-quick"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-unspecified-low"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-unspecified-high"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-deep-low"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-deep-high"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-ultrabrain"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-architect"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-visual-engineering"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-artistry"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-writing"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-memory-kibitzer"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-memory-reflection"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-summary"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-synthetic-role-alpha"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-synthetic-role-beta"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide filter control (all, different, untracked).",
+      "value": {
+        "data-pf": "guide-filter"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-sisyphus"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-hephaestus"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-prometheus"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-primary-atlas"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-explore"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-librarian"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-plan-consultant"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-ouroboros"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-oracle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-plan-reviewer"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-code-reviewer"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-gate-reviewer"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-omo-native-qa-executor"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-fast-explore"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-quick"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-unspecified-low"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-unspecified-high"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-deep-low"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-deep-high"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-ultrabrain"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-architect"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-visual-engineering"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-artistry"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-categories-writing"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-memory-kibitzer"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-memory-reflection"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-summary"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-synthetic-role-alpha"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail disclosure toggle.",
+      "value": {
+        "data-pf": "guide-row-toggle"
+      }
+    },
+    {
+      "surface": "guide",
+      "reason": "Allocation guide per-row detail row referenced by aria-controls.",
+      "value": {
+        "id": "pf-gd-agents-synthetic-role-beta"
+      }
     }
   ],
   "expected": [

@@ -368,8 +368,11 @@ test('guide held main edits follow the shown profile while agent edits remain sh
     ['gpt-deepseek', 'other-profile-model', 'same-profile-model'],
   ]) {
     const html = load().render(state, live({ shown: profileKey, pending }));
-    const row = /data-guide-row="primary\/sisyphus"[\s\S]*?<\/tr>/.exec(html)[0];
-    const held = /data-guide-field="HELD"[\s\S]*?<\/td>/.exec(row)[0];
+    const dom = makeController().document.createElement('div');
+    dom.innerHTML = html;
+    const row = dom.querySelector('[data-guide-row="primary/sisyphus"]');
+    const detailId = row.querySelector('[data-pf="guide-row-toggle"]').getAttribute('aria-controls');
+    const held = dom.querySelector('#' + detailId + ' [data-guide-field="HELD"]').textContent;
     assert.ok(held.includes(included), held);
     assert.ok(!held.includes(excluded), held);
     assert.match(held, /daily-heavy/);
@@ -3034,7 +3037,7 @@ test('page wiring: 권장 배치 가이드 opens the in-page dialog over the gui
   const dlg = e.byId.main.querySelector('#pf-guide-dlg');
   assert.equal(dlg.tagName, 'DIALOG');
   assert.ok(dlg.querySelector('#pf-sec-guide'), 'the existing guide section lives in the dialog');
-  assert.equal(dlg.querySelectorAll('.pf-rec tbody tr').length, (STATE.guide.rows || []).length, 'guide follows the supplied source rows');
+  assert.equal(dlg.querySelectorAll('[data-guide-row]').length, (STATE.guide.rows || []).length, 'guide follows the supplied source rows');
   let opened = 0;
   dlg.showModal = () => { opened += 1; dlg.open = true; };
   dlg.close = () => { dlg.open = false; };

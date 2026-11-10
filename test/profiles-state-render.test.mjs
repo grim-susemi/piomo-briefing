@@ -253,11 +253,23 @@ test('allocation guide: all real rows, raw DOM and AX identity, read-only lifecy
       document.querySelector('[data-pf="guide-open"]').click();
     })()`);
     assert.equal(await page.eval(`document.querySelector('#pf-guide-dlg').open`), true);
-    for (const modifiers of [0, 8, 0]) {
-      await page.client.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers });
-      await page.client.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers });
-      assert.equal(await page.eval(`document.activeElement?.getAttribute('data-pf')`), 'guide-close',
-        'Tab and Shift+Tab retain visible focus on the read-only guide sole control');
+    const focusIds = await page.eval(`(() => {
+      const controls = [...document.querySelector('#pf-guide-dlg').querySelectorAll('button, a[href], input, select, textarea, summary, [tabindex]')]
+        .filter(el => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length);
+      controls.forEach((el, index) => { el.dataset.guideFocusProbe = String(index); });
+      controls[0].focus();
+      return controls.map(el => el.dataset.guideFocusProbe);
+    })()`);
+    assert.ok(focusIds.length >= 5, 'close, three filters and row toggles are keyboard reachable');
+    for (const modifiers of [0, 8]) {
+      const order = modifiers === 0 ? [...focusIds.slice(1), focusIds[0]]
+        : [...focusIds.slice(1).reverse(), focusIds[0]];
+      for (const wanted of order) {
+        await page.client.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers });
+        await page.client.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers });
+        assert.equal(await page.eval(`document.activeElement?.dataset.guideFocusProbe`), wanted,
+          'Tab cycles all visible dialog controls in document order and wraps inside the dialog');
+      }
     }
     if (process.env.OMO_PROFILE_IDENTITY_FAILURE) {
       const selector = process.env.OMO_PROFILE_IDENTITY_FAILURE === 'status'
@@ -269,23 +281,34 @@ test('allocation guide: all real rows, raw DOM and AX identity, read-only lifecy
       name: row.querySelector('[data-guide-name]').textContent,
       status: row.querySelector('[data-guide-field="STATUS"] .pf-chip').textContent,
       fields: [...row.querySelectorAll('[data-guide-field]')].map(cell => cell.dataset.guideField),
-      text: row.textContent
+      detailFields: [...document.getElementById(row.querySelector('[data-pf="guide-row-toggle"]').getAttribute('aria-controls')).querySelectorAll('[data-guide-field]')]
+        .map(cell => cell.dataset.guideField),
+      text: row.textContent + document.getElementById(row.querySelector('[data-pf="guide-row-toggle"]').getAttribute('aria-controls')).textContent
     }))`);
     const ax = await page.client.send('Accessibility.getFullAXTree');
     const axNames = ax.nodes.filter(node => !node.ignored).map(node => node.name?.value).filter(Boolean);
     assertGuideIdentity(actual, expected, axNames);
-    const fields = ['GROUP / ROLE / SCOPE', 'CURRENT', 'HELD', 'RECOMMENDED', 'LINKED', 'EFFECTIVE', 'STATUS'];
-    for (const row of actual) assert.deepEqual(row.fields, fields);
+    const fields = ['GROUP / ROLE / SCOPE', 'CURRENT', 'RECOMMENDED', 'STATUS'];
+    for (const row of actual) {
+      assert.deepEqual(row.fields, fields);
+      assert.deepEqual(row.detailFields, ['HELD', 'LINKED', 'EFFECTIVE']);
+    }
     const gate = actual.find(row => row.id === 'agents/omo-native-gate-reviewer');
     assert.match(gate.text, /sol-61-high/);
     assert.match(gate.text, /the case when there is no alias/);
     assert.equal(await page.eval(`document.querySelectorAll('#pf-guide-dlg [data-pf="apply"]').length`), 0);
-    for (const [width, height] of [[1600, 900], [390, 844]]) {
+    for (const [width, height] of [[1440, 900], [1024, 900], [390, 844]]) {
       await page.client.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 600 });
       await page.eval(`document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))`);
       const metrics = await page.eval(`(() => {
         const dialog = document.querySelector('#pf-guide-dlg');
         return { width: innerWidth, horizontalScroll: dialog.scrollWidth - dialog.clientWidth,
+          scrollHeight: dialog.scrollHeight, clientHeight: dialog.clientHeight,
+          maxRowHeight: Math.max(...[...dialog.querySelectorAll('[data-guide-row]')].map(row => row.getBoundingClientRect().height)),
+          wrappedRecommendations: [...dialog.querySelectorAll('[data-guide-field="RECOMMENDED"] li')].filter(item => {
+            const range = document.createRange(); range.selectNodeContents(item);
+            return range.getClientRects().length > 1;
+          }).length,
           rows: [...dialog.querySelectorAll('[data-guide-row]')].map(row => ({
             id: row.dataset.guideRow, cells: [...row.children].map(cell => {
               const r = cell.getBoundingClientRect(); return { field: cell.dataset.guideField, x: r.x, y: r.y, w: r.width, h: r.height };
@@ -293,18 +316,90 @@ test('allocation guide: all real rows, raw DOM and AX identity, read-only lifecy
           })) };
       })()`);
       assert.equal(metrics.horizontalScroll, 0);
+      assert.equal(metrics.wrappedRecommendations, 0, `${width}: recommendation items never wrap`);
+      if (width === 1440) {
+        assert.ok(metrics.scrollHeight / metrics.clientHeight <= 2.5, '27 collapsed rows fit within 2.5 dialog heights');
+        assert.ok(metrics.maxRowHeight <= 96, 'collapsed rows are at most 96px');
+      }
+      if (width === 390) assert.ok(metrics.scrollHeight <= 9000, 'phone guide length stays within 9000px');
       if (width < 600) for (const row of metrics.rows) {
         assert.deepEqual(row.cells.map(cell => cell.field), fields);
         assert.equal(new Set(row.cells.map(cell => cell.x)).size, 1);
         for (let i = 1; i < row.cells.length; i++) assert.ok(row.cells[i].y >= row.cells[i - 1].y + row.cells[i - 1].h - 1);
       }
       measurements.push(metrics);
+      const sticky = await page.eval(`(() => {
+        const dialog = document.querySelector('#pf-guide-dlg');
+        dialog.scrollTop = dialog.scrollHeight;
+        const box = dialog.getBoundingClientRect(), head = dialog.querySelector('thead th').getBoundingClientRect();
+        return { top: head.top, bottom: head.bottom, dialogTop: box.top, dialogBottom: box.bottom };
+      })()`);
+      assert.ok(sticky.top >= sticky.dialogTop && sticky.bottom <= sticky.dialogBottom,
+        `${width}: header stays inside the dialog at the last row`);
       if (out) {
         fs.mkdirSync(out, { recursive: true });
         if (width < 600) await page.eval(`document.querySelector('[data-guide-row="agents/omo-native-gate-reviewer"]').scrollIntoView({ block: 'start' })`);
         await page.screenshot(path.join(out, `guide-${width}.png`));
       }
     }
+    const filterCounts = {
+      all: state.guide.rows.length,
+      different: state.guide.rows.filter(row => !['recommended', 'fallback', 'untracked'].includes(row.recommended.status)).length,
+      untracked: state.guide.rows.filter(row => row.recommended.HasRecommendation === false).length,
+    };
+    for (const filter of ['different', 'untracked', 'all']) {
+      await page.eval(`document.querySelector('[data-pf="guide-filter"][data-guide-filter="${filter}"]').click()`);
+      const filtered = await page.eval(`(() => {
+        const dialog = document.querySelector('#pf-guide-dlg');
+        return {
+          ids: [...dialog.querySelectorAll('[data-guide-row]')].map(row => row.dataset.guideRow),
+          visible: [...dialog.querySelectorAll('[data-guide-row]')].filter(row => !row.hidden).map(row => row.dataset.guideRow),
+          focused: document.activeElement?.dataset.guideFilter,
+          counts: Object.fromEntries([...dialog.querySelectorAll('[data-pf="guide-filter"]')].map(button =>
+            [button.dataset.guideFilter, (button.textContent.match(/\\d+/g) || []).map(Number)]))
+        };
+      })()`);
+      assert.deepEqual(filtered.ids, expected.map(row => row.id), 'filter retains every source row in DOM order');
+      const visible = state.guide.rows.filter(row => filter === 'all' ||
+        (filter === 'untracked' ? row.recommended.HasRecommendation === false
+          : !['recommended', 'fallback', 'untracked'].includes(row.recommended.status))).map(row => row.id);
+      assert.deepEqual(filtered.visible, visible);
+      assert.equal(filtered.focused, filter, 'rerender restores focus to the active filter');
+      for (const [key, count] of Object.entries(filterCounts)) assert.deepEqual(filtered.counts[key], [count],
+        `${key}: count always describes the unfiltered source`);
+    }
+    const details = await page.eval(`(() => {
+      const ids = [...document.querySelectorAll('[data-guide-row]')].map(row => row.dataset.guideRow);
+      return ids.map(id => {
+        const row = document.querySelector('[data-guide-row="' + id + '"]');
+        row.querySelector('[data-pf="guide-row-toggle"]').click();
+        const toggle = document.querySelector('[data-guide-row="' + id + '"] [data-pf="guide-row-toggle"]');
+        const detail = document.getElementById(toggle.getAttribute('aria-controls'));
+        return { id, detailId: detail.id, expanded: toggle.getAttribute('aria-expanded'), hidden: detail.hidden,
+          focused: document.activeElement === toggle, text: detail.textContent };
+      });
+    })()`);
+    assert.equal(new Set(details.map(row => row.detailId)).size, expected.length, 'every row owns distinct details');
+    for (const [index, detail] of details.entries()) {
+      assert.equal(detail.expanded, 'true');
+      assert.equal(detail.hidden, false);
+      assert.equal(detail.focused, true, 'rerender restores focus to the expanded row toggle');
+      const source = state.guide.rows[index];
+      for (const value of [source.current.alias, source.current.modelId, source.current.sourceFile,
+        source.current.sourcePath, source.current.reason, source.applyScope, source.purposeGroup,
+        source.recommended.Official, source.linked.EffectiveCategory, source.linked.EffectiveAlias,
+        ...(source.linked.candidates || [])].filter(Boolean)) {
+        assert.ok(detail.text.includes(value), `${source.id}: details retain ${value}`);
+      }
+    }
+    await page.client.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await page.client.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    assert.equal(await page.eval(`document.querySelector('#pf-guide-dlg').open`), false);
+    assert.equal(await page.eval(`document.activeElement?.getAttribute('data-pf')`), 'guide-open');
+    await page.eval(`document.querySelector('[data-pf="guide-open"]').click()`);
+    assert.equal(await page.eval(`document.querySelector('#pf-guide-dlg').open`), true);
+    assert.deepEqual(await page.eval(`[...document.querySelectorAll('[data-guide-row]')].map(row => row.dataset.guideRow)`),
+      expected.map(row => row.id), 'reopen retains the exact guide rows');
     await page.eval(`document.querySelector('[data-pf="guide-close"]').click()`);
     assert.equal(await page.eval(`document.activeElement?.getAttribute('data-pf')`), 'guide-open');
     // Stage a real edit, open the guide, then complete a second edit while it is
@@ -327,7 +422,14 @@ test('allocation guide: all real rows, raw DOM and AX identity, read-only lifecy
       return document.querySelector('[data-pf-route="agents/explore"] [data-pf="route-thinking"]').value;
     })()`);
     assert.equal(await page.eval(`document.querySelector('#pf-guide-dlg').open`), true);
-    assert.ok((await page.eval(`document.querySelector('[data-guide-row="agents/explore"] [data-guide-field="HELD"]').textContent`)).includes(`"thinking":"${heldThinking}"`));
+    const heldText = await page.eval(`(() => {
+      const row = document.querySelector('[data-guide-row="agents/explore"]');
+      const detail = document.getElementById(row.querySelector('[data-pf="guide-row-toggle"]').getAttribute('aria-controls'));
+      return detail.querySelector('[data-guide-field="HELD"]').textContent;
+    })()`);
+    assert.ok(heldText.includes('agents/explore'), 'HELD identifies the staged route');
+    assert.ok(heldText.includes(' / ' + heldThinking), 'HELD uses the readable change label');
+    assert.doesNotMatch(heldText, /"kind":|"thinking":/, 'HELD does not expose serialized change objects');
     const pendingChanged = await page.eval(`document.querySelector('.pf-pending').textContent`);
     assert.notEqual(pendingChanged, pendingBefore);
     await page.eval(`document.querySelector('[data-pf="guide-close"]').click()`);

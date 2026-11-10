@@ -13,8 +13,10 @@ const OUTPUT = join(ROOT, 'src', 'page', 'generated', 'profiles-view.min.js');
 // Full-A (2026-11-09): markup/class-only change (webDeepseek head row + fold); no new top-level bindings, this, eval or strictness-sensitive syntax.
 // 2026-11-10: preserve original missing role/main attributes and alias JIT titles; classic scope and strictness-sensitive syntax unchanged.
 // 2026-11-10 (todo8): move routeRow backup summary into sibling pf-row-sum-b span; markup-only change, classic semantics unchanged.
-const REVIEWED_SOURCE = '257acc595e66e30ca0526abede7d2512e439bf2b7d4497b891dbca686ee2b68a';
-const REVIEWED_PAYLOAD = '05ffbd80fde0df7905ba415aa189540cf33c39b836f26f0f48edf15c79fb34e1';
+// 2026-11-10 (todo9): export pure guideRowModel/guideRowHtml on BriefProfiles and add controller guideFilter/guideOpen state; no top-level bindings, eval or strictness-sensitive syntax.
+// 2026-11-10 (todo9 attempt2): restore explicit none empty-value semantics via guideCode/guideDash; classic semantics unchanged.
+const REVIEWED_SOURCE = '57369fdbaffedf0b1a0c04e1551a7c208d24b231658d3993d06345ac4cb959bc';
+const REVIEWED_PAYLOAD = '5199a3410d47f4384a195e7e96a3394fb111736da1f5ccdd4793e2b775849994';
 
 try {
   if (typeof Bun === 'undefined' || Bun.version !== '1.4.0') throw new Error('regeneration requires Bun 1.4.0');

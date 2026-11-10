@@ -1398,55 +1398,207 @@
       version ? version + ' 기준 경로와 sha256' : '경로와 sha256');
   }
 
+  function guideDash(v) { return str(v) ? esc(v) : '<span title="none">none</span>'; }
+  function guideCode(v) { return '<code' + (str(v) ? '>' + esc(v) : ' title="none">none') + '</code>'; }
+  function guideStatusGlyph(status) {
+    var shape = status === 'recommended' ? '<path d="M20 6 9 17l-5-5"></path>' :
+      status === 'fallback' ? '<circle cx="12" cy="12" r="9"></circle><path d="m9 12 2 2 4-4"></path>' :
+      status === 'different' ? '<path d="M8 7h12M8 7l3-3M8 7l3 3M16 17H4M16 17l-3-3M16 17l-3 3"></path>' :
+      status === 'variant-different' ? '<path d="M5 9h14M15 5l4 4-4 4M19 15H5"></path>' :
+      status === 'unresolved' ? '<circle cx="12" cy="12" r="9"></circle><path d="m9 9 6 6M15 9l-6 6"></path>' :
+      status === 'unassigned' ? '<circle cx="12" cy="12" r="9"></circle>' :
+      '<path d="M5 12h14"></path>';
+    return '<svg class="ic ic-xs" viewBox="0 0 24 24" aria-hidden="true">' + shape + '</svg>';
+  }
+  function guideStatusChip(status) {
+    return '<span class="pf-chip pf-st-' + knownStatus(status) + '"' +
+      attr('title', status) + attr('aria-label', status) + '>' +
+      guideStatusGlyph(status) + esc(status) + '</span>';
+  }
+  function guideFilterMatch(filter, hasRec, status) {
+    if (filter === 'untracked') return !hasRec;
+    if (filter === 'different') return status !== 'recommended' && status !== 'fallback' && status !== 'untracked';
+    return true;
+  }
+  function guideRowModel(row, view, edit) {
+    var r = obj(row) || {}, v = obj(view), e = obj(edit) || {};
+    var d = v ? detailView(v, e) : null;
+    var profile = d ? profileOf(d, shownKeyOf(d, e)) : null;
+    var entries = catalogEntries(d || v);
+    var current = obj(r.current) || {}, rec = obj(r.recommended) || {}, linked = obj(r.linked) || {};
+    var status = str(rec.status || rec.Status) || 'untracked';
+    var hasRec = has(rec, 'HasRecommendation') ? rec.HasRecommendation === true :
+      has(rec, 'hasRecommendation') ? rec.hasRecommendation === true :
+      Boolean(str(rec.Official || rec.official)) && str(rec.Official || rec.official) !== '공식 권장 없음';
+    var rawOfficial = str(rec.Official || rec.official) || '공식 권장 없음';
+    var items = hasRec ? rawOfficial.split(' > ') : [];
+    var held = pendingOf(e).filter(function (c) {
+      if (r.group === 'routing') return (c.kind === 'setRoute' || c.kind === 'setRoleBackup') && c.section === r.section && c.role === r.role && ofProfile(c, profile);
+      if (r.group === 'primary') return c.agentId === r.role ||
+        (r.role === 'sisyphus' && c.kind === 'setMain' && ofProfile(c, profile));
+      if (r.group === 'memory') return c.kind === 'setMemoryRow' && c.row === r.role;
+      return r.group === 'summary' && c.kind === 'setSummarizer';
+    });
+    var name = str(r.labelEn) || (r.group === 'primary' ? idOf(AGENTS, str(r.role)) :
+      r.group === 'memory' ? (r.role === 'kibitzer' ? 'Kibitzer' : 'Reflection') : str(r.role));
+    var modelId = str(current.modelId);
+    var modelLabel = modelId ? (modelText(entries, modelId) || bareModel(modelId)) : '';
+    var linkedActive = linked.active === true;
+    var linkedEffective = linked.effective === true;
+    var linkedModelId = str(linked.modelId);
+    var linkedModelLabel = linkedModelId ? (modelText(entries, linkedModelId) || bareModel(linkedModelId)) : '';
+    var linkedThinking = str(linked.thinking);
+    var linkedSame = linkedActive && linkedEffective && linkedModelId === modelId && linkedThinking === str(current.thinking);
+    var effective = linkedActive && linkedEffective ? linked : current;
+    var id = str(r.id) || (str(r.group) + '/' + str(r.role));
+    var detailId = 'pf-gd-' + slug(id);
+    var openMap = obj(e.guideOpen);
+    var filter = str(e.guideFilter) || 'all';
+    return {
+      id: id,
+      detailId: detailId,
+      group: str(r.group),
+      purposeGroup: str(r.purposeGroup),
+      applyScope: str(r.applyScope),
+      role: str(r.role),
+      name: name,
+      expanded: !!(openMap && openMap[id] === true),
+      hidden: !guideFilterMatch(filter, hasRec, status),
+      current: {
+        alias: str(current.alias),
+        modelId: modelId,
+        modelLabel: modelLabel,
+        thinking: str(current.thinking),
+        origin: str(current.origin),
+        sourceFile: str(current.sourceFile),
+        sourcePath: str(current.sourcePath),
+        reason: str(current.reason)
+      },
+      recommended: {
+        hasRecommendation: hasRec,
+        official: rawOfficial,
+        items: items,
+        status: status
+      },
+      linked: {
+        active: linkedActive,
+        effective: linkedEffective,
+        sameAsCurrent: linkedSame,
+        candidates: arr(linked.candidates).map(str),
+        effectiveCategory: str(linked.EffectiveCategory),
+        effectiveAlias: str(linked.EffectiveAlias),
+        modelId: linkedModelId,
+        modelLabel: linkedModelLabel,
+        thinking: linkedThinking,
+        reason: str(linked.reason)
+      },
+      effective: {
+        modelId: str(effective.modelId),
+        thinking: str(effective.thinking),
+        origin: effective === linked ? 'LINKED' : (str(current.origin) || 'CURRENT')
+      },
+      held: held.map(changeLabel),
+      status: status
+    };
+  }
+  function guideRowHtml(model) {
+    var m = obj(model) || {};
+    var cur = obj(m.current) || {}, rec = obj(m.recommended) || {}, lnk = obj(m.linked) || {}, eff = obj(m.effective) || {};
+    var held = arr(m.held);
+    var status = str(m.status) || str(rec.status) || 'untracked';
+    var curHtml = guideCode(cur.modelLabel || cur.modelId) + ' <i' + (str(cur.thinking) ? '>/ ' + esc(cur.thinking) : ' title="none">/ none') + '</i>' +
+      (cur.origin ? ' <span>' + esc(cur.origin) + '</span>' : '') +
+      (!cur.modelId && cur.reason ? ' <span>' + esc(cur.reason) + '</span>' : '');
+    if (lnk.active) {
+      if (lnk.effective && lnk.modelId) {
+        if (!lnk.sameAsCurrent) {
+          curHtml += '<small>LINKED <code>' + esc(lnk.modelLabel || lnk.modelId) + '</code>' +
+            (lnk.thinking ? ' <i>/ ' + esc(lnk.thinking) + '</i>' : '') + '</small>';
+        }
+      } else {
+        curHtml += '<small class="pf-c-amber">LINKED ' + esc(lnk.reason || 'unresolved') + '</small>';
+      }
+    }
+    if (held.length) curHtml += ' ' + chip('pf-c-amber', 'pending ' + held.length);
+    var recHtml = rec.hasRecommendation && arr(rec.items).length
+      ? '<ol class="pf-chain">' + arr(rec.items).map(function (item) { return '<li>' + esc(item) + '</li>'; }).join('') + '</ol>'
+      : '공식 권장 없음';
+    var roleCell = '<button type="button" data-pf="guide-row-toggle"' +
+      ' aria-expanded="' + (m.expanded ? 'true' : 'false') + '"' + attr('aria-controls', m.detailId) + '>' +
+      '<b data-guide-name>' + esc(m.name) + '</b><code data-guide-role>' + esc(m.role) + '</code></button>';
+    var linkedCandidates = arr(lnk.candidates).join(' → ');
+    var catAlias = str(lnk.effectiveCategory || lnk.EffectiveCategory) || str(lnk.effectiveAlias || lnk.EffectiveAlias)
+      ? ' <code>' + esc(str(lnk.effectiveCategory || lnk.EffectiveCategory) + ' / ' + str(lnk.effectiveAlias || lnk.EffectiveAlias)) + '</code>' : '';
+    var linkedDetail = (linkedCandidates ? esc(linkedCandidates) : '—') + ' ' +
+      (lnk.active ? 'active' : '별칭이 없는 경우 (the case when there is no alias)') +
+      catAlias + (lnk.reason ? ' ' + esc(lnk.reason) : '');
+    var heldDetail = held.length ? held.map(esc).join(' · ') : '—';
+    var effDetail = guideCode(eff.modelId) + ' ' + guideDash(eff.thinking) + ' ' + esc(eff.origin || 'CURRENT');
+    var metaDetail = '<p><span data-guide-group>' + esc(m.group) + (m.purposeGroup ? ' / ' + esc(m.purposeGroup) : '') + '</span> ' +
+      '<code data-guide-scope>' + esc(m.applyScope) + '</code> · ' +
+      guideCode(cur.alias) + ' ' + guideCode(cur.modelId) +
+      (cur.origin ? ' ' + esc(cur.origin) : '') +
+      (cur.sourceFile ? ' <code>' + esc(cur.sourceFile) + '</code>' : '') +
+      (cur.sourcePath ? ' <code>' + esc(cur.sourcePath) + '</code>' : '') +
+      (cur.reason ? ' ' + esc(cur.reason) : '') +
+      ' · ' + esc(rec.official || '공식 권장 없음') + '</p>';
+    return '<tr' + attr('data-guide-row', m.id) + attr('data-guide-row-group', m.group) + boolAttr('hidden', m.hidden) + '>' +
+      '<td data-guide-field="GROUP / ROLE / SCOPE">' + roleCell + '</td>' +
+      '<td data-guide-field="CURRENT">' + curHtml + '</td>' +
+      '<td data-guide-field="RECOMMENDED">' + recHtml + '</td>' +
+      '<td data-guide-field="STATUS">' + guideStatusChip(status) + '</td></tr>' +
+      '<tr class="pf-rec-d"' + attr('id', m.detailId) + boolAttr('hidden', !m.expanded || m.hidden) + '><td colspan="4">' +
+      metaDetail +
+      '<div data-guide-field="HELD"><b>HELD</b> ' + heldDetail + '</div>' +
+      '<div data-guide-field="LINKED"><b>LINKED</b> ' + linkedDetail + '</div>' +
+      '<div data-guide-field="EFFECTIVE"><b>EFFECTIVE</b> ' + effDetail + '</div>' +
+      '</td></tr>';
+  }
+
   // 권장 배치 가이드 (PS Show-RecommendationGuide :6380) as an in-page dialog over data the state already carries: the
   // guide sources and each shown role's official recommendation. Nothing is fetched.
   function guideDialog(view, edit) {
-    var profile = profileOf(view, shownKeyOf(view, edit));
-    var headers = ['GROUP / ROLE / SCOPE', 'CURRENT', 'HELD', 'RECOMMENDED', 'LINKED', 'EFFECTIVE', 'STATUS'];
-    var rows = arr(obj(view && view.guide) && view.guide.rows).filter(obj).map(function (r) {
-      var current = obj(r.current) || {}, rec = obj(r.recommended) || {}, linked = obj(r.linked) || {};
-      var status = str(rec.status || rec.Status) || 'untracked';
-      var held = pendingOf(edit).filter(function (c) {
-        if (r.group === 'routing') return (c.kind === 'setRoute' || c.kind === 'setRoleBackup') && c.section === r.section && c.role === r.role && ofProfile(c, profile);
-        if (r.group === 'primary') return c.agentId === r.role ||
-          (r.role === 'sisyphus' && c.kind === 'setMain' && ofProfile(c, profile));
-        if (r.group === 'memory') return c.kind === 'setMemoryRow' && c.row === r.role;
-        return r.group === 'summary' && c.kind === 'setSummarizer';
-      });
-      var name = r.labelEn || (r.group === 'primary' ? idOf(AGENTS, r.role) :
-        r.group === 'memory' ? (r.role === 'kibitzer' ? 'Kibitzer' : 'Reflection') : r.role);
-      var model = str(current.modelId);
-      var effective = linked.active && linked.effective ? linked : current;
-      var linkedText = arr(linked.candidates).join(' → ');
-      var cells = [
-        '<span data-guide-name>' + esc(name) + '</span><code data-guide-role>' + esc(r.role) + '</code>' +
-          '<span data-guide-group>' + esc(r.group) + (r.purposeGroup ? ' / ' + esc(r.purposeGroup) : '') +
-          '</span><code data-guide-scope>' + esc(r.applyScope) + '</code>',
-        '<code>' + valueOrDash(current.alias) + '</code><code>' + valueOrDash(model) + '</code>' +
-          '<span>' + valueOrDash(current.thinking) + '</span>' +
-          (current.origin ? '<span>' + esc(current.origin) + '</span>' : '') +
-          (current.sourceFile ? '<code>' + esc(current.sourceFile) + '</code>' : '') +
-          (current.sourcePath ? '<code>' + esc(current.sourcePath) + '</code>' : '') +
-          (current.reason ? '<span>' + esc(current.reason) + '</span>' : ''),
-        held.length ? held.map(function (c) { return '<code>' + esc(JSON.stringify(c)) + '</code>'; }).join('') : '—',
-        esc(rec.Official || rec.official || '공식 권장 없음'),
-        linkedText ? '<span>' + esc(linkedText) + '</span><span>' +
-          (linked.active ? 'active' : '별칭이 없는 경우 (the case when there is no alias)') + '</span>' +
-          (linked.active ? '<code>' + esc(linked.EffectiveCategory) + ' / ' + esc(linked.EffectiveAlias) + '</code>' : '') : '—',
-        '<code>' + valueOrDash(effective.modelId) + '</code><span>' + valueOrDash(effective.thinking) + '</span>' +
-          '<span>' + esc(effective === linked ? 'LINKED' : current.origin || 'CURRENT') + '</span>',
-        chip('pf-st-' + knownStatus(status), status)
-      ];
-      return '<tr' + attr('data-guide-row', r.id) + attr('data-guide-row-group', r.group) + '>' +
-        cells.map(function (cell, i) {
-          return '<td' + attr('data-guide-field', headers[i]) + '><span class="pf-guide-label" aria-hidden="true">' +
-            headers[i] + '</span><div>' + cell + '</div></td>';
-        }).join('') + '</tr>';
+    var headers = ['ROLE', 'CURRENT', 'RECOMMENDED', 'STATUS'];
+    var filter = str(edit && edit.guideFilter) || 'all';
+    var models = arr(obj(view && view.guide) && view.guide.rows).filter(obj).map(function (r) {
+      return guideRowModel(r, view, edit);
+    });
+    var counts = {
+      all: models.length,
+      different: models.filter(function (m) { return guideFilterMatch('different', m.recommended.hasRecommendation, m.status); }).length,
+      untracked: models.filter(function (m) { return guideFilterMatch('untracked', m.recommended.hasRecommendation, m.status); }).length
+    };
+    var visibleCount = models.filter(function (m) { return !m.hidden; }).length;
+    var prevGroup = '', groupRows = [];
+    models.forEach(function (m) {
+      if (m.group !== prevGroup) {
+        groupRows.push({ group: m.group, total: 0, visible: 0, html: '' });
+        prevGroup = m.group;
+      }
+      var bucket = groupRows[groupRows.length - 1];
+      bucket.total += 1;
+      if (!m.hidden) bucket.visible += 1;
+      bucket.html += guideRowHtml(m);
+    });
+    var tbody = groupRows.map(function (b) {
+      return '<tr class="pf-rec-gh"' + boolAttr('hidden', b.visible === 0) + '><th colspan="4" scope="colgroup">' +
+        esc(b.group) + ' <span class="pf-count">' + b.total + '</span></th></tr>' + b.html;
     }).join('');
+    var filterBar = '<div class="pf-guide-bar" role="toolbar" aria-label="가이드 걸러 보기">' +
+      ['all', 'different', 'untracked'].map(function (key) {
+        var on = filter === key;
+        return button('guide-filter', attr('data-guide-filter', key) + ' aria-pressed="' + (on ? 'true' : 'false') + '"',
+          esc(key) + ' <span class="pf-count">' + counts[key] + '</span>', false, 'pf-btn' + (on ? ' pf-guide-seg-on' : ''));
+      }).join('') + '</div>';
     return '<dialog class="pf-dlg" id="pf-guide-dlg" aria-labelledby="pf-guide-t"><div class="pf-dlg-h"><b id="pf-guide-t">권장 배치 가이드</b>' +
-      button('guide-close', '', ic('x', 'ic-sm') + ' 닫기', false, 'pf-btn') + '</div>' + guide(view) +
-      (rows ? '<table class="pf-rec"><thead><tr>' + headers.map(function (h) { return '<th scope="col">' + h + '</th>'; }).join('') +
-        '</tr></thead><tbody>' + rows + '</tbody></table>' : '') +
+      button('guide-close', '', ic('x', 'ic-sm') + ' 닫기', false, 'pf-btn') + '</div>' +
+      filterBar +
+      (models.length ? '<table class="pf-rec"><thead><tr>' +
+        headers.map(function (h) { return '<th scope="col">' + h + '</th>'; }).join('') +
+        '</tr></thead><tbody>' + tbody + '</tbody></table>' : '') +
+      (!visibleCount ? '<p class="pf-empty pf-guide-empty" role="status">조건에 맞는 권장 배치 행이 없습니다.</p>' : '') +
+      '<details class="fold pf-guide-fold"><summary><span>출처(경로·sha256)</span></summary>' +
+      guide(view) + '</details>' +
       '</dialog>';
   }
 
@@ -1693,7 +1845,7 @@
     var fetchFn = opt.fetch;
     var tokenFn = opt.token;
     var notify = typeof opt.onChange === 'function' ? opt.onChange : function () {};
-    var s = { view: null, shown: '', pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false, openRow: '', tab: 'primary', query: '' };
+    var s = { view: null, shown: '', pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false, openRow: '', tab: 'primary', query: '', guideFilter: 'all', guideOpen: map() };
     var seq = 0;
 
     function snapshot() {
@@ -1703,7 +1855,8 @@
         memoryErrors: copyMap(s.memoryErrors), memorySaved: copyMap(s.memorySaved),
         preview: s.preview, conflict: s.conflict, error: s.error, errorKind: s.errorKind,
         status: s.status, result: s.result, loading: s.loading, busy: s.busy, confirmClear: s.confirmClear,
-        openRow: s.openRow, tab: s.tab, query: s.query
+        openRow: s.openRow, tab: s.tab, query: s.query,
+        guideFilter: s.guideFilter, guideOpen: copyMap(s.guideOpen)
       };
     }
     function changed() { notify(snapshot()); }
@@ -2133,6 +2286,21 @@
         changed();
         return snapshot();
       },
+      setGuideFilter: function (filter) {
+        var f = str(filter);
+        if (f !== 'all' && f !== 'different' && f !== 'untracked') return snapshot();
+        s.guideFilter = f;
+        changed();
+        return snapshot();
+      },
+      toggleGuideRow: function (rowId) {
+        var k = str(rowId);
+        if (!k) return snapshot();
+        if (s.guideOpen[k]) delete s.guideOpen[k];
+        else s.guideOpen[k] = true;
+        changed();
+        return snapshot();
+      },
       preview: function (profileKey) { return send('preview', null, { profileKey: profileKey }); },
       apply: function (profileKey) { return send('apply', null, { profileKey: profileKey }); },
       reapply: function () {
@@ -2212,6 +2380,17 @@
           var sumTarget = root.querySelector('.pf-row-sum[data-row="' + rowKey + '"]');
           if (sumTarget && typeof sumTarget.focus === 'function') sumTarget.focus({ preventScroll: true });
         }
+      } else if (act === 'guide-filter') {
+        var filterKey = str(t.getAttribute('data-guide-filter'));
+        c.setGuideFilter(filterKey);
+        var filterTarget = root.querySelector('[data-pf="guide-filter"][data-guide-filter="' + filterKey + '"]');
+        if (filterTarget && typeof filterTarget.focus === 'function') filterTarget.focus({ preventScroll: true });
+      } else if (act === 'guide-row-toggle') {
+        var gRow = typeof t.closest === 'function' ? t.closest('[data-guide-row]') : null;
+        var gRowId = str(t.getAttribute('data-guide-toggle')) || (gRow ? str(gRow.getAttribute('data-guide-row')) : '');
+        c.toggleGuideRow(gRowId);
+        var gToggleTarget = root.querySelector('[data-guide-row="' + gRowId + '"] [data-pf="guide-row-toggle"]');
+        if (gToggleTarget && typeof gToggleTarget.focus === 'function') gToggleTarget.focus({ preventScroll: true });
       } else if (act === 'guide-open' || (act === 'jump' && t.getAttribute('data-target') === 'guide')) {
         var guideBox = root.querySelector('#pf-guide-dlg');
         if (guideBox && typeof guideBox.showModal === 'function' && !guideBox.open) guideBox.showModal();
@@ -2570,12 +2749,32 @@
       if (!ev || ev.defaultPrevented || ev.isComposing || ev.keyCode === 229) return;
       var keyTarget = ev.target;
       var keyController = controller();
-      // The read-only guide has one tab stop. Keep Tab and Shift+Tab on it
-      // rather than letting the browser move focus to the document body.
       var openGuide = root.querySelector('#pf-guide-dlg[open]');
       if (openGuide && ev.key === 'Tab' && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
         ev.preventDefault();
-        openGuide.querySelector('[data-pf="guide-close"]').focus();
+        var focusables = Array.prototype.slice.call(
+          openGuide.querySelectorAll('button, a[href], input, select, textarea, summary, [tabindex]')
+        ).filter(function (el) {
+          if (el.disabled || el.hasAttribute('disabled') || el.getAttribute('tabindex') === '-1') return false;
+          for (var n = el; n && n !== openGuide; n = n.parentNode) {
+            if (n.nodeType === 1 && (n.hidden || n.hasAttribute('hidden') ||
+              (n.tagName === 'DETAILS' && !n.open && n !== el.parentNode))) return false;
+          }
+          if (typeof el.getClientRects === 'function') {
+            var rects = el.getClientRects();
+            if (rects && rects.length === 0 && el.offsetWidth === 0 && el.offsetHeight === 0) return false;
+          }
+          return true;
+        });
+        if (!focusables.length) return;
+        var docActive = root.ownerDocument && root.ownerDocument.activeElement;
+        var curIdx = focusables.indexOf(docActive);
+        var nextIdx = ev.shiftKey
+          ? (curIdx <= 0 ? focusables.length - 1 : curIdx - 1)
+          : (curIdx < 0 || curIdx >= focusables.length - 1 ? 0 : curIdx + 1);
+        if (focusables[nextIdx] && typeof focusables[nextIdx].focus === 'function') {
+          focusables[nextIdx].focus();
+        }
         return;
       }
       if (keyTarget && keyTarget.getAttribute && keyTarget.getAttribute('data-pf') === 'tab' &&
@@ -2671,6 +2870,8 @@
     STALE_BANNER: STALE_BANNER,
     CONFLICT_TEXT: CONFLICT_TEXT,
     displayModelLabels: displayModelLabels,
+    guideRowModel: guideRowModel,
+    guideRowHtml: guideRowHtml,
     escapeHtml: esc
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
