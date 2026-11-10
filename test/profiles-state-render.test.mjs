@@ -769,7 +769,7 @@ test('real state(): the declared oracle and a file-defined ouroboros render serv
   }
 });
 
-test('real state(): each Oracle advisor offers only its own family and shows its saved pin', (t) => {
+test('real state(): each Oracle advisor offers only its own family and shows its saved pin', async (t) => {
   const fx = makeFixture(t);
   const file = path.join(fx.primary, 'agent', 'oracle-advisor', 'routing.json');
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -788,14 +788,27 @@ test('real state(): each Oracle advisor offers only its own family and shows its
     ['gpt', 'gpt', 'chatgpt-subscription/gpt-6-astra', 'high'],
   ]);
   const html = loadView().render(state, liveEdit());
-  const box = (name) => new RegExp(`data-pf-advisor="${name}"[\\s\\S]*?</select></label></div></div>`).exec(html)[0];
-  const claudeModels = [...box('claude').matchAll(/data-pf="advisor-model"[\s\S]*?<\/select>/g)][0][0];
-  const gptModels = [...box('gpt').matchAll(/data-pf="advisor-model"[\s\S]*?<\/select>/g)][0][0];
+  const { makeController } = await import('./fixtures/controller-dom.mjs');
+  const dom = makeController({ modules: [] }).document.createElement('div');
+  dom.innerHTML = html;
+  const outerHtml = (el) => {
+    assert.ok(el, 'control element must exist');
+    const wrap = dom.ownerDocument.createElement('div');
+    wrap.appendChild(el);
+    return wrap.innerHTML;
+  };
+  const claudeBox = dom.querySelector('[data-pf-advisor="claude"]');
+  const gptBox = dom.querySelector('[data-pf-advisor="gpt"]');
+  assert.ok(claudeBox, 'claude advisor must exist');
+  assert.ok(gptBox, 'gpt advisor must exist');
+  const claudeModels = outerHtml(claudeBox.querySelector('[data-pf="advisor-model"]'));
+  const gptModels = outerHtml(gptBox.querySelector('[data-pf="advisor-model"]'));
+  const claudeThinking = outerHtml(claudeBox.querySelector('[data-pf="advisor-thinking"]'));
   assert.match(claudeModels, /value="anthropic-subscription\/claude-opus-5-5"[^>]* selected/);
   assert.doesNotMatch(claudeModels, /gpt-/, 'the Claude advisor lists no GPT model');
   assert.match(gptModels, /value="chatgpt-subscription\/gpt-6-astra"[^>]* selected/);
   assert.doesNotMatch(gptModels, /claude/, 'the GPT advisor lists no Claude model');
-  assert.match(box('claude'), /data-pf="advisor-thinking"[\s\S]*?value="max" selected/);
+  assert.match(claudeThinking, /data-pf="advisor-thinking"[\s\S]*?value="max" selected/);
 });
 
 test('real state(): the guide pins both 5.1.44 sources and rows carry real recommendation statuses', (t) => {
