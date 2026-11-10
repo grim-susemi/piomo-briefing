@@ -2,6 +2,7 @@
  * Tokens.css owns every colour and every 4 px step; this sheet only names tokens. The layout is a dense
  * card wall on a wide screen and one column on a phone. No style attributes are written by the renderer. */
 .pf {
+  --pf-ctl-bg-hover: color-mix(in srgb, var(--c-fg) 8%, var(--c-main));
   max-width: none;
   padding: var(--sp-2) var(--sp-4) var(--sp-8);
   display: grid;
@@ -222,9 +223,24 @@
   overflow: hidden;
   white-space: nowrap;
 }
-.pf select:hover:not(:disabled), .pf input[type="text"]:hover:not(:disabled) {
+.pf select {
+  background-color: var(--c-main);
+  color-scheme: light dark;
+}
+.pf select:hover:not(:disabled) {
+  border-color: var(--c-line-strong);
+  background: var(--pf-ctl-bg-hover);
+}
+.pf input[type="text"]:hover:not(:disabled) {
   border-color: var(--c-line-strong);
   background: var(--fill-hover);
+}
+.pf select option, .pf select optgroup {
+  background-color: var(--c-pop);
+  color: var(--c-fg);
+}
+.pf select option:disabled {
+  color: var(--c-fg-3);
 }
 .pf select:disabled, .pf input:disabled {
   color: var(--c-fg-3);
