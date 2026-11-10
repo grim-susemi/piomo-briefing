@@ -102,6 +102,15 @@
 .pf-banner-warn { border-color: var(--c-amber-line); }
 
 .pf-note, .pf-empty, .pf-muted, .pf-hint { color: var(--c-fg-3); font-size: var(--fs-sm); }
+.pf-fullid {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin: 0;
+  color: var(--c-fg-2);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
 .pf-hint { font-size: var(--fs-2xs); }
 .pf-empty { margin: 0; display: flex; align-items: baseline; gap: var(--sp-1); }
 .pf-ro-note { padding: var(--sp-2) 0 0; }
@@ -438,6 +447,13 @@
 }
 .pf-rh { margin: var(--sp-1) 0 0; font-size: var(--fs-sm); line-height: 1.4; }
 .pf-tri { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-1); }
+.pf-route[data-pf-route] > .pf-tri,
+.pf-agent-editor > .pf-tri,
+.pf-mem-sels > .pf-tri,
+.pf-tri[data-pf-main],
+.pf-backup-direct {
+  grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
+}
 .pf-blk { display: grid; gap: var(--sp-1); min-width: 0; }
 .pf-blk-h { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
 .pf-lane-rec { margin: 0; overflow-wrap: anywhere; }
@@ -596,6 +612,8 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 
 /* main, lane, summarizer, memory */
 .pf-lane, .pf-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-1); align-items: end; }
+.pf-sum[data-pf-sum] { grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr)); }
+.pf-sum[data-pf-sum] > .pf-field-grow { grid-column: auto; }
 .pf-lane-ro { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .pf-main-v { font-family: var(--font-mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .pf-mems { display: grid; gap: var(--sp-2); }

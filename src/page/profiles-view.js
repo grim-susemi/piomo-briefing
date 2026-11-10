@@ -244,6 +244,80 @@
     var at = str(model).indexOf('/');
     return at > 0 ? str(model).slice(at + 1) : str(model);
   }
+  // Pure option descriptors: model is the full ID even when value is an alias or bare ID.
+  // missing keeps a stored ID literal; placeholder keeps its text outside the model pool.
+  // Only text changes. Callers escape it at the HTML boundary after completing the pool.
+  function displayModelLabels(options) {
+    var models = [], parts = map(), labels = map(), pending = [], used = map();
+    options.forEach(function (option) {
+      if (option.placeholder || has(parts, option.model)) return;
+      models.push(option.model);
+      parts[option.model] = bareModel(option.model).split('/');
+    });
+    models.forEach(function (model) {
+      var path = parts[model], label = '';
+      var annotated = options.filter(function (option) {
+        return !option.placeholder && !option.missing && option.off && option.model === model;
+      });
+      for (var depth = 1; depth <= path.length; depth++) {
+        var suffix = path.slice(-depth).join('/');
+        var collision = models.some(function (other) {
+          return other !== model && parts[other].slice(-depth).join('/').toLowerCase() === suffix.toLowerCase();
+        }) || options.some(function (option) {
+          return !option.placeholder && option.missing && option.model !== model &&
+            option.model.toLowerCase() === suffix.toLowerCase();
+        }) || annotated.length && options.some(function (other) {
+          if (other.placeholder || other.model === model) return false;
+          var endings = other.missing ? [other.model] : parts[other.model].map(function (_, index) {
+            return parts[other.model].slice(index).join('/');
+          });
+          return endings.some(function (ending) {
+            var text = ending + (other.off ? ' · ' + other.off.label : '');
+            return annotated.some(function (own) {
+              return (suffix + ' · ' + own.off.label).toLowerCase() === text.toLowerCase();
+            });
+          });
+        });
+        if (!collision) { label = suffix; break; }
+      }
+      if (label) labels[model] = label;
+    });
+    // Reserve literal stored IDs and all resolved text before allocating any ID numbers.
+    options.forEach(function (option) {
+      if (option.placeholder) return;
+      var label = option.missing ? option.model : labels[option.model];
+      if (label) {
+        used[(label + (option.off ? ' · ' + option.off.label : '')).toLowerCase()] = true;
+      } else if (pending.indexOf(option.model) < 0) {
+        pending.push(option.model);
+      }
+    });
+    pending.sort();
+    var next = 1;
+    pending.forEach(function (model) {
+      var label;
+      do {
+        label = bareModel(model) + ' [ID ' + next++ + ']';
+      } while (options.some(function (option) {
+        return !option.placeholder && !option.missing && option.model === model &&
+          has(used, (label + (option.off ? ' · ' + option.off.label : '')).toLowerCase());
+      }));
+      labels[model] = label;
+      options.forEach(function (option) {
+        if (!option.placeholder && !option.missing && option.model === model) {
+          used[(label + (option.off ? ' · ' + option.off.label : '')).toLowerCase()] = true;
+        }
+      });
+    });
+    return options.map(function (option) {
+      var copy = Object.assign({}, option);
+      if (!option.placeholder) {
+        copy.text = (option.missing ? option.model : labels[option.model]) +
+          (option.off ? ' · ' + option.off.label : '');
+      }
+      return copy;
+    });
+  }
   function entryOf(entries, alias, model) {
     for (var i = 0; i < entries.length; i++) {
       if (alias && entries[i].alias === alias) return entries[i];
@@ -285,36 +359,68 @@
   }
   // One model choice. A model the engine does not serve stays listed but disabled, its reason in the label and the
   // title (IS-6); a forced pick of it is still the server's to refuse.
-  function modelOption(value, label, model, selected, off) {
-    return '<option value="' + esc(value) + '"' + attr('data-provider', providerOf(model)) + (selected ? ' selected' : '') +
-      (off ? ' disabled' + attr('title', offTitle(off)) : '') + '>' + esc(off ? label + ' · ' + off.label : label) + '</option>';
+  function modelOption(option) {
+    var text = (option.prefix || '') + option.text;
+    if (option.aliasLabel) text = option.alias + ' · ' + text + (option.variant ? ' / ' + option.variant : '');
+    var title = !option.placeholder && text !== bareModel(option.model) ? option.model : '';
+    if (title && option.off) title += ' · ' + offTitle(option.off);
+    if (option.aliasLabel) title = '';
+    return '<option value="' + esc(option.value) + '"' +
+      (has(option, 'provider') ? attr('data-provider', option.provider) : '') +
+      (option.selected ? ' selected' : '') + (option.off ? ' disabled' : '') +
+      (title ? attr('title', title) : '') + '>' + esc(text) + '</option>';
+  }
+  function modelOptions(options) {
+    return displayModelLabels(options).map(modelOption).join('');
+  }
+  function modelPool(entries, provider, current) {
+    var pool = [], seen = map(), model = current;
+    entries.forEach(function (entry) {
+      if (provider && providerOf(entry.model) !== provider || has(seen, entry.model)) return;
+      seen[entry.model] = true;
+      pool.push({ value: entry.model, model: entry.model, provider: providerOf(entry.model),
+        selected: entry.model === model, off: entry.off });
+    });
+    if (model && !has(seen, model)) pool.push({
+      value: model, model: model, provider: providerOf(model), selected: true, missing: true
+    });
+    return pool;
+  }
+  function modelText(entries, model) {
+    var pool = modelPool(entries, providerOf(model), model);
+    var labels = displayModelLabels(pool);
+    for (var i = 0; i < labels.length; i++) if (labels[i].model === model) return labels[i].text;
+    return '';
+  }
+  function fullIdLine(id, model, alias) {
+    return '<p class="pf-fullid"' + attr('id', id + '-fullid') + ' tabindex="0"><code>' +
+      esc(model || STATUS_TEXT.none) + (alias ? ' · ' + esc(alias) : '') + '</code></p>';
+  }
+  function modelDescription(id) {
+    return attr('aria-describedby', id + '-fullid');
   }
   function modelSelect(name, attrs, entries, provider, fullId, disabled) {
-    var opts = '<option value=""' + (fullId ? '' : ' selected') + '>(선택)</option>', found = false, seen = map();
-    entries.forEach(function (e) {
-      if (provider && providerOf(e.model) !== provider) return;
-      if (e.model === fullId) found = true;
-      if (has(seen, e.model)) return;
-      seen[e.model] = true;
-      opts += modelOption(e.model, e.alias + ' · ' + e.model, e.model, e.model === fullId, e.off);
-    });
-    if (fullId && !found) opts += '<option value="' + esc(fullId) + '"' + attr('data-provider', providerOf(fullId)) + ' selected>' + esc(fullId) + '</option>';
-    if (!opts) opts = '<option value="" selected>(모델 없음)</option>';
-    return select(name, attrs, opts, disabled);
+    var pool = modelPool(entries, provider, fullId);
+    pool.unshift({ value: '', placeholder: true, selected: !fullId, text: '(선택)' });
+    var entry = entryOf(entries, '', fullId);
+    return select(name, attrs, modelOptions(pool), disabled,
+      fullId ? (entry ? entry.alias + ' · ' : '') + fullId : '(선택)');
   }
   function backupSelect(entries, alias, primary, attrs, busy, direct) {
-    var options = '<option value=""' + (alias || direct ? '' : ' selected') + '>백업 없음</option>';
-    if (direct) options += '<option value="__direct__" selected>직접 선택한 백업</option>';
+    var options = [{ value: '', placeholder: true, selected: !alias && !direct, text: '백업 없음' }];
+    if (direct) options.push({ value: '__direct__', placeholder: true, selected: true, text: '직접 선택한 백업' });
     var found = !alias;
     entries.forEach(function (entry) {
       if (entry.alias !== alias && (!entry.registered || entry.alias === primary ||
         providerOf(entry.model) === 'opencode-go' && !/^(?:ocg-)?muse-/i.test(bareModel(entry.model)))) return;
       if (entry.alias === alias) found = true;
-      options += modelOption(entry.alias, entry.alias + ' · ' + entry.model + (entry.variant ? ' / ' + entry.variant : ''),
-        entry.model, entry.alias === alias, entry.off);
+      options.push({ value: entry.alias, alias: entry.alias, aliasLabel: true, variant: entry.variant,
+        model: entry.model, provider: providerOf(entry.model), selected: entry.alias === alias, off: entry.off });
     });
-    if (!found) options += '<option selected value="' + esc(alias) + '">' + esc(alias) + ' · 저장된 백업</option>';
-    return select('route-backup', attrs, options, busy);
+    if (!found) options.push({ value: alias, placeholder: true, selected: true, text: alias + ' · 저장된 백업' });
+    var selected = entryOf(entries, alias);
+    return select('route-backup', attrs, modelOptions(options), busy,
+      selected ? selected.model : alias || (direct ? '직접 선택한 백업' : '백업 없음'));
   }
   function backupFields(edit, profile, section, role, saved, entries, id, primary) {
     var route = section + '/' + role;
@@ -324,7 +430,7 @@
     var provider = str(choice.provider) || providerOf(model);
     if (model && model.indexOf('/') < 0 && provider) model = provider + '/' + model;
     var thinking = str(choice.thinking) || str(definition && definition.variant);
-    var summary = alias || (model ? bareModel(model) + (thinking ? ' / ' + thinking : '') : '');
+    var summary = alias || (model ? modelText(entries, model) + (thinking ? ' / ' + thinking : '') : '');
     var draft = draftOf(edit, 'backup:' + str(profile && profile.omoProfile) + ':' + route);
     if (draft) { provider = str(draft.provider); model = str(draft.model); thinking = str(draft.thinking); }
     var candidates = entries.filter(function (e) {
@@ -337,27 +443,28 @@
       html: '<div class="pf-backup" data-backup-route="' + esc(route) + '">' +
         '<div class="pf-backup-direct">' +
         labelled('백업 1. 서비스', id + '-provider', select('backup-provider', on('provider'), memoryServiceOptions(candidates, provider), busy)) +
-        labelled('백업 2. 모델', id + '-model', select('backup-model', on('model'), memoryModelOptions(candidates, provider, model), busy || !provider)) +
+        labelled('백업 2. 모델', id + '-model', select('backup-model', on('model') + modelDescription(id + '-model'), memoryModelOptions(candidates, provider, model), busy || !provider, model || '(선택)')) +
         labelled('백업 3. 추론강도', id + '-thinking', select('backup-thinking', on('thinking'), memoryThinkingOptions(candidates, model, thinking), busy || !model)) +
-        '</div>' +
+        '</div>' + fullIdLine(id + '-model', model, alias) +
         labelledHint('기존 등록 별칭', '선택값만 저장합니다. 자동 전환하지 않습니다.', id,
-          backupSelect(entries, alias, primary, withId(id, attr('data-route', route)), busy, !alias && !!str(choice.model))) +
+          backupSelect(entries, alias, primary, withId(id, attr('data-route', route)) + modelDescription(id), busy, !alias && !!str(choice.model))) +
+        fullIdLine(id, model, alias) +
         '</div>'
     };
   }
   function mainModelSelect(name, attrs, entries, provider, bare, disabled) {
-    var opts = '<option value=""' + (bare ? '' : ' selected') + '>(선택)</option>', found = false, seen = map();
+    var pool = [{ value: '', placeholder: true, selected: !bare, text: '(선택)' }], found = false, seen = map();
     entries.forEach(function (e) {
       if (provider && providerOf(e.model) !== provider) return;
       var id = bareModel(e.model);
       if (id === bare) found = true;
       if (has(seen, id)) return;
       seen[id] = true;
-      opts += modelOption(id, e.alias + ' · ' + id, e.model, id === bare, e.off);
+      pool.push({ value: id, model: e.model, provider: providerOf(e.model), selected: id === bare, off: e.off });
     });
-    if (bare && !found) opts += '<option value="' + esc(bare) + '" selected>' + esc(bare) + '</option>';
-    if (!opts) opts = '<option value="" selected>(모델 없음)</option>';
-    return select(name, attrs, opts, disabled);
+    var full = bare ? (provider ? provider + '/' : '') + bare : '';
+    if (bare && !found) pool.push({ value: bare, model: full, selected: true, missing: true });
+    return select(name, attrs, modelOptions(pool), disabled, full || '(선택)');
   }
   // The store's verdict on a shown model, worded: the store decides it once for every model (registry.mjs
   // supportStatusFor) and sends the refusal code and the first home that refuses it, which a forced pick is refused
@@ -428,18 +535,9 @@
     return opts;
   }
   function summarizerModelOptions(entries, provider, currentModel) {
-    var opts = '<option value=""' + (currentModel ? '' : ' selected') + '>(선택)</option>', found = false, seen = map();
-    entries.forEach(function (e) {
-      if (!provider || providerOf(e.model) !== provider) return;
-      if (e.model === currentModel) found = true;
-      if (has(seen, e.model)) return;
-      seen[e.model] = true;
-      opts += modelOption(e.model, e.alias + ' · ' + e.model, e.model, e.model === currentModel, e.off);
-    });
-    if (currentModel && !found) {
-      opts += '<option value="' + esc(currentModel) + '"' + attr('data-provider', providerOf(currentModel)) + ' selected>' + esc(currentModel) + '</option>';
-    }
-    return opts;
+    var pool = modelPool(provider ? entries : [], provider, currentModel);
+    pool.unshift({ value: '', placeholder: true, selected: !currentModel, text: '(선택)' });
+    return modelOptions(pool);
   }
   function memoryServiceOptions(candidates, provider) {
     var opts = '<option value=""' + (provider ? '' : ' selected') + '>(선택)</option>';
@@ -454,16 +552,17 @@
     return opts;
   }
   function memoryModelOptions(candidates, provider, model) {
-    var opts = '<option value=""' + (model ? '' : ' selected') + '>(선택)</option>', found = false;
+    var pool = [{ value: '', placeholder: true, selected: !model, text: '(선택)' }], found = false;
     candidates.forEach(function (c) {
       if (!provider || c.provider !== provider) return;
       if (c.model === model) found = true;
-      opts += modelOption(c.model, c.alias + ' · ' + c.model, c.model, c.model === model, c.off);
+      pool.push({ value: c.model, model: c.model, provider: providerOf(c.model), selected: c.model === model, off: c.off });
     });
     if (model && !found) {
-      opts += '<option value="' + esc(model) + '"' + attr('data-provider', providerOf(model)) + ' selected>' + esc(STATUS_LABEL.unresolved + ': ' + model) + '</option>';
+      pool.push({ value: model, model: model, provider: providerOf(model), selected: true,
+        missing: true, prefix: STATUS_LABEL.unresolved + ': ' });
     }
-    return opts;
+    return modelOptions(pool);
   }
   function memoryThinkingOptions(candidates, model, reasoning) {
     var opts = '<option value=""' + (reasoning ? '' : ' selected') + '>(선택)</option>', found = false;
@@ -776,17 +875,17 @@
       var pinValue = draft && has(draft, 'pin') ? str(draft.pin) : pin ? pinProvider + '|' + pinModel : '';
       var pinThinking = draft && has(draft, 'thinking') ? str(draft.thinking) : pin ? str(pin.thinking) : 'medium';
       var pinEntries = id === 'hephaestus' ? entries.filter(function (e) { return bareModel(e.model).indexOf('gpt-') === 0; }) : entries;
-      var pinOpts = '<option value=""' + (pinValue ? '' : ' selected') + '>핀 없음 (레인 사용)</option>';
+      var pinPool = [{ value: '', placeholder: true, selected: !pinValue, text: '핀 없음 (레인 사용)' }];
       var pinSeen = map();
       pinEntries.forEach(function (e) {
         if (pinProvider && providerOf(e.model) !== pinProvider) return;
         var value = providerOf(e.model) + '|' + bareModel(e.model);
         if (has(pinSeen, value)) return;
         pinSeen[value] = true;
-        pinOpts += modelOption(value, e.alias + ' · ' + e.model, e.model, value === pinValue, e.off);
+        pinPool.push({ value: value, model: e.model, provider: providerOf(e.model), selected: value === pinValue, off: e.off });
       });
       if (pinValue && !has(pinSeen, pinValue)) {
-        pinOpts += '<option value="' + esc(pinValue) + '" selected>' + esc(pinValue) + '</option>';
+        pinPool.push({ value: pinValue, model: pinValue.replace('|', '/'), selected: true, missing: true });
       }
       var mem = remembered ? str(remembered.provider) + ' · ' + str(remembered.modelId) + (str(remembered.thinking) ? ' / ' + str(remembered.thinking) : '') : '';
       var laneId = 'pf-agent-lane-' + id;
@@ -794,14 +893,15 @@
         ? '<span class="pf-lbl">레인</span><span class="pf-ro-val">' + esc(lane) + '</span>'
         : labelled('레인', laneId, select('agent-lane', withId(laneId, ' data-agent="' + esc(id) + '"'), laneOptions(lane), busy));
       var pinId = 'pf-agent-pin-' + id, pinThinkId = 'pf-agent-pin-thinking-' + id;
+      var pinFull = pinValue.replace('|', '/');
       var pinHint = id === 'hephaestus' ? 'GPT 계열만' : '';
       var pinControls = ro
         ? '<span class="pf-lbl">핀</span><span class="pf-ro-val">' + (pin ? esc(pinProvider + ' · ' + pinModel + ' / ' + pinThinking) : '없음') + '</span>'
         : '<div class="pf-tri">' +
           labelled(CAPTIONS[0], 'pf-agent-provider-' + id, providerSelect('agent-provider', withId('pf-agent-provider-' + id, attr('data-agent', id)), providersOf(pinEntries, pinProvider), pinProvider, busy)) +
-          labelledHint(CAPTIONS[1], pinHint, pinId, select('agent-pin', withId(pinId, ' data-agent="' + esc(id) + '"'), pinOpts, busy)) +
+          labelledHint(CAPTIONS[1], pinHint, pinId, select('agent-pin', withId(pinId, ' data-agent="' + esc(id) + '"') + modelDescription(pinId), modelOptions(pinPool), busy, pinFull || '핀 없음 (레인 사용)')) +
           labelled(CAPTIONS[2], pinThinkId, select('agent-pin-thinking', withId(pinThinkId, ' data-agent="' + esc(id) + '"'), memoryThinkingOptions(memoryCandidates(view), pinValue.replace('|', '/'), pinThinking), busy || !pinValue)) +
-          '</div>';
+          '</div>' + fullIdLine(pinId, pinFull, (entryOf(entries, '', pinFull) || {}).alias);
       var resetBtn = ro ? '<span class="pf-muted">기억은 확장이 관리</span>' : button('reset-memory', ' data-agent="' + esc(id) + '"', '기억 초기화', busy, 'pf-btn pf-btn-ghost');
       if (reset && !ro) resetBtn = button('reset-memory', ' data-agent="' + esc(id) + '"', STATUS_TEXT.pending, busy, 'pf-btn pf-btn-ghost on');
       var effective = obj(agent.effective) || {};
@@ -811,15 +911,15 @@
       var origin = str(effective.origin) || 'unknown';
       var originLabel = { main: 'Main', pin: 'Pin', memory: 'Memory', lane: 'Lane', unavailable: 'Unavailable', unknown: 'Unknown' }[origin] || origin;
       var reason = str(effective.reason);
-      var savedText = str(effective.modelId) ? str(effective.provider) + ' · ' + effective.modelId +
+      var savedText = str(effective.modelId) ? modelText(entries, str(effective.provider) + '/' + effective.modelId) +
         (str(effective.thinking) ? ' / ' + effective.thinking : '') : reason || STATUS_LABEL.unknown;
       var mainValues = id === 'sisyphus' ? mainValuesOf(view, edit) : null;
       var staged = !!(laneChange || pinChange || reset || draft || (mainValues && (mainValues.pending || mainValues.draft)));
       var summaryText = savedText;
       if (mainValues && (mainValues.pending || mainValues.draft)) {
-        summaryText = mainValues.provider + ' · ' + (mainValues.model || STATUS_TEXT.none) + ' / ' + (mainValues.thinking || STATUS_TEXT.none);
+        summaryText = modelText(entries, mainValues.provider + '/' + mainValues.model) + ' / ' + (mainValues.thinking || STATUS_TEXT.none);
       } else if (id !== 'sisyphus' && (pinChange || draft)) {
-        summaryText = pinValue ? pinValue.replace('|', ' · ') + ' / ' + pinThinking : '핀 없음 (레인 사용) · ' + lane;
+        summaryText = pinValue ? modelText(pinEntries, pinFull) + ' / ' + pinThinking : '핀 없음 (레인 사용) · ' + lane;
       }
       if (laneChange) summaryText += ' · ' + lane;
       if (reset) summaryText += ' · 기억 초기화';
@@ -941,12 +1041,12 @@
       ? '<span class="pf-ro-val"' + withId(editId, boolAttr('hidden', !open)) + '>' + valueOrDash(provider) + ' · ' + valueOrDash(bareModel(full)) + ' / ' + valueOrDash(thinking) + '</span>'
       : '<div class="pf-tri"' + withId(editId, boolAttr('hidden', !open)) + '>' +
         labelled(CAPTIONS[0], rid + '-provider', providerSelect('route-provider', withId(rid + '-provider', on('service')), providersOf(entries, provider), provider, busy)) +
-        labelled(CAPTIONS[1], rid + '-model', modelSelect('route-model', withId(rid + '-model', on('model')), entries, provider, full, busy)) +
+        labelled(CAPTIONS[1], rid + '-model', modelSelect('route-model', withId(rid + '-model', on('model')) + modelDescription(rid + '-model'), entries, provider, full, busy)) +
         labelled(CAPTIONS[2], rid + '-thinking', select('route-thinking', withId(rid + '-thinking', on('effort')), memoryThinkingOptions(candidates, full, thinking), busy)) +
-        backup.html +
+        fullIdLine(rid + '-model', full, alias) + backup.html +
         '</div>';
     var sumModel = '<span class="pf-row-primary"' + attr('title', full + (thinking ? ' / ' + thinking : '')) + '>' +
-      valueOrDash(bareModel(full)) + (str(thinking) ? ' / ' + esc(thinking) : '') + '</span>' +
+      valueOrDash(modelText(entries, full)) + (str(thinking) ? ' / ' + esc(thinking) : '') + '</span>' +
       '<span class="pf-backup-summary"' + attr('title', '백업: ' + (backupAlias || '없음')) + '>백업: ' + esc(backupAlias || '없음') + '</span>';
     var stateLabel = r.absentIn ? STATUS_TEXT.absent + ': ' + str(r.absentIn) : str(r.stateLabel);
     var sumOrigin = !change && !draft && (rec.status === 'unresolved' || (alias && !entry))
@@ -1027,15 +1127,15 @@
         ? '<span class="pf-ro-val"' + withId(editId, boolAttr('hidden', !open)) + '>' + valueOrDash(provider) + ' · ' + valueOrDash(bareModel(model)) + ' / ' + valueOrDash(thinking) + '</span>'
         : '<div class="pf-tri"' + withId(editId, boolAttr('hidden', !open)) + '>' +
           labelled(CAPTIONS[0], rid + '-provider', select('advisor-provider', withId(rid + '-provider', on('service')), memoryServiceOptions(candidates, provider), busy)) +
-          labelled(CAPTIONS[1], rid + '-model', select('advisor-model', withId(rid + '-model', on('model')), memoryModelOptions(candidates, provider, model), busy)) +
+          labelled(CAPTIONS[1], rid + '-model', select('advisor-model', withId(rid + '-model', on('model')) + modelDescription(rid + '-model'), memoryModelOptions(candidates, provider, model), busy, model || '(선택)')) +
           labelled(CAPTIONS[2], rid + '-thinking', select('advisor-thinking', withId(rid + '-thinking', on('effort')), memoryThinkingOptions(candidates, model, thinking), busy)) +
-          '</div>';
+          fullIdLine(rid + '-model', model, '') + '</div>';
       var familyLabel = str(r.family) === 'claude' ? 'Claude 계열만' : str(r.family) === 'gpt' ? 'GPT 계열만' : str(r.family);
       var sumBtn = '<button type="button" class="pf-row-sum" data-pf="row-toggle"' + attr('data-row', 'advisor:' + name) +
         ' aria-expanded="' + (open ? 'true' : 'false') + '"' + attr('aria-controls', editId) + '>' +
         '<span class="pf-row-sum-r">' + esc('oracle · ' + name) + '</span>' +
         '<span class="pf-row-sum-m"><span class="pf-row-primary"' + attr('title', model + (thinking ? ' / ' + thinking : '')) + '>' +
-        valueOrDash(bareModel(model)) + (thinking ? ' / ' + esc(thinking) : '') + '</span></span>' +
+        valueOrDash(modelText(candidates, model)) + (thinking ? ' / ' + esc(thinking) : '') + '</span></span>' +
         '<span class="pf-row-sum-o">' + chip('pf-c-gray', change || draft ? STATUS_TEXT.override : familyLabel) + offChip(off) + '</span></button>';
       return '<div class="pf-route"' + attr('data-pf-advisor', name) + '>' + sumBtn +
         '<div class="pf-route-id">' + tag('advisor') + '<span class="pf-route-ko">' + esc('Oracle 자문가 · ' + name) + '</span>' +
@@ -1086,11 +1186,11 @@
     } else {
       body = '<div class="pf-tri" data-pf-main' + attr('data-thinking', thinking) + '>' +
         labelled(CAPTIONS[0], prefix + '-provider', providerSelect('main-provider', withId(prefix + '-provider', ' data-main="1"'), providers, provider, busy)) +
-        labelled(CAPTIONS[1], prefix + '-model', mainModelSelect('main-model', withId(prefix + '-model', ' data-main="1"'), entries, provider, model, busy)) +
+        labelled(CAPTIONS[1], prefix + '-model', mainModelSelect('main-model', withId(prefix + '-model', ' data-main="1"') + modelDescription(prefix + '-model'), entries, provider, model, busy)) +
         labelled(CAPTIONS[2], prefix + '-thinking', select('main-thinking', withId(prefix + '-thinking', ' data-main="1"'),
           levels ? thinkingOptions(clampedThinking(entry, thinking), false, levels) : thinkingOptions(thinking, true),
           busy || !!off)) +
-        '</div>';
+        fullIdLine(prefix + '-model', model ? provider + '/' + model : '', entry && entry.alias) + '</div>';
     }
     if (inlineId) return body;
     return '<div class="pf-blk" id="pf-sec-main" data-pf-sec="main" data-flow="main" data-flow-sec="main"><h3 class="pf-blk-h">메인 모델 설정 ' +
@@ -1150,7 +1250,8 @@
       ? '<span class="pf-ro-val">' + valueOrDash(current || '원본 기본 컴팩션') + '</span>'
       : '<div class="pf-sum" data-pf-sum>' +
         labelled('1. 제공사', 'pf-summarizer-provider', select('summarizer-provider', withId('pf-summarizer-provider', ' data-sum="1"'), summarizerProviderOptions(entries, provider), busy)) +
-        labelled('2. AI 모델', 'pf-summarizer-model', select('summarizer-model', withId('pf-summarizer-model', ' data-sum="1"'), summarizerModelOptions(entries, provider, current), busy || !provider), 'pf-field-grow') + '</div>' +
+        labelled('2. AI 모델', 'pf-summarizer-model', select('summarizer-model', withId('pf-summarizer-model', ' data-sum="1"') + modelDescription('pf-summarizer-model'), summarizerModelOptions(entries, provider, current), busy || !provider, current || '(선택)'), 'pf-field-grow') + '</div>' +
+        fullIdLine('pf-summarizer-model', current, shownEntry && shownEntry.alias) +
         warnings.map(function (w) { return '<p class="pf-warn pf-warn-' + esc(w.level) + '">' + ic('info', 'ic-sm') + ' ' + esc(w.text) + '</p>'; }).join('');
     return '<div class="pf-blk" id="pf-sec-summarizer" data-pf-sec="summarizer" data-flow="summarizer" data-flow-sec="summarizer">' +
       '<h3 class="pf-blk-h">요약 담당 모델 ' + chip('pf-c-gray', 'compaction.model') + offChip(shownEntry && shownEntry.off) + '</h3>' + body + '</div>';
@@ -1235,11 +1336,11 @@
           '<div class="pf-tri">' +
           labelled(CAPTIONS[0], memId + '-service', select('memory-service', withId(memId + '-service', on('service')),
             memoryServiceOptions(candidates, provider), dis)) +
-          labelled(CAPTIONS[1], memId + '-model', select('memory-model', withId(memId + '-model', on('model')),
-            memoryModelOptions(choices, provider, model), dis)) +
+          labelled(CAPTIONS[1], memId + '-model', select('memory-model', withId(memId + '-model', on('model')) + modelDescription(memId + '-model'),
+            memoryModelOptions(choices, provider, model), dis, model || '(선택)')) +
           labelled(CAPTIONS[2], memId + '-thinking', select('memory-thinking', withId(memId + '-thinking', on('effort')),
             memoryThinkingOptions(candidates, model, reasoning), dis)) +
-          '</div></div>';
+          '</div>' + fullIdLine(memId + '-model', model, searchChoice && searchChoice.alias) + '</div>';
       }
       var chips = [];
       if (m.owned) chips.push(chip('pf-c-green', STATUS_TEXT.owned));
@@ -1253,7 +1354,7 @@
       var memSumBtn = '<button type="button" class="pf-row-sum" data-pf="row-toggle"' + attr('data-row', 'memory:' + key) +
           ' aria-expanded="' + (memOpen ? 'true' : 'false') + '"' + attr('aria-controls', memEditId) + '>' +
           '<span class="pf-row-sum-r">' + esc(key) + ' · ' + esc(rowTitle) + '</span>' +
-          '<span class="pf-row-sum-m">' + valueOrDash(bareModel(model)) + (str(reasoning) ? ' / ' + esc(reasoning) : '') + '</span>' +
+          '<span class="pf-row-sum-m">' + valueOrDash(modelText(choices, model)) + (str(reasoning) ? ' / ' + esc(reasoning) : '') + '</span>' +
           '<span class="pf-row-sum-o">' + memSumOrigin + '</span></button>';
       return '<section class="pf-group"' + attr('data-flow-sec', key) + '><h3 class="pf-rh">' + esc(secTitle) + '</h3>' +
         '<article class="pf-mem-row" data-pf-memory-row="' + esc(key) + '">' + memSumBtn +
@@ -2518,6 +2619,25 @@
         return;
       }
     }
+    // Repeated alias titles are constructed from the current view before native select use.
+    function prepareBackupTitles(ev) {
+      var target = ev && ev.target;
+      if (!target || target.tagName !== 'SELECT' || target.getAttribute('data-pf') !== 'route-backup') return;
+      var c = controller();
+      if (!c) return;
+      var entries = catalogEntries(c.snapshot().view);
+      Array.prototype.forEach.call(target.options, function (option) {
+        var entry = entryOf(entries, option.value);
+        if (!entry) return;
+        var title = option.textContent !== bareModel(entry.model) ? entry.model : '';
+        if (title && entry.off) title += ' · ' + offTitle(entry.off);
+        if (title) option.setAttribute('title', title);
+        else option.removeAttribute('title');
+      });
+    }
+    root.addEventListener('pointerdown', prepareBackupTitles, true);
+    root.addEventListener('focusin', prepareBackupTitles, true);
+    root.addEventListener('keydown', prepareBackupTitles, true);
     var doc = root.ownerDocument;
     var click = keepScroll(onClick), change = keepScroll(onChange), input = keepScroll(onInput), keydown = keepScroll(onKey);
     root.addEventListener('click', click);
@@ -2531,6 +2651,9 @@
     root.addEventListener('input', input);
     if (doc && typeof doc.addEventListener === 'function') doc.addEventListener('keydown', keydown);
     return function unbind() {
+      root.removeEventListener('pointerdown', prepareBackupTitles, true);
+      root.removeEventListener('focusin', prepareBackupTitles, true);
+      root.removeEventListener('keydown', prepareBackupTitles, true);
       root.removeEventListener('click', click);
       root.removeEventListener('close', guideClosed, true);
       root.removeEventListener('change', change);
@@ -2546,6 +2669,7 @@
     bind: bind,
     STALE_BANNER: STALE_BANNER,
     CONFLICT_TEXT: CONFLICT_TEXT,
+    displayModelLabels: displayModelLabels,
     escapeHtml: esc
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

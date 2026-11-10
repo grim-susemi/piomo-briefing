@@ -515,9 +515,63 @@ test('support: an unread registry gives REGISTRY_UNKNOWN in the write refusal, t
   };
   assert.ok(region('data-pf-route="agents/ouroboros"', 'data-pf-route="').includes(flag), 'the saved role value reads 미확인');
   assert.ok(region('id="pf-sec-main"', 'id="pf-sec-summarizer"').includes(flag), 'the saved main model reads 미확인');
-  const options = [...html.matchAll(/<option\b[^>]*\btitle="([^"]*)"/g)].map((m) => m[1]);
-  assert.ok(options.length > 0);
-  for (const title of options) assert.equal(title, 'REGISTRY_UNKNOWN · stable');
+  const decode = (text) => text.replace(/&(amp|lt|gt|quot|#39|#96);/g,
+    (_, key) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", '#96': '`' })[key]);
+  const modelKinds = new Set(['route-model', 'route-backup', 'main-model', 'summarizer-model',
+    'memory-model', 'backup-model', 'agent-pin', 'advisor-model']);
+  const picks = [...html.matchAll(/<select\b([^>]*)>([\s\S]*?)<\/select>/g)]
+    .filter((pick) => modelKinds.has(/\bdata-pf="([^"]*)"/.exec(pick[1])[1]));
+  assert.ok(picks.length > 0, 'model controls must exist');
+  let checked = 0, deferred = 0;
+  for (const pick of picks) {
+    const kind = /\bdata-pf="([^"]*)"/.exec(pick[1])[1];
+    if (kind === 'route-model' || kind === 'main-model') {
+      const options = [...pick[2].matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/g)];
+      const missingValue = kind === 'main-model' ? 'gpt-6-sol' : 'openai/gpt-6-sol';
+      if (options.some(option => decode(/\bvalue="([^"]*)"/.exec(option[1])[1]) === missingValue)) {
+        const known = [...new Set(entries.filter(entry => entry.model.startsWith('openai/')).map(entry => entry.model))];
+        const actual = options.map(option => ({
+          value: decode(/\bvalue="([^"]*)"/.exec(option[1])[1]), disabled: /\sdisabled\b/.test(option[1]),
+          selected: /\sselected\b/.test(option[1]), provider: (/\bdata-provider="([^"]*)"/.exec(option[1]) || [null, null])[1]
+        }));
+        const expected = [{ value: '', disabled: false, selected: false, provider: null },
+          ...known.map(model => ({ value: kind === 'main-model' ? model.slice(7) : model,
+            disabled: true, selected: false, provider: 'openai' })),
+          { value: missingValue, disabled: false, selected: true, provider: kind === 'main-model' ? null : 'openai' }];
+        assert.deepEqual(actual, expected, kind + ' complete pool preserves immutable pre-readability attributes');
+      }
+    }
+    for (const option of pick[2].matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/g)) {
+      const value = decode(/\bvalue="([^"]*)"/.exec(option[1])[1]);
+      if (!value || value === '__direct__') continue;
+      const aliasEntry = Object.hasOwn(state.catalog, value) ? state.catalog[value] : null;
+      const model = (aliasEntry ? aliasEntry.model : '')
+        || (kind === 'main-model' ? state.main.effective.provider + '/' + value
+          : kind === 'agent-pin' ? value.replace('|', '/') : value);
+      if ((kind === 'route-model' || kind === 'main-model') && !entries.some(entry => entry.model === model)) {
+        assert.doesNotMatch(option[1], /\sdisabled\b/, kind + ' saved literal stays enabled');
+        assert.match(option[1], /\sselected\b/, kind + ' saved literal stays selected');
+        assert.equal(decode(option[2]), model, kind + ' saved literal stays literal');
+        assert.equal(decode(/\btitle="([^"]*)"/.exec(option[1])[1]), model);
+        checked++;
+        continue;
+      }
+      assert.match(option[1], /\sdisabled\b/, kind + ' ' + value);
+      const variant = kind === 'route-backup' && aliasEntry ? aliasEntry.variant || aliasEntry.reasoning || '' : '';
+      assert.ok(decode(option[2]).endsWith(' · REGISTRY_UNKNOWN' + (variant ? ' / ' + variant : '')),
+        kind + ' visible reason and alias effort: ' + value);
+      const title = /\btitle="([^"]*)"/.exec(option[1]);
+      if (kind === 'route-backup' && Object.hasOwn(state.catalog, value)) {
+        assert.equal(title, null, 'deferred aliases are checked at real use by the lifecycle suite');
+        deferred++;
+      } else {
+        assert.ok(title, kind + ' serialized title missing: ' + value);
+        assert.equal(decode(title[1]), model + ' · REGISTRY_UNKNOWN · stable', kind + ' ' + value);
+      }
+      checked++;
+    }
+  }
+  assert.ok(checked > 0 && deferred > 0, 'both serialized and deferred model pools are exercised');
   assert.doesNotMatch(html, /UNSUPPORTED_MODEL/, 'an unread registry is not treated as a proven unsupported model');
 });
 

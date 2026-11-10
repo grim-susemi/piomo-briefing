@@ -873,7 +873,7 @@ test('page wiring: the pending row remove button removes that exact row', async 
   assert.deepEqual(e.errors, []);
 });
 
-test('selects: every control titles its selected label and declares an ellipsis', () => {
+test('selects: every control titles its full selection and declares an ellipsis', () => {
   const P = load();
   const html = P.render(STATE, live());
   const tags = [...html.matchAll(/<select\b([^>]*)>/g)].map((m) => m[1]);
@@ -898,7 +898,7 @@ test('summarizer: several aliases for one model still select exactly one option 
   const selected = [...pick[2].matchAll(/<option\b[^>]*\bselected[^>]*>([\s\S]*?)<\/option>/g)];
   assert.equal(selected.length, 1, 'more than one option is selected');
   const title = /\btitle="([^"]*)"/.exec(pick[1])[1];
-  assert.equal(title, textOf(selected[0][1]).trim(), 'title differs from the visible selected label');
+  assert.equal(title, current, 'summarizer title must retain the full selected model ID');
 });
 
 test('copy: (max 추론), 진짜 max 추론 and 실시간 상황판 stay on one line', () => {
@@ -2008,7 +2008,7 @@ test('support: an unserved model stays listed in role, main, summarizer, Kibitze
     const off = options.find((o) => o.value === argon);
     assert.ok(off, name + ': the unserved model is filtered out of the list');
     assert.equal(off.disabled, true, name + ': the unserved model is selectable');
-    assert.equal(off.title, 'UNSUPPORTED_MODEL · stable', name);
+    assert.equal(off.title, 'opencode/gemini-4-argon · UNSUPPORTED_MODEL · stable', name);
     assert.match(off.text, /gemini-4-argon · UNSUPPORTED_MODEL$/, name);
     const served = options.find((o) => o.value.endsWith('served-pro'));
     assert.equal(served.disabled, false, name + ': a served model stays selectable');
@@ -2059,7 +2059,9 @@ test('support: an unread registry keeps every model listed but disabled as REGIS
     assert.equal(options.length, 2, name);
     for (const o of options) {
       assert.equal(o.disabled, true, name + ' ' + o.value);
-      assert.equal(o.title, 'REGISTRY_UNKNOWN · stable', name + ' ' + o.value);
+      const model = name === 'main' ? 'opencode/' + o.value : o.value;
+      assert.equal(o.title, model + ' · REGISTRY_UNKNOWN · stable', name + ' ' + o.value);
+      assert.match(o.text, / · REGISTRY_UNKNOWN$/, name + ' ' + o.value);
     }
   }
 });
