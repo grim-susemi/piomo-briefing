@@ -94,12 +94,17 @@ export function renderValueContract(api, state) {
     const rendered = api.render(state, { ...edit, ...extra });
     // showModal changes visibility, not values. Capture its real rendered subtree.
     const html = name === 'guide' ? /<dialog\b[^>]*id="pf-guide-dlg"[\s\S]*?<\/dialog>/.exec(rendered)[0] : rendered;
-    const items = [];
+    const items = [], elements = [];
     for (const match of html.matchAll(/<[a-z][^>]*>/g)) {
       const attrs = attrsOf(match[0]);
       const keys = ['id', 'data-pf', 'data-flow', 'data-row', 'data-profile'];
       const values = Object.fromEntries(keys.filter(key => Object.hasOwn(attrs, key)).map(key => [key, attrs[key]]));
-      for (const [key, value] of Object.entries(values)) items.push({ [key]: value });
+      const hooks = Object.entries(values).map(([key, value]) => ({ [key]: value }));
+      const indices = hooks.map((_, index) => items.length + index);
+      if (hooks.length) elements.push({ tag: /^<([a-z][\w-]*)/.exec(match[0])[1], hooks, indices,
+        duplicateHooks: keys.some(key => [...match[0].matchAll(/([\w-]+)(?:="[^"]*")?/g)]
+          .filter(attribute => attribute[1] === key).length > 1) });
+      items.push(...hooks);
       if (match[0].startsWith('<select')) {
         const end = html.indexOf('</select>', match.index);
         const options = [...html.slice(match.index, end).matchAll(/<option\b[^>]*>/g)].map(option => {
@@ -110,7 +115,7 @@ export function renderValueContract(api, state) {
         items.push({ select: true, options });
       }
     }
-    return { name, htmlBytes: Buffer.byteLength(html), items };
+    return { name, htmlBytes: Buffer.byteLength(html), items, elements };
   });
 }
 
