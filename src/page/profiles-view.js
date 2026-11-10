@@ -1046,8 +1046,8 @@
         fullIdLine(rid + '-model', full, alias) + backup.html +
         '</div>';
     var sumModel = '<span class="pf-row-primary"' + attr('title', full + (thinking ? ' / ' + thinking : '')) + '>' +
-      valueOrDash(modelText(entries, full)) + (str(thinking) ? ' / ' + esc(thinking) : '') + '</span>' +
-      '<span class="pf-backup-summary"' + attr('title', '백업: ' + (backupAlias || '없음')) + '>백업: ' + esc(backupAlias || '없음') + '</span>';
+      valueOrDash(modelText(entries, full)) + (str(thinking) ? ' / ' + esc(thinking) : '') + '</span>';
+    var sumBackup = '<span class="pf-row-sum-b pf-backup-summary"' + attr('title', '백업: ' + (backupAlias || '없음')) + '>백업: ' + esc(backupAlias || '없음') + '</span>';
     var stateLabel = r.absentIn ? STATUS_TEXT.absent + ': ' + str(r.absentIn) : str(r.stateLabel);
     var sumOrigin = !change && !draft && (rec.status === 'unresolved' || (alias && !entry))
       ? chip('pf-c-amber', MEMORY_STATUS_LABEL.skippedUnresolved)
@@ -1059,6 +1059,7 @@
         ' aria-expanded="' + (open ? 'true' : 'false') + '"' + attr('aria-controls', editId) + '>' +
         '<span class="pf-row-sum-r">' + esc(r.role) + (r.labelEn && r.labelEn !== r.role ? ' · ' + esc(r.labelEn) : '') + '</span>' +
         '<span class="pf-row-sum-m">' + sumModel + '</span>' +
+        sumBackup +
         '<span class="pf-row-sum-o">' + sumOrigin + '</span></button>';
     return '<div class="pf-route" data-pf-route="' + esc(key) + '">' + sumBtn +
       '<div class="pf-route-id">' + tag(r.section === 'agents' ? 'agent' : 'category') +

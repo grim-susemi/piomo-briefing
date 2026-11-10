@@ -55,8 +55,7 @@ export function checkF8(board, reference) {
     fail(F8_CHECKS[4], { expected: memory(reference.sections), actual: memory(board.sections) });
   }
   try {
-    assertPurposeGrid(board.purposeGrid, `${board.frame?.width || 'board'} F8`,
-      board.frame?.width >= 1440 ? 2 : 1);
+    assertPurposeGrid(board.purposeGrid, `${board.frame?.width || 'board'} F8`);
     for (const steps of Object.values(board.tasks)) {
       const controls = steps.filter(step => /^(role:|memory:)/.test(step.control));
       if (new Set(controls.map(step => step.box?.container)).size > 1) {

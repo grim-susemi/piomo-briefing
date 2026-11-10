@@ -185,6 +185,53 @@ export const FLOW_LIB = `(() => {
     return t ? t.textContent : '';
   });
   const options = (el) => [...el.querySelectorAll('option')].map((o) => ({ value: o.value, text: o.textContent }));
+  // Independent dimensions, not resolved tracks or inferred row/column answers (#1207).
+  const responsive = (el) => {
+    const grid = el.closest('.pf-tri');
+    const memory = el.closest('.pf-mem-sels');
+    const tri = grid || memory?.querySelector(':scope > .pf-tri');
+    const row = el.closest('[data-pf-route], [data-pf-memory-row]');
+    if (!tri || !row) return null;
+    const selector = tri.matches('.pf-route[data-pf-route] > .pf-tri') ? 'route'
+      : tri.matches('.pf-mem-sels > .pf-tri') ? 'memory' : null;
+    const key = row.dataset.pfRoute || row.dataset.pfMemoryRow;
+    const group = (selector === 'memory' ? 'memory:' : 'role:') + key;
+    const metrics = (node) => {
+      const cs = getComputedStyle(node), r = node.getBoundingClientRect();
+      return { box: { ...contentBox(node), w: r.width, h: r.height },
+        inset: [cs.borderLeftWidth, cs.borderTopWidth, cs.borderRightWidth, cs.borderBottomWidth].map(Number.parseFloat),
+        padding: [cs.paddingLeft, cs.paddingTop, cs.paddingRight, cs.paddingBottom].map(Number.parseFloat),
+        display: cs.display, columnGap: Number.parseFloat(cs.columnGap), rowGap: Number.parseFloat(cs.rowGap) };
+    };
+    const nodes = memory ? [...memory.querySelectorAll(':scope > label > select, :scope > .pf-tri > label > select')]
+      : [...tri.querySelectorAll(':scope > label > select')];
+    const canvas = document.createElement('canvas').getContext('2d');
+    return { schema: 'flow-responsive/1', selector, group,
+      row: (row.dataset.pfRoute ? 'role:' : 'memory:') + key,
+      section: row.closest('[data-flow-sec]')?.dataset.flowSec,
+      rootRem: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+      owner: metrics(memory || tri), grid: metrics(tri),
+      occupancy: [...tri.children].map(node => {
+        const cs = getComputedStyle(node);
+        return { kind: node.matches('label.pf-sel') ? 'field' : node.matches('p.pf-fullid') ? 'full-id'
+          : node.matches('.pf-backup') ? 'backup' : 'unsupported',
+          start: cs.gridColumnStart, end: cs.gridColumnEnd, binding: node.dataset.backupRoute || null };
+      }),
+      fields: nodes.map(node => {
+        const label = node.closest('label'), caption = label.querySelector('.pf-sel-t');
+        const cs = getComputedStyle(node), ownerRow = node.closest('[data-pf-route], [data-pf-memory-row]');
+        canvas.font = cs.fontSize + ' ' + cs.fontFamily;
+        return { control: node.dataset.flow,
+          group: (ownerRow.dataset.pfRoute ? 'role:' + ownerRow.dataset.pfRoute : 'memory:' + ownerRow.dataset.pfMemoryRow),
+          binding: node.dataset.route || node.dataset.memory,
+          parent: label.parentElement === tri ? 'triplet' : label.parentElement === memory ? 'mode' : null,
+          box: contentBox(node), labelHeight: label.getBoundingClientRect().height,
+          captionHeight: caption.getBoundingClientRect().height, labelGap: Number.parseFloat(getComputedStyle(label).rowGap),
+          captionScroll: caption.scrollWidth - caption.clientWidth,
+          selectedWidth: canvas.measureText(node.selectedOptions[0]?.text || '').width,
+          available: node.clientWidth - Number.parseFloat(cs.paddingLeft) - Number.parseFloat(cs.paddingRight) - 20 };
+      }) };
+  };
   const snap = () => window.BriefPage && window.BriefPage.state.ui.profilesState;
   const prepare = (id) => {
     let el = q(id);
@@ -271,7 +318,7 @@ export const FLOW_LIB = `(() => {
       el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
       const moved = list.map((n, i) => ({ container: nameOf(n), px: Math.abs(n.scrollTop - before[i]), visible: n.clientHeight }));
       const r = el.getBoundingClientRect();
-      return { preparation, region: regionOf(el), box: contentBox(el), view: box(r, 0, 0), disabled: !!el.disabled,
+      return { preparation, region: regionOf(el), box: contentBox(el), responsive: responsive(el), view: box(r, 0, 0), disabled: !!el.disabled,
         scrolls: moved.reduce((s, m) => s + (m.px ? Math.ceil(m.px / m.visible) : 0), 0), moved: moved.filter((m) => m.px) };
     },
     visible(id) {
@@ -430,7 +477,7 @@ export async function perform(page, id, posts, log) {
       levels: model ? await page.eval(`window.__flow.levels(${JSON.stringify(model)})`) : null };
   }
   log.push({ control: id, ...done });
-  return { control: id, preparation: step.preparation, region: step.region, box: step.box, scrolls: step.scrolls, view: step.view, moved: step.moved, disabled: step.disabled, hit, live, result: done };
+  return { control: id, preparation: step.preparation, region: step.region, box: step.box, responsive: step.responsive, scrolls: step.scrolls, view: step.view, moved: step.moved, disabled: step.disabled, hit, live, result: done };
 }
 
 export const rel = (a, b, tol) => {
@@ -439,8 +486,89 @@ export const rel = (a, b, tol) => {
 };
 export const right = (b) => b.x + b.w, bottom = (b) => b.y + b.h;
 
+// Only the named original task groups are authorized; all other F4 pairs stay literal.
+const RESPONSIVE_GROUPS = {
+  'role:agents/explore': { selector: 'route', section: 'agents:explore-research', parts: ['service', 'model', 'effort'] },
+  'memory:kibitzer': { selector: 'memory', section: 'kibitzer', parts: ['mode', 'service', 'model', 'effort'] },
+};
+function responsiveSlots(step, reference, tolerance) {
+  const group = step.control.replace(/:[^:]+$/, ''), policy = RESPONSIVE_GROUPS[group];
+  if (!policy || !Object.hasOwn(step, 'responsive')) return null;
+  if (step.responsive == null) return { group, errors: ['missing responsive metadata'] };
+  const m = step.responsive, errors = [];
+  const fail = check => errors.push(check);
+  const finite = n => Number.isFinite(n) && n >= 0;
+  const validBox = b => b && [b.x, b.y, b.w, b.h].every(Number.isFinite) && b.w > 0 && b.h > 0;
+  const ids = reference.filter(s => s.control.startsWith(group + ':')).map(s => s.control);
+  if (JSON.stringify(ids) !== JSON.stringify(policy.parts.map(part => group + ':' + part))) fail('reference group');
+  if (m.schema !== 'flow-responsive/1' || m.selector !== policy.selector || m.group !== group ||
+      m.row !== group || m.section !== policy.section) fail('owner/group/selector');
+  if (!(Number.isFinite(m.rootRem) && m.rootRem > 0)) fail('root rem');
+  const content = metric => {
+    if (!metric || !validBox(metric.box) || !Array.isArray(metric.inset) || !Array.isArray(metric.padding) ||
+        metric.inset.length !== 4 || metric.padding.length !== 4 || !metric.inset.every(finite) ||
+        !metric.padding.every(finite) || metric.display !== 'grid' || !finite(metric.rowGap) || !finite(metric.columnGap)) return null;
+    const [l, t, r, b] = metric.inset.map((v, i) => v + metric.padding[i]);
+    return { x: metric.box.x + l, y: metric.box.y + t, w: metric.box.w - l - r,
+      h: metric.box.h - t - b, container: metric.box.container };
+  };
+  const owner = content(m.owner), grid = content(m.grid);
+  if (!validBox(owner) || !validBox(grid) || !owner.container || owner.container !== grid.container ||
+      owner.container !== step.box?.container || m.grid?.columnGap !== 4) fail('owner dimensions/frame/gap');
+  if (!Array.isArray(m.fields) || JSON.stringify(m.fields.map(f => f?.control)) !== JSON.stringify(ids)) fail('field order');
+  const kinds = policy.selector === 'route' ? ['field', 'field', 'field', 'full-id', 'backup'] : ['field', 'field', 'field'];
+  if (!Array.isArray(m.occupancy) || JSON.stringify(m.occupancy.map(item => item?.kind)) !== JSON.stringify(kinds) ||
+      m.occupancy.some(item => item.kind === 'field' ? item.start !== 'auto' || item.end !== 'auto'
+        : item.start !== '1' || item.end !== '-1' ||
+          (item.kind === 'backup' && item.binding !== group.slice(group.indexOf(':') + 1)))) fail('grid occupancy');
+  if (errors.length) return { group, errors };
+  if (policy.selector === 'route' && ['x', 'y', 'w', 'h'].some(k => Math.abs(owner[k] - grid[k]) > 1)) fail('role owner/grid');
+  const mode = policy.selector === 'memory' ? m.fields[0] : null, fields = mode ? m.fields.slice(1) : m.fields;
+  const gap = m.grid.columnGap, min = Math.min(18 * m.rootRem, grid.w);
+  const capacity = Math.max(1, Math.floor((grid.w + gap) / (min + gap)));
+  // Full-span role siblings occupy every auto-repeat track; Memory's empty tracks collapse.
+  const tracks = policy.selector === 'route' ? capacity : Math.min(3, capacity);
+  const columns = Math.min(3, tracks), width = (grid.w - (tracks - 1) * gap) / tracks;
+  const slots = [], heights = fields.map(f => f.captionHeight + f.labelGap + f.box?.h);
+  let y = grid.y;
+  for (let i = 0; i < fields.length; i++) {
+    if (i && i % columns === 0) y += Math.max(...heights.slice(i - columns, i)) + m.grid.rowGap;
+    slots.push({ control: fields[i].control, x: grid.x + (i % columns) * (width + gap),
+      y: y + fields[i].captionHeight + fields[i].labelGap, w: width, h: fields[i].box?.h });
+  }
+  if (mode) {
+    slots.unshift({ control: mode.control, x: owner.x, y: owner.y + mode.captionHeight + mode.labelGap, w: owner.w, h: mode.box?.h });
+    if (Math.abs(grid.x - owner.x) > 1 || Math.abs(grid.w - owner.w) > 1 ||
+        Math.abs(grid.y - (owner.y + mode.labelHeight + m.owner.rowGap)) > tolerance) fail('mode above triplet');
+  }
+  for (let i = 0; i < m.fields.length; i++) {
+    const f = m.fields[i], slot = slots[i];
+    if (f.group !== group || f.binding !== group.slice(group.indexOf(':') + 1) ||
+        f.parent !== (mode && i === 0 ? 'mode' : 'triplet')) fail('field owner/binding');
+    if (!validBox(f.box) || f.box.container !== grid.container ||
+        ![f.labelHeight, f.captionHeight, f.labelGap, f.selectedWidth, f.available, f.captionScroll].every(finite) ||
+        f.labelHeight <= 0 || f.captionHeight <= 0 ||
+        Math.abs(f.labelHeight - f.captionHeight - f.labelGap - f.box?.h) > 1) {
+      fail('field dimensions'); continue;
+    }
+    if (Math.abs(f.box.x - slot.x) > tolerance || Math.abs(f.box.y - slot.y) > tolerance) fail('row/column slot');
+    if (Math.abs(f.box.w - slot.w) > 1) fail('protected track width');
+    if (f.box.x < owner.x - 1 || right(f.box) > right(owner) + 1 ||
+        f.box.y < owner.y - 1 || bottom(f.box) > bottom(owner) + 1) fail('owner clipping');
+    if (f.available > f.box.w - 20 || f.captionScroll > 1 || f.selectedWidth > f.available + 1) fail('text clipping');
+    for (const b of m.fields.slice(i + 1).map(field => field.box).filter(validBox)) {
+      if (Math.min(right(f.box), right(b)) - Math.max(f.box.x, b.x) > 1 &&
+          Math.min(bottom(f.box), bottom(b)) - Math.max(f.box.y, b.y) > 1) fail('overlap');
+    }
+  }
+  const current = m.fields.find(f => f.control === step.control)?.box;
+  if (!validBox(step.box) || !current || ['x', 'y', 'w', 'h'].some(k => Math.abs(current[k] - step.box[k]) > 1)) fail('raw step disagreement');
+  return { group, columns, tracks, width, origin: { x: owner.x, y: owner.y }, slots, errors: [...new Set(errors)] };
+}
+
 export function diff(board, ref, rules, size) {
   const out = {};
+  const spatial = { strictDifferences: [], responsive: [] };
   const add = (rule, detail) => { (out[rule].differences ||= []).push(detail); };
   for (const id of Object.keys(rules.rules)) out[id] = { name: rules.rules[id].name, differences: [] };
   if (JSON.stringify(comparisonSections(board.sections)) !== JSON.stringify(ref.sections)) add('F1', { expected: ref.sections, actual: comparisonSections(board.sections) });
@@ -467,12 +595,31 @@ export function diff(board, ref, rules, size) {
     // F4 compares step pairs that share one region (one container) on both sides: the reference boxes are container
     // coordinates, so only same-container pairs have comparable relations; cross-region order is F7's.
     const tol = rules.rules.F4.tolerancePx || 8;
+    const layouts = got.map(step => board.source === 'board' ? responsiveSlots(step, want, tol) : null);
+    layouts.forEach((layout, i) => {
+      if (!layout) return;
+      spatial.responsive.push({ task, control: got[i].control, ...layout });
+      if (layout.errors.length) add('F4', { task, control: got[i].control, check: 'responsive metadata', errors: layout.errors });
+    });
     for (let i = 0; i < want.length; i++) {
       for (let j = i + 1; j < want.length; j++) {
         const gi = got[i], gj = got[j];
         if (!gi || !gj || gi.missing || gj.missing || want[i].region !== want[j].region || gi.region !== gj.region) continue;
         const a = rel(want[i].box, want[j].box, tol), b = rel(gi.box, gj.box, tol);
-        if (a.x !== b.x || a.y !== b.y) add('F4', { task, pair: [want[i].control, want[j].control], expected: a, actual: b });
+        const detail = { task, pair: [want[i].control, want[j].control], expected: a, actual: b };
+        if (a.x !== b.x || a.y !== b.y) spatial.strictDifferences.push(detail);
+        const li = layouts[i], lj = layouts[j];
+        let expected = a;
+        if (li && lj && !li.errors.length && !lj.errors.length && li.group === lj.group &&
+            li.columns === lj.columns && li.columns < 3) {
+          const local = (layout, id) => {
+            const slot = layout.slots.find(s => s.control === id);
+            return { ...slot, x: slot.x - layout.origin.x, y: slot.y - layout.origin.y };
+          };
+          expected = rel(local(li, gi.control), local(lj, gj.control), tol);
+        }
+        if (expected.x !== b.x || expected.y !== b.y) add('F4', { ...detail, expected,
+          ...(expected === a ? {} : { nativeExpected: a, contract: 'responsive' }) });
       }
     }
   }
@@ -518,7 +665,7 @@ export function diff(board, ref, rules, size) {
   // Not a flow rule: every step control must be on top where it is clicked.
   const occlusion = Object.entries(board.tasks).flatMap(([task, steps]) => steps.filter((s) => s.hit).map((s) => ({ task, control: s.control, onTop: s.hit.onTop, at: [s.hit.x, s.hit.y], top: s.hit.top })));
   for (const o of occlusion) if (!o.onTop) differences.push({ rule: 'occlusion', ...o });
-  return { schema: 'flow-diff/1', size, reference: path.relative(ROOT, REFERENCE).replace(/\\/g, '/'), rules: out, occlusion, differences };
+  return { schema: 'flow-diff/1', size, reference: path.relative(ROOT, REFERENCE).replace(/\\/g, '/'), rules: out, spatial, occlusion, differences };
 }
 
 async function main() {

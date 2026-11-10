@@ -12,8 +12,9 @@ const OUTPUT = join(ROOT, 'src', 'page', 'generated', 'profiles-view.min.js');
 // Primary summaries share main draft values; guide drafts and native focus follow profile/tab scope.
 // Full-A (2026-11-09): markup/class-only change (webDeepseek head row + fold); no new top-level bindings, this, eval or strictness-sensitive syntax.
 // 2026-11-10: preserve original missing role/main attributes and alias JIT titles; classic scope and strictness-sensitive syntax unchanged.
-const REVIEWED_SOURCE = '74123bcfad71432e390bd707efce6c6506eeb29fb71e4de30ef67b1744e02d9c';
-const REVIEWED_PAYLOAD = '7690105744b81a5b338bfc230d79729a5982cb28e8b8a9fc0789992476e83d13';
+// 2026-11-10 (todo8): move routeRow backup summary into sibling pf-row-sum-b span; markup-only change, classic semantics unchanged.
+const REVIEWED_SOURCE = '257acc595e66e30ca0526abede7d2512e439bf2b7d4497b891dbca686ee2b68a';
+const REVIEWED_PAYLOAD = '05ffbd80fde0df7905ba415aa189540cf33c39b836f26f0f48edf15c79fb34e1';
 
 try {
   if (typeof Bun === 'undefined' || Bun.version !== '1.4.0') throw new Error('regeneration requires Bun 1.4.0');

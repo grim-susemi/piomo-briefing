@@ -75,16 +75,39 @@ export async function measurePurposeGrid(page, { boundary = false } = {}) {
       const groups = [...grid.querySelectorAll('.pf-group')];
       const box = n => { const r = n.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width }; };
       const roles = document.querySelector('.pf-roles');
+      const routeSummaries = [...grid.querySelectorAll('.pf-route[data-pf-route] > .pf-row-sum')];
+      const routeCells = routeSummaries.map(s => ({ row: s.dataset.row, ownerRect: s.getBoundingClientRect().toJSON(),
+        cells: [['role', 'r'], ['model', 'm'], ['backup', 'b'], ['status', 'o']].map(([cell, suffix]) => {
+          const node = s.querySelector(':scope > .pf-row-sum-' + suffix);
+          return { cell, scrollWidth: node.scrollWidth, clientWidth: node.clientWidth, rect: node.getBoundingClientRect().toJSON() };
+        }) }));
       return {
+        viewportWidth: innerWidth,
         containerWidth: roles.clientWidth,
         columns: getComputedStyle(grid).gridTemplateColumns.split(/\\s+/).length,
         visualColumns: new Set(groups.map(g => Math.round(g.getBoundingClientRect().left))).size,
         tracks: getComputedStyle(grid).gridTemplateColumns,
-        gap: parseFloat(getComputedStyle(grid).columnGap),
+        gap: parseFloat(getComputedStyle(grid).rowGap),
         groups: groups.map(g => ({ id: g.dataset.flowSec, ...box(g), span: getComputedStyle(g).gridColumn,
           rows: [...g.querySelectorAll('.pf-row-sum')].map(s => s.dataset.row),
           scroll: getComputedStyle(g).overflowY })),
-        maxRowHeight: Math.max(...[...grid.querySelectorAll('.pf-row-sum')].map(s => s.getBoundingClientRect().height)),
+        clippedCells: routeCells.flatMap(({ row, cells }) => cells
+          .filter(c => c.cell !== 'backup' && c.scrollWidth > c.clientWidth + 1)
+          .map(({ cell, scrollWidth, clientWidth }) => ({ row, cell, scrollWidth, clientWidth }))),
+        ownerEscapes: routeCells.flatMap(({ row, ownerRect, cells }) => cells.filter(c =>
+          (c.rect.left < ownerRect.left - 1 || c.rect.right > ownerRect.right + 1 ||
+            c.rect.top < ownerRect.top - 1 || c.rect.bottom > ownerRect.bottom + 1))
+          .map(({ cell, rect }) => ({ row, cell, rect, ownerRect }))),
+        cellOverlaps: routeCells.flatMap(({ row, cells }) => cells.flatMap((a, i) => cells.slice(i + 1).flatMap(b => {
+          const left = Math.max(a.rect.left, b.rect.left), top = Math.max(a.rect.top, b.rect.top);
+          const width = Math.min(a.rect.right, b.rect.right) - left, height = Math.min(a.rect.bottom, b.rect.bottom) - top;
+          return width > 1 && height > 1
+            ? [{ row, pair: [a.cell, b.cell], rects: [a.rect, b.rect], intersection: { left, top, width, height } }] : [];
+        }))),
+        maxRowHeight: Math.max(...[...grid.querySelectorAll('.pf-row-sum')].map(s =>
+          (s.matches('.pf-route[data-pf-route] > .pf-row-sum') ? s.parentElement : s).getBoundingClientRect().height)),
+        maxNonRouteRowHeight: Math.max(0, ...[...grid.querySelectorAll('.pf-row-sum')]
+          .filter(s => !s.matches('.pf-route[data-pf-route] > .pf-row-sum')).map(s => s.getBoundingClientRect().height)),
         horizontalScroll: Math.max(0, document.documentElement.scrollWidth - innerWidth, roles.scrollWidth - roles.clientWidth)
       };
     })()`);
@@ -173,18 +196,29 @@ export async function measurePurposeGrid(page, { boundary = false } = {}) {
   return { tabs, expanded, navigation, boundaries };
 }
 
-export function assertPurposeGrid(result, label, expectedColumns) {
+export function assertPurposeGrid(result, label) {
   const baselineRows = ['primary', 'agents', 'categories', 'memory']
     .flatMap(tab => result.tabs[tab].groups.flatMap(group => group.rows));
   for (const [tab, m] of Object.entries(result.tabs)) {
-    assert.equal(m.columns, expectedColumns, `${label} ${tab}: expected ${expectedColumns} columns`);
+    assert.equal(m.columns, 1, `${label} ${tab}: expected 1 column`);
     if (tab !== 'primary' && m.groups.length > 1) {
-      assert.equal(m.visualColumns, expectedColumns, `${label} ${tab}: rendered group columns`);
+      assert.equal(m.visualColumns, 1, `${label} ${tab}: rendered group columns`);
     }
     assert.equal(m.horizontalScroll, 0, `${label} ${tab}: horizontal scroll`);
-    assert.ok(m.maxRowHeight > 0 && m.maxRowHeight <= 32, `${label} ${tab}: summary height ${m.maxRowHeight}`);
-    assert.equal(m.gap, 12);
-    if (expectedColumns === 2) assert.equal(m.tracks, '300px 300px');
+    assert.ok(Number.isFinite(m.viewportWidth) && m.viewportWidth > 0, `${label} ${tab}: viewport width ${m.viewportWidth}`);
+    assert.ok(Number.isFinite(m.containerWidth) && m.containerWidth > 0, `${label} ${tab}: roles width ${m.containerWidth}`);
+    assert.ok(Number.isFinite(m.maxRowHeight) && m.maxRowHeight > 0, `${label} ${tab}: total row height ${m.maxRowHeight}`);
+    assert.ok(Number.isFinite(m.maxNonRouteRowHeight) && m.maxNonRouteRowHeight >= 0,
+      `${label} ${tab}: nonroute row height ${m.maxNonRouteRowHeight}`);
+    if (m.viewportWidth > 599) assert.ok(m.maxNonRouteRowHeight <= 32,
+      `${label} ${tab}: desktop nonroute row height ${m.maxNonRouteRowHeight} exceeds 32`);
+    assert.ok(Array.isArray(m.clippedCells), `${label} ${tab}: clipped cells measurement required`);
+    assert.equal(m.clippedCells.length, 0, `${label} ${tab}: clipped role/model/status cells ${JSON.stringify(m.clippedCells)}`);
+    assert.ok(Array.isArray(m.cellOverlaps), `${label} ${tab}: cell overlaps measurement required`);
+    assert.equal(m.cellOverlaps.length, 0, `${label} ${tab}: overlapping cells ${JSON.stringify(m.cellOverlaps)}`);
+    assert.ok(Array.isArray(m.ownerEscapes), `${label} ${tab}: owner escapes measurement required`);
+    assert.equal(m.ownerEscapes.length, 0, `${label} ${tab}: cells outside summary owner ${JSON.stringify(m.ownerEscapes)}`);
+    assert.equal(m.gap, tab === 'memory' && m.viewportWidth >= 900 ? 12 : 20);
     assert.ok(m.groups.every(g => g.scroll === 'visible'), 'groups never scroll independently');
   }
   assert.equal(result.tabs.primary.groups[0].span, '1 / -1');
@@ -205,5 +239,5 @@ export function assertPurposeGrid(result, label, expectedColumns) {
       assert.deepEqual(m.dom, baselineRows.filter(row => m.dom.includes(row)), `${label}: search preserves group subsequence`);
     }
   }
-  for (const b of result.boundaries) assert.equal(b.columns, b.width === 612 ? 2 : 1, `container boundary ${b.width}`);
+  for (const b of result.boundaries) assert.equal(b.columns, 1, `container boundary ${b.width}`);
 }

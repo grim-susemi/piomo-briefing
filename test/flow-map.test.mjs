@@ -208,7 +208,13 @@ test('F8 checks disclosure, tab preparation, memory document order and only addi
   }));
   const grid = {
     tabs: Object.fromEntries(['primary', 'agents', 'categories', 'memory'].map(tab => [tab, {
-      columns: 1, tracks: '500px', gap: 12, horizontalScroll: 0, maxRowHeight: 28,
+      viewportWidth: 1180, containerWidth: 620, columns: 1, tracks: '500px',
+      gap: tab === 'memory' ? 12 : 20,
+      horizontalScroll: 0, maxRowHeight: 28,
+      maxNonRouteRowHeight: (tab === 'primary' || tab === 'memory') ? 28 : 0,
+      clippedCells: [],
+      cellOverlaps: [],
+      ownerEscapes: [],
       groups: [{ id: tab, span: '1 / -1', scroll: 'visible', rows: tab === 'categories' ? order : [] }],
     }])),
     expanded: [{ row: 'route:categories/deep-high', group: 'categories:deep', span: '1 / -1',
@@ -217,7 +223,7 @@ test('F8 checks disclosure, tab preparation, memory document order and only addi
         directBackup: fields.slice(3, 6), alias: fields.slice(6), backupWidth },
       widths: [160, 160, 160], topmost: [true, true, true], horizontalScroll: 0 }],
     navigation: { closed: { dom: order, visual: order, keyboard: order }, search: { dom: order, visual: order, keyboard: order } },
-    boundaries: [{ width: 611, columns: 1 }, { width: 612, columns: 2 }],
+    boundaries: [{ width: 611, columns: 1 }, { width: 612, columns: 1 }],
   };
   const board = {
     frame: { width: 1180 },
@@ -228,6 +234,22 @@ test('F8 checks disclosure, tab preparation, memory document order and only addi
     rows: { preparation: { role: structuredClone(preparation), memory: structuredClone(preparation) } },
   };
   assert.deepEqual(checkF8(board, reference), []);
+  // Positive wrapped height verification under #1197 A: route summaries allow needed height for lossless content reflow
+  const wrappedBoard = structuredClone(board);
+  wrappedBoard.purposeGrid.tabs.agents.maxRowHeight = 64;
+  wrappedBoard.purposeGrid.tabs.categories.maxRowHeight = 72;
+  assert.deepEqual(checkF8(wrappedBoard, reference), [], 'route rows allow wrapped needed height under #1197');
+  // Genuine synthetic phone frame 390 under #1202 A & #1204: tab viewportWidth 390, phone Memory gap 20, and nonroute Memory 75.5 acceptance
+  const phoneBoard = structuredClone(board);
+  phoneBoard.frame = { width: 390 };
+  for (const [tabName, tab] of Object.entries(phoneBoard.purposeGrid.tabs)) {
+    tab.viewportWidth = 390;
+    tab.containerWidth = 358;
+    tab.gap = 20; // phone Memory remains 20 per #1204
+  }
+  phoneBoard.purposeGrid.tabs.memory.maxNonRouteRowHeight = 75.5;
+  phoneBoard.purposeGrid.tabs.memory.maxRowHeight = 75.5;
+  assert.deepEqual(checkF8(phoneBoard, reference), [], 'phone 390 accepts nonroute Memory 75.5 under #1202');
   assert.deepEqual(comparisonSections(board.sections), reference.sections);
   const tabOrder = board.sections.filter(id => id !== 'kibitzer' && id !== 'reflection');
   const tail = tabOrder.findIndex(id => id === 'lanes');
@@ -246,7 +268,49 @@ test('F8 checks disclosure, tab preparation, memory document order and only addi
       const k = b.sections.indexOf('kibitzer'), r = b.sections.indexOf('reflection');
       [b.sections[k], b.sections[r]] = [b.sections[r], b.sections[k]];
     }],
-    ['purpose-group-grid-navigation', (b) => { b.purposeGrid.boundaries[1].columns = 1; }],
+    ['purpose-group-grid-navigation', (b) => { b.purposeGrid.boundaries[1].columns = 2; }],
+    ['purpose-group-grid-navigation', (b) => { b.purposeGrid.boundaries[0].columns = 2; }],
+    ['purpose-group-grid-navigation', (b) => {
+      b.purposeGrid.tabs.agents.clippedCells.push({
+        row: 'route:agents/explore', cell: 'model', scrollWidth: 160, clientWidth: 120,
+      });
+    }],
+    // Prior 33/57 fixed route height failures invalidated by #1197 A (lossless content reflow / needed height).
+    // Replaced with cell overlap, missing metric, and owner containment escape failures:
+    ['purpose-group-grid-navigation', (b) => {
+      b.purposeGrid.tabs.agents.cellOverlaps.push({
+        row: 'route:agents/explore', pair: ['model', 'status'], xOverlap: 12, yOverlap: 8,
+      });
+    }],
+    ['purpose-group-grid-navigation', (b) => {
+      delete b.purposeGrid.tabs.agents.cellOverlaps;
+    }],
+    ['purpose-group-grid-navigation', (b) => {
+      delete b.purposeGrid.tabs.agents.clippedCells;
+    }],
+    ['purpose-group-grid-navigation', (b) => {
+      delete b.purposeGrid.tabs.agents.ownerEscapes;
+    }],
+    ['purpose-group-grid-navigation', (b) => {
+      b.purposeGrid.tabs.agents.ownerEscapes = [{ row: 'route:agents/explore', cell: 'status' }];
+    }],
+    ['purpose-group-grid-navigation', (b) => {
+      delete b.purposeGrid.tabs.primary.viewportWidth;
+    }],
+    ['purpose-group-grid-navigation', (b) => {
+      delete b.purposeGrid.tabs.primary.maxNonRouteRowHeight;
+    }],
+    ['purpose-group-grid-navigation', (b) => {
+      b.purposeGrid.tabs.primary.maxNonRouteRowHeight = 33;
+    }],
+    // #1204 negative: wrong Memory gap at viewportWidth >= 900 (e.g. 20 instead of 12) fails
+    ['purpose-group-grid-navigation', (b) => {
+      b.purposeGrid.tabs.memory.gap = 20;
+    }],
+    // #1204 negative: wrong other tab gap at viewportWidth >= 900 (e.g. 12 instead of 20) fails
+    ['purpose-group-grid-navigation', (b) => {
+      b.purposeGrid.tabs.primary.gap = 12;
+    }],
     ['purpose-group-grid-navigation', (b) => { b.purposeGrid.expanded[0].editor.primary[2].width += 2; }],
     ['purpose-group-grid-navigation', (b) => { b.purposeGrid.expanded[0].editor.directBackup[2].width += 2; }],
     ['purpose-group-grid-navigation', (b) => { b.purposeGrid.expanded[0].editor.alias[0].width -= 2; }],
@@ -269,7 +333,7 @@ test('F8 checks disclosure, tab preparation, memory document order and only addi
 
 test('board: the message tray sits in flat flow below cards/detail and is reachable inside #main as the sole vertical scroller at both fixture sizes (#849 A)', { timeout: 280000 }, async () => {
   const { execFileSync } = await import('node:child_process');
-  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { mkdtempSync, rmSync, readdirSync, readFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { launch } = await import('../scripts/cdp.mjs');
   const { startBoard, settle, openScreen } = await import('../scripts/qa-flow-map.mjs');
@@ -277,7 +341,27 @@ test('board: the message tray sits in flat flow below cards/detail and is reacha
   let boardServer = null;
   let page = null;
   try {
-    execFileSync(process.execPath, ['scripts/qa-flow-map.mjs', '--out', out], { cwd: process.cwd(), stdio: 'pipe', timeout: 270000 });
+    try {
+      execFileSync(process.execPath, ['scripts/qa-flow-map.mjs', '--out', out], { cwd: process.cwd(), stdio: 'pipe', timeout: 270000 });
+    } catch (childError) {
+      const status = childError.status;
+      const signal = childError.signal;
+      const stdout = Buffer.isBuffer(childError.stdout) ? childError.stdout.toString('utf8') : (childError.stdout || '');
+      const stderr = Buffer.isBuffer(childError.stderr) ? childError.stderr.toString('utf8') : (childError.stderr || '');
+      const reportEntries = [];
+      for (const name of readdirSync(out).sort()) {
+        if (/^flow-diff-.*\.json$/.test(name) || name === 'flow-map-run.json') {
+          reportEntries.push(`--- ${name} ---\n${readFileSync(join(out, name), 'utf8').trim()}`);
+        }
+      }
+      const parts = [
+        `scripts/qa-flow-map.mjs child process failed (status=${status}, signal=${signal})`,
+        stdout ? `--- stdout ---\n${stdout.trim()}` : '',
+        stderr ? `--- stderr ---\n${stderr.trim()}` : '',
+        ...reportEntries,
+      ].filter(Boolean);
+      throw new Error(parts.join('\n\n'), { cause: childError });
+    }
 
     boardServer = await startBoard(join(out, 'verify-board'));
     page = await launch({ width: 1180, height: 700 });

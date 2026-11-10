@@ -3118,7 +3118,7 @@ test('compact rows: desktop geometry, mobile visibility and native Enter/Space d
     for (const width of [1440, 1600, 1000, 900]) {
       await page.client.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false });
       const grid = await measurePurposeGrid(page, { boundary: width === 1440 });
-      assertPurposeGrid(grid, `${width}x900`, width >= 1440 ? 2 : 1);
+      assertPurposeGrid(grid, `${width}x900`);
       if (evidence) {
         fs.mkdirSync(evidence, { recursive: true });
         fs.writeFileSync(path.join(evidence, `grid-${width}.json`), JSON.stringify(grid, null, 2) + '\n');
@@ -3132,19 +3132,57 @@ test('compact rows: desktop geometry, mobile visibility and native Enter/Space d
       await page.eval('document.fonts.ready.then(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))');
       const metrics = await page.eval(`(() => {
         const sums = [...document.querySelectorAll('.pf-tab-panel:not([hidden]) .pf-row-sum')];
+        const routeSums = sums.filter(s => s.matches('.pf-route[data-pf-route] > .pf-row-sum'));
+        const nonRouteSums = sums.filter(s => !s.matches('.pf-route[data-pf-route] > .pf-row-sum'));
+        const cellOverlaps = routeSums.flatMap(s => {
+          const cells = [
+            ['role', s.querySelector('.pf-row-sum-r')],
+            ['model', s.querySelector('.pf-row-sum-m')],
+            ['backup', s.querySelector('.pf-row-sum-b')],
+            ['status', s.querySelector('.pf-row-sum-o')],
+          ].filter(([, el]) => el && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0);
+          const pairs = [];
+          for (let i = 0; i < cells.length; i++) {
+            for (let j = i + 1; j < cells.length; j++) {
+              const a = cells[i][1].getBoundingClientRect(), b = cells[j][1].getBoundingClientRect();
+              const xOverlap = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+              const yOverlap = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+              if (xOverlap > 1 && yOverlap > 1) {
+                pairs.push({ row: s.dataset.row, pair: [cells[i][0], cells[j][0]], xOverlap, yOverlap });
+              }
+            }
+          }
+          return pairs;
+        });
+        const ownerEscapes = routeSums.flatMap(s => {
+          const sBox = s.getBoundingClientRect();
+          const cells = [...s.querySelectorAll('.pf-row-sum-r, .pf-row-sum-m, .pf-row-sum-b, .pf-row-sum-o')];
+          return cells.filter(c => {
+            const cBox = c.getBoundingClientRect();
+            return cBox.left < sBox.left - 1 || cBox.right > sBox.right + 1 || cBox.top < sBox.top - 1 || cBox.bottom > sBox.bottom + 1;
+          }).map(c => ({ row: s.dataset.row, class: c.className }));
+        });
         return {
           width: innerWidth,
           rowHeights: sums.map((s) => s.parentElement.getBoundingClientRect().height),
+          nonRouteRowHeights: nonRouteSums.map((s) => s.parentElement.getBoundingClientRect().height),
+          routeRowHeights: routeSums.map((s) => s.parentElement.getBoundingClientRect().height),
+          cellOverlaps,
+          ownerEscapes,
           panesTop: document.querySelector('.pf-panes').getBoundingClientRect().top,
           hiddenEditors: sums.every((s) => s.getAttribute('aria-expanded') === 'false' &&
             getComputedStyle(document.getElementById(s.getAttribute('aria-controls'))).display === 'none'),
           visibleSummaries: sums.every((s) => getComputedStyle(s).display !== 'none' && s.getBoundingClientRect().height > 0),
-          badges: sums.flatMap(s => [...s.querySelectorAll('.pf-row-sum-o > .pf-chip')].map(e => ({
-            text: e.textContent, title: e.title, ariaLabel: e.getAttribute('aria-label'), width: e.getBoundingClientRect().width,
-            right: e.getBoundingClientRect().right, parentRight: e.parentElement.getBoundingClientRect().right,
-            clipped: e.scrollWidth > e.clientWidth, ellipsis: getComputedStyle(e).textOverflow,
-            overflow: getComputedStyle(e).overflow,
-          }))),
+          badges: sums.flatMap(s => {
+            const isRoute = s.matches('.pf-route[data-pf-route] > .pf-row-sum') || !!s.closest('.pf-route[data-pf-route]');
+            return [...s.querySelectorAll('.pf-row-sum-o > .pf-chip')].map(e => ({
+              isRoute,
+              text: e.textContent, title: e.title, ariaLabel: e.getAttribute('aria-label'), width: e.getBoundingClientRect().width,
+              right: e.getBoundingClientRect().right, parentRight: e.parentElement.getBoundingClientRect().right,
+              clipped: e.scrollWidth > e.clientWidth, ellipsis: getComputedStyle(e).textOverflow,
+              overflow: getComputedStyle(e).overflow,
+            }));
+          }),
           descriptions: [...document.querySelectorAll('.pf-card-sum')].map(e => ({
             text: e.textContent, height: e.clientHeight, fullHeight: e.scrollHeight, clamp: getComputedStyle(e).webkitLineClamp,
           })),
@@ -3156,7 +3194,10 @@ test('compact rows: desktop geometry, mobile visibility and native Enter/Space d
       assert.equal(metrics.overflow, false);
       for (const badge of metrics.badges) {
         assert.ok(badge.width > 0 && badge.right <= badge.parentRight + 1, JSON.stringify(badge));
-        if (badge.clipped) {
+        if (badge.isRoute) {
+          assert.equal(badge.clipped, false, JSON.stringify(badge));
+          assert.notEqual(badge.ellipsis, 'ellipsis', JSON.stringify(badge));
+        } else if (badge.clipped) {
           assert.equal(badge.ellipsis, 'ellipsis', JSON.stringify(badge));
           assert.equal(badge.overflow, 'hidden', JSON.stringify(badge));
           assert.equal(badge.title, badge.text, JSON.stringify(badge));
@@ -3165,8 +3206,13 @@ test('compact rows: desktop geometry, mobile visibility and native Enter/Space d
         if (width === 390) assert.equal(badge.clipped, false, JSON.stringify(badge));
       }
       assert.ok(metrics.descriptions.every(d => d.clamp === 'none' && d.height >= d.fullHeight), JSON.stringify(metrics.descriptions));
+      // Under #1197 A: route summaries allow needed height with lossless reflow. Direct r/m/b/o overlaps must be 0 and cells must stay inside owner.
+      assert.equal(metrics.cellOverlaps.length, 0, 'direct r/m/b/o cell overlaps must be 0: ' + JSON.stringify(metrics.cellOverlaps));
+      assert.equal(metrics.ownerEscapes.length, 0, 'cells must stay contained within owner summary: ' + JSON.stringify(metrics.ownerEscapes));
       if (width === 1440) {
-        assert.ok(Math.max(...metrics.rowHeights) <= 32, JSON.stringify(metrics));
+        if (metrics.nonRouteRowHeights.length > 0) {
+          assert.ok(Math.max(...metrics.nonRouteRowHeights) <= 32, JSON.stringify(metrics));
+        }
         assert.ok(metrics.panesTop <= 190, JSON.stringify(metrics));
       } else {
         assert.ok(Math.min(...metrics.rowHeights) >= 44, JSON.stringify(metrics));
@@ -3198,13 +3244,36 @@ test('compact rows: desktop geometry, mobile visibility and native Enter/Space d
         const saved = summary.querySelector('[data-pf-saved]');
         const model = summary.querySelector('.pf-row-sum-m');
         const box = saved.getBoundingClientRect(), container = model.getBoundingClientRect();
-        return { id, text: model.textContent, pending: summary.querySelector('.pf-row-sum-o').textContent.includes('pending'),
-          separateSavedLine: box.top > container.top, savedFits: box.right <= container.right + 1,
+        const providerSelect = document.getElementById(id === 'sisyphus' ? 'pf-sisyphus-provider' : 'pf-agent-provider-atlas');
+        const modelSelect = document.getElementById(id === 'sisyphus' ? 'pf-sisyphus-model' : 'pf-agent-pin-atlas');
+        const thinkingSelect = id === 'sisyphus' ? document.getElementById('pf-sisyphus-thinking') : null;
+        return {
+          id,
+          text: model.textContent,
+          providerValue: providerSelect ? providerSelect.value : '',
+          modelValue: modelSelect ? modelSelect.value : '',
+          thinkingValue: thinkingSelect ? thinkingSelect.value : '',
+          pending: summary.querySelector('.pf-row-sum-o').textContent.includes('pending'),
+          separateSavedLine: box.top > container.top,
+          savedFits: box.right <= container.right + 1,
           height: summary.getBoundingClientRect().height,
-          overflow: document.documentElement.scrollWidth > innerWidth };
+          overflow: document.documentElement.scrollWidth > innerWidth
+        };
       })`);
       for (const row of staged) {
-        assert.match(row.text, /anthropic · claude-opus-5-5/);
+        // Plan 7 canonical pure display-label oracle: short unique model name 'claude-opus-5-5'
+        // (the provider prefix was moved to provider controls, title, and full-ID location per Plan 7)
+        assert.match(row.text, /^claude-opus-5-5/, 'display label must match canonical short label from Plan 7');
+        if (row.id === 'sisyphus') {
+          assert.equal(row.providerValue, 'anthropic', 'sisyphus provider select retains staged provider');
+          assert.equal(row.modelValue, 'claude-opus-5-5', 'sisyphus model select retains staged model');
+          assert.equal(row.thinkingValue, 'medium', 'sisyphus thinking select retains staged thinking');
+          assert.match(row.text, /^claude-opus-5-5\s*\/\s*medium/, 'sisyphus summary text includes short model and thinking');
+        } else if (row.id === 'atlas') {
+          assert.equal(row.providerValue, 'anthropic', 'atlas provider select retains staged provider');
+          assert.equal(row.modelValue, 'anthropic|claude-opus-5-5', 'atlas pin select retains staged full ID');
+          assert.match(row.text, /^claude-opus-5-5/, 'atlas summary text includes short model');
+        }
         assert.equal(row.pending, true);
         assert.equal(row.separateSavedLine, true, JSON.stringify(row));
         assert.equal(row.savedFits, true, JSON.stringify(row));

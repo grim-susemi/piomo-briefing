@@ -1117,8 +1117,14 @@ async function captureReviewEvidence(page, { url, homes, pluginInfo, commitSha, 
     layout.recaptureReason = '390px only: close the navigation drawer before observing the page; first-run evidence preserved in rejected-mobile-drawer.';
   }
   if (previous && supplement) commandLog.unshift(fs.readFileSync(path.join(OUT, 'commands.txt'), 'utf8').trim());
-  layout.criteria = { desktopClosedHeight: '<=32px', touchClosedHeight: '>=44px',
-    selectsTopmostAndMatched: 'Only the desktop two-column layout (1440/1600); narrow layouts remain measured without applying topmost.',
+  layout.criteria = { routeSummaryReflow: '#1197 A lossless content reflow; needed height permitted; no fixed 32/56px cap',
+    desktopNonRouteClosedHeight: '<=32px (desktop viewports >=600px)',
+    touchClosedHeight: '>=44px (touch target at 390px, no added phone nonroute upper cap per #1202)',
+    columns: 'always 1 column',
+    gap: '20px (other tabs and phone Memory); 12px (Memory at viewportWidth >=900px per #1204)',
+    cellOverlaps: '0 direct r/m/b/o overlaps (>1px both axes)',
+    clippedCells: '0 clipped role/model/status cells', ownerContainment: 'all cells contained within summary owner',
+    selectsTopmostAndMatched: 'Desktop viewports (1440/1600); narrow layouts remain measured without applying topmost.',
     correctedAt: new Date().toISOString() };
   const fail = (state, criterion, actual, expected) => layout.failures.push({ state, criterion, actual, expected });
   const save = () => {
@@ -1142,14 +1148,16 @@ async function captureReviewEvidence(page, { url, homes, pluginInfo, commitSha, 
     fs.writeFileSync(path.join(OUT, 'contrast.json'), JSON.stringify(contrast, null, 2) + '\n');
     fs.writeFileSync(path.join(OUT, 'commands.txt'), commandLog.join('\n') + '\n');
     const table = [
-      '| Viewport / theme | Closed height | Criterion | Columns | Horizontal scroll | Selects topmost (desktop two-column only) | Layout measurements |',
-      '| --- | ---: | --- | ---: | ---: | --- | --- |',
+      '| Viewport / theme | Closed height | Criterion | Columns | Horizontal scroll | Overlaps | Selects topmost (desktop 1440/1600) | Layout measurements |',
+      '| --- | ---: | --- | ---: | ---: | ---: | --- | --- |',
       ...Object.entries(layout.viewports).map(([key,m]) => {
         const g=Object.values(m.grid.tabs), height=Math.max(...g.map(t=>t.maxRowHeight));
         const topmost=m.viewport.width>=1440 ? m.grid.expanded.every(r=>r.topmost.every(Boolean)) && m.primarySelects.every(s=>s.topmost) : null;
         const matching=layout.failures.filter(f=>f.state===key || f.state.startsWith(key+'/'));
-        return '| '+[key,height+'px',m.touch?'>=44px':'<=32px',m.grid.tabs.agents.columns,
-          Math.max(...g.map(t=>t.horizontalScroll))+'px',topmost===null?'N/A':String(topmost),matching.length?'FAIL ('+matching.length+')':'PASS'].join(' | ')+' |';
+        const overlaps=g.reduce((sum,t)=>sum+(Array.isArray(t.cellOverlaps)?t.cellOverlaps.length:0), 0);
+        const criterion = m.touch ? 'reflow / touch >=44px' : 'reflow / desktop nonroute <=32px';
+        return '| '+[key,height+'px',criterion,m.grid.tabs.agents.columns,
+          Math.max(...g.map(t=>t.horizontalScroll))+'px',overlaps,topmost===null?'N/A':String(topmost),matching.length?'FAIL ('+matching.length+')':'PASS'].join(' | ')+' |';
       }),
     ];
     fs.writeFileSync(path.join(OUT, 'failures.md'), [
@@ -1354,32 +1362,80 @@ async function captureReviewEvidence(page, { url, homes, pluginInfo, commitSha, 
       const m = { viewport: vp, theme, touch: vp.width === 390, grid };
       layout.viewports[key] = m;
       for (const [id, g] of Object.entries(grid.tabs)) {
-        const expected = vp.width >= 1440 ? 2 : 1;
+        const expected = 1;
         if (g.columns !== expected) fail(key + '/' + id, 'role group columns', g.columns, expected);
         if (g.horizontalScroll > 0) fail(key + '/' + id, 'horizontal scroll px', g.horizontalScroll, 0);
-        if (vp.width === 390 ? g.maxRowHeight < 44 : g.maxRowHeight > 32) {
-          fail(key + '/' + id, 'closed summary height px', g.maxRowHeight, vp.width === 390 ? '>=44' : '<=32');
+        // Under #1204: Memory gap 12px at viewportWidth >= 900px; other tabs and phone Memory remain 20px.
+        const expectedGap = (id === 'memory' && vp.width >= 900) ? 12 : 20;
+        if (g.gap !== undefined && g.gap !== expectedGap) {
+          fail(key + '/' + id, 'group gap px', g.gap, expectedGap);
+        }
+        // Under #1197 A: route total maxRowHeight is positive finite and may grow as needed for lossless reflow.
+        if (!Number.isFinite(g.maxRowHeight) || g.maxRowHeight <= 0) {
+          fail(key + '/' + id, 'maxRowHeight positive finite number', typeof g.maxRowHeight, 'positive finite number');
+        }
+        // Under #1202 A: maxNonRouteRowHeight is finite >= 0 for every tab; desktop viewports (>=600px, e.g. 900/1000/1440/1600)
+        // enforce original <=32px based on actual viewport; phone viewports (<600px / 390px) have no added nonroute upper cap and enforce minimum 44px touch targets.
+        if (!Number.isFinite(g.maxNonRouteRowHeight) || g.maxNonRouteRowHeight < 0) {
+          fail(key + '/' + id, 'maxNonRouteRowHeight finite number >= 0', typeof g.maxNonRouteRowHeight, 'finite number >= 0');
+        } else if (vp.width >= 600) {
+          if (g.maxNonRouteRowHeight > 32) {
+            fail(key + '/' + id, 'desktop nonroute summary height px', g.maxNonRouteRowHeight, '<=32');
+          }
+        }
+        if (vp.width === 390 && g.maxRowHeight < 44) {
+          fail(key + '/' + id, 'closed summary touch height px', g.maxRowHeight, '>=44');
+        }
+        if (!Array.isArray(g.clippedCells)) {
+          fail(key + '/' + id, 'clippedCells measurement array', typeof g.clippedCells, 'Array');
+        } else if (g.clippedCells.length > 0) {
+          fail(key + '/' + id, 'clipped role/model/status cells', g.clippedCells.length, 0);
+        }
+        if (!Array.isArray(g.cellOverlaps)) {
+          fail(key + '/' + id, 'cellOverlaps measurement array', typeof g.cellOverlaps, 'Array');
+        } else if (g.cellOverlaps.length > 0) {
+          fail(key + '/' + id, 'direct r/m/b/o cell overlaps', g.cellOverlaps.length, 0);
+        }
+        if (!Array.isArray(g.ownerEscapes)) {
+          fail(key + '/' + id, 'ownerEscapes measurement array', typeof g.ownerEscapes, 'Array');
+        } else if (g.ownerEscapes.length > 0) {
+          fail(key + '/' + id, 'cell summary owner containment escapes', g.ownerEscapes.length, 0);
         }
       }
       for (const e of grid.expanded) {
         if (vp.width >= 1440 && (e.widths.length !== 3 || Math.min(...e.widths) <= 0 || Math.max(...e.widths)-Math.min(...e.widths)>1)) fail(key+'/'+e.row,'three equal select widths',e.widths,'three positive widths within 1px');
         if (vp.width >= 1440 && e.topmost.some(v=>!v)) fail(key+'/'+e.row,'three selects topmost',e.topmost,[true,true,true]);
       }
-      for (const b of grid.boundaries) if (b.columns !== (b.width === 612 ? 2 : 1)) fail(key,'612/611 container boundary',b,'612=2 columns, 611=1 column');
+      for (const b of grid.boundaries) if (b.columns !== 1) fail(key,'612/611 container boundary',b,'both 611 and 612 = 1 column');
       await tab('agents');
       await shot('agents-purpose-groups');
       await tab('categories');
       await shot('categories-purpose-groups');
       await tab('primary');
       m.summaryAndTouchTargets = await page.eval(`(() => {
+        const roles = document.querySelector('.pf-roles');
+        const rolesWidth = roles ? roles.clientWidth : 0;
         const nodes=[...document.querySelectorAll('.pf-row-sum')].filter(n=>n.checkVisibility());
-        const summary=nodes.map(n=>({row:n.dataset.row,height:n.getBoundingClientRect().height,
-          contentHeight:Math.max(...[...n.children].map(c=>c.getBoundingClientRect().height))}));
+        const summary=nodes.map(n=>{
+          const parent = n.matches('.pf-route[data-pf-route] > .pf-row-sum') ? n.parentElement : n;
+          return {
+            row:n.dataset.row,
+            height:parent.getBoundingClientRect().height,
+            contentHeight:Math.max(...[...n.children].map(c=>c.getBoundingClientRect().height)),
+            rolesWidth
+          };
+        });
         const targets=[...document.querySelectorAll('[data-pf-root] button,[data-pf-root] select,[data-pf-root] input')].filter(n=>n.checkVisibility()).map(n=>({
           element:n.id||n.dataset.row||n.dataset.pf||n.tagName,height:n.getBoundingClientRect().height,disabled:n.disabled}));
         return {summary,targets};
       })()`);
-      for (const r of m.summaryAndTouchTargets.summary) if(vp.width !== 390 && r.contentHeight>32) fail(key+'/'+r.row,'closed summary content height px',r.contentHeight,'<=32');
+      for (const r of m.summaryAndTouchTargets.summary) {
+        const isRoute = r.row && r.row.startsWith('route:');
+        if (!isRoute && vp.width >= 600) {
+          if (r.height > 32) fail(key+'/'+r.row,'closed summary parent height px',r.height,'<=32');
+          if (r.contentHeight > 32) fail(key+'/'+r.row,'closed summary content height px',r.contentHeight,'<=32');
+        }
+      }
       if (vp.width === 390) for (const t of m.summaryAndTouchTargets.targets) if(t.height<44) fail(key+'/'+t.element,'touch target height px',t.height,'>=44');
       await click('[data-row="agent:sisyphus"]');
       await page.eval(`document.querySelector('[data-row="agent:sisyphus"]').parentElement.querySelector('select').scrollIntoView({block:'center'})`);
@@ -1641,7 +1697,7 @@ async function main() {
         viewportMeasurements[vp.name].purposeGrid = grid;
         fs.writeFileSync(path.join(OUT, `grid-${vp.name}.json`), JSON.stringify(grid, null, 2) + '\n');
         await page.screenshot(path.join(OUT, `groups-${vp.name}.png`));
-        assertPurposeGrid(grid, vp.name, vp.width >= 1440 ? 2 : 1);
+        assertPurposeGrid(grid, vp.name);
         if (grid.boundaries.length) fs.writeFileSync(path.join(OUT, 'boundary-611-612.txt'), JSON.stringify(grid.boundaries, null, 2) + '\n');
       }
     }
