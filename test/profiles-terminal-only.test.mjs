@@ -147,8 +147,9 @@ test('external memory selector is a separate unproven stored value and never a w
   const targetIds = fx.store.targetIds();
   assert.deepEqual(targetIds, [
     'omo.jsonc', 'agent/settings.json', 'agent/models.json',
-    'runtime/native-profile-switcher-main.json', 'native-profile-selection.json',
-    'agent/native-profile-selection.json', 'agent/primary-agents/roster.json',
+    'runtime/native-profile-switcher-main.json', 'runtime/native-profile-switcher-role-backups.json',
+    'native-profile-selection.json', 'agent/native-profile-selection.json',
+    'agent/primary-agents/roster.json', 'agent/oracle-advisor/routing.json',
   ]);
   const state = fx.store.state();
   assert.equal(state.memory.externalSelector.storedValue, 'selector-only-alias');
