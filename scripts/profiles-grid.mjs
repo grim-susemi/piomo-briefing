@@ -1,6 +1,58 @@
 // Shared browser measurements for the additive F8 grid/navigation checks.
 import assert from 'node:assert/strict';
 
+// Shared page-side measurement for the grid and WinForms comparison probes.
+export const ROUTE_EDITOR_PROBE = `(route) => {
+  const fields = [...route.querySelectorAll('select')].map(select => {
+    const rect = select.getBoundingClientRect();
+    return { name: select.dataset.pf, route: select.dataset.route,
+      caption: select.closest('label')?.querySelector('.pf-sel-t')?.textContent || '',
+      width: rect.width, height: rect.height,
+      topmost: select.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)) };
+  });
+  const backup = route.querySelector('.pf-backup');
+  return { order: fields.map(field => field.name),
+    primary: fields.filter(field => field.name.startsWith('route-') && field.name !== 'route-backup'),
+    directBackup: fields.filter(field => field.name.startsWith('backup-')),
+    alias: fields.filter(field => field.name === 'route-backup'),
+    backupWidth: backup ? backup.getBoundingClientRect().width : 0 };
+}`;
+
+export function routeEditorDifferences(editor, route) {
+  const differences = [];
+  const compare = (check, actual, expected) => {
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) differences.push({ check, expected, actual });
+  };
+  const groups = [
+    ['primary', ['route-provider', 'route-model', 'route-thinking'], ['1. 구독 서비스', '2. AI 모델', '3. 추론 강도']],
+    ['directBackup', ['backup-provider', 'backup-model', 'backup-thinking'], ['백업 1. 서비스', '백업 2. 모델', '백업 3. 추론강도']],
+    ['alias', ['route-backup'], ['기존 등록 별칭']],
+  ];
+  compare('editor control order', editor.order, groups.flatMap(([, names]) => names));
+  for (const [group, names, captions] of groups) {
+    const fields = editor[group];
+    compare(group + ' identities', fields.map(field => field.name), names);
+    compare(group + ' captions', fields.map(field => field.caption), captions);
+    compare(group + ' route binding', fields.map(field => field.route), names.map(() => route));
+    compare(group + ' positive dimensions', fields.map(field => field.width > 0 && field.height > 0), names.map(() => true));
+    compare(group + ' topmost', fields.map(field => field.topmost), names.map(() => true));
+  }
+  for (const group of ['primary', 'directBackup']) {
+    const widths = editor[group].map(field => field.width);
+    if (!(Math.min(...widths) > 0 && Math.max(...widths) - Math.min(...widths) <= 1)) {
+      differences.push({ check: group + ' equal widths', expected: 'positive widths within 1px', actual: widths });
+    }
+  }
+  if (!(editor.backupWidth > 0)) differences.push({ check: 'backup container width', expected: '> 0', actual: editor.backupWidth });
+  if (editor.alias.length === 1) {
+    const width = editor.alias[0].width;
+    if (!(Math.abs(width - editor.backupWidth) <= 1 && width >= Math.max(...editor.primary.map(field => field.width)))) {
+      differences.push({ check: 'alias spans backup container', expected: editor.backupWidth, actual: width });
+    }
+  }
+  return differences;
+}
+
 export async function measurePurposeGrid(page, { boundary = false } = {}) {
   const paint = () => page.eval('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))');
   const saved = await page.eval(`({
@@ -49,11 +101,10 @@ export async function measurePurposeGrid(page, { boundary = false } = {}) {
     await paint();
     expanded.push(await page.eval(`(() => {
       const summary = document.querySelector('[data-row="${row}"]'), group = summary.closest('.pf-group');
-      const selects = [...summary.parentElement.querySelectorAll('.pf-tri select')];
+      const editor = (${ROUTE_EDITOR_PROBE})(summary.parentElement);
       return { row: '${row}', group: group.dataset.flowSec, span: getComputedStyle(group).gridColumn,
         openGroups: [...document.querySelectorAll('.pf-group:has(.pf-row-sum[aria-expanded="true"])')].map(g => g.dataset.flowSec),
-        widths: selects.map(s => s.getBoundingClientRect().width),
-        topmost: selects.map(s => { const r = s.getBoundingClientRect(); return s.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); }),
+        editor, widths: editor.primary.map(field => field.width), topmost: editor.primary.map(field => field.topmost),
         overflowNodes: [...group.querySelectorAll('*')].filter(n => n.getBoundingClientRect().right >
           document.querySelector('.pf-roles').getBoundingClientRect().right).map(n => n.className),
         horizontalScroll: Math.max(0, document.documentElement.scrollWidth - innerWidth,
@@ -140,11 +191,7 @@ export function assertPurposeGrid(result, label, expectedColumns) {
   for (const m of result.expanded) {
     assert.equal(m.span, '1 / -1', `${label} ${m.row}: full span`);
     assert.deepEqual(m.openGroups, [m.group], `${label}: no stale expanded group`);
-    assert.equal(m.widths.length, 4, 'three primary fields and one explicit backup');
-    const primaryWidths = m.widths.slice(0, 3);
-    assert.ok(Math.min(...primaryWidths) > 0 && Math.max(...primaryWidths) - Math.min(...primaryWidths) <= 1, `${label}: select3 ${m.widths}`);
-    assert.ok(m.widths[3] >= Math.max(...primaryWidths), `${label}: backup field spans the editor`);
-    assert.deepEqual(m.topmost, [true, true, true, true], `${label}: every model field is topmost`);
+    assert.deepEqual(routeEditorDifferences(m.editor, m.row.slice('route:'.length)), [], `${label} ${m.row}: primary and backup fields`);
     assert.equal(m.horizontalScroll, 0);
   }
   for (const [mode, m] of Object.entries(result.navigation)) {

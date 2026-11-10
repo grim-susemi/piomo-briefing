@@ -1030,8 +1030,11 @@ test('tokens.css is the first stylesheet chunk of the page: the later sheets rea
   const styles = [...html.matchAll(/<style>\n([\s\S]*?)\n<\/style>/g)].map((m) => m[1]);
   assert.equal(styles.length, 1, 'the page inlines one stylesheet');
   const sheet = (name) => fs.readFileSync(join(HERE, '..', 'src', 'page', name), 'utf8');
-  const order = ['tokens.css', 'page.css', 'plan-view.css', 'roadmap-view.css', 'workers-view.css', 'alarm.css', 'shell.css', 'profiles-view.css', 'convo.css', 'blocks.css', 'annotate.css', 'cards-view.css', 'office.css'];
-  assert.equal(styles[0], order.map(sheet).join('\n'), 'tokens.css first, then the sheets in their old order');
+  const assembly = fs.readFileSync(join(HERE, '..', 'src', 'render.mjs'), 'utf8');
+  const order = JSON.parse(/const PAGE_CSS = (\[[^\n]+\]);/.exec(assembly)[1].replace(/'/g, '"'));
+  assert.equal(order[0], 'tokens.css', 'tokens precede every dependent sheet');
+  assert.ok(order.includes('profiles-view.css'), 'the switcher stylesheet remains shipped');
+  assert.equal(styles[0], order.map(name => sheet(name).replace(/<\/style/gi, '<\\/style')).join('\n'), 'all declared sheets ship in order with their complete bytes');
   assert.match(sheet('tokens.css'), /^:root \{\n  color-scheme: light dark;/m, 'the tokens follow the light and the dark scheme');
   assert.doesNotMatch(styles[0], /font-weight:\s*(?:[7-9]00|bold)/, 'weights 400 / 500 / 600 only');
 });

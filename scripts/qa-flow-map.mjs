@@ -25,7 +25,7 @@ import { createBoardServer } from '../src/server.mjs';
 import { pageHtml } from '../src/render.mjs';
 import { formatJsonText, openProfilesStore } from '../src/profiles/store.mjs';
 import { checkF8, comparisonSections, comparisonSteps, requireF8 } from './flow-map-f8.mjs';
-import { measurePurposeGrid } from './profiles-grid.mjs';
+import { measurePurposeGrid, ROUTE_EDITOR_PROBE, routeEditorDifferences } from './profiles-grid.mjs';
 import { RAW_NAME_COPY, RAW_CONDITIONAL_NAME_COPY, RAW_STATUS_COPY } from './profiles-copy.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -231,8 +231,11 @@ export const FLOW_LIB = `(() => {
       let route = document.querySelector('[data-pf-route="agents/explore"]');
       const routeSum = route && route.querySelector('.pf-row-sum[aria-expanded="false"]');
       if (routeSum) { routeSum.click(); route = document.querySelector('[data-pf-route="agents/explore"]'); }
-      const widths = route ? [...route.querySelectorAll('select')].map((s) => Math.round(s.getBoundingClientRect().width)) : [];
-      const role = { captions: route ? captions(route) : [], selects: widths.length, widths, recommendationOnLabelLine: !!(route && route.querySelector('.pf-route-id [class*="pf-st-"]')) };
+      route.querySelector('.pf-tri').scrollIntoView({ block: 'nearest' });
+      const editor = (${ROUTE_EDITOR_PROBE})(route);
+      const widths = editor.primary.map(field => field.width);
+      const role = { editor, captions: editor.primary.map(field => field.caption), selects: widths.length, widths,
+        recommendationOnLabelLine: !!route.querySelector('.pf-route-id [class*="pf-st-"]') };
       const routeClose = route && route.querySelector('.pf-row-sum[aria-expanded="true"]');
       if (routeClose) routeClose.click();
       const memoryPreparation = prepare('memory:kibitzer:mode');
@@ -476,6 +479,7 @@ export function diff(board, ref, rules, size) {
   const rows = board.rows;
   for (const detail of checkF8(board, ref)) add('F8', detail);
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  for (const detail of routeEditorDifferences(rows.role.editor, 'agents/explore')) add('F6', { row: 'role', ...detail });
   if (!same(rows.role.captions, ref.rows.role.captions)) add('F6', { row: 'role', expected: ref.rows.role.captions, actual: rows.role.captions });
   if (rows.role.selects !== 3 || Math.max(...rows.role.widths) - Math.min(...rows.role.widths) > 1) add('F6', { row: 'role', expected: 'three equal-width selects', actual: rows.role.widths });
   if (!rows.role.recommendationOnLabelLine) add('F6', { row: 'role', expected: 'recommendation chip on the label line', actual: false });

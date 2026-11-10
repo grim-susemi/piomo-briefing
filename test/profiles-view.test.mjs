@@ -667,13 +667,33 @@ function labelledControls(html) {
   return { labels, controls };
 }
 
+// The fixture owns the row identities; the editing contract owns each row's fields.
+// Compare identities, not only totals, so a missing control cannot be replaced by a duplicate.
+function expectedSelectIds(state) {
+  const agents = Object.keys(state.roster.agents);
+  const routes = state.routing.rows.map(({ section, role }) => 'pf-route-' + section + '-' + role);
+  const backups = [...routes.map(id => id + '-backup'), ...agents.map(id => 'pf-primary-backup-' + id)];
+  return [
+    ...agents.map(id => 'pf-agent-lane-' + id),
+    ...agents.filter(id => id !== 'sisyphus').flatMap(id =>
+      ['pf-agent-provider-', 'pf-agent-pin-', 'pf-agent-pin-thinking-'].map(prefix => prefix + id)),
+    ...['pf-sisyphus', 'pf-main', ...routes].flatMap(id =>
+      ['provider', 'model', 'thinking'].map(field => id + '-' + field)),
+    ...backups.flatMap(id => [id, ...['provider', 'model', 'thinking'].map(field => id + '-' + field)]),
+    ...Object.keys(state.memory).flatMap(key =>
+      ['mode', 'service', 'model', 'thinking'].map(field => 'pf-memory-' + key + '-' + field)),
+    'pf-lane-select', 'pf-summarizer-provider', 'pf-summarizer-model',
+  ].sort();
+}
+
 test('a11y: every select and input has a visible label and an accessible name', () => {
   const P = load();
   const html = P.render(STATE, live());
   const { labels, controls } = labelledControls(html);
   const selects = controls.filter((c) => c.tag === 'select');
-  assert.equal(selects.length, 62, '51 original selects plus 11 explicit backup selections');
-  assert.equal(controls.length, 64, '62 selects + 1 text input + the global search');
+  assert.deepEqual(selects.map(c => c.id).sort(), expectedSelectIds(STATE), 'all fixture row editing controls are present exactly once');
+  assert.deepEqual(controls.filter(c => c.tag !== 'select').map(c => c.id).sort(),
+    ['pf-lane-literal', 'pf-routing-search'], 'the lane literal and global search remain available');
   assert.equal(controls.filter((c) => c.pf === 'routing-search').length, 1);
   for (const c of controls) {
     const name = c.aria || c.ref || labels.get(c.id) || '';
@@ -857,7 +877,7 @@ test('selects: every control titles its selected label and declares an ellipsis'
   const P = load();
   const html = P.render(STATE, live());
   const tags = [...html.matchAll(/<select\b([^>]*)>/g)].map((m) => m[1]);
-  assert.equal(tags.length, 62);
+  assert.deepEqual(tags.map(attrs => /\bid="([^"]+)"/.exec(attrs)[1]).sort(), expectedSelectIds(STATE));
   for (const attrs of tags) assert.match(attrs, /\btitle="[^"]+"/, 'select without a full-value title');
   const model = /<select[^>]*data-pf="route-model"[^>]*>/.exec(html)[0];
   assert.match(model, /title="[^"]*·[^"]*\/[^"]*"/, 'model title carries alias and full id');
@@ -925,7 +945,12 @@ test('responsive controls: 1024 stacks the agent pin/thinking pair and 390 uses 
   const at1040 = css.slice(css.indexOf('@media (max-width: 1040px)'), css.indexOf('@media (max-width: 760px)'));
   assert.match(at1040, /\.pf-pin-sels \{ grid-template-columns: minmax\(0, 1fr\); \}/);
   const at599 = css.slice(css.indexOf('@media (max-width: 599px)'));
-  assert.match(at599, /\.pf-pin-sels, \.pf-tri \{ grid-template-columns: minmax\(0, 1fr\); \}/, 'the phone stacks the three selects');
+  const phoneGridRules = [...at599.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  for (const selector of ['.pf-pin-sels', '.pf-tri', '.pf-backup-direct']) {
+    const rule = phoneGridRules.find(([_, selectors]) => selectors.split(',').some(value => value.trim() === selector));
+    assert.ok(rule, selector + ' has a phone rule');
+    assert.match(rule[2], /grid-template-columns:\s*minmax\(0, 1fr\);/, selector + ' stacks its selects');
+  }
   assert.match(at599, /\.pf-agent \{ grid-template-columns: minmax\(0, 1fr\); align-items: start; \}/);
 });
 

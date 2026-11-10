@@ -149,7 +149,12 @@ test('real state(): closed and expanded linked reviewer agree with guide without
   assert.equal(row.linked.modelId, 'kimi-coding/k3');
   assert.equal(row.linked.thinking, 'max');
   const html = routeHtml(state);
-  assert.match(html, /pf-row-sum-m">k3 \/ max/);
+  const linkedPrimary = /class="pf-row-primary" title="([^"]*)">([^<]*)<\/span>/.exec(html);
+  assert.ok(linkedPrimary, 'linked primary summary remains separate from the backup summary');
+  assert.deepEqual(linkedPrimary.slice(1), [
+    row.linked.modelId + ' / ' + row.linked.thinking,
+    row.linked.modelId.split('/').slice(1).join('/') + ' / ' + row.linked.thinking,
+  ]);
   assert.match(html, /pf-row-sum-o">.*LINKED/);
   assert.equal(row.linked.EffectiveCategory, 'unspecified-high');
   assert.equal(row.linked.EffectiveAlias, 'kimi-max');
@@ -163,7 +168,12 @@ test('real state(): closed and expanded linked reviewer agree with guide without
   state = fx.store.state();
   row = rowOf(state, 'agents', 'omo-native-gate-reviewer');
   assert.equal(row.linked.active, false);
-  assert.match(routeHtml(state), /pf-row-sum-m">gpt-6.1-sol \/ high/);
+  const explicitPrimary = /class="pf-row-primary" title="([^"]*)">([^<]*)<\/span>/.exec(routeHtml(state));
+  assert.ok(explicitPrimary, 'explicit primary summary remains separate from the backup summary');
+  assert.deepEqual(explicitPrimary.slice(1), [
+    row.current.modelId + ' / ' + row.current.thinking,
+    row.current.modelId.split('/').slice(1).join('/') + ' / ' + row.current.thinking,
+  ]);
   assert.doesNotMatch(routeHtml(state), />LINKED</);
 
   delete layer.agents['omo-native-gate-reviewer'];

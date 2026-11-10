@@ -71,18 +71,22 @@ for (const [name, source, artifact, error] of failures) {
 test('the page ships only the verified body in the old classic-script position and leaves other chunks intact', () => {
   // Given the actual generated page and its readable CSS/other scripts.
   const html = pageHtml(BOARD, 7);
-  const names = ['icons', 'view', 'plan-view', 'roadmap-view', 'workers-view', 'blocks', 'convo-view', 'shell', 'profiles-view', 'alarm', 'annotate', 'cards-view', 'office-assets', 'office-model', 'office-view', 'page'];
+  const assembly = read('src/render.mjs');
+  const names = JSON.parse(/const PAGE_JS = (\[[^\n]+\]);/.exec(assembly)[1].replace(/'/g, '"'));
   // When extracting its ordinary inline scripts.
   const scripts = [...html.matchAll(/<script>\n([\s\S]*?)\n<\/script>/g)].map((match) => match[1]);
-  // Then only the profiles representation differs, at index 8, before page initialization.
+  // Then every declared chunk retains its position and bytes before the bootstrap.
+  assert.equal(names.filter(name => name === 'profiles-view.js').length, 1, 'the verified switcher chunk is mandatory');
+  assert.ok(names.indexOf('profiles-view.js') < names.indexOf('page.js'), 'the switcher publishes before page initialization');
   assert.equal(scripts.length, names.length + 1);
   for (const [index, name] of names.entries()) {
-    const expected = name === 'profiles-view' ? PAYLOAD :
-      CLASSIC_SCRIPTS.includes(name + '.js') ? readClassicScript(PAGE_DIR, name + '.js') : read('src/page/' + name + '.js');
+    const expected = name === 'profiles-view.js' ? PAYLOAD :
+      CLASSIC_SCRIPTS.includes(name) ? readClassicScript(PAGE_DIR, name) : read('src/page/' + name);
     assert.equal(scripts[index], expected.replace(/<(\/?script|!--)/gi, '\\x3C$1'), name);
   }
-  const styles = ['tokens', 'page', 'plan-view', 'roadmap-view', 'workers-view', 'alarm', 'shell', 'profiles-view', 'convo', 'blocks', 'annotate', 'cards-view', 'office'];
-  assert.equal(/<style>\n([\s\S]*?)\n<\/style>/.exec(html)[1], styles.map((name) => read('src/page/' + name + '.css').replace(/<\/style/gi, '<\\/style')).join('\n'));
+  assert.match(scripts.at(-1), /^document\.addEventListener\("DOMContentLoaded",/);
+  const styles = JSON.parse(/const PAGE_CSS = (\[[^\n]+\]);/.exec(assembly)[1].replace(/'/g, '"'));
+  assert.equal(/<style>\n([\s\S]*?)\n<\/style>/.exec(html)[1], styles.map((name) => read('src/page/' + name).replace(/<\/style/gi, '<\\/style')).join('\n'));
   assert.equal(html.includes(ARTIFACT.split('\n')[0]), false);
 });
 

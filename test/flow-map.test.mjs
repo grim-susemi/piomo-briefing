@@ -193,13 +193,29 @@ test('F8 checks disclosure, tab preparation, memory document order and only addi
   const { map: reference } = loadFlowMap();
   const preparation = { row: { expanded: true }, tab: { selected: true } };
   const order = ['route:categories/deep-low', 'route:categories/deep-high', 'route:categories/ultrabrain'];
+  // routeRow's primary triple precedes backupFields' direct triple and registered alias.
+  const backupWidth = 3 * 160 + 2 * 4;
+  const fields = [
+    ['route-provider', '1. 구독 서비스', 160],
+    ['route-model', '2. AI 모델', 160],
+    ['route-thinking', '3. 추론 강도', 160],
+    ['backup-provider', '백업 1. 서비스', 160],
+    ['backup-model', '백업 2. 모델', 160],
+    ['backup-thinking', '백업 3. 추론강도', 160],
+    ['route-backup', '기존 등록 별칭', backupWidth],
+  ].map(([name, caption, width]) => ({
+    name, caption, width, route: 'categories/deep-high', height: 28, topmost: true,
+  }));
   const grid = {
     tabs: Object.fromEntries(['primary', 'agents', 'categories', 'memory'].map(tab => [tab, {
       columns: 1, tracks: '500px', gap: 12, horizontalScroll: 0, maxRowHeight: 28,
       groups: [{ id: tab, span: '1 / -1', scroll: 'visible', rows: tab === 'categories' ? order : [] }],
     }])),
     expanded: [{ row: 'route:categories/deep-high', group: 'categories:deep', span: '1 / -1',
-      openGroups: ['categories:deep'], widths: [160, 160, 160], topmost: [true, true, true], horizontalScroll: 0 }],
+      openGroups: ['categories:deep'],
+      editor: { order: fields.map(field => field.name), primary: fields.slice(0, 3),
+        directBackup: fields.slice(3, 6), alias: fields.slice(6), backupWidth },
+      widths: [160, 160, 160], topmost: [true, true, true], horizontalScroll: 0 }],
     navigation: { closed: { dom: order, visual: order, keyboard: order }, search: { dom: order, visual: order, keyboard: order } },
     boundaries: [{ width: 611, columns: 1 }, { width: 612, columns: 2 }],
   };
@@ -231,7 +247,14 @@ test('F8 checks disclosure, tab preparation, memory document order and only addi
       [b.sections[k], b.sections[r]] = [b.sections[r], b.sections[k]];
     }],
     ['purpose-group-grid-navigation', (b) => { b.purposeGrid.boundaries[1].columns = 1; }],
-    ['purpose-group-grid-navigation', (b) => { b.purposeGrid.expanded[0].widths[2] += 2; }],
+    ['purpose-group-grid-navigation', (b) => { b.purposeGrid.expanded[0].editor.primary[2].width += 2; }],
+    ['purpose-group-grid-navigation', (b) => { b.purposeGrid.expanded[0].editor.directBackup[2].width += 2; }],
+    ['purpose-group-grid-navigation', (b) => { b.purposeGrid.expanded[0].editor.alias[0].width -= 2; }],
+    ...['primary', 'directBackup', 'alias'].map(group => ['purpose-group-grid-navigation', (b) => {
+      const editor = b.purposeGrid.expanded[0].editor;
+      const removed = editor[group].pop();
+      editor.order = editor.order.filter(name => name !== removed.name);
+    }]),
     ['purpose-group-grid-navigation', (b) => { b.purposeGrid.navigation.search.keyboard = order.slice().reverse(); }],
     ['purpose-group-grid-navigation', (b) => { b.purposeGrid.navigation.closed.visual = order.slice().reverse(); }],
     ['purpose-group-grid-navigation', (b) => { b.tasks.role[1].box.container = 'different-frame'; }],
