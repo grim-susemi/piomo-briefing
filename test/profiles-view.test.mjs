@@ -1680,8 +1680,10 @@ test('selected card: a green wash marks the shown card; a check glyph joins curr
   assert.match(/<article class="pf-card on">[\s\S]*?<\/article>/.exec(other)[0], /data-profile="experimental-custom"/, 'the wash follows the shown card');
   assert.equal((other.match(/pf-current/g) || []).length, 1, 'current stays on the active card only');
   const css = read('src/page/profiles-view.css');
-  assert.match(css, /\.pf-card\.on \{[^}]*background: var\(--c-green-tint\)/);
-  assert.match(css, /\.pf-card\.on \{[^}]*box-shadow: inset 0 0 0 1px var\(--c-green\)/);
+  assert.match(css, /\.pf-card\.on \{[^}]*border-top-color: var\(--c-line-card\)/);
+  assert.match(css, /\.pf-card\.on \{[^}]*background: var\(--fill-sel\)/);
+  assert.match(css, /\.pf-card\.on \{[^}]*box-shadow: none/);
+  assert.match(css, /\.pf-card\.on \.pf-card-name \{[^}]*font-weight: var\(--fw-semibold\)/);
 });
 
 // WinForms Get-MainComboCurrentValues for every card (PS:2489-2518, PS:6086-6094): default, then the saved override,

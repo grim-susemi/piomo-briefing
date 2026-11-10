@@ -88,6 +88,8 @@
   --c-line: light-dark(rgb(0 0 0 / 9%), rgb(255 255 255 / 8%));
   --c-line-strong: light-dark(rgb(0 0 0 / 14%), rgb(255 255 255 / 16%));
   --c-line-soft: light-dark(rgb(0 0 0 / 5%), rgb(255 255 255 / 4%));
+  --c-line-card: light-dark(rgb(0 0 0 / 30%), rgb(255 255 255 / 24%));
+  --c-band: light-dark(rgb(26 28 31 / 7%), rgb(230 230 233 / 9%));
   --fill-soft: light-dark(rgb(26 28 31 / 5%), rgb(230 230 233 / 5%));
   --fill-hover: light-dark(rgb(26 28 31 / 8%), rgb(230 230 233 / 8%));
   --fill-sel: light-dark(rgb(26 28 31 / 12%), rgb(230 230 233 / 12%));

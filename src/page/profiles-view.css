@@ -169,7 +169,7 @@
 .pf-sec {
   min-width: 0;
   border: 0;
-  border-top: var(--hair) solid var(--c-line);
+  border-top: 1px solid var(--c-line-card);
   border-radius: 0;
   background: transparent;
   box-shadow: none;
@@ -300,13 +300,13 @@
   gap: var(--sp-2) var(--sp-3);
   padding: var(--sp-1) var(--sp-2);
   border: 0;
-  border-top: var(--hair) solid var(--c-line);
+  border-top: 1px solid var(--c-line-strong);
   border-radius: 0;
   background: transparent;
 }
 .pf-agent-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); min-width: 0; }
-.pf-agent.pf-route { display: block; padding: 0; border: 0; border-radius: var(--r-md); }
-.pf-agent-editor { display: grid; gap: var(--sp-2); padding: var(--sp-2); min-width: 0; }
+.pf-agent.pf-route { display: block; padding: 0; border-radius: 0; }
+.pf-agent-editor { display: grid; gap: var(--sp-2); padding: var(--sp-2); min-width: 0; border-top: 1px solid var(--c-line-strong); background: var(--fill-soft); }
 .pf-agent-editor[hidden] { display: none; }
 .pf-routing-tools { padding: var(--sp-1) var(--sp-2) 0; min-width: 0; }
 .pf-routing-tools > label { display: block; font-size: var(--fs-sm); margin-bottom: 2px; }
@@ -473,12 +473,12 @@
 .pf-guide-label { display: none; }
 
 /* profiles: one card per row; the main button fills the card, 적용 sits beside it at the bottom right */
-.pf-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
+.pf-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; border-bottom: 1px solid var(--c-line-card); }
 .pf-card {
   position: relative;
   min-width: 0;
   border: 0;
-  border-top: var(--hair) solid var(--c-line);
+  border-top: 1px solid var(--c-line-card);
   border-radius: 0;
   background: transparent;
   box-shadow: none;
@@ -500,7 +500,7 @@
 button.pf-card-b:hover:not(:disabled) { background: var(--fill-hover); }
 button.pf-card-b:active:not(:disabled) { background: var(--fill-press); }
 button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
-.pf-card.on { border-top-color: var(--c-green); background: var(--c-green-tint); box-shadow: inset 0 0 0 1px var(--c-green); }
+.pf-card.on { border-top-color: var(--c-line-card); background: var(--fill-sel); box-shadow: none; }
 /* the right gutters keep text clear of 적용 중 (top) and 적용 (bottom); the cards header stays on one line so two cards
  * and their 적용 sit above the fold at 1180x700 */
 .pf-card:has(> .pf-current) .pf-card-top { padding-right: 64px; }
@@ -511,7 +511,8 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-current .ic { width: 12px; height: 12px; }
 .pf-card-top { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: var(--sp-1) var(--sp-2); }
 .pf-card-num { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); }
-.pf-card-name { font-weight: var(--fw-semibold); }
+.pf-card-name { font-weight: var(--fw-medium); }
+.pf-card.on .pf-card-name { font-weight: var(--fw-semibold); }
 .pf-card-en { color: var(--c-fg-3); font-size: var(--fs-xs); }
 .pf-card-tag { margin-top: 2px; }
 .pf-card-sum {
@@ -529,9 +530,11 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 
 /* routing: one WinForms row = the label line (recommendation chip kept) over three equal-width selects */
 .pf-group { display: grid; gap: var(--sp-1); min-width: 0; }
-.pf-group-h { display: flex; align-items: baseline; gap: var(--sp-2); margin: 0; color: var(--c-fg-2); font-size: var(--fs-sm); }
+.pf-group-h { display: flex; align-items: baseline; gap: var(--sp-2); margin: 0; padding: 4px 8px; border-radius: 6px; background: var(--c-band); color: var(--c-fg-2); font-size: var(--fs-sm); }
 .pf-routes { display: grid; gap: var(--sp-1); }
-.pf-route { display: grid; gap: 2px; min-width: 0; padding: var(--sp-1) var(--sp-2); border: 0; border-top: var(--hair) solid var(--c-line-soft); border-radius: 0; background: transparent; }
+.pf-route { display: grid; gap: 2px; min-width: 0; padding: var(--sp-1) var(--sp-2); border: 0; border-top: 1px solid var(--c-line-strong); border-radius: 0; background: transparent; }
+.pf-group-h + .pf-route, .pf-group-h + .pf-agent, .pf-group-h + .pf-mem-row { border-top: 0; }
+.pf-route > .pf-tri { padding: var(--sp-1) var(--sp-2); border-top: 1px solid var(--c-line-strong); background: var(--fill-soft); }
 .pf-route:has(> .pf-row-sum[aria-expanded="false"]),
 .pf-mem-row:has(> .pf-row-sum[aria-expanded="false"]) {
   padding: 0;
@@ -602,13 +605,13 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
   min-width: 0;
   padding: var(--sp-1) var(--sp-2);
   border: 0;
-  border-top: var(--hair) solid var(--c-line);
+  border-top: 1px solid var(--c-line-strong);
   border-radius: 0;
   background: transparent;
 }
 .pf-mem-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); }
 .pf-mem-cat { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); }
-.pf-mem-sels { display: grid; gap: var(--sp-1); }
+.pf-mem-sels { display: grid; gap: var(--sp-1); padding: var(--sp-1) var(--sp-2); border-top: 1px solid var(--c-line-strong); background: var(--fill-soft); }
 .pf-mem-row > .pf-note { margin: 0; }
 
 /* guide */
