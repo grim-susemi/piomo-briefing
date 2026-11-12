@@ -112,6 +112,7 @@
   --c-amber-line: light-dark(rgb(176 120 0 / 24%), rgb(227 185 85 / 22%));
   --c-amber-text: light-dark(#634100, #e8c06a); /* amber text on a tint that sits on a selected row or tab */
   --c-red: light-dark(#b3372e, #ef8379);
+  --c-red-text: light-dark(#9b2c25, #ff9f96); /* error text over selected editor fills */
   --c-red-tint: light-dark(rgb(179 55 46 / 9%), rgb(239 131 121 / 13%));
   --c-gray: light-dark(#5c6068, #a9adb5);
   --c-gray-tint: light-dark(rgb(26 28 31 / 6%), rgb(230 230 233 / 8%));

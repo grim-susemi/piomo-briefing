@@ -59,6 +59,7 @@
   var heldForBusy = false;
   var shell, main, sideList, rail, tabs, trimEl;
   var profilesCtl = null;
+  var profilesSaveAckPending = false;
   var regionHtml = Object.create(null), scrollMemory = Object.create(null), renderedKey = null;
   var cardsView = null, cardsEpoch = 0, cardsRead = 0, cardsOwnerAction = null;
   // A constant region keeps TASK14's own DOM, filters and expanded rows outside string-rendered agent updates.
@@ -711,6 +712,7 @@
       if (!cards && cardsView) { cardsView.destroy(); cardsView = null; cardsEpoch++; }
       var html;
       if (state.ui.view === 'profiles') {
+        if (profilesSaveAckPending) return;
         var ps = state.ui.profilesState || null;
         var pe = ps ? Object.assign({}, ps, { live: state.ui.live === true }) : { live: state.ui.live === true };
         html = g.BriefProfiles && typeof g.BriefProfiles.render === 'function'
@@ -1110,7 +1112,28 @@
       profilesCtl = g.BriefProfiles.createController({
         fetch: function (url, opts) { return g.fetch(url, opts); },
         token: function () { return boardToken(); },
-        onChange: function (snap) { state.ui.profilesState = snap; render(); }
+        onChange: function (snap, reason) {
+          state.ui.profilesState = snap;
+          if (state.ui.view === 'profiles' && profilesSaveAckPending) return;
+          if (reason === 'card-save-start' && state.ui.view === 'profiles' && g.BriefProfiles.acknowledgeCardSave(main, snap)) {
+            profilesSaveAckPending = true;
+            // The local DOM update must not reuse an identical pre-ACK region.
+            delete regionHtml.main;
+            // Present the local acknowledgment before the existing full profiles render.
+            g.requestAnimationFrame(function () {
+              g.requestAnimationFrame(function () {
+                profilesSaveAckPending = false;
+                if (state.ui.view === 'profiles') {
+                  render();
+                  // A save refused during the acknowledgment regains focus on the re-rendered button.
+                  if (typeof g.BriefProfiles.afterAckRender === 'function') g.BriefProfiles.afterAckRender();
+                }
+              });
+            });
+            return;
+          }
+          render();
+        }
       });
     }
     return profilesCtl;

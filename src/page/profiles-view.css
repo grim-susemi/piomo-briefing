@@ -36,6 +36,12 @@
 }
 .pf-title { margin: 0; font-size: var(--fs-2xl); line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pf-keep { white-space: nowrap; }
+.pf-card-sum .pf-keep, .pf-du .pf-keep {
+  display: inline-block;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .pf-active { color: var(--c-fg-2); font-size: var(--fs-sm); font-weight: var(--fw-medium); }
 
 .pf-tag {
@@ -217,7 +223,7 @@
 .pf-sel-t { color: var(--c-fg-3); font-size: var(--fs-2xs); font-weight: var(--fw-medium); }
 .pf-lbl { color: var(--c-fg-3); font-size: var(--fs-2xs); font-weight: var(--fw-medium); }
 .pf-field-grow { grid-column: span 2; }
-.pf select, .pf input[type="text"] {
+.pf select, .pf input[type="text"], .pf textarea {
   width: 100%;
   min-width: 0;
   height: var(--ctl-h);
@@ -232,6 +238,15 @@
   overflow: hidden;
   white-space: nowrap;
 }
+.pf textarea {
+  height: auto;
+  min-height: calc(var(--ctl-h) * 2);
+  padding: var(--sp-1) var(--sp-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  resize: vertical;
+}
 .pf select {
   background-color: var(--c-main);
   color-scheme: light dark;
@@ -240,7 +255,7 @@
   border-color: var(--c-line-strong);
   background: var(--pf-ctl-bg-hover);
 }
-.pf input[type="text"]:hover:not(:disabled) {
+.pf input[type="text"]:hover:not(:disabled), .pf textarea:hover:not(:disabled) {
   border-color: var(--c-line-strong);
   background: var(--fill-hover);
 }
@@ -251,7 +266,7 @@
 .pf select option:disabled {
   color: var(--c-fg-3);
 }
-.pf select:disabled, .pf input:disabled {
+.pf select:disabled, .pf input:disabled, .pf textarea:disabled {
   color: var(--c-fg-3);
   background: var(--c-sunk);
   border-color: var(--ctl-edge);
@@ -259,7 +274,7 @@
   opacity: 1;
   cursor: not-allowed;
 }
-.pf select:focus-visible, .pf input:focus-visible, .pf button:focus-visible, .pf summary:focus-visible,
+.pf select:focus-visible, .pf input:focus-visible, .pf textarea:focus-visible, .pf button:focus-visible, .pf summary:focus-visible,
 .pf #pf-focus-status:focus-visible {
   outline: 2px solid var(--c-accent);
   outline-offset: 2px;
@@ -297,6 +312,7 @@
 .pf-btn-primary:disabled { border-color: var(--ctl-edge); background: var(--c-sunk); color: var(--c-fg-3); opacity: 1; }
 .pf-btn-primary { border-color: var(--c-primary); background: var(--c-primary); color: var(--c-on-primary); }
 .pf-btn-primary:hover:not(:disabled) { background: var(--c-fg-2); border-color: transparent; }
+.pf-btn-primary:active:not(:disabled) { background: var(--c-fg-3); border-color: transparent; color: var(--c-on-primary); }
 .pf-btn-ghost { background: transparent; }
 .pf-btn-icon { width: var(--ctl-h); min-width: var(--ctl-h); min-height: var(--ctl-h); flex: none; padding: 0; }
 
@@ -333,6 +349,7 @@
   font: inherit;
   font-size: var(--fs-sm);
 }
+.pf-routing-tools > input::placeholder { color: var(--c-fg-3); opacity: 1; }
 .pf-routing-tabs { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-1); }
 .pf-routing-tabs [role="tab"] { cursor: pointer; color: inherit; background: transparent; border: 1px solid var(--c-line); border-radius: 4px; padding: 5px 8px; }
 .pf-routing-tabs [aria-selected="true"] { background: var(--fill-sel); font-weight: var(--fw-medium); border-color: currentColor; }
@@ -372,16 +389,17 @@
   background: transparent;
   box-shadow: none;
 }
-.pf-status-l, .pf-status-r { display: grid; gap: 2px; min-width: 0; }
+.pf-status-l, .pf-status-r { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; min-width: 0; }
 .pf-status-m { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
 .pf-status-r { margin-left: auto; justify-items: end; }
 .pf-status-c { color: var(--c-fg-3); font-size: var(--fs-2xs); font-weight: var(--fw-semibold); }
-.pf-status-v { font-size: var(--fs-lg); line-height: 1.3; }
+.pf-status-v { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-lg); line-height: 1.3; }
 .pf-title-n { color: var(--c-amber); }
 .pf-panes { display: grid; grid-template-columns: clamp(300px, 36%, 620px) minmax(0, 1fr); gap: var(--sp-3); align-items: start; min-width: 0; }
 /* the WinForms detail pane (PS:7283) scrolls on its own; in the two-pane layout it fills the panes' row (below) */
 .pf-detail {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-2);
   min-width: 0;
   padding: var(--sp-1) 0 var(--sp-2);
@@ -415,8 +433,37 @@
   .pf-card-en { display: none; }
   .pf-card-main, .pf-card-svc { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 }
-.pf-dt { margin: 0; font-size: 18px; line-height: 1.3; }
-.pf-du { margin: 0; color: var(--c-fg-2); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: break-word; }
+.pf-dt { margin: 0; min-width: 0; overflow-wrap: anywhere; font-size: 18px; line-height: 1.3; }
+@media (min-width: 600px) {
+  .pf[data-readonly="true"] .pf-dt { word-break: normal; }
+}
+@media (min-width: 900px) and (max-width: 1023px) {
+  .pf[data-readonly="true"] .pf-panes { grid-template-columns: clamp(272px, 36%, 620px) minmax(0, 1fr); }
+}
+/* Writable titles use the full card width; actions retain their separate hit boxes. */
+.pf[data-readonly="false"] .pf-card-name { grid-column: 1 / -1; grid-row: 2; }
+.pf[data-readonly="false"] .pf-card-sel { grid-column: 2; grid-row: 1; justify-self: start; }
+@media (min-width: 600px) {
+  .pf[data-readonly="false"] .pf-dt { word-break: normal; }
+  .pf[data-readonly="false"] .pf-card:has(> .pf-card-apply) {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-rows: auto auto;
+    padding-right: 0;
+  }
+  .pf[data-readonly="false"] .pf-card > .pf-card-b { grid-column: 1 / -1; grid-row: 1; }
+  .pf[data-readonly="false"] .pf-card > .pf-current {
+    grid-column: 1; grid-row: 2; justify-self: start; align-self: center; margin: 0 0 var(--sp-1) var(--sp-2);
+  }
+  .pf[data-readonly="false"] .pf-card-edit { grid-column: 2; grid-row: 2; margin-bottom: var(--sp-1); }
+  .pf[data-readonly="false"] .pf-card-apply { grid-column: 3; grid-row: 2; }
+}
+@media (min-width: 900px) and (max-width: 1023px) {
+  .pf[data-readonly="false"] .pf-panes { grid-template-columns: clamp(272px, 36%, 620px) minmax(0, 1fr); }
+}
+@media (max-width: 359px) {
+  .pf[data-readonly="false"] { padding-inline: var(--sp-1); }
+}
+.pf-du { margin: 0; min-width: 0; color: var(--c-fg-2); font-size: var(--fs-sm); word-break: keep-all; overflow-wrap: anywhere; }
 .pf-cap { margin: 0; display: flex; align-items: baseline; gap: var(--sp-2); color: var(--c-fg-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
 /* the WinForms routing box scrolls on its own and ends where the detail pane's view ends (the pane less its title, usage
  * and caption: 84 px at 1180x700, plus 4 px to spare), whatever the message strip below takes, so a role row is never
@@ -557,10 +604,12 @@
 .pf-guide-fold > summary { cursor: pointer; min-height: var(--ctl-h); display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--c-fg-2); font-size: var(--fs-xs); }
 .pf-guide-label { display: none; }
 
-/* profiles: one card per row; the main button fills the card, 적용 sits beside it at the bottom right */
+/* profiles: one card per row; the main button fills column 1, 편집 and 적용 sit in column 2 with disjoint hit boxes */
 .pf-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; border-bottom: 1px solid var(--c-line-card); }
 .pf-card {
   position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   border: 0;
   border-top: 1px solid var(--c-line-card);
@@ -568,8 +617,16 @@
   background: transparent;
   box-shadow: none;
 }
+.pf-card:has(> .pf-card-apply) {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 1fr auto auto;
+  column-gap: var(--sp-2);
+  row-gap: var(--sp-1);
+  padding-right: var(--sp-2);
+}
 .pf-card-b {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1px;
   width: 100%;
   min-width: 0;
@@ -582,35 +639,98 @@
   font: inherit;
   text-align: left;
 }
+.pf-card:has(> .pf-card-apply) > .pf-card-b {
+  grid-column: 1;
+  grid-row: 1 / span 3;
+}
 button.pf-card-b:hover:not(:disabled) { background: var(--fill-hover); }
 button.pf-card-b:active:not(:disabled) { background: var(--fill-press); }
 button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
 .pf-card.on { border-top-color: var(--c-line-card); background: var(--fill-sel); box-shadow: none; }
-/* the right gutters keep text clear of 적용 중 (top) and 적용 (bottom); the cards header stays on one line so two cards
- * and their 적용 sit above the fold at 1180x700 */
-.pf-card:has(> .pf-current) .pf-card-top { padding-right: 64px; }
-.pf-card-main, .pf-card-svc { padding-right: 48px; }
+/* Read-only card metadata keeps its own row so the title can use the full width. */
+.pf-card:not(:has(> .pf-card-apply)):has(> .pf-current) .pf-card-top { padding-right: 0; }
+.pf-card:not(:has(> .pf-card-apply)) .pf-card-name {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+.pf-card:not(:has(> .pf-card-apply)) .pf-card-sel {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: start;
+}
 .pf-card > .pf-current { position: absolute; top: var(--sp-2); right: var(--sp-3); }
-.pf-card-apply { position: absolute; right: var(--sp-3); bottom: var(--sp-2); padding: 2px var(--sp-2); }
+.pf-card:has(> .pf-card-apply) > .pf-current {
+  position: static;
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  align-self: start;
+  margin-top: var(--sp-1);
+}
+.pf-card-edit {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+  align-self: end;
+  min-width: var(--ctl-h);
+  padding: 2px var(--sp-2);
+}
+.pf-card-apply {
+  grid-column: 2;
+  grid-row: 3;
+  justify-self: end;
+  align-self: end;
+  min-width: var(--ctl-h);
+  margin-bottom: var(--sp-1);
+  padding: 2px var(--sp-2);
+}
+.pf-card-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-2);
+  border-top: 1px solid var(--c-line-strong);
+  background: var(--fill-soft);
+}
+.pf-card-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.pf-card-sum-f { grid-column: 1 / -1; }
+.pf-card-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.pf-card-msg { margin: 0; }
+.pf-new-profile { display: grid; gap: var(--sp-2); margin-top: var(--sp-2); min-width: 0; }
+.pf-new-profile > .pf-new-open { justify-self: start; }
+.pf-new-profile .pf-note { margin: 0; }
+.pf-card-msg.pf-err { color: var(--c-red-text); }
 #pf-sec-profiles .pf-sec-t { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); }
 .pf-current .ic { width: 12px; height: 12px; }
-.pf-card-top { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: var(--sp-1) var(--sp-2); }
+.pf-card-top { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: var(--sp-1) var(--sp-2); min-width: 0; }
+.pf-card-top:has(> .pf-card-sel) { grid-template-columns: auto minmax(0, 1fr) auto; }
+.pf-card-sel { display: inline-flex; align-items: center; color: var(--c-fg-2); }
 .pf-card-num { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); }
-.pf-card-name { font-weight: var(--fw-medium); }
+.pf-card-name { min-width: 0; overflow-wrap: anywhere; font-weight: var(--fw-medium); }
 .pf-card.on .pf-card-name { font-weight: var(--fw-semibold); }
-.pf-card-en { color: var(--c-fg-3); font-size: var(--fs-xs); }
-.pf-card-tag { margin-top: 2px; }
+.pf-card-en { min-width: 0; overflow-wrap: anywhere; color: var(--c-fg-3); font-size: var(--fs-xs); }
+.pf-card-tag { min-width: 0; margin-top: 2px; }
+.pf-card-tag .pf-tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .pf-card-sum {
   display: block;
+  min-width: 0;
   margin-top: 2px;
   color: var(--c-fg-2);
   font-size: var(--fs-sm);
   word-break: keep-all;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
 }
 .pf-card-main, .pf-card-svc { color: var(--c-fg-3); font-family: var(--font-mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
 .pf-card-main { margin-top: var(--sp-1); }
 .pf-card-main.pf-card-off { color: var(--c-amber); }
+.pf-card.on .pf-card-main.pf-card-off { color: var(--c-amber-text); }
 .pf-card-flag .ic { width: 1em; height: 1em; vertical-align: -.1em; }
 
 /* routing: one WinForms row = the label line (recommendation chip kept) over three equal-width selects */
@@ -882,10 +1002,26 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
   .pf-sec-b { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
 }
 @media (max-width: 599px) {
-  .pf-agent-fields { grid-template-columns: minmax(0, 1fr); }
+  .pf-agent-fields, .pf-card-fields { grid-template-columns: minmax(0, 1fr); }
   /* Phone visual-qa D1: the shell's 44 px target (shell.css 322-328, tokens.css --hit).
    * Desktop keeps the 28 px board density in --ctl-h; only the phone raises the local token. */
   .pf { --ctl-h: var(--hit); }
+  #pf-sec-profiles > .pf-sec-b { padding-inline: 0; }
+  .pf-card:has(> .pf-card-apply) {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-rows: auto auto;
+    row-gap: var(--sp-2);
+    padding-right: 0;
+  }
+  .pf-card > .pf-card-b { padding-inline: var(--sp-1); }
+  .pf-card:has(> .pf-card-apply) > .pf-card-b { grid-column: 1 / -1; grid-row: 1; }
+  .pf-card:not(:has(> .pf-card-apply)):has(> .pf-current) .pf-card-top { padding-right: 0; }
+  .pf-card > .pf-current { position: static; grid-column: 1; grid-row: 2; justify-self: start; align-self: center; margin: 0 0 var(--sp-1) var(--sp-1); }
+  .pf-card:has(> .pf-card-apply) > .pf-current { grid-column: 1; grid-row: 2; justify-self: start; align-self: center; margin: 0; }
+  .pf-card-edit { grid-column: 2; grid-row: 2; margin-bottom: var(--sp-1); }
+  .pf-card-apply { grid-column: 3; grid-row: 2; }
+  .pf-card-b, .pf-dt { scroll-margin-top: calc(var(--bar-h) + var(--sp-6)); }
+  .pf-status-v, .pf-dt, .pf-card-name { word-break: break-all; }
   .pf-row-sum { flex-wrap: wrap; height: auto; max-height: none; }
   .pf-row-sum-o { flex: 1 1 100%; flex-wrap: wrap; max-width: 100%; }
   .pf-row-sum-o > .pf-chip { flex-shrink: 0; max-width: 100%; }
@@ -916,7 +1052,7 @@ button.pf-card-b:disabled { cursor: not-allowed; color: var(--c-fg-3); }
  * Keep the repair on this page so the denser shared board typography is unchanged. */
 @media (min-width: 600px) {
   .pf-sub, .pf-sec-s, .pf-card-sum, .pf-tray-next, .pf-ro-val, .pf-active,
-  .pf-empty-state .pf-empty { font-size: 14px; }
+  .pf-empty-state .pf-empty, .pf-card-msg { font-size: 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .pf-btn { transition: none; }

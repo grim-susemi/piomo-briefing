@@ -119,7 +119,16 @@ test('separators, neutral shown-card styling, flatness and actual pane top with 
       }
       if (c.mobile) assert.ok(Math.min(...closedProbe.collapsedHeights) >= 44, `${c.label}: phone collapsed row height >= 44px`);
       else {
-        assert.ok(Math.max(...closedProbe.collapsedHeights) <= 32, `${c.label}: desktop collapsed row height <= 32px`);
+        // Plan todo 8: a role list at least 600 px wide keeps one 32 px line. Below 600 px, owner decision #1529 A: the row
+        // wraps to its content and role, model and status are never clipped (no height cap).
+        if (closedProbe.rolesWidth !== null && closedProbe.rolesWidth < 600) assert.deepEqual(closedProbe.narrowClipped, [], `${c.label}: narrow role list clips no role, model or status cell`);
+        else {
+          // At 600 px and wider a row whose cells fit one line stays <= 32 px; a row whose unclipped cells cannot fit
+          // (#1529 A: no truncation) may wrap, but still clips nothing.
+          assert.deepEqual(closedProbe.narrowClipped, [], `${c.label}: no role, model or status cell is clipped`);
+          const tooTall = closedProbe.rowFits.filter((r) => r.fits && r.h > 32);
+          assert.deepEqual(tooTall, [], `${c.label}: rows that fit one line stay <= 32px`);
+        }
         if (closedProbe.webHeight !== null) {
           assert.equal(closedProbe.panesTop, closedProbe.webTop + closedProbe.webHeight + closedProbe.webGap,
             `${c.label}: the allowance contains only the adjacent Web panel and its following gap`);
@@ -175,6 +184,18 @@ test('S6-SCALE: DPR 1.5 density emulation renders >= 1 physical-pixel thickness 
           { kind: 'sec-top', selector: '.pf-sec.pf-web', edge: 'top' },
           { kind: 'card-top', selector: 'article.pf-card:has([data-flow="card:kimi-deepseek"])', edge: 'top' },
           { kind: 'card-on-top', selector: 'article.pf-card.on', edge: 'top' },
+        ],
+      },
+      {
+        // The role rows sit below the card wall at 1440x900, so they get their own frame scrolled to the open row.
+        frameId: 'agents-rows',
+        prepare: `(() => {
+          document.querySelector('[role="tab"][data-tab="agents"]').click();
+          const row = document.querySelector('[data-pf="row-toggle"][data-row="route:agents/explore"]');
+          if (row.getAttribute('aria-expanded') !== 'true') row.click();
+          row.closest('[data-pf-route]').scrollIntoView({ block: 'start' });
+        })()`,
+        targets: [
           { kind: 'route-divider', selector: '[data-pf-route="agents/librarian"]', edge: 'top' },
           { kind: 'route-editor-top', selector: '#pf-route-agents-explore-editor', edge: 'top' },
         ],
@@ -189,6 +210,18 @@ test('S6-SCALE: DPR 1.5 density emulation renders >= 1 physical-pixel thickness 
         })()`,
         targets: [
           { kind: 'cards-bottom', selector: '.pf-cards', edge: 'bottom' },
+        ],
+      },
+      {
+        // The open Sisyphus editor and the next agent row are not on screen with the card wall's bottom edge.
+        frameId: 'primary-rows',
+        prepare: `(() => {
+          document.querySelector('[role="tab"][data-tab="primary"]').click();
+          const row = document.querySelector('[data-pf="row-toggle"][data-row="agent:sisyphus"]');
+          if (row.getAttribute('aria-expanded') !== 'true') row.click();
+          row.closest('[data-pf-agent]').scrollIntoView({ block: 'start' });
+        })()`,
+        targets: [
           { kind: 'agent-divider', selector: '[data-pf-agent="hephaestus"]', edge: 'top' },
           { kind: 'agent-editor-top', selector: '#pf-agent-sisyphus-editor', edge: 'top' },
         ],

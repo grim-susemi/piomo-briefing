@@ -64,6 +64,19 @@ export const SEPARATION_PROBE_SCRIPT = `(() => {
   }
   const collapsedHeights = [...document.querySelectorAll('.pf-tab-panel:not([hidden]) .pf-row-sum[aria-expanded="false"]')]
     .map((s) => Math.round(s.parentElement.getBoundingClientRect().height * 100) / 100);
+  const rolesEl = document.querySelector('.pf-tab-panel:not([hidden]) .pf-roles') || document.querySelector('.pf-roles');
+  const rolesWidth = rolesEl ? Math.round(rolesEl.getBoundingClientRect().width) : null;
+  const tallest = [...document.querySelectorAll('.pf-tab-panel:not([hidden]) .pf-row-sum[aria-expanded="false"]')]
+    .map((s) => ({ h: Math.round(s.parentElement.getBoundingClientRect().height), row: s.getAttribute('data-row'), parent: s.parentElement.className, cells: [...s.children].map((k) => k.className.split(' ')[0] + ':' + Math.round(k.getBoundingClientRect().height) + 'x' + Math.round(k.getBoundingClientRect().width) + '[' + k.textContent.slice(0, 80) + ']').join(' ') }))
+    .sort((a, b) => b.h - a.h).slice(0, 3);
+  const narrowClipped = [...document.querySelectorAll('.pf-tab-panel:not([hidden]) .pf-row-sum[aria-expanded="false"] > :is(.pf-row-sum-r, .pf-row-sum-m, .pf-row-sum-o)')]
+    .filter((k) => k.scrollWidth > k.clientWidth + 1).map((k) => k.className.split(' ')[0] + ':' + k.textContent.slice(0, 40));
+  const rowFits = [...document.querySelectorAll('.pf-tab-panel:not([hidden]) .pf-row-sum[aria-expanded="false"]')].map((s) => {
+    const cs = getComputedStyle(s), kids = [...s.children];
+    const gap = parseFloat(cs.columnGap) || 0, inner = s.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+    const need = kids.reduce((n, k) => n + k.scrollWidth, 0) + gap * Math.max(0, kids.length - 1);
+    return { row: s.getAttribute('data-row'), h: Math.round(s.parentElement.getBoundingClientRect().height), fits: need <= inner, need: Math.round(need), inner: Math.round(inner) };
+  });
   const openEditor = document.querySelector('.pf-tab-panel:not([hidden]) .pf-route > .pf-tri:not([hidden]), .pf-tab-panel:not([hidden]) .pf-agent-editor:not([hidden]), .pf-tab-panel:not([hidden]) .pf-mem-sels:not([hidden])');
   const openEditorStyle = openEditor ? (() => {
     const cs = getComputedStyle(openEditor), bg = parse(cs.backgroundColor);
@@ -93,7 +106,7 @@ export const SEPARATION_PROBE_SCRIPT = `(() => {
     horizontalOverflow: document.documentElement.scrollWidth > innerWidth || main.scrollWidth > main.clientWidth,
     titleRelBottom: Math.round(titleRect.bottom - mainRect.top), cardsBottomBorder, cardGaps, cardTops,
     greenTokens: { tint: currentCs.backgroundColor, fg: currentCs.color }, currentCount: document.querySelectorAll('.pf-current').length,
-    groupHeaders, firstAfterHeaderBorders, neighborRouteDividers, collapsedHeights, openEditorStyle, nonFlat,
+    groupHeaders, firstAfterHeaderBorders, neighborRouteDividers, collapsedHeights, rolesWidth, tallest, narrowClipped, rowFits, openEditorStyle, nonFlat,
   };
 })()`;
 
@@ -121,6 +134,7 @@ export function buildRasterMeasureExpression(pngBase64, targets) {
       const halfWindow = 8;
       const yStart = Math.max(0, pxCenterY - halfWindow);
       const yEnd = Math.min(canvas.height - 1, pxCenterY + halfWindow);
+      if (yEnd < yStart) throw new Error('raster target outside the screenshot: ' + t.kind + ' ' + t.selector + ' cssY=' + Math.round(cssY));
       const strip = ctx.getImageData(pxX, yStart, 1, yEnd - yStart + 1).data;
       const samples = [];
       for (let i = 0; i <= yEnd - yStart; i++) {

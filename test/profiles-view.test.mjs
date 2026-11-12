@@ -323,9 +323,11 @@ test('primary staged summaries: Sisyphus and Atlas retain edits through close, r
     const staged = plain(e.page.state.ui.profilesState.pending);
     e.fire(summary(), 'click');
     assert.equal(summary().getAttribute('aria-expanded'), 'false');
-    assert.match(summary().querySelector('.pf-row-sum-m').textContent, /anthropic · claude-opus-5-5 \/ medium/);
+    // Plan todo 7: the closed-row summary drops the provider from a listed model's label.
+    assert.match(summary().querySelector('.pf-row-sum-m').textContent, /claude-opus-5-5 \/ medium/);
     assert.match(summary().querySelector('.pf-row-sum-o').textContent, /pending/);
-    assert.match(summary().querySelector('[data-pf-saved]').textContent, /saved-provider · saved-model \/ low.*Memory/);
+    // Plan todo 7 rule 4: a saved value outside the list shows its full original id.
+    assert.match(summary().querySelector('[data-pf-saved]').textContent, /saved-provider\/saved-model \/ low.*Memory/);
     e.fire(summary(), 'click');
     assert.equal(summary().getAttribute('aria-expanded'), 'true');
     assert.equal(selectedValueOf(e.byId.main.querySelector(id === 'sisyphus' ? '#pf-sisyphus-model' : '#pf-agent-pin-atlas')),
@@ -334,7 +336,8 @@ test('primary staged summaries: Sisyphus and Atlas retain edits through close, r
     e.fire(e.byId.main.querySelector('[data-pf="clear"]'), 'click');
     e.fire(e.byId.main.querySelector('[data-pf="clear-confirm"]'), 'click');
     if (summary().getAttribute('aria-expanded') === 'true') e.fire(summary(), 'click');
-    assert.match(summary().querySelector('.pf-row-sum-m').textContent, /saved-provider · saved-model \/ low/);
+    // Plan todo 7 rule 4: a saved value outside the list shows its full original id.
+    assert.match(summary().querySelector('.pf-row-sum-m').textContent, /saved-provider\/saved-model \/ low/);
     assert.doesNotMatch(summary().querySelector('.pf-row-sum-o').textContent, /pending/);
     assert.deepEqual(plain(e.page.state.ui.profilesState.pending), []);
     assert.deepEqual(e.errors, []);
@@ -391,7 +394,8 @@ test('primary rows: store origins and unavailable reasons remain explicit, and t
   for (const [id, label] of [['sisyphus', 'Main'], ['hephaestus', 'Pin'], ['prometheus', 'Memory'], ['atlas', 'Lane']]) {
     const row = new RegExp('data-pf-agent="' + id + '"[\\s\\S]*?<\\/button>').exec(html)[0];
     assert.match(row, new RegExp('>' + label + '<'));
-    assert.match(row, /pf-row-sum-m">fixture · /);
+    // Plan todo 7 rule 4: an unlisted effective model keeps its full id.
+    assert.match(row, /pf-row-sum-m">fixture\//);
   }
   assert.match(html, /pf-c-amber"[^>]*>thinking-mismatch · settings: high \/ sidecar: max/);
   state.mainSettingsThinking = 'low';
@@ -736,7 +740,8 @@ test('phone: the view raises its local control token to the 44 px --hit target',
   const phone = css.slice(css.indexOf('@media (max-width: 599px)'));
   assert.match(phone, /\.pf\s*\{\s*--ctl-h:\s*var\(--hit\);\s*\}/);
   assert.match(phone, /\.pf-nav-b,\s*\.pf-diff summary\s*\{\s*min-height:\s*var\(--hit\);\s*\}/);
-  assert.match(css, /\.pf select, \.pf input\[type="text"\] \{[\s\S]*?height: var\(--ctl-h\);/);
+  // Plan todo 15 adds the card summary textarea to the same control rules.
+  assert.match(css, /\.pf select, \.pf input\[type="text"\](?:, \.pf textarea)? \{[\s\S]*?height: var\(--ctl-h\);/);
   assert.match(css, /\.pf-btn \{[\s\S]*?min-height: var\(--ctl-h\);/);
   const touch = css.slice(css.indexOf('@media (max-width: 899px)'), css.indexOf('@media (max-width: 760px)'));
   assert.match(touch, /\.pf-routing-tools > input,\s*\.pf-routing-tabs \[role="tab"\] \{ min-height: var\(--hit\); \}/);
@@ -927,7 +932,7 @@ test('disabled secondary buttons keep their contrast without opacity', () => {
 
 test('disabled selects and secondary buttons set colour, background and border without UA dimming', () => {
   const css = read('src/page/profiles-view.css');
-  const select = /\.pf select:disabled, \.pf input:disabled \{([^}]*)\}/.exec(css)[1];
+  const select = /\.pf select:disabled, \.pf input:disabled(?:, \.pf textarea:disabled)? \{([^}]*)\}/.exec(css)[1];
   assert.match(select, /color:\s*var\(--c-fg-3\)/);
   assert.match(select, /background:\s*var\(--c-sunk\)/);
   assert.match(select, /border-color:\s*var\(--ctl-edge\)/);
@@ -2082,13 +2087,14 @@ test('memory rows: a served model without a catalog alias is offered from the st
     assert.deepEqual(services.map((o) => [o.value, o.disabled]), [['openai', false], ['opencode', false]], key);
   }
   const models = optionsOf(html, 'data-flow="memory:kibitzer:model"').filter((o) => o.value);
-  assert.deepEqual(models.map((o) => [o.value, o.text, o.disabled, o.selected]), [['openai/gpt-6-sol', 'gpt-6-sol · openai/gpt-6-sol', false, true]]);
+  assert.deepEqual(models.map((o) => [o.value, o.text, o.disabled, o.selected]), [['openai/gpt-6-sol', 'gpt-6-sol', false, true]]); // plan todo 7: short label, value unchanged
   assert.deepEqual(optionsOf(html, 'data-flow="memory:kibitzer:effort"').map((o) => o.value), ['', 'low', 'high']);
-  // A catalog model keeps its alias label, and the unserved one stays listed but disabled.
+  // Plan todo 7: memory options show the short model label (the alias form is only for the role alias select);
+  // the unserved one stays listed but disabled with its reason.
   const opencode = optionsOf(html, 'data-flow="memory:reflection:model"').filter((o) => o.value);
   assert.deepEqual(opencode.map((o) => [o.value, o.text, o.disabled]), [
-    ['opencode/served-pro', 'oc-pro · opencode/served-pro', false],
-    ['opencode/gemini-4-argon', 'oc-argon · opencode/gemini-4-argon · UNSUPPORTED_MODEL', true]
+    ['opencode/served-pro', 'served-pro', false],
+    ['opencode/gemini-4-argon', 'gemini-4-argon · UNSUPPORTED_MODEL', true]
   ]);
 });
 
@@ -2958,7 +2964,9 @@ test('layout: card markup has no nested interactive elements', () => {
     assert.equal((html.match(/<article class="pf-card(?: on)?">/g) || []).length, 6);
   }
   for (const [, body] of P.render(STATE, live()).matchAll(/<article class="pf-card(?: on)?">([\s\S]*?)<\/article>/g)) {
-    assert.equal((body.match(/<button\b/g) || []).length, 2, 'a card holds its main button and its own 적용');
+    // Plan todo 15: a writable card adds its own text 편집 button beside 적용.
+    assert.equal((body.match(/<button\b/g) || []).length, 3, 'a card holds its main button, its own 적용 and its own 편집');
+    assert.match(body, /<button[^>]*data-pf="edit-profile-card"[^>]*>편집<\/button>/);
     assert.match(body, /<button type="button" class="pf-card-b" data-pf="select-profile"[^>]*aria-pressed="(?:true|false)"/);
     assert.match(body, /<button[^>]*data-pf="apply-card"[^>]*>적용<\/button>/);
   }

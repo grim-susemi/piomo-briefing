@@ -15,8 +15,16 @@ const OUTPUT = join(ROOT, 'src', 'page', 'generated', 'profiles-view.min.js');
 // 2026-11-10 (todo8): move routeRow backup summary into sibling pf-row-sum-b span; markup-only change, classic semantics unchanged.
 // 2026-11-10 (todo9): export pure guideRowModel/guideRowHtml on BriefProfiles and add controller guideFilter/guideOpen state; no top-level bindings, eval or strictness-sensitive syntax.
 // 2026-11-10 (todo9 attempt2): restore explicit none empty-value semantics via guideCode/guideDash; classic semantics unchanged.
-const REVIEWED_SOURCE = '57369fdbaffedf0b1a0c04e1551a7c208d24b231658d3993d06345ac4cb959bc';
-const REVIEWED_PAYLOAD = '5199a3410d47f4384a195e7e96a3394fb111736da1f5ccdd4793e2b775849994';
+// 2026-11-10 (todo15): add inline card text editor and standalone setProfileCard lifecycle inside BriefProfiles IIFE; no new top-level bindings, eval or strictness-sensitive syntax.
+// 2026-11-11 (todo15 recovery): preserve the inline draft while the existing guide opens; classic semantics unchanged.
+// 2026-11-11 (todo15 correction2): remove Alt+Tab interception and disable busy edit triggers; classic scope unchanged.
+// 2026-11-11 (todo15 round3): only the rendered edited card's Apply loses primary styling; handlers and classic scope unchanged.
+// 2026-11-11 (todo15 round4): add selected-card chevron span inside profileCards; markup-only change, classic scope and strictness-sensitive syntax unchanged.
+// 2026-11-12 (G5/1502): optional save-start notification and local DOM ACK inside the IIFE; classic this/strictness unchanged.
+// 2026-11-13 (G5/1508): ACK disables every busy-gated control and a refused save refocuses its button; IIFE-local var and closure only, classic this/strictness unchanged.
+// 2026-11-13 (task16): new-profile form, controller newProfile state and standalone addProfile send inside the IIFE; no new top-level bindings, classic this/strictness unchanged.
+const REVIEWED_SOURCE = '8a7555bddcbd6819febf95c2eec1b0b484226384f195a00b5be605a18ec652b4';
+const REVIEWED_PAYLOAD = '4dc32c950596f5b4ae6c70af3628c035161e300b2b83856f4960ca63209fb127';
 
 try {
   if (typeof Bun === 'undefined' || Bun.version !== '1.4.0') throw new Error('regeneration requires Bun 1.4.0');

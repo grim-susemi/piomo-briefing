@@ -28,6 +28,19 @@
     UNSUPPORTED_MODEL: '설치 엔진이 이 모델을 지원하지 않아 적용하지 않았으니 다른 모델을 고르십시오.',
     ADVISOR_FAMILY: '자문가는 자기 계열(Claude 또는 GPT) 모델만 쓸 수 있어 저장하지 않았으니 같은 계열 모델을 고르십시오.'
   };
+  var CARD_CONFLICT_TEXT = '다른 곳에서 설정이 바뀌어 충돌했습니다. 새로고침 후 다시 저장해 주십시오.';
+  var CARD_BUSY_TEXT = '다른 작업이 진행 중입니다. 잠시 기다려 주십시오.';
+  var CARD_SAVING_TEXT = '카드 글을 저장하는 중…';
+  var CARD_REASON_TEXT = {
+    EMPTY: '이름이 비어 있습니다. 이름을 입력해 주십시오.',
+    TOO_LONG: '글자 수 제한(이름 40자, 꼬리표 24자, 설명 160자)을 초과했습니다.',
+    CONTROL_CHAR: '제어 문자는 사용할 수 없습니다.',
+    NOT_STRING: '문자열로 입력해 주십시오.',
+    NULL_NOT_ALLOWED: '사용자 프로필은 기본 글로 되돌릴 수 없습니다.',
+    UNKNOWN_PROFILE: '대상에 없는 프로필이라 찾을 수 없습니다.',
+    BAD_PROFILE_CARDS: '프로필 카드 파일이 손상되어 저장할 수 없습니다.',
+    STALE: CARD_CONFLICT_TEXT
+  };
   var AGENTS = [
     ['sisyphus', 'Sisyphus'],
     ['hephaestus', 'Hephaestus'],
@@ -824,6 +837,26 @@
     if (obj(view.inventory) && view.inventory.stale === true) return true;
     return false;
   }
+  function cardWritable(view) {
+    var pc = obj(view && view.profileCards);
+    return !pc || pc.writable !== false;
+  }
+  function cardReadOnlyReason(view) {
+    var pc = obj(view && view.profileCards);
+    var reason = str(pc && pc.reason);
+    return '프로필 카드 파일이 손상되어 카드 글 편집은 읽기 전용입니다.' + (reason ? ' (' + reason + ')' : '');
+  }
+  function cardErrorText(json, status) {
+    if (status === 409) return CARD_CONFLICT_TEXT;
+    var errs = arr(json && json.errors);
+    for (var i = 0; i < errs.length; i++) {
+      var r = str(obj(errs[i]) && errs[i].reason);
+      if (has(CARD_REASON_TEXT, r)) return CARD_REASON_TEXT[r];
+    }
+    var code = str(json && json.code);
+    if (has(CARD_REASON_TEXT, code)) return CARD_REASON_TEXT[code];
+    return '카드 글을 저장하지 못했습니다. 입력값을 확인해 주십시오.';
+  }
 
   // ---- sections ----------------------------------------------------------------------------------------------------
   function secHead(key, count, extra, subOverride, tagName) {
@@ -974,11 +1007,77 @@
     return shown;
   }
 
+  function cardEditor(p, edit, busy, conflict) {
+    var ce = obj(edit && edit.cardEdit);
+    if (!ce || str(ce.key) !== p.key) return '';
+    var cid = 'pf-card-' + slug(p.key);
+    var notice = obj(edit && edit.cardNotice);
+    var msg = notice && str(notice.text)
+      ? str(notice.text)
+      : conflict ? CARD_CONFLICT_TEXT : busy ? CARD_BUSY_TEXT : '';
+    var isErr = !!(notice && (notice.kind === 'error' || notice.kind === 'conflict')) || conflict;
+    var canReset = p.custom !== true && obj(p.defaults) !== null;
+    return '<div class="pf-card-editor" data-pf-card-editor="' + esc(p.key) + '">' +
+      '<div class="pf-card-fields">' +
+      labelled('이름', cid + '-name', textInput('card-name', withId(cid + '-name', ' maxlength="40"'), str(ce.name), false)) +
+      labelled('꼬리표', cid + '-tag', textInput('card-tag', withId(cid + '-tag', ' maxlength="24"'), str(ce.tag), false)) +
+      labelled('설명', cid + '-summary', '<textarea class="pf-card-ta" data-pf="card-summary"' +
+        withId(cid + '-summary', ' maxlength="160" rows="3"') + '>' + esc(str(ce.summary)) + '</textarea>', 'pf-card-sum-f') +
+      '</div>' +
+      '<div class="pf-card-acts">' +
+      button('save-profile-card', '', '저장', busy || conflict, 'pf-btn pf-btn-primary') +
+      button('cancel-profile-card', '', '취소', false, 'pf-btn') +
+      (canReset ? button('reset-profile-card', '', '기본 글로', busy || conflict, 'pf-btn pf-btn-ghost') : '') +
+      '</div>' +
+      (msg ? '<p class="' + (isErr ? 'pf-err' : 'pf-note') + ' pf-card-msg" role="' + (isErr ? 'alert' : 'status') + '">' + esc(msg) + '</p>' : '') +
+      '</div>';
+  }
+
+  // Create-by-duplicate: a text button after the cards opens a flat form below it. Creating only adds the profile and
+  // shows it; nothing is applied, so the current chip stays where it was.
+  function newProfileArea(view, edit, list, shown, blocked, writable, roReason) {
+    var np = obj(edit && edit.newProfile);
+    var created = obj(edit && edit.newCreated);
+    var createdNote = created && profileOf(view, created.key)
+      ? '<p class="pf-note pf-new-done" role="status">' + esc('\'' + str(created.name) + '\' 프로필을 만들었습니다. 아직 적용하지 않았습니다. 쓰려면 그 카드의 적용을 누르십시오.') + '</p>' : '';
+    var open = button('new-profile', (roReason ? attr('title', roReason) : '') +
+      ' aria-expanded="' + (np ? 'true' : 'false') + '"', '새 프로필', blocked || !writable, 'pf-btn pf-new-open');
+    if (!np || !writable) return '<div class="pf-new-profile">' + createdNote + open + '</div>';
+    var notice = obj(edit && edit.newNotice);
+    var msg = notice && str(notice.text) ? str(notice.text) : '';
+    var isErr = !!(notice && (notice.kind === 'error' || notice.kind === 'conflict'));
+    var base = str(np.baseProfileKey) || shown;
+    var options = list.filter(obj).map(function (p) {
+      return '<option value="' + esc(p.key) + '"' + (p.key === base ? ' selected' : '') + '>' +
+        esc((num(p.num) === null ? '' : p.num + '. ') + (p.name || p.key)) + '</option>';
+    }).join('');
+    var limitation = obj(view && view.profileCards) && str(view.profileCards.subscriptionCopyLimitation)
+      ? '<p class="pf-note">CommandCode 구독 배정은 프로필 이름에 묶여 있어 새 프로필로 복사되지 않습니다.</p>' : '';
+    return '<div class="pf-new-profile">' + createdNote + open +
+      '<div class="pf-card-editor" data-pf-new-profile="">' +
+      '<div class="pf-card-fields">' +
+      labelled('이름', 'pf-new-name', textInput('new-profile-name', withId('pf-new-name', ' maxlength="40"'), str(np.name), false)) +
+      labelled('꼬리표', 'pf-new-tag', textInput('new-profile-tag', withId('pf-new-tag', ' maxlength="24"'), str(np.tag), false)) +
+      labelled('설명', 'pf-new-summary', '<textarea class="pf-card-ta" data-pf="new-profile-summary"' +
+        withId('pf-new-summary', ' maxlength="160" rows="3"') + '>' + esc(str(np.summary)) + '</textarea>', 'pf-card-sum-f') +
+      labelled('복제할 프로필', 'pf-new-base', select('new-profile-base', withId('pf-new-base'), options, blocked), 'pf-card-sum-f') +
+      '</div>' +
+      '<p class="pf-note">복제한 프로필의 역할·모델 배치를 그대로 가져옵니다. 만들기만 하고 적용하지는 않습니다.</p>' + limitation +
+      '<div class="pf-card-acts">' +
+      button('create-profile', '', '만들기', blocked, 'pf-btn pf-btn-primary') +
+      button('cancel-new-profile', '', '취소', false, 'pf-btn') +
+      '</div>' +
+      (msg ? '<p class="' + (isErr ? 'pf-err' : 'pf-note') + ' pf-card-msg" role="' + (isErr ? 'alert' : 'status') + '">' + esc(msg) + '</p>' : '') +
+      '</div></div>';
+  }
+
   // WinForms New-ProfileCard (PS:7067-7205), one card per row: the main button only shows the profile (aria-pressed =
   // shown), 적용 is a separate button beside it (never nested) and 적용 중 marks the globally active profile.
   function profileCards(view, edit, ro) {
     var busy = !!(edit && edit.busy === true);
     var conflict = !!(edit && edit.conflict === true);
+    var writable = !ro && cardWritable(view);
+    var roReason = !ro && !writable ? cardReadOnlyReason(view) : '';
     var activeKey = str(obj(view && view.activeProfile) && view.activeProfile.key);
     var shown = shownKeyOf(view, edit);
     var list = arr(view && view.profiles);
@@ -988,7 +1087,8 @@
       var on = p.key === shown;
       var cardMain = cardMainOf(view, edit, p, entries);
       var body = '<span class="pf-card-top"><span class="pf-card-num">' + esc(num(p.num) === null ? '' : p.num) + '</span>' +
-        '<span class="pf-card-name">' + esc(p.name || p.key) + '</span></span>' +
+        '<span class="pf-card-name">' + esc(p.name || p.key) + '</span>' +
+        (on ? '<span class="pf-card-sel" role="img" title="selected" aria-label="selected">' + ic('chevron-right', 'ic-xs') + '</span>' : '') + '</span>' +
         '<span class="pf-card-en">' + esc(p.name || '') + '</span>' +
         '<span class="pf-card-tag">' + tag(p.tag || 'profile') + '</span>' +
         '<span class="pf-card-sum">' + summaryText(p.summary || '') + '</span>' +
@@ -1002,11 +1102,17 @@
         : '<button type="button" class="pf-card-b"' + attr('data-pf', 'select-profile') + attr('data-profile', p.key) +
           attr('data-flow', 'card:' + p.key) + ' aria-pressed="' + on + '"' + boolAttr('disabled', busy) + '>' + body + '</button>';
       return '<article class="pf-card' + (on ? ' on' : '') + '">' + main + (p.key === activeKey ? currentChip() : '') +
+        (ro ? '' : button('edit-profile-card', attr('data-profile', p.key) + attr('aria-label', cardTitle(p) + ' 글 편집') +
+          (roReason ? attr('title', roReason) : ''), '편집', busy || !writable, 'pf-btn pf-card-edit')) +
         (ro ? '' : button('apply-card', attr('data-profile', p.key) + attr('data-flow', 'apply:card:' + p.key) +
-          attr('aria-label', cardTitle(p) + ' 적용'), '적용', busy || conflict, 'pf-btn pf-btn-primary pf-card-apply')) + '</article>';
+          attr('aria-label', cardTitle(p) + ' 적용'), '적용', busy || conflict, 'pf-btn' +
+          (writable && obj(edit && edit.cardEdit) && str(edit.cardEdit.key) === p.key ? '' : ' pf-btn-primary') + ' pf-card-apply')) +
+        (writable ? cardEditor(p, edit, busy, conflict) : '') + '</article>';
     }).join('');
-    return section('profiles', '<div class="pf-cards">' +
-      (cards || emptyState('프로필이 없습니다. omo.jsonc의 프로필을 확인한 뒤 상태를 다시 불러와 주십시오.', edit)) + '</div>', list.length, '',
+    return section('profiles', (roReason ? '<p class="pf-note pf-ro-note" role="status">' + esc(roReason) + '</p>' : '') +
+      '<div class="pf-cards">' +
+      (cards || emptyState('프로필이 없습니다. omo.jsonc의 프로필을 확인한 뒤 상태를 다시 불러와 주십시오.', edit)) + '</div>' +
+      (ro ? '' : newProfileArea(view, edit, list, shown, busy || conflict, writable, roReason)), list.length, '',
     list.length + '개 프로필 · ' + (shown ? '현재 선택' : '선택 없음'), attr('data-flow', 'cards'));
   }
 
@@ -1845,7 +1951,12 @@
     var fetchFn = opt.fetch;
     var tokenFn = opt.token;
     var notify = typeof opt.onChange === 'function' ? opt.onChange : function () {};
-    var s = { view: null, shown: '', pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false, openRow: '', tab: 'primary', query: '', guideFilter: 'all', guideOpen: map() };
+    var s = { view: null, shown: '', pending: [], draft: map(), memoryErrors: map(), memorySaved: map(), preview: null, conflict: false, error: '', errorKind: '', status: '', result: null, loading: false, busy: false, confirmClear: false, openRow: '', tab: 'primary', query: '', guideFilter: 'all', guideOpen: map(), cardEdit: null, cardNotice: null, newProfile: null, newNotice: null, newCreated: null };
+    // Standalone saves report inside the open form: the card editor, else the new-profile form.
+    function standaloneNotice(n) {
+      if (s.cardEdit) s.cardNotice = n;
+      else if (s.newProfile) s.newNotice = n;
+    }
     var seq = 0;
 
     function snapshot() {
@@ -1856,10 +1967,16 @@
         preview: s.preview, conflict: s.conflict, error: s.error, errorKind: s.errorKind,
         status: s.status, result: s.result, loading: s.loading, busy: s.busy, confirmClear: s.confirmClear,
         openRow: s.openRow, tab: s.tab, query: s.query,
-        guideFilter: s.guideFilter, guideOpen: copyMap(s.guideOpen)
+        guideFilter: s.guideFilter, guideOpen: copyMap(s.guideOpen),
+        cardEdit: s.cardEdit ? { key: str(s.cardEdit.key), name: str(s.cardEdit.name), tag: str(s.cardEdit.tag), summary: str(s.cardEdit.summary) } : null,
+        cardNotice: s.cardNotice ? { kind: str(s.cardNotice.kind), text: str(s.cardNotice.text) } : null,
+        newProfile: s.newProfile ? { name: str(s.newProfile.name), tag: str(s.newProfile.tag), summary: str(s.newProfile.summary),
+          baseProfileKey: str(s.newProfile.baseProfileKey) } : null,
+        newNotice: s.newNotice ? { kind: str(s.newNotice.kind), text: str(s.newNotice.text) } : null,
+        newCreated: s.newCreated ? { key: str(s.newCreated.key), name: str(s.newCreated.name) } : null
       };
     }
-    function changed() { notify(snapshot()); }
+    function changed(reason) { notify(snapshot(), reason); }
     function token() { return typeof tokenFn === 'function' ? str(tokenFn()) : str(tokenFn); }
     function responseJson(res) {
       if (!res || typeof res.json !== 'function') return Promise.resolve(null);
@@ -1880,7 +1997,7 @@
       return '프로필 상태를 불러오지 못했습니다. 잠시 뒤 다시 시도해 주십시오.';
     }
 
-    function load() {
+    function load(onDone) {
       if (typeof fetchFn !== 'function') {
         s.error = '상태를 불러올 수 없습니다.'; s.errorKind = 'unavailable'; s.loading = false; changed(); return Promise.resolve(snapshot());
       }
@@ -1909,6 +2026,16 @@
           if (!obj(json)) return settleFailure({ message: 'invalid-json' });
           s.view = obj(json);
           if (!s.shown) s.shown = str(obj(s.view && s.view.activeProfile) && s.view.activeProfile.key);
+          if (s.cardEdit && (s.view.readOnly === true || s.view.banner === STALE_BANNER ||
+              (obj(s.view.inventory) && s.view.inventory.stale === true) || !cardWritable(s.view) || !profileOf(s.view, s.cardEdit.key))) {
+            s.cardEdit = null;
+            s.cardNotice = null;
+          }
+          if (s.newProfile && (s.view.readOnly === true || s.view.banner === STALE_BANNER ||
+              (obj(s.view.inventory) && s.view.inventory.stale === true) || !cardWritable(s.view))) {
+            s.newProfile = null;
+            s.newNotice = null;
+          }
           s.loading = false;
           s.error = '';
           s.errorKind = '';
@@ -1916,6 +2043,7 @@
           s.conflict = false;
           if (s.status === STATUS_TEXT.conflict) s.status = '';
           changed();
+          if (typeof onDone === 'function') onDone();
           return snapshot();
         });
       }, settleFailure);
@@ -2110,17 +2238,34 @@
     function send(action, changesOverride, options) {
       var opt = obj(options) || {};
       var reapply = opt.reapply === true;
+      var standalone = opt.standalone === true;
       var applyProfileKey = opt.profileKey || s.shown || (obj(s.view && s.view.activeProfile) && s.view.activeProfile.key);
       var list = Array.isArray(changesOverride)
         ? changesOverride.slice()
         : action === 'apply' || action === 'preview'
           ? changesForProfile(applyProfileKey, Boolean(opt.profileKey))
           : s.pending.slice();
-      if (s.busy) return Promise.resolve(snapshot());
+      if (s.busy) {
+        if (standalone && (s.cardEdit || s.newProfile)) {
+          standaloneNotice({ kind: 'busy', text: CARD_BUSY_TEXT });
+          changed();
+        }
+        return Promise.resolve(snapshot());
+      }
       // A 409 makes the loaded roster revision stale: neither preview nor apply may post it again
       // until a successful state read. The latch survives add/drop/removeKind/clear; only load() lifts it.
-      if (s.conflict) return Promise.resolve(snapshot());
+      if (s.conflict) {
+        if (standalone && (s.cardEdit || s.newProfile)) {
+          standaloneNotice({ kind: 'conflict', text: CARD_CONFLICT_TEXT });
+          changed();
+        }
+        return Promise.resolve(snapshot());
+      }
       if (typeof fetchFn !== 'function') {
+        if (standalone) {
+          standaloneNotice({ kind: 'error', text: '실시간 상황판에서만 보낼 수 있습니다.' });
+          changed(); return Promise.resolve(snapshot());
+        }
         s.error = '실시간 상황판에서만 보낼 수 있습니다.'; s.errorKind = 'unavailable'; changed(); return Promise.resolve(snapshot());
       }
       if (!list.length) {
@@ -2134,9 +2279,15 @@
         expected: obj(s.view && s.view.targets) || {},
         rosterRevision: num(obj(s.view && s.view.roster) && s.view.roster.revision) || 0
       };
-      s.busy = true; s.preview = null; s.result = null; s.conflict = false; s.error = ''; s.errorKind = ''; s.confirmClear = false;
-      s.status = reapply ? STATUS_TEXT.reapplying : action === 'preview' ? STATUS_TEXT.previewing : STATUS_TEXT.applying;
-      changed();
+      s.busy = true;
+      if (standalone) {
+        standaloneNotice({ kind: 'busy', text: s.cardEdit ? CARD_SAVING_TEXT : '새 프로필을 만드는 중…' });
+      } else {
+        s.preview = null; s.result = null; s.conflict = false; s.error = ''; s.errorKind = ''; s.confirmClear = false;
+        s.status = reapply ? STATUS_TEXT.reapplying : action === 'preview' ? STATUS_TEXT.previewing : STATUS_TEXT.applying;
+      }
+      changed(standalone && s.cardEdit ? 'card-save-start' : undefined);
+      var keysBefore = arr(s.view && s.view.profiles).map(function (p) { return obj(p) ? p.key : ''; });
       var request;
       try {
         request = fetchFn('/profiles', {
@@ -2153,6 +2304,35 @@
       }).then(function (res) {
         var json = obj(res.json);
         s.busy = false;
+        if (standalone) {
+          if (res.status === 200 && json && json.ok === true) {
+            var creating = opt.creating === true;
+            s.cardEdit = null;
+            s.cardNotice = null;
+            if (creating) { s.newProfile = null; s.newNotice = null; }
+            return load(function () {
+              if (creating) {
+                // Show the new profile only; the active profile and its chip stay unchanged.
+                var made = arr(s.view && s.view.profiles).filter(function (p) {
+                  return obj(p) && p.custom === true && keysBefore.indexOf(p.key) < 0;
+                })[0];
+                if (made) { s.shown = str(made.key); s.newCreated = { key: str(made.key), name: str(made.name) }; changed(); }
+                if (typeof opt.onSaved === 'function') opt.onSaved(made ? str(made.key) : '');
+                return;
+              }
+              if (typeof opt.onSaved === 'function') opt.onSaved(str(opt.profileKey));
+            }).then(function () { return snapshot(); });
+          }
+          if (res.status === 409) {
+            s.conflict = true;
+            standaloneNotice({ kind: 'conflict', text: CARD_CONFLICT_TEXT });
+            changed();
+            return snapshot();
+          }
+          standaloneNotice({ kind: 'error', text: cardErrorText(json, res.status) });
+          changed();
+          return snapshot();
+        }
         if (res.status === 200 && json && json.ok === true) {
           if (action === 'preview') {
             s.preview = json; s.status = STATUS_TEXT.previewReady; s.conflict = false; s.error = ''; s.errorKind = '';
@@ -2199,6 +2379,12 @@
         return snapshot();
       }).catch(function (err) {
         s.busy = false;
+        if (standalone) {
+          if (g.console && g.console.warn) g.console.warn('[profiles] send failed', err);
+          standaloneNotice({ kind: 'error', text: '보내지 못했습니다. 네트워크 연결을 확인한 뒤 다시 시도해 주십시오.' });
+          changed();
+          return snapshot();
+        }
         s.status = STATUS_TEXT.failure;
         if (g.console && g.console.warn) g.console.warn('[profiles] send failed', err);
         s.errorKind = 'network';
@@ -2300,6 +2486,88 @@
         else s.guideOpen[k] = true;
         changed();
         return snapshot();
+      },
+      editCard: function (profileKey) {
+        if (s.busy || !obj(s.view) || s.view.readOnly === true || s.view.banner === STALE_BANNER ||
+            (obj(s.view.inventory) && s.view.inventory.stale === true) || !cardWritable(s.view)) return snapshot();
+        var p = profileOf(s.view, str(profileKey));
+        if (!p) return snapshot();
+        s.cardEdit = { key: str(p.key), name: str(p.name), tag: str(p.tag), summary: str(p.summary) };
+        s.cardNotice = null;
+        changed();
+        return snapshot();
+      },
+      cancelCardEdit: function () {
+        if (!s.cardEdit) return snapshot();
+        s.cardEdit = null;
+        s.cardNotice = null;
+        changed();
+        return snapshot();
+      },
+      setCardDraft: function (field, value) {
+        if (!s.cardEdit || (field !== 'name' && field !== 'tag' && field !== 'summary')) return snapshot();
+        s.cardEdit[field] = str(value);
+        return snapshot();
+      },
+      saveCard: function (onSaved) {
+        if (!s.cardEdit) return Promise.resolve(snapshot());
+        var key = str(s.cardEdit.key);
+        var change = {
+          kind: 'setProfileCard',
+          profileKey: key,
+          name: str(s.cardEdit.name),
+          tag: str(s.cardEdit.tag),
+          summary: str(s.cardEdit.summary).replace(/\r\n|\r|\n/g, ' ')
+        };
+        return send('apply', [change], { standalone: true, profileKey: key, onSaved: onSaved });
+      },
+      resetCard: function (onSaved) {
+        if (!s.cardEdit) return Promise.resolve(snapshot());
+        var key = str(s.cardEdit.key);
+        var p = profileOf(s.view, key);
+        if (!p || p.custom === true || !obj(p.defaults)) return Promise.resolve(snapshot());
+        var change = {
+          kind: 'setProfileCard',
+          profileKey: key,
+          name: null,
+          tag: null,
+          summary: null
+        };
+        return send('apply', [change], { standalone: true, profileKey: key, onSaved: onSaved });
+      },
+      openNewProfile: function () {
+        if (s.busy || !obj(s.view) || s.view.readOnly === true || s.view.banner === STALE_BANNER ||
+            (obj(s.view.inventory) && s.view.inventory.stale === true) || !cardWritable(s.view)) return snapshot();
+        s.cardEdit = null;
+        s.cardNotice = null;
+        s.newCreated = null;
+        s.newProfile = { name: '', tag: '', summary: '', baseProfileKey: s.shown || str(obj(s.view.activeProfile) && s.view.activeProfile.key) };
+        s.newNotice = null;
+        changed();
+        return snapshot();
+      },
+      cancelNewProfile: function () {
+        if (!s.newProfile) return snapshot();
+        s.newProfile = null;
+        s.newNotice = null;
+        changed();
+        return snapshot();
+      },
+      setNewDraft: function (field, value) {
+        if (!s.newProfile || ['name', 'tag', 'summary', 'baseProfileKey'].indexOf(field) < 0) return snapshot();
+        s.newProfile[field] = str(value);
+        return snapshot();
+      },
+      createProfile: function (onSaved) {
+        if (!s.newProfile) return Promise.resolve(snapshot());
+        var change = {
+          kind: 'addProfile',
+          name: str(s.newProfile.name),
+          tag: str(s.newProfile.tag),
+          summary: str(s.newProfile.summary).replace(/\r\n|\r|\n/g, ' '),
+          baseProfileKey: str(s.newProfile.baseProfileKey)
+        };
+        return send('apply', [change], { standalone: true, creating: true, profileKey: change.baseProfileKey, onSaved: onSaved });
       },
       preview: function (profileKey) { return send('preview', null, { profileKey: profileKey }); },
       apply: function (profileKey) { return send('apply', null, { profileKey: profileKey }); },
@@ -2413,6 +2681,63 @@
         if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'start' });
       } else if (act === 'select-profile') {
         c.show(t.getAttribute('data-profile'));
+      } else if (act === 'edit-profile-card') {
+        if (t.hasAttribute('disabled')) return;
+        c.cancelNewProfile();
+        c.editCard(t.getAttribute('data-profile'));
+      } else if (act === 'new-profile') {
+        if (t.hasAttribute('disabled')) return;
+        if (c.snapshot().newProfile) c.cancelNewProfile();
+        else c.openNewProfile();
+        var newName = root.querySelector('[data-pf="new-profile-name"]');
+        var newFocus = newName || root.querySelector('[data-pf="new-profile"]');
+        if (newFocus && typeof newFocus.focus === 'function') newFocus.focus({ preventScroll: true });
+      } else if (act === 'cancel-new-profile') {
+        c.cancelNewProfile();
+        var newBtn = root.querySelector('[data-pf="new-profile"]');
+        if (newBtn && typeof newBtn.focus === 'function') newBtn.focus({ preventScroll: true });
+      } else if (act === 'create-profile') {
+        if (t.hasAttribute('disabled') || c.snapshot().busy) return;
+        c.createProfile(function (madeKey) {
+          var madeBtn = madeKey && root.querySelector('[data-pf="select-profile"][data-profile="' + madeKey + '"]');
+          if (madeBtn && typeof madeBtn.focus === 'function') madeBtn.focus({ preventScroll: true });
+        }).then(function (snap) {
+          // A refused create keeps the form: return focus to 만들기 once it is enabled again.
+          if (!obj(snap && snap.newProfile) || !focusLost()) return;
+          var retry = root.querySelector('[data-pf="create-profile"]');
+          if (retry && !retry.hasAttribute('disabled') && typeof retry.focus === 'function') retry.focus({ preventScroll: true });
+        });
+      } else if (act === 'cancel-profile-card') {
+        var cancelEdit = obj(c.snapshot().cardEdit);
+        var cancelKey = str(cancelEdit && cancelEdit.key);
+        c.cancelCardEdit();
+        if (cancelKey) {
+          var cancelBtn = root.querySelector('[data-pf="edit-profile-card"][data-profile="' + cancelKey + '"]');
+          if (cancelBtn && typeof cancelBtn.focus === 'function') cancelBtn.focus({ preventScroll: true });
+        }
+      } else if (act === 'save-profile-card' || act === 'reset-profile-card') {
+        var focusEdit = function (savedKey) {
+          if (!savedKey) return;
+          var savedBtn = root.querySelector('[data-pf="edit-profile-card"][data-profile="' + savedKey + '"]');
+          if (savedBtn && typeof savedBtn.focus === 'function') savedBtn.focus({ preventScroll: true });
+        };
+        // The acknowledgment disables the activated button, which drops its focus to the body. After a
+        // refused save the re-rendered button is enabled again: return focus to it once that render lands.
+        var doc = root.ownerDocument;
+        var hadFocus = !!doc && doc.activeElement === t;
+        // True once focus is settled; false while the acknowledgment still shows the button disabled.
+        var refocus = function () {
+          if (!focusLost()) return true;
+          var again = root.querySelector('[data-pf="' + act + '"]');
+          if (again && again.disabled !== true && !again.hasAttribute('disabled')) { again.focus({ preventScroll: true }); return true; }
+          return false;
+        };
+        var saving = act === 'reset-profile-card' ? c.resetCard(focusEdit) : c.saveCard(focusEdit);
+        pendingAckFocus = null;
+        if (hadFocus) Promise.resolve(saving).then(function (snap) {
+          // No timer: if the acknowledgment frame is still up, the page runs this after its full render.
+          if (obj(snap && snap.cardEdit) && !refocus()) pendingAckFocus = refocus;
+        });
       } else if (act === 'apply-card') {
         // WinForms card 적용 (PS:7167-7182): show that profile, then write its edits and the shared ones and activate it.
         c.show(t.getAttribute('data-profile'));
@@ -2451,12 +2776,23 @@
     }
     function onInput(ev) {
       var t = ev && ev.target;
-      if (t && t.getAttribute('data-pf') === 'routing-search') {
+      var act = t && typeof t.getAttribute === 'function' ? t.getAttribute('data-pf') : '';
+      if (act === 'routing-search') {
         var searchController = controller();
         if (searchController) searchController.search(str(t.value));
         return;
       }
-      if (!t || t.getAttribute('data-pf') !== 'lane-literal') return;
+      if (act === 'new-profile-name' || act === 'new-profile-tag' || act === 'new-profile-summary') {
+        var newController = controller();
+        if (newController) newController.setNewDraft(act.slice(12), str(t.value));
+        return;
+      }
+      if (act === 'card-name' || act === 'card-tag' || act === 'card-summary') {
+        var cardController = controller();
+        if (cardController) cardController.setCardDraft(act.slice(5), str(t.value));
+        return;
+      }
+      if (!t || act !== 'lane-literal') return;
       var c = controller();
       if (!c || c.snapshot().busy) return;
       c.setDraft('lane', { literal: str(t.value) });
@@ -2487,6 +2823,10 @@
       var act = t.getAttribute('data-pf');
       var c = controller();
       if (!c || c.snapshot().busy) return;
+      if (act === 'new-profile-base') {
+        c.setNewDraft('baseProfileKey', str(t.value));
+        return;
+      }
       if (act === 'agent-lane') {
         c.setDraft('agent:' + t.getAttribute('data-agent'), { lane: t.value });
         c.add({ kind: 'setAgentLane', agentId: t.getAttribute('data-agent'), lane: t.value });
@@ -2789,6 +3129,21 @@
         return;
       }
       if (str(ev.key) === 'Escape') {
+        if (keyController && keyController.snapshot().newProfile && !root.querySelector('#pf-guide-dlg[open]')) {
+          if (typeof ev.preventDefault === 'function') ev.preventDefault();
+          keyController.cancelNewProfile();
+          var escNewBtn = root.querySelector('[data-pf="new-profile"]');
+          if (escNewBtn && typeof escNewBtn.focus === 'function') escNewBtn.focus({ preventScroll: true });
+          return;
+        }
+        if (keyController && keyController.snapshot().cardEdit && !root.querySelector('#pf-guide-dlg[open]')) {
+          if (typeof ev.preventDefault === 'function') ev.preventDefault();
+          var escCardKey = str(keyController.snapshot().cardEdit.key);
+          keyController.cancelCardEdit();
+          var escEditBtn = root.querySelector('[data-pf="edit-profile-card"][data-profile="' + escCardKey + '"]');
+          if (escEditBtn && typeof escEditBtn.focus === 'function') escEditBtn.focus({ preventScroll: true });
+          return;
+        }
         if (keyController && keyController.snapshot().query && !root.querySelector('#pf-guide-dlg[open]')) {
           if (typeof ev.preventDefault === 'function') ev.preventDefault();
           keyController.search('');
@@ -2806,12 +3161,12 @@
       }
       if (ev.ctrlKey || ev.altKey || ev.metaKey || ev.shiftKey || !/^[1-6]$/.test(str(ev.key))) return;
       var t = ev.target;
-      if (t && (t.isContentEditable || (typeof t.closest === 'function' && t.closest('input,select,textarea,[contenteditable]')))) return;
+      if (t && (t.isContentEditable || (typeof t.closest === 'function' && t.closest('input,select,textarea,[contenteditable],[data-pf-card-editor],[data-pf-new-profile]')))) return;
       if (root.querySelector('#pf-guide-dlg[open]')) return;
       var buttons = root.querySelectorAll('[data-pf="select-profile"]');
       var c = buttons.length ? controller() : null;
       var view = c ? obj(c.snapshot().view) : null;
-      var p = arr(view && view.profiles).filter(function (x) { return obj(x) && x.num === Number(ev.key); })[0];
+      var p = arr(view && view.profiles).filter(function (x) { return obj(x) && x.custom !== true && x.num === Number(ev.key); })[0];
       for (var i = 0; p && i < buttons.length; i++) {
         if (buttons[i].getAttribute('data-profile') !== p.key || buttons[i].hasAttribute('disabled')) continue;
         if (typeof ev.preventDefault === 'function') ev.preventDefault();
@@ -2862,10 +3217,43 @@
     };
   }
 
+  var BUSY_GATED_BUTTONS = ['save-profile-card', 'reset-profile-card', 'select-profile', 'edit-profile-card', 'apply-card',
+    'reset-memory', 'preview', 'apply', 'reapply', 'clear', 'clear-cancel', 'clear-confirm', 'drop', 'reload-state',
+    'web-deepseek-on', 'web-deepseek-off', 'new-profile', 'create-profile'];
+  var pendingAckFocus = null;
+  function afterAckRender() {
+    var run = pendingAckFocus;
+    pendingAckFocus = null;
+    if (run) run();
+  }
+  function acknowledgeCardSave(root, edit) {
+    var editor = root.querySelector('[data-pf-card-editor]');
+    if (!editor || editor.getAttribute('data-pf-card-editor') !== edit.cardEdit.key) return false;
+    var pfRoot = editor.closest('[data-pf-root]');
+    pfRoot.setAttribute('data-pf-busy', 'true');
+    // Disable every control the busy render disables (and the controller rejects while busy), so no
+    // control looks enabled in the acknowledgment frame while its action would be refused.
+    var busyControls = pfRoot.querySelectorAll('select[data-pf], [data-pf="lane-literal"], ' + BUSY_GATED_BUTTONS.map(function (action) {
+      return 'button[data-pf="' + action + '"]';
+    }).join(', '));
+    for (var i = 0; i < busyControls.length; i++) busyControls[i].disabled = true;
+    var notice = editor.querySelector('.pf-card-msg');
+    if (!notice) {
+      notice = root.ownerDocument.createElement('p');
+      editor.appendChild(notice);
+    }
+    notice.className = 'pf-note pf-card-msg';
+    notice.setAttribute('role', 'status');
+    notice.textContent = edit.cardNotice.text;
+    return true;
+  }
+
   g.BriefProfiles = {
     render: render,
     side: side,
     createController: createController,
+    acknowledgeCardSave: acknowledgeCardSave,
+    afterAckRender: afterAckRender,
     bind: bind,
     STALE_BANNER: STALE_BANNER,
     CONFLICT_TEXT: CONFLICT_TEXT,

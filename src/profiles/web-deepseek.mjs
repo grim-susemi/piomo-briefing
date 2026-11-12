@@ -2,7 +2,7 @@
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 const require = createRequire(import.meta.url);
-const MODULE = 'C:/Users/USER/orca/projects/기타 작업/.omo/research/deepseek-piomo-followup-20261106/diagnosis-r2/deepseek-use/managed-control.cjs';
+const MODULE = 'C:/Users/USER/orca/projects/susemi-deepseek-web-private/candidate/provider/managed-control.cjs';
 
 function controller() {
   return existsSync(MODULE) ? require(MODULE) : null;

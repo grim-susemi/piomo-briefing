@@ -5221,12 +5221,1774 @@
       "value": {
         "id": "pf-gd-agents-synthetic-role-beta"
       }
+    },
+    {
+      "surface": "top",
+      "reason": "Inline profile card text editor trigger button for gpt-kimi-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "gpt-kimi-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "gpt-kimi-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Inline profile card text editor trigger button for gpt-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "gpt-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "gpt-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Inline profile card text editor trigger button for kimi-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "kimi-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "kimi-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Inline profile card text editor trigger button for kimi-ollama-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "kimi-ollama-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "kimi-ollama-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Inline profile card text editor trigger button for experimental-custom.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "experimental-custom"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "experimental-custom"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Inline profile card text editor trigger button for cmd-glm-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "cmd-glm-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "cmd-glm-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Task 16 create-by-duplicate trigger button after the profile cards.",
+      "value": {
+        "data-pf": "new-profile"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Inline profile card text editor trigger button for gpt-kimi-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "gpt-kimi-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "gpt-kimi-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Inline profile card text editor trigger button for gpt-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "gpt-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "gpt-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Inline profile card text editor trigger button for kimi-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "kimi-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "kimi-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Inline profile card text editor trigger button for kimi-ollama-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "kimi-ollama-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "kimi-ollama-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Inline profile card text editor trigger button for experimental-custom.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "experimental-custom"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "experimental-custom"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Inline profile card text editor trigger button for cmd-glm-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "cmd-glm-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "cmd-glm-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Task 16 create-by-duplicate trigger button after the profile cards.",
+      "value": {
+        "data-pf": "new-profile"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Inline profile card text editor trigger button for gpt-kimi-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "gpt-kimi-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "gpt-kimi-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Inline profile card text editor trigger button for gpt-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "gpt-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "gpt-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Inline profile card text editor trigger button for kimi-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "kimi-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "kimi-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Inline profile card text editor trigger button for kimi-ollama-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "kimi-ollama-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "kimi-ollama-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Inline profile card text editor trigger button for experimental-custom.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "experimental-custom"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "experimental-custom"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Inline profile card text editor trigger button for cmd-glm-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "cmd-glm-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "cmd-glm-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Task 16 create-by-duplicate trigger button after the profile cards.",
+      "value": {
+        "data-pf": "new-profile"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Inline profile card text editor trigger button for gpt-kimi-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "gpt-kimi-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "gpt-kimi-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Inline profile card text editor trigger button for gpt-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "gpt-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "gpt-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Inline profile card text editor trigger button for kimi-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "kimi-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "kimi-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Inline profile card text editor trigger button for kimi-ollama-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "kimi-ollama-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "kimi-ollama-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Inline profile card text editor trigger button for experimental-custom.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "experimental-custom"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "experimental-custom"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Inline profile card text editor trigger button for cmd-glm-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "cmd-glm-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "cmd-glm-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Task 16 create-by-duplicate trigger button after the profile cards.",
+      "value": {
+        "data-pf": "new-profile"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Inline profile card text editor trigger button for gpt-kimi-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "gpt-kimi-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "gpt-kimi-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Inline profile card text editor trigger button for gpt-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "gpt-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "gpt-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Inline profile card text editor trigger button for kimi-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "kimi-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "kimi-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Inline profile card text editor trigger button for kimi-ollama-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "kimi-ollama-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "kimi-ollama-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Inline profile card text editor trigger button for experimental-custom.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "experimental-custom"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "experimental-custom"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Inline profile card text editor trigger button for cmd-glm-deepseek.",
+      "element": {
+        "tag": "button",
+        "anchor": {
+          "data-pf": "edit-profile-card",
+          "data-profile": "cmd-glm-deepseek"
+        },
+        "hooks": [
+          {
+            "data-pf": "edit-profile-card"
+          },
+          {
+            "data-profile": "cmd-glm-deepseek"
+          }
+        ]
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Task 16 create-by-duplicate trigger button after the profile cards.",
+      "value": {
+        "data-pf": "new-profile"
+      }
     }
   ],
   "expected": [
     {
       "key": "runtime/native-profile-switcher-profile-cards.json",
       "reason": "Primary-only optional user profile card metadata participates in the store compare-and-swap contract."
+    }
+  ],
+  "cardEditor": [
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-kimi-deepseek-name"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "card-name"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-kimi-deepseek-tag"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "card-tag"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-kimi-deepseek-summary"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "card-summary"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "save-profile-card"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "cancel-profile-card"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "reset-profile-card"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-deepseek-name"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-deepseek-tag"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-deepseek-summary"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-deepseek-name"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-deepseek-tag"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-deepseek-summary"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-ollama-deepseek-name"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-ollama-deepseek-tag"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-ollama-deepseek-summary"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-experimental-custom-name"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-experimental-custom-tag"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-experimental-custom-summary"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-cmd-glm-deepseek-name"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-cmd-glm-deepseek-tag"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-cmd-glm-deepseek-summary"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-1-name"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-1-tag"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-1-summary"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-2-name"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-2-tag"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-2-summary"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-3-name"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-3-tag"
+      }
+    },
+    {
+      "surface": "top",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-3-summary"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-kimi-deepseek-name"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "card-name"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-kimi-deepseek-tag"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "card-tag"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-kimi-deepseek-summary"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "card-summary"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "save-profile-card"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "cancel-profile-card"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "reset-profile-card"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-deepseek-name"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-deepseek-tag"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-deepseek-summary"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-deepseek-name"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-deepseek-tag"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-deepseek-summary"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-ollama-deepseek-name"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-ollama-deepseek-tag"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-ollama-deepseek-summary"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-experimental-custom-name"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-experimental-custom-tag"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-experimental-custom-summary"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-cmd-glm-deepseek-name"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-cmd-glm-deepseek-tag"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-cmd-glm-deepseek-summary"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-1-name"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-1-tag"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-1-summary"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-2-name"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-2-tag"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-2-summary"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-3-name"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-3-tag"
+      }
+    },
+    {
+      "surface": "agents",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-3-summary"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-kimi-deepseek-name"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "card-name"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-kimi-deepseek-tag"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "card-tag"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-kimi-deepseek-summary"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "card-summary"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "save-profile-card"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "cancel-profile-card"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "reset-profile-card"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-deepseek-name"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-deepseek-tag"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-deepseek-summary"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-deepseek-name"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-deepseek-tag"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-deepseek-summary"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-ollama-deepseek-name"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-ollama-deepseek-tag"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-ollama-deepseek-summary"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-experimental-custom-name"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-experimental-custom-tag"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-experimental-custom-summary"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-cmd-glm-deepseek-name"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-cmd-glm-deepseek-tag"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-cmd-glm-deepseek-summary"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-1-name"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-1-tag"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-1-summary"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-2-name"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-2-tag"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-2-summary"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-3-name"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-3-tag"
+      }
+    },
+    {
+      "surface": "categories",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-3-summary"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-kimi-deepseek-name"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "card-name"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-kimi-deepseek-tag"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "card-tag"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-kimi-deepseek-summary"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "card-summary"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "save-profile-card"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "cancel-profile-card"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "reset-profile-card"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-deepseek-name"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-deepseek-tag"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-deepseek-summary"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-deepseek-name"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-deepseek-tag"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-deepseek-summary"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-ollama-deepseek-name"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-ollama-deepseek-tag"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-ollama-deepseek-summary"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-experimental-custom-name"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-experimental-custom-tag"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-experimental-custom-summary"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-cmd-glm-deepseek-name"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-cmd-glm-deepseek-tag"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-cmd-glm-deepseek-summary"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-1-name"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-1-tag"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-1-summary"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-2-name"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-2-tag"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-2-summary"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-3-name"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-3-tag"
+      }
+    },
+    {
+      "surface": "memory",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-3-summary"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-kimi-deepseek-name"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "card-name"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-kimi-deepseek-tag"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "card-tag"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-kimi-deepseek-summary"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "card-summary"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "save-profile-card"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "cancel-profile-card"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "data-pf": "reset-profile-card"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-deepseek-name"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-deepseek-tag"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-gpt-deepseek-summary"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-deepseek-name"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-deepseek-tag"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-deepseek-summary"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-ollama-deepseek-name"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-ollama-deepseek-tag"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-kimi-ollama-deepseek-summary"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-experimental-custom-name"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-experimental-custom-tag"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-experimental-custom-summary"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-cmd-glm-deepseek-name"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-cmd-glm-deepseek-tag"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-cmd-glm-deepseek-summary"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-1-name"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-1-tag"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-1-summary"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-2-name"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-2-tag"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-2-summary"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-3-name"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-3-tag"
+      }
+    },
+    {
+      "surface": "expanded",
+      "reason": "Public hook of the opened inline profile card text editor.",
+      "value": {
+        "id": "pf-card-custom-3-summary"
+      }
     }
   ]
 }
