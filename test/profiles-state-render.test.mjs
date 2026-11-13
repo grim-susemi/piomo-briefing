@@ -732,21 +732,21 @@ test('effective unknown providers are unavailable and an unreadable roster is un
   }
 });
 
-test('real state(): a 5.1.44-absent role is read-only, labelled and keeps its config', (t) => {
+test('real state(): a declared category the bundle lacks is editable and keeps its config', (t) => {
   const fx = makeFixture(t);
   const state = fx.store.state();
   const fast = rowOf(state, 'categories', 'fast-explore');
   assert.ok(fast, 'fast-explore row stays visible');
-  assert.equal(fast.readOnly, true);
-  assert.equal(fast.absentIn, REAL_INVENTORY.version);
-  assert.equal(fast.stateLabel, `${REAL_INVENTORY.version}에 없음`);
+  assert.equal(fast.readOnly, false, 'declared in the layer, so editable (#1562 B)');
+  assert.equal(fast.absentIn, null);
+  assert.equal(fast.stateLabel, null);
+  assert.deepEqual(fast.config, state.routing.layer.categories['fast-explore'], 'the layer config is preserved');
   assert.equal(rowOf(state, 'agents', 'explore').readOnly, false, 'live role stays editable');
   assert.equal(rowOf(state, 'agents', 'explore').stateLabel, null);
 
   const html = loadView().render(state, liveEdit());
-  assert.ok(textOf(html).includes(`absent: ${REAL_INVENTORY.version}`));
   assert.match(html, /data-pf-route="categories\/fast-explore"/);
-  assert.doesNotMatch(html, /data-route="categories\/fast-explore"/, 'an absent role renders no edit controls');
+  assert.match(html, /data-route="categories\/fast-explore"/, 'the declared category renders edit controls');
 });
 
 test('real state(): the declared oracle and a file-defined ouroboros render service, model and effort controls', (t) => {

@@ -46,8 +46,8 @@ test('every inventory id appears as a routing row', () => {
   }
 });
 
-test('roles absent from 5.1.44 are read-only, labelled, and keep their config', () => {
-  const layer = { categories: { 'fast-explore': { model: 'kimi-max' } } };
+test('roles absent from 5.1.44 and not declared by the layer are read-only and labelled', () => {
+  const layer = {};
   const rows = refreshRoutingRows({ inventory, layer });
   for (const [section, role] of [['agents', 'oracle'], ['agents', 'ouroboros'], ['categories', 'fast-explore']]) {
     const row = rows.find((entry) => entry.section === section && entry.role === role);
@@ -63,7 +63,7 @@ test('roles absent from 5.1.44 are read-only, labelled, and keep their config', 
 
 // The engine serves an agent its profile layer declares (oracle, with its tools) or an agent file defines
 // (agents/ouroboros.md) even when the bundle's builtin list omits it, and resolves its model from that layer entry.
-test('an agent the profile declares or an agent file defines is editable; a disabled or category one is not', () => {
+test('a role the profile declares or an agent file defines is editable; a disabled one is not', () => {
   const layer = {
     agents: { oracle: { tools: { read: true }, model: 'sol' }, ouroboros: { model: 'flash-high' } },
     categories: { 'fast-explore': { model: 'kimi-max' } },
@@ -77,7 +77,12 @@ test('an agent the profile declares or an agent file defines is editable; a disa
     assert.deepEqual(row.config, layer.agents[role]);
   }
   const category = rows.find((entry) => entry.section === 'categories' && entry.role === 'fast-explore');
-  assert.equal(category.readOnly, true, 'a declared category the bundle lacks stays read-only');
+  assert.equal(category.readOnly, false, 'a declared category the bundle lacks is editable (#1562 B)');
+  assert.equal(category.stateLabel, null);
+  assert.deepEqual(category.config, layer.categories['fast-explore']);
+  const offCategory = refreshRoutingRows({ inventory, layer: { categories: { 'fast-explore': { model: 'kimi-max', disable: true } } } })
+    .find((entry) => entry.section === 'categories' && entry.role === 'fast-explore');
+  assert.equal(offCategory.readOnly, true, 'a disabled declared category stays read-only');
   const disabled = refreshRoutingRows({ inventory, layer: { agents: { oracle: { model: 'sol', disable: true } } } })
     .find((entry) => entry.section === 'agents' && entry.role === 'oracle');
   assert.equal(disabled.readOnly, true);
