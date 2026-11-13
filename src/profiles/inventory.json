@@ -1,16 +1,16 @@
 {
   "schema": 1,
-  "version": "5.1.60",
+  "version": "5.1.69",
   "sources": {
     "omoTask": {
-      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.60-r1\\package\\plugin\\extensions\\omo-task.js",
-      "sha256": "f6deddc72924134b7ddbae9fafdd4912cc79faf151c2921357a1a2c19d640441",
-      "bytes": 1298908
+      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.69-r1\\package\\plugin\\extensions\\omo-task.js",
+      "sha256": "719c1eac06b34bac708506fd62b6d4614b8ceb25c39c3fe10f9b2e03547d9eb7",
+      "bytes": 1317047
     },
     "omo": {
-      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.60-r1\\package\\plugin\\extensions\\omo.js",
-      "sha256": "8d4a4f5c66804f267895b5ddfde69ad158b61e152c7ad7e700cfb9c3231feed4",
-      "bytes": 1460383
+      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.69-r1\\package\\plugin\\extensions\\omo.js",
+      "sha256": "9ac748c54c71d27db43cc56836d3b63eb888d2d96c72d1e21cb2f5000cd31ee3",
+      "bytes": 1465893
     }
   },
   "agents": [
@@ -56,6 +56,7 @@
       "model_pad",
       "memory",
       "telemetry",
+      "device_service",
       "side_panel",
       "computer",
       "disabled_skills",
@@ -82,6 +83,7 @@
       "model_pad",
       "memory",
       "telemetry",
+      "device_service",
       "side_panel",
       "computer",
       "disabled_skills",

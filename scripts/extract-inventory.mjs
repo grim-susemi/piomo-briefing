@@ -82,9 +82,9 @@ function findAnchor(source, anchors, file) {
 // The agent entry schema: 5.1.44 declared it after `Hd=_d(` and opened it with Jl({ / Kl({;
 // 5.1.48 and 5.1.60 open it directly, so its object opens at the first `{` after the anchor.
 function agentEntryKeys(omo) {
-  const entry = findAnchor(omo, ['Hd=_d(', 'bd({description:jl().optional(),prompt:jl().optional()', 'gd({description:Cl().optional(),prompt:Cl().optional()'], 'omo.js');
+  const entry = findAnchor(omo, ['To({description:Bi().optional(),prompt:Bi().optional()', 'Hd=_d(', 'bd({description:jl().optional(),prompt:jl().optional()', 'gd({description:Cl().optional(),prompt:Cl().optional()'], 'omo.js');
   let open;
-  if (entry.anchor.startsWith('bd({') || entry.anchor.startsWith('gd({')) {
+  if (entry.anchor.startsWith('bd({') || entry.anchor.startsWith('gd({') || entry.anchor.startsWith('To({')) {
     open = omo.indexOf('{', entry.index);
   } else {
     let kl = omo.indexOf('Jl({', entry.index);
@@ -97,12 +97,12 @@ function agentEntryKeys(omo) {
 
 export function extractInventory({ omo, omoTask, omoPath, omoTaskPath, version }) {
   const anchors = {};
-  const agentAnchor = findAnchor(omo, ['var B$=[', 'var s$=[', 'var iE=[', 'var dC=[', 'var _T=['], 'omo.js');
+  const agentAnchor = findAnchor(omo, ['var F$=[', 'var B$=[', 'var s$=[', 'var iE=[', 'var dC=[', 'var _T=['], 'omo.js');
   anchors.agents = agentAnchor.anchor;
   const agents = JSON.parse(extractBalanced(omo, omo.indexOf('[', agentAnchor.index)));
   if (!Array.isArray(agents) || agents.length === 0) fail('agent id array is empty');
 
-  const categoryAnchor = findAnchor(omo, ['Z_=[...D_,...J_,...M_,...L_]', 'F_=[...[', ',Gb=[', ',yb=[', ',mb=['], 'omo.js');
+  const categoryAnchor = findAnchor(omo, [',oy=[...[', 'Z_=[...D_,...J_,...M_,...L_]', 'F_=[...[', ',Gb=[', ',yb=[', ',mb=['], 'omo.js');
   anchors.categories = categoryAnchor.anchor;
   const categoryArray = categoryAnchor.anchor.startsWith('Z_=')
     ? ['D_=[', 'J_=[', 'M_=[', 'L_=['].map((anchor) => {
@@ -113,15 +113,15 @@ export function extractInventory({ omo, omoTask, omoPath, omoTaskPath, version }
   const categories = [...categoryArray.matchAll(/\{name:"([a-z0-9-]+)",config:/g)].map((match) => match[1]);
   if (categories.length === 0) fail('category id array is empty');
 
-  const laneAnchor = findAnchor(omo, ['var Xse=[', 'var Qoe=[', 'var mce=[', 'var noe=[', 'var Rde=['], 'omo.js');
+  const laneAnchor = findAnchor(omo, ['var xae=[', 'var Xse=[', 'var Qoe=[', 'var mce=[', 'var noe=[', 'var Rde=['], 'omo.js');
   anchors.lanes = laneAnchor.anchor;
   const lanes = JSON.parse(extractBalanced(omo, omo.indexOf('[', laneAnchor.index)));
   if (!Array.isArray(lanes) || lanes.length === 0) fail('lane id array is empty');
 
-  const rootAnchor = findAnchor(omo, ['hf=gd({', 'yf=bd({', 'qu=Jl({', 'Ru=Kl({', 'Mu=Kl({'], 'omo.js');
+  const rootAnchor = findAnchor(omo, ['Tl=To({', 'hf=gd({', 'yf=bd({', 'qu=Jl({', 'Ru=Kl({', 'Mu=Kl({'], 'omo.js');
   anchors.root = rootAnchor.anchor;
   const rootKeys = objectKeys(extractBalanced(omo, omo.indexOf('{', rootAnchor.index), '{', '}'));
-  const nativeAnchor = findAnchor(omo, ['ff=gd({', 'mf=bd({', 'zu=Jl({', 'Nu=Kl({', 'Cu=Kl({'], 'omo.js');
+  const nativeAnchor = findAnchor(omo, ['Ol=To({', 'ff=gd({', 'mf=bd({', 'zu=Jl({', 'Nu=Kl({', 'Cu=Kl({'], 'omo.js');
   anchors.native = nativeAnchor.anchor;
   const nativeKeys = objectKeys(extractBalanced(omo, omo.indexOf('{', nativeAnchor.index), '{', '}'));
   const entry = agentEntryKeys(omo);
