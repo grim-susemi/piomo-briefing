@@ -9,8 +9,8 @@
     },
     "omo": {
       "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.69-r1\\package\\plugin\\extensions\\omo.js",
-      "sha256": "9ac748c54c71d27db43cc56836d3b63eb888d2d96c72d1e21cb2f5000cd31ee3",
-      "bytes": 1465893
+      "sha256": "e2caa6701cf7d2488ab8937022a661bbcaab1b4e88c38206f4172419727be711",
+      "bytes": 1466573
     }
   },
   "agents": [
