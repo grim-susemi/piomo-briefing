@@ -14,7 +14,8 @@
 .anum { position: absolute; top: -8px; left: -8px; z-index: 3; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--r-full); background: var(--red); color: var(--panel); box-shadow: 0 0 0 2px var(--bg); font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 1; user-select: none; }
 mark.am { border-radius: 2px; background: var(--red-bg); color: var(--red); text-decoration: underline; text-underline-offset: 2px; }
 .ann-root .rimg { position: relative; }
-.ann-root .rimg > img { cursor: crosshair; }
+.ann-enabled .rimg > img { cursor: crosshair; }
+.ann-root:not(.ann-enabled) .rep-hint { display: none; }
 .rimg > .pin { position: absolute; z-index: 2; display: grid; place-items: center; box-sizing: border-box; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; background: var(--red); color: var(--panel); box-shadow: 0 0 0 2px var(--panel), var(--ann-pin-shadow); font-size: var(--fs-sm); font-weight: var(--fw-semibold); line-height: 1; pointer-events: none; user-select: none; }
 .rimg > .pin.pend { border: 1px dashed var(--ctl-edge); background: var(--ann-tint); color: var(--fg); }
 .band { position: fixed; z-index: 30; border: 1px solid var(--accent); background: var(--ann-tint); pointer-events: none; }
@@ -45,7 +46,9 @@ mark.am { border-radius: 2px; background: var(--red-bg); color: var(--red); text
 .pconf, .ann-clear { margin-top: var(--sp-2); padding: var(--sp-2); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-md); background: var(--panel); }
 .pconf p, .ann-clear p { margin: 0 0 var(--sp-2); }
 .ann-tray { display: contents; }
+.ann-mode { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-2); color: var(--muted); font-size: var(--fs-sm); }
 .tray { position: sticky; top: var(--stabs-h, 40px); z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); margin: 0 0 var(--sp-2); padding: var(--sp-2) var(--sp-3); border: var(--hair) solid var(--ctl-edge); border-radius: var(--r-lg); background: var(--c-pop); color: var(--fg); font-size: var(--fs-base); }
+.ann-root:not(.ann-enabled) .tray { position: static; }
 .tray .tray-n b { color: var(--fg); }
 .tray .tray-hint { color: var(--muted); font-size: var(--fs-sm); }
 .tlist { margin: -4px 0 var(--sp-3); padding: var(--sp-1) var(--sp-3); border: var(--hair) solid var(--line); border-radius: var(--r-xl); background: var(--panel); font-size: var(--fs-base); }
@@ -70,7 +73,7 @@ pre.prev { max-height: 260px; margin: 4px 0 0; padding: 8px 10px; overflow: auto
 @media (max-width: 599px) {
   .pop { bottom: 0; width: 100%; max-width: 100%; max-height: calc(100dvh - env(safe-area-inset-top) - var(--sp-4)); overflow-y: auto; padding: var(--sp-4) var(--sp-4) calc(var(--sp-4) + env(safe-area-inset-bottom)); border-bottom: 0; border-radius: var(--r-xl) var(--r-xl) 0 0; }
   .pop .seg { gap: var(--sp-2); }
-  .pop .seg button, .pop .ann-btn, .ann-clear .ann-btn, .tray .ann-btn, .tlist .ti-x, .ann-prev summary { min-height: 44px; min-width: 44px; }
+  .pop .seg button, .pop .ann-btn, .ann-mode .ann-btn, .ann-clear .ann-btn, .tray .ann-btn, .tlist .ti-x, .ann-prev summary { min-height: 44px; min-width: 44px; }
   .ann-root .ab > .bh { position: static; width: max-content; min-width: var(--hit); min-height: var(--hit); margin: var(--sp-1) 0; padding: 0 var(--sp-3); } /* B-1 */
   .pop .pb { gap: var(--sp-2); }
   .pop .kb { flex-basis: 100%; }

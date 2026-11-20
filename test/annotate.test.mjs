@@ -123,7 +123,7 @@ function pageHtml(t, { seq = 12, rows = null } = {}) {
 }
 const RECT = { head: [300, 50, 1100, 40], now: [300, 100, 1100, 40], 'card/plan': [300, 150, 260, 60], 'card/dec': [570, 150, 260, 60], 'dec/96': [300, 300, 1100, 60], 'dec/90': [300, 370, 1100, 24], 'note/k1': [300, 400, 1100, 24], 'p1/wave/1': [300, 440, 300, 200], 'p1/wave/1/label': [340, 444, 60, 16], 'p1/task/3': [310, 470, 280, 50], 'p1/task/3/label': [316, 474, 100, 16] };
 function layout(t) { for (const el of t.root.querySelectorAll('[data-block],[data-anchor]')) { const key = el.getAttribute('data-block') || el.getAttribute('data-anchor'), m = /^change\/\d+\/(\d+)$/.exec(key), r = m ? [320, 230 + 26 * Number(m[1]), 1060, 24] : RECT[key]; if (r) t.win.rects.set(el, { left: r[0], top: r[1], width: r[2], height: r[3] }); } }
-function makePage({ storage = new FakeStorage(), mode = 'live', session = SESSION, sub = 'ov' } = {}) {
+function makePage({ storage = new FakeStorage(), mode = 'live', session = SESSION, sub = 'ov', enable = true } = {}) {
   const t = { warns: [], errors: [], copied: [], sent: [], idles: 0, capture: {}, bubble: {}, storage };
   const win = { console: { warn: (...a) => t.warns.push(a.join(' ')), error: (...a) => t.errors.push(a) }, sessionStorage: storage, innerWidth: 1440, innerHeight: 900, scrollY: 0, selection: null, navigator: { clipboard: { writeText: text => { t.copied.push(text); return Promise.resolve(); } } }, rects: new Map(), sizes: new Map(), clients: new Map(), addEventListener() {} };
   win.rectOf = el => { const r = win.rects.get(el) || { left: 0, top: 0, width: 0, height: 0 }; return { ...r, right: r.left + r.width, bottom: r.top + r.height }; };
@@ -137,7 +137,15 @@ function makePage({ storage = new FakeStorage(), mode = 'live', session = SESSIO
   t.A.mount(root, { context: () => t.state.session ? { session: t.state.session, sub: t.state.sub, mode: t.state.mode } : null, send: (s, text) => { t.sent.push({ s, text }); }, idle: () => { t.idles++; } });
   t.fire = (target, type, props = {}) => { const ev = { type, target, button: 0, clientX: 0, clientY: 0, altKey: false, ctrlKey: false, metaKey: false, key: '', defaultPrevented: false, stopped: false, preventDefault() { this.defaultPrevented = true; }, stopPropagation() { this.stopped = true; }, ...props }; for (const fn of t.capture[type] || []) { fn(ev); if (ev.stopped) return ev; } for (let n = target; n && !ev.stopped; n = n.parentNode) for (const fn of n.listeners?.[type] || []) fn(ev); if (!ev.stopped) for (const fn of t.bubble[type] || []) fn(ev); return ev; };
   t.click = el => t.fire(el, 'click'); t.key = (el, key, extra = {}) => t.fire(el, 'keydown', { key, ...extra });
-  t.render = opts => { root.innerHTML = pageHtml(t, opts); layout(t); t.A.decorate(); };
+  let firstRender = true;
+  t.afterRender = () => {
+    t.A.decorate();
+    if (firstRender && enable) t.click(root.querySelector('[data-ann-act="toggle"]'));
+    firstRender = false;
+  };
+  t.render = opts => {
+    root.innerHTML = pageHtml(t, opts); layout(t); t.afterRender();
+  };
   t.block = id => root.querySelectorAll('[data-block]').find(el => el.getAttribute('data-block') === id) || null; t.anchor = id => root.querySelectorAll('[data-anchor]').find(el => el.getAttribute('data-anchor') === id) || null;
   t.bh = el => el.children.find(c => c.classList.contains('bh')) || null; t.pop = () => body.querySelector('.pop');
   t.select = (node, text, [left, top, width, height], hits) => { const rect = { left, top, width, height, right: left + width, bottom: top + height }, range = { commonAncestorContainer: node, startContainer: node, getBoundingClientRect: () => rect, cloneRange() { return this; } }; if (hits) range.intersectsNode = n => hits.includes(n); win.selection = { isCollapsed: false, rangeCount: 1, getRangeAt: () => range, toString: () => text, removeAllRanges() { win.selection = null; } }; };
@@ -145,6 +153,41 @@ function makePage({ storage = new FakeStorage(), mode = 'live', session = SESSIO
   return t;
 }
 const idOf = el => el.getAttribute('data-block') || el.getAttribute('data-anchor');
+
+test('manual mode leaves selection alone while off and resumes the parked draft after a redraw', () => {
+  const t = makePage({ enable: false });
+  const toggle = () => t.root.querySelector('[data-ann-act="toggle"]');
+  t.render();
+  const block = t.block('now');
+  t.select(block.childNodes[0], '지금 시안', [300, 100, 90, 16]);
+  assert.equal(t.fire(block, 'mouseup').defaultPrevented, false);
+  assert.equal(t.fire(t.root, 'mousedown').defaultPrevented, false);
+  assert.equal(t.pop(), null);
+  assert.equal(String(t.win.selection), '지금 시안');
+  assert.equal(t.bh(block), null);
+
+  t.click(toggle());
+  t.fire(block, 'mouseup');
+  const draft = t.pop();
+  draft.querySelector('textarea').value = '아직 작성 중';
+  t.click(draft.querySelector('[data-ann-intent="질문"]'));
+  t.click(draft.querySelector('[data-ann-act="toggle"]'));
+  assert.equal(t.pop(), null);
+  assert.equal(t.A.busy(), false);
+  assert.equal(t.win.selection, null);
+  assert.equal(t.document.activeElement, toggle());
+  t.render({ seq: 13 });
+  assert.equal(t.bh(t.block('now')), null);
+  assert.equal(t.pop(), null);
+
+  t.click(toggle());
+  const restored = t.pop();
+  assert.equal(restored.querySelector('textarea').value, '아직 작성 중');
+  t.click(restored.querySelector('[data-ann-act="add"]'));
+  assert.deepEqual(plain(t.A.list(SID).map(a => [a.blocks, a.text, a.intent, a.comment])), [
+    [['now'], '지금 시안', '질문', '아직 작성 중'],
+  ]);
+});
 
 test('classic script loads without a DOM and exposes the module API', () => { const A = pure(); for (const fn of ['mount', 'decorate', 'trayBar', 'tray', 'toMarkdown', 'compose', 'place', 'busy', 'list', 'add', 'remove', 'clear']) assert.equal(typeof A[fn], 'function', fn); assert.equal(A.busy(), false); assert.deepEqual(plain(A.limits), { notes: 10, text: 12000, comment: 1000 }); });
 test('toMarkdown: golden feedback for three annotations (selected text, block only, two paths)', () => { assert.equal(pure().toMarkdown(SESSION, NOTES, SESSION.attachments), GOLDEN); });
@@ -181,9 +224,12 @@ test('stale block: a block id missing after a refresh shows 바뀜·사라짐 an
 });
 test('file mode: Markdown 복사 with the live-board hint and no send button; live mode names the receiving tab', async () => {
   const A = pure(), file = parseHtml(A.trayBar(SESSION, NOTES, false, 'file')); assert.equal(file.querySelector('[data-ann-act="copy"]').textContent, 'Markdown 복사'); assert.equal(file.querySelector('.tray-hint').textContent, '실시간 상황판에서 보내기'); assert.equal(file.querySelector('[data-ann-act="send"]'), null); assert.ok(!file.textContent.includes('로 보내기'));
-  const live = parseHtml(A.trayBar(SESSION, NOTES, false, 'live')); assert.equal(shown(live.querySelector('[data-ann-act="send"]')), '[app-window] 상황판제작 #185로 보내기'); assert.equal(live.querySelector('[data-ann-act="copy"]'), null); assert.equal(shown(live.querySelector('.tray-n')), '[pin] 이 대화에 보낼 주석 3개'); assert.deepEqual(live.querySelectorAll('.ann-btn').map(b => shown(b)), ['목록 보기', '모두 지우기', '[app-window] 상황판제작 #185로 보내기']); assert.equal(live.querySelector('.tlist'), null);
+  const live = parseHtml(A.trayBar(SESSION, NOTES, false, 'live')); assert.equal(shown(live.querySelector('[data-ann-act="send"]')), '[app-window] 상황판제작 #185로 보내기'); assert.equal(live.querySelector('[data-ann-act="copy"]'), null); assert.equal(shown(live.querySelector('.tray-n')), '[pin] 이 대화에 보낼 주석 3개'); assert.deepEqual(live.querySelectorAll('.tray .ann-btn').map(b => shown(b)), ['목록 보기', '모두 지우기', '[app-window] 상황판제작 #185로 보내기']); assert.equal(live.querySelector('.tlist'), null);
   const open = parseHtml(A.trayBar(SESSION, NOTES, true, 'live')); assert.deepEqual(open.querySelectorAll('.tlist .ti').map(r => [r.querySelector('.n').textContent, r.querySelector('.it2').textContent, r.querySelector('.ti-w').textContent]), [['1', '질문', '결정 · 결정 카드'], ['2', '고쳐줘', '개요 · 요약 카드'], ['3', '고쳐줘', '개요 · 블록 2개']]); assert.equal(open.querySelectorAll('[data-ann-act="del"]').length, 3); assert.equal(open.querySelector('pre.prev').textContent, GOLDEN);
-  const empty = parseHtml(A.trayBar(SESSION, [], false, 'live')); assert.equal(shown(empty.querySelector('.hint')), '글자를 드래그하거나, 블록 위 [message-square] 주석을 누르거나, 빈 곳에서 끌어 여러 블록을 고르면 그 자리에 주석 창이 떠'); assert.equal(empty.querySelectorAll('button').length, 0);
+  const empty = parseHtml(A.trayBar(SESSION, [], false, 'live')); assert.equal(empty.querySelector('.hint'), null);
+  assert.deepEqual(empty.querySelectorAll('button').map(b => b.getAttribute('data-ann-act')), ['toggle']);
+  const enabled = makePage(); enabled.render();
+  assert.equal(shown(enabled.root.querySelector('.hint')), '글자를 드래그하거나, 블록 위 [message-square] 주석을 누르거나, 빈 곳에서 끌어 여러 블록을 고르면 그 자리에 주석 창이 떠');
   const t = makePage({ mode: 'file' }); NOTES.forEach(n => t.A.add(SID, n)); t.render(); assert.equal(t.root.querySelector('[data-ann-act="send"]'), null); t.click(t.root.querySelector('[data-ann-act="copy"]')); await flush(); assert.deepEqual(t.copied, [GOLDEN]); assert.equal(t.root.querySelector('.ann-msg.ok').textContent, '복사했어요 - 그 대화창에 붙여넣으세요'); assert.equal(t.sent.length, 0);
 });
 test('a text drag inside a block opens the tray at the selection; Ctrl+Enter adds a numbered, marked annotation with the full text', () => {
@@ -251,7 +297,7 @@ function reportModel(t) {
   const id = store.allocDecisionId({ sessionId: SID, question: '어느 시안?', recommend: 'B', reason: 'r', blocks: true, createdAt: at, source: 'brief', options: { A: { text: '덧칠형', consequence: '지금 화면 유지' }, B: { text: '노션형', consequence: '섹션과 페이지' }, C: { text: '레일형', consequence: '레일과 탭' } } }); const asset = path.join(dir, 'assets', SHAS.C + '.png'), image = (k, p) => ({ sha: SHAS[k], ext: 'png', mime: 'image/png', bytes: 100, w: 200, h: 125, path: p, alt: '시안 ' + k, option: k });
   store.replace('sessions/' + SID + '/reports.json', [{ id: 'r1', title: '시안 비교', summary: '', decisionId: id, at, images: [image('A', SHOTS.A), image('B', SHOTS.B), image('C', asset)] }]); const model = buildViewModel(withReports(store, store.readSnapshot()), at + 5, { isAlive: () => false, stateDir: dir }); return { session: model.sessions.find(s => s.id === SID), dir, asset };
 }
-function reportPage(t, session) { const cv = vm.createContext({}); for (const f of ['src/page/view.js', 'src/page/convo-view.js']) vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), cv, { filename: f }); Object.assign(t.state, { session, sub: 'rep' }); t.root.innerHTML = cv.BriefConvo.render(session, { sub: 'rep', live: t.state.mode === 'live', answers: {}, expanded: {} }, { now: 0 }); const imgs = t.root.querySelectorAll('img'); imgs.forEach((img, n) => t.win.rects.set(img, { left: 400 + 220 * n, top: 300, width: 200, height: 125 })); t.A.decorate(); return imgs; }
+function reportPage(t, session) { const cv = vm.createContext({}); for (const f of ['src/page/view.js', 'src/page/convo-view.js']) vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), cv, { filename: f }); Object.assign(t.state, { session, sub: 'rep' }); t.root.innerHTML = cv.BriefConvo.render(session, { sub: 'rep', live: t.state.mode === 'live', answers: {}, expanded: {} }, { now: 0 }); const imgs = t.root.querySelectorAll('img'); imgs.forEach((img, n) => t.win.rects.set(img, { left: 400 + 220 * n, top: 300, width: 200, height: 125 })); t.afterRender(); return imgs; }
 const pinsOf = el => el.querySelectorAll('.pin').map(x => [x.getAttribute('class'), x.style.left, x.style.top, x.textContent]);
 test('a click on a report image opens the tray at that spot with an empty, focused comment; the numbered pin at (25%, 40%) is in the tray list and its Markdown names the original image only', t => {
   const { session, dir, asset } = reportModel(t); assert.deepEqual(plain(session.blockSources['rep/r1/img/1']), { paths: [SHOTS.B] }); assert.equal(session.blockSources['rep/r1/img/2'], undefined); const p = makePage({ session, sub: 'rep' }), imgs = reportPage(p, session); assert.equal(imgs.length, 3); assert.equal(imgs[1].parentNode.getAttribute('class'), 'rimg'); const cell = p.block('rep/r1/img/1'); p.fire(imgs[1], 'click', { clientX: 670, clientY: 350 }); const pop = p.pop(); assert.ok(pop); assert.equal(shown(pop.querySelector('.ph')), '[message-square] [app-window] 상황판제작 #185 대화에 주석 · 보고서 · 보고서 그림 (25%, 40%)'); assert.equal(pop.querySelector('.pq').textContent, 'B · 노션형 추천 섹션과 페이지'); assert.equal(shown(pop.querySelector('.pp')), '[paperclip] ' + SHOTS.B); assert.equal(pop.querySelector('.seg .on').getAttribute('data-ann-intent'), '고쳐줘'); const ta = pop.querySelector('textarea'); assert.equal(p.document.activeElement, ta); assert.equal(ta.value, ''); assert.deepEqual({ ...pop.style }, { top: '369px', left: '659px' }); assert.deepEqual(pinsOf(cell), [['pin pend', '25%', '40%', '']]); assert.equal(p.A.busy(), true);

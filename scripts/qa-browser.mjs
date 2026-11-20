@@ -574,6 +574,9 @@ async function toggleDetails(page, selector) {
 
 // One annotation through a block's 💬 button: hover the block, press the button, type, Ctrl+Enter. Returns the new count.
 async function annotateBlock(page, sid, blockSel, comment) {
+  if (await page.eval(`!document.querySelector('#main').classList.contains('ann-enabled')`)) {
+    await click(page, '.ann-mode [data-ann-act="toggle"]');
+  }
   const n0 = await page.eval(`BriefAnnotate.list(${J(sid)}).length`);
   await hover(page, blockSel, { fx: 0.3, fy: 0.5 });
   await click(page, `${blockSel} > .bh`, { scroll: false });

@@ -391,6 +391,7 @@ test('page.js: a tick is stored under omo-briefing.check.<sessionId>.<reportId>.
 test('annotations: every block carries its own button and is named 보고서 블록 in the composed feedback', () => {
   const e = makeController({ modules: ['icons', ...MODULES.slice(1), 'shell', 'annotate'] });
   const main = openReport(e, session());
+  e.fire(main.querySelector('[data-ann-act="toggle"]'), 'click');
   const figs = main.querySelectorAll('figure');
   assert.equal(figs.length, 6);
   for (const f of figs) assert.ok(f.children.some((c) => c.classList.contains('bh')), f.getAttribute('data-block'));

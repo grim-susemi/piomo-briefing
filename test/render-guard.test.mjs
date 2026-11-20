@@ -31,7 +31,7 @@ const REVIEWED_ROWS = [
   ["alarm.js", "innerHTML", "b.innerHTML =soundLabel(on)", "soundLabel(): our own icons and words only"],
   ["alarm.js", "setAttribute", "b.setAttribute('aria-pressed', on ? 'true' : 'false')", "boolean, not model text"],
   ["annotate.js", "innerHTML", "b.innerHTML =ic('message-square', 'ic-xs') + ' 주석'", "constant icon + label, no model text"],
-  ["annotate.js", "innerHTML", "el.innerHTML =popHtml(c, kindOf(ids) + (pin ? ' ' + pinText(pin) : ''), text ? cut(collapse(text), SHOW_MAX) : snip, paths)", "popHtml() escapes every model string with esc()"],
+  ["annotate.js", "innerHTML", "el.innerHTML =popHtml(c, kind, shown, note.paths)", "popHtml() escapes every model string with esc()"],
   ["annotate.js", "innerHTML", "slot.innerHTML =trayInner(c.session, load(c.sid), !!openList[c.sid], c.mode, own(msgs, c.sid) || null, c.expanded)", "trayInner() escapes every model string with esc()"],
   ["annotate.js", "setAttribute", "b.setAttribute('aria-pressed', on ? 'true' : 'false')", "boolean, not model text"],
   ["annotate.js", "setAttribute", "b.setAttribute('class', 'bh')", "constant attribute value"],

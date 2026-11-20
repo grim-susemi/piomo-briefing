@@ -380,6 +380,7 @@ test('overview held-details toggles persist through the shipped renderer', () =>
 
 test('busy: real annotation editor and main selection hold refresh; sidebar selection and search do not', () => {
   const e = makeController(); e.page.receive(model(1)); e.page.open('s1', 'ov');
+  click(e, '[data-ann-act="toggle"]');
   click(e, '[data-block="now"] [data-ann-act="block"]');
   assert.equal(e.ctx.BriefAnnotate.busy(), true);
   e.advance(600); e.page.receive(model(2));
@@ -738,6 +739,7 @@ test('C-CAP2 integration: refresh without briefSeq keeps replacement rows visibl
   const e = makeController();
   e.page.receive(model(1));
   e.page.open('s1', 'ov');
+  click(e, '[data-ann-act="toggle"]');
   assert.ok(e.byId.side.querySelector('[data-sec="tabs"]').querySelector('[data-row="s1"]'), 'alive card initially appears under open tabs');
   const A = e.ctx.BriefAnnotate;
   assert.equal(A.add('s1', note).ok, true);

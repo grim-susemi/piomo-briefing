@@ -35,6 +35,7 @@
   var env = { root: null, hooks: {}, mounted: false };
   var cache = Object.create(null), openList = Object.create(null), msgs = Object.create(null), warned = Object.create(null);
   var clearPending = Object.create(null);
+  var enabled = false, parked = Object.create(null);
   var storageDead = false, pop = null, band = null, swallow = false, wasBusy = false;
 
   function str(v) { return typeof v === 'string' ? v : typeof v === 'number' && isFinite(v) ? String(v) : ''; }
@@ -139,10 +140,12 @@
   }
   function trayInner(s, l, open, mode, msg, expanded) {
     var m = typeof msg === 'string' ? { text: msg, ok: false } : obj(msg);
+    var control = '<div class="ann-mode"><button type="button" class="ann-btn" data-ann-act="toggle">' +
+      (enabled ? '주석 끄기' : '주석 켜기') + '</button><span role="status">' + (enabled ? '주석 켜짐' : '주석 꺼짐') + '</span></div>';
     var note = m && str(m.text) ? '<p class="ann-msg' + (m.ok ? ' ok' : '') + '" role="' + (m.ok || m.sending ? 'status' : 'alert') + '">' + esc(m.text) + '</p>' : '';
     if (m && m.copy && mode === 'live') note += '<button type="button" class="ann-btn" data-ann-act="copy">Markdown 복사</button>';
     if (m && m.conflict) note += '<button type="button" class="ann-btn" data-act="ann-new" data-sid="' + esc(s.id) + '">새로 보내기</button>';
-    if (!l.length) return '<p class="hint">' + esc(TXT.hint[0]) + ic('message-square', 'ic-xs') + esc(TXT.hint[1]) + '</p>' + note;
+    if (!l.length) return control + (enabled ? '<p class="hint">' + esc(TXT.hint[0]) + ic('message-square', 'ic-xs') + esc(TXT.hint[1]) + '</p>' : '') + note;
     var live = mode === 'live';
     var html = '<div class="tray" role="group" aria-label="보낼 주석"><span class="tray-n">' + ic('pin') + ' 이 대화에 보낼 주석 <b>' + l.length + '</b>개</span><span class="sp"></span>' +
       '<button type="button" class="ann-btn" data-ann-act="list" aria-expanded="' + (open ? 'true' : 'false') + '">' + (open ? '목록 접기' : '목록 보기') + '</button>' +
@@ -150,7 +153,7 @@
       (live ? '<button type="button" class="ann-btn go" data-ann-act="send"' + (m && m.sending ? ' disabled' : '') + '>' + tabNameHtml(s) + '로 보내기</button>' : '<button type="button" class="ann-btn go" data-ann-act="copy">' + esc(TXT.copy) + '</button><span class="tray-hint">' + esc(TXT.fileHint) + '</span>') + '</div>';
     if (clearPending[str(s.id)]) html += '<div class="ann-clear" role="group" aria-label="주석 지우기 확인"><p>모아 둔 주석을 모두 지울까요?</p><button type="button" class="ann-btn" data-ann-act="clear-cancel">계속 보관</button> <button type="button" class="ann-btn danger" data-ann-act="clear-confirm">모두 지우기</button></div>';
     if (open) { var md = toMarkdown(s, l, s.attachments), key = 'cv:' + str(s.id) + ':ann-prev'; html += '<div class="tlist">' + l.map(listRow).join('') + '<details class="ann-prev" data-open-key="' + esc(key) + '"' + (own(expanded, key) === true ? ' open' : '') + '><summary>' + (live ? '보낼' : '복사할') + ' 내용 미리 보기 · ' + cps(md).length + '/' + TEXT_MAX + '자</summary><pre class="prev">' + esc(md) + '</pre></details></div>'; }
-    return html + note;
+    return control + html + note;
   }
   function trayBar(session, notes, open, mode, msg) { var s = obj(session) || {}; return '<div class="ann-tray" data-ann-tray="' + esc(str(s.id)) + '">' + trayInner(s, arr(notes).map(normNote).filter(Boolean), !!open, mode, msg) + '</div>'; }
   function tray(session, mode) { var s = obj(session), sid = s ? str(s.id) : ''; return sid ? trayBar(s, load(sid), !!openList[sid], mode, own(msgs, sid) || null) : ''; }
@@ -209,16 +212,17 @@
   function badgeHost(el) { var t = upper(el); if (t === 'TR') { var kids = el.childNodes || []; for (var i = 0; i < kids.length; i++) if (kids[i].nodeType === 1) return kids[i]; return null; } return own(NO_CHILD, t) ? null : el; }
   function decorate() {
     var root = env.root; if (!root || !doc) return; undecorate(root); var c = context(); if (pop && (!c || c.sid !== pop.sid || c.sub !== pop.sub)) closePop(); if (!c) return; var byId = Object.create(null);
-    blocksIn(root).forEach(function (el) {
-      var id = blockId(el); (byId[id] || (byId[id] = [])).push(el); if (!ownBlock(el)) return; addClass(el, 'ab'); if (own(NO_BUTTON, upper(el))) return;
+    var l = load(c.sid), changed = false, badges = [], pins = [];
+    if (enabled || l.length) blocksIn(root).forEach(function (el) {
+      var id = blockId(el); (byId[id] || (byId[id] = [])).push(el); if (!enabled || !ownBlock(el)) return; addClass(el, 'ab'); if (own(NO_BUTTON, upper(el))) return;
       var b = doc.createElement('button'); b.setAttribute('type', 'button'); b.setAttribute('class', 'bh'); b.setAttribute('data-ann-act', 'block'); b.setAttribute('title', '이 블록에 주석 달기'); b.innerHTML = ic('message-square', 'ic-xs') + ' 주석'; el.appendChild(b);
     });
-    var l = load(c.sid), changed = false, badges = [], pins = [];
     l.forEach(function (a, i) { var missing = false, present = [];
       a.blocks.forEach(function (id, k) { var hits = outermost(byId[id] || []); if (!hits.length) missing = true;
+        if (!enabled) return;
         hits.forEach(function (el) { addClass(el, 'bann'); present.push(el); if (k !== 0) return; var host = a.pin ? pinHost(el) : null; if (host) { pins.push({ host: host, pin: a.pin, n: i + 1 }); return; } var hit = badges.filter(function (b) { return b.el === el; })[0]; if (hit) hit.nums.push(i + 1); else badges.push({ el: el, nums: [i + 1] }); });
       });
-      if (a.text && !missing) markText(present, a.text); if (a.sub === c.sub && a.gone !== missing) { a.gone = missing; changed = true; }
+      if (enabled && a.text && !missing) markText(present, a.text); if (a.sub === c.sub && a.gone !== missing) { a.gone = missing; changed = true; }
     });
     badges.forEach(function (b) { var host = badgeHost(b.el); if (!host) return; var span = doc.createElement('span'); span.setAttribute('class', 'anum'); span.setAttribute('aria-label', b.nums.join(', ') + '번 주석'); span.textContent = b.nums.join('·'); host.appendChild(span); });
     pins.forEach(function (p) { p.host.appendChild(pinEl(p.pin, p.n)); });
@@ -238,20 +242,56 @@
       (shown ? '<div class="pq">' + esc(shown) + '</div>' : '') + (paths.length ? '<div class="pp" title="' + esc(paths.join('\n')) + '">' + ic('paperclip') + ' ' + esc(paths[0]) + (paths.length > 1 ? ' 외 ' + (paths.length - 1) : '') + '</div>' : '') +
       '<div class="seg" role="group" aria-label="주석 종류"><button type="button" class="on" data-ann-intent="고쳐줘" aria-pressed="true">' + ic('pencil') + ' 고쳐줘</button><button type="button" data-ann-intent="질문" aria-pressed="false">' + ic('circle-question-mark') + ' 질문</button></div>' +
       '<label class="plabel">의견<textarea class="pt" rows="3" placeholder="여기에 대한 의견" aria-label="의견"></textarea></label>' +
-      '<div class="pb"><span class="kb">Ctrl+Enter 추가 · Esc 취소</span><span class="pc">0/' + COMMENT_MAX + '</span><span class="sp"></span><button type="button" class="ann-btn" data-ann-act="cancel">취소</button><button type="button" class="ann-btn go" data-ann-act="add">주석 추가</button></div>' +
+      '<div class="pb"><span class="kb">Ctrl+Enter 추가 · Esc 취소</span><span class="pc">0/' + COMMENT_MAX + '</span><span class="sp"></span><button type="button" class="ann-btn" data-ann-act="toggle">주석 끄기</button><button type="button" class="ann-btn" data-ann-act="cancel">취소</button><button type="button" class="ann-btn go" data-ann-act="add">주석 추가</button></div>' +
       '<div class="pconf" role="group" aria-label="초안 버리기 확인" hidden><p>쓰던 주석을 버릴까요?</p><button type="button" class="ann-btn" data-ann-act="keep">계속 쓰기</button> <button type="button" class="ann-btn danger" data-ann-act="discard">초안 버리기</button></div><p class="perr" role="alert" hidden></p>';
   }
   function openPop(c, els, text, anchor, pin) {
-    closePop(); var ids = uniq(els.map(blockId)), paths = []; ids.forEach(function (id) { pathsFor(c.session, id).forEach(function (p) { if (paths.indexOf(p) < 0) paths.push(p); }); });
-    var snip = first(collapse(els.map(textOf).filter(Boolean).join(' / ')), SNIP_MAX), el = doc.createElement('div');
+    var ids = uniq(els.map(blockId)), paths = []; ids.forEach(function (id) { pathsFor(c.session, id).forEach(function (p) { if (paths.indexOf(p) < 0) paths.push(p); }); });
+    var snip = first(collapse(els.map(textOf).filter(Boolean).join(' / ')), SNIP_MAX);
+    showPop(c, els, { ids: ids, text: text, snip: snip, paths: paths, pin: pin || null }, anchor);
+  }
+  function showPop(c, els, note, anchor) {
+    closePop();
+    var el = doc.createElement('div');
     el.setAttribute('class', 'pop'); el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', '주석 달기');
-    el.innerHTML = popHtml(c, kindOf(ids) + (pin ? ' ' + pinText(pin) : ''), text ? cut(collapse(text), SHOW_MAX) : snip, paths); doc.body.appendChild(el);
-    pop = { el: el, ta: el.querySelector('textarea'), sid: c.sid, sub: c.sub, ids: ids, els: els, text: text, snip: snip, paths: paths, intent: INTENTS[0], anchor: anchor, last: null, pin: pin || null };
+    var kind = kindOf(note.ids) + (note.pin ? ' ' + pinText(note.pin) : '');
+    var shown = note.text ? cut(collapse(note.text), SHOW_MAX) : note.snip;
+    el.innerHTML = popHtml(c, kind, shown, note.paths); doc.body.appendChild(el);
+    pop = { el: el, ta: el.querySelector('textarea'), sid: c.sid, sub: c.sub, ids: note.ids, els: els, text: note.text, snip: note.snip, paths: note.paths, intent: INTENTS[0], anchor: anchor, last: null, pin: note.pin };
     els.forEach(function (b) { addClass(b, 'bsel'); }); drawPend(); if (load(c.sid).length >= MAX_NOTES) popError(TXT.full);
     if (pop.ta) { pop.ta.addEventListener('keydown', guard('tray key', onPopKey)); pop.ta.addEventListener('input', guard('tray input', onPopInput)); }
+    if (note.value && pop.ta) { pop.ta.value = note.value; setIntent(note.intent); onPopInput(); }
     position(); if (pop.ta && typeof pop.ta.focus === 'function') pop.ta.focus({ preventScroll: true }); noteBusy();
   }
   function closePop() { if (!pop) return; var p = pop; pop = null; detach(p.el); p.els.forEach(function (b) { dropClass(b, 'bsel'); }); if (p.pin) all(env.root, '.rimg .pin.pend').forEach(detach); noteBusy(); }
+  function toggleMode() {
+    var c = context(); if (!c) return;
+    var key = JSON.stringify([c.sid, c.sub]);
+    enabled = !enabled;
+    if (enabled) addClass(env.root, 'ann-enabled');
+    else {
+      dropClass(env.root, 'ann-enabled');
+      if (pop && pop.ta && pop.ta.value) {
+        parked[key] = { ids: pop.ids, text: pop.text, snip: pop.snip, paths: pop.paths, pin: pop.pin, intent: pop.intent, value: pop.ta.value };
+      }
+      var sel = g.getSelection && g.getSelection();
+      if (pop && pop.text && sel && String(sel).trim() === pop.text) sel.removeAllRanges();
+      closePop();
+      if (band) endBand(false);
+      swallow = false;
+    }
+    decorate();
+    var note = enabled && parked[key];
+    if (note) {
+      var els = blocksIn(env.root);
+      var anchors = note.ids.flatMap(function (id) { return outermost(els.filter(function (el) { return blockId(el) === id; })); });
+      showPop(c, anchors, note, {});
+      delete parked[key];
+    } else {
+      var button = env.root.querySelector('.ann-mode [data-ann-act="toggle"]');
+      if (button) button.focus();
+    }
+  }
   function cancelPop() {
     if (!draft()) { closePop(); return; }
     var confirm = pop.el.querySelector('.pconf'); confirm.removeAttribute('hidden'); position();
@@ -296,12 +336,14 @@
     else if (act === 'del') remove(c.sid, Number(t.getAttribute('data-ann-i'))); else return; decorate();
   }
   function onClick(ev) {
-    if (swallow) { swallow = false; if (typeof ev.stopPropagation === 'function') ev.stopPropagation(); if (typeof ev.preventDefault === 'function') ev.preventDefault(); return; }
-    var t = ev.target && typeof ev.target.closest === 'function' ? ev.target.closest('[data-ann-act],[data-ann-intent]') : null; if (!t) { pinClick(ev); return; }
+    if (enabled && swallow) { swallow = false; if (typeof ev.stopPropagation === 'function') ev.stopPropagation(); if (typeof ev.preventDefault === 'function') ev.preventDefault(); return; }
+    var t = ev.target && typeof ev.target.closest === 'function' ? ev.target.closest('[data-ann-act],[data-ann-intent]') : null; if (!t) { if (enabled) pinClick(ev); return; }
     var inPop = !!pop && pop.el.contains(t); if (!inPop && !connected(t)) return;
+    var act = t.getAttribute('data-ann-act'); if (!enabled && act === 'block') return;
     if (typeof ev.stopPropagation === 'function') ev.stopPropagation(); if (typeof ev.preventDefault === 'function') ev.preventDefault();
+    if (act === 'toggle') { toggleMode(); return; }
     if (t.hasAttribute('data-ann-intent')) { if (inPop) setIntent(t.getAttribute('data-ann-intent')); return; }
-    var act = t.getAttribute('data-ann-act'); if (inPop) { if (act === 'add') addFromPop(); else if (act === 'cancel') cancelPop(); else if (act === 'keep') keepPop(); else if (act === 'discard') closePop(); return; }
+    if (inPop) { if (act === 'add') addFromPop(); else if (act === 'cancel') cancelPop(); else if (act === 'keep') keepPop(); else if (act === 'discard') closePop(); return; }
     if (act === 'block') openFromButton(t); else trayAction(act, t);
   }
   function pinClick(ev) {
@@ -314,6 +356,7 @@
   function openFromButton(t) { var b = parentEl(t), c = context(); if (!b || !c || !b.matches(BLOCK_SEL)) return; if (draft()) { popError(TXT.draft); return; } openPop(c, [rep(b)], '', {}); }
   function onScrollbar(ev) { var root = env.root; if (ev.target !== root) return false; var r = root.getBoundingClientRect(), cw = num(root.clientWidth), ch = num(root.clientHeight); return (cw > 0 && ev.clientX >= r.left + cw) || (ch > 0 && ev.clientY >= r.top + ch); }
   function onMouseDown(ev) {
+    if (!enabled) return;
     swallow = false; var root = env.root, t = ev.target; if (!root || ev.button !== 0 || !t || typeof t.closest !== 'function' || !root.contains(t)) return;
     if (t.closest(ev.altKey ? NO_ALT_DRAG : NO_DRAG)) return; var b = t.closest(BLOCK_SEL); if (b && root.contains(b) && !ev.altKey) return;
     if (onScrollbar(ev)) return; var c = context(); if (!c) return; if (pop) { if (draft()) { popError(TXT.draft); return; } closePop(); }
@@ -337,7 +380,7 @@
     var inner = host.closest(BLOCK_SEL), els = inner && root.contains(inner) ? [rep(inner)] : typeof range.intersectsNode === 'function' ? uniq(outermost(blocksIn(root).filter(function (el) { return range.intersectsNode(el); })).map(rep)) : [];
     if (!els.length) return; openPop(c, els, text, { range: typeof range.cloneRange === 'function' ? range.cloneRange() : range });
   }
-  function onMouseUp(ev) { if (band) { endBand(true); return; } textPick(ev); }
+  function onMouseUp(ev) { if (!enabled) return; if (band) { endBand(true); return; } textPick(ev); }
   function onKey(ev) {
     swallow = false; if (ev.key !== 'Escape') return; if (band) endBand(false); else if (pop) { var conf = pop.el.querySelector('.pconf'); if (conf && !conf.hasAttribute('hidden')) keepPop(); else cancelPop(); }
     else { var c = context(); if (c && clearPending[c.sid]) { delete clearPending[c.sid]; refreshTray(c); } }

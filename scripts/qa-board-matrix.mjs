@@ -1107,6 +1107,7 @@ async function runViewport(vp, A, B, D) {
 
   // the tray on a text selection: a drag over the first line of the 지금 headline, ending clear of the block's own 💬 주석
   // hover button (top-right corner of the block; a release on that button is no text selection)
+  await click('.ann-mode [data-ann-act="toggle"]');
   await scrollMainTop();
   await settle();
   const drag = await ev(`(() => {
