@@ -214,6 +214,27 @@ test('role rendering escapes raw model and alias once across options titles and 
 });
 
 // R: registered aliases retain effort while ordinary model options omit alias repetition.
+test('direct backup gives Neon one model option and exactly its registered efforts', () => {
+  const value = structuredClone(state);
+  const provider = 'antigravity-ocx';
+  const model = `${provider}/google-antigravity/gemini-4-neon`;
+  const levels = ['low', 'medium', 'high', 'xhigh'];
+  for (const variant of levels) {
+    value.catalog[`${provider}-gemini-4-neon-${variant}`] = { model, variant, levels };
+  }
+  const row = value.routing.rows.find((entry) => entry.section === 'agents');
+  const route = `${row.section}/${row.role}`;
+  row.backup = { provider, model, thinking: 'xhigh' };
+  const html = render(value, { tab: 'agents', openRow: `route:${route}` });
+  const selectFor = (kind) => picks(html).find((entry) =>
+    entry.attrs['data-pf'] === kind && entry.attrs['data-route'] === route);
+  const modelOptions = selectFor('backup-model').options.filter((entry) => entry.attrs.value === model);
+  assert.deepEqual(modelOptions.map(({ text, selected }) => [text, selected]), [['Gemini 4 Neon', true]]);
+  const effortOptions = selectFor('backup-thinking').options.filter((entry) => entry.attrs.value);
+  assert.deepEqual(effortOptions.map((entry) => entry.attrs.value), levels);
+  assert.equal(effortOptions.find((entry) => entry.selected)?.text, 'xhigh (extra high)');
+});
+
 test('registered backup labels keep alias effort and the short model', () => {
   const html = render(state, { tab: 'agents' });
   const backups = picks(html).filter((pick) => pick.attrs['data-pf'] === 'route-backup');

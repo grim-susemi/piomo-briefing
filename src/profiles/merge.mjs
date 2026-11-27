@@ -160,6 +160,7 @@ export function getOrCreateCatalogAlias({ catalog, provider, model, reasoning, p
 export function setProfileLayerModel({
   config, profileKey, section, role, alias,
   ensureCatalogAlias = false, ensureModelId = '', ensureVariant = '', modelReasoning = {},
+  effortValidated = false,
 }) {
   if (!isPlainObject(config?.profiles)) throw new Error(`프로필 ${profileKey} 레이어를 찾을 수 없습니다.`);
   const profile = config.profiles[profileKey];
@@ -179,9 +180,11 @@ export function setProfileLayerModel({
     if (!String(ensureModelId ?? '').trim() || !String(ensureVariant ?? '').trim()) {
       throw new Error(`별칭 ${alias} 생성에 필요한 모델/강도 정보가 없습니다.`);
     }
-    const reasoningFlag = Object.hasOwn(modelReasoning, ensureModelId) ? Boolean(modelReasoning[ensureModelId]) : true;
-    if (!testReasoningLevelSupported(ensureModelId, ensureVariant, reasoningFlag)) {
-      throw new Error(`모델 ${ensureModelId} 이(가) 지원하지 않는 추론 강도입니다: ${ensureVariant}`);
+    if (!effortValidated) {
+      const reasoningFlag = Object.hasOwn(modelReasoning, ensureModelId) ? Boolean(modelReasoning[ensureModelId]) : true;
+      if (!testReasoningLevelSupported(ensureModelId, ensureVariant, reasoningFlag)) {
+        throw new Error(`모델 ${ensureModelId} 이(가) 지원하지 않는 추론 강도입니다: ${ensureVariant}`);
+      }
     }
     if (!isPlainObject(existing)) {
       catalog[alias] = { model: ensureModelId, variant: ensureVariant };

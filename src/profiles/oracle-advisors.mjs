@@ -2,16 +2,17 @@
 // extension; the switcher only reads it and rewrites one field, profiles.<advisor>.model, when the owner
 // picks a model and effort for an advisor that already exists. The grammar and the family rule below mirror
 // that extension's validateRouting (piomo-oracle-advisor-mod src/seams.mjs): a pin is provider/model[:level]
-// with one slash, and the model's family must stay the profile's declared family, so a Claude advisor
+// with optional model namespace segments, and the model's family must stay the profile's declared family, so a Claude advisor
 // cannot be turned into a GPT one from here.
 export const ADVISOR_FILE = 'agent/oracle-advisor/routing.json';
 
-const PIN_GRAMMAR = /^[a-z0-9_.-]+\/([a-z0-9_.-]+)(?::[a-z0-9_.-]+)?$/i;
+const PIN_GRAMMAR = /^[a-z0-9_.-]+\/(?:[a-z0-9_.-]+\/)*([a-z0-9_.-]+)(?::[a-z0-9_.-]+)?$/i;
 
 export function advisorFamilyOf(bareModelId) {
   const lower = String(bareModelId).toLowerCase();
   if (lower.includes('claude')) return 'claude';
   if (lower.startsWith('gpt-')) return 'gpt';
+  if (lower.startsWith('gemini-')) return 'gemini';
   return 'other';
 }
 

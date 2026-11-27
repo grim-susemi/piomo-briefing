@@ -1,16 +1,16 @@
 {
   "schema": 1,
-  "version": "5.1.69",
+  "version": "5.1.81",
   "sources": {
     "omoTask": {
-      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.69-r1\\package\\plugin\\extensions\\omo-task.js",
-      "sha256": "719c1eac06b34bac708506fd62b6d4614b8ceb25c39c3fe10f9b2e03547d9eb7",
-      "bytes": 1317047
+      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.81-r1\\package\\plugin\\extensions\\omo-task.js",
+      "sha256": "6d66684e90dfa303bacc098997b42ac6301154bf5060d590e901a39b8e4054e4",
+      "bytes": 1323991
     },
     "omo": {
-      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.69-r1\\package\\plugin\\extensions\\omo.js",
-      "sha256": "e2caa6701cf7d2488ab8937022a661bbcaab1b4e88c38206f4172419727be711",
-      "bytes": 1466573
+      "path": "C:\\Users\\USER\\.omo-stable-500\\staging\\memory-rollback-5.1.81-r1\\package\\plugin\\extensions\\omo.js",
+      "sha256": "37022d7f3363e8661e498176d43e6aef71994746f8aaac850482d3b0b69b1ea5",
+      "bytes": 1564223
     }
   },
   "agents": [
@@ -43,6 +43,8 @@
   "schemaKeys": {
     "root": [
       "provenance",
+      "session_wake",
+      "operator_alerts",
       "formatOnMutation",
       "$schema",
       "categories",
@@ -60,6 +62,7 @@
       "side_panel",
       "computer",
       "disabled_skills",
+      "keyword_detector",
       "exclude_models",
       "[opencode]",
       "[native]",
@@ -71,6 +74,8 @@
     ],
     "native": [
       "provenance",
+      "session_wake",
+      "operator_alerts",
       "formatOnMutation",
       "categories",
       "agents",
@@ -87,6 +92,7 @@
       "side_panel",
       "computer",
       "disabled_skills",
+      "keyword_detector",
       "exclude_models",
       "[opencode]",
       "[native]",

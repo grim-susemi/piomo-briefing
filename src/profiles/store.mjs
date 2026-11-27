@@ -605,7 +605,7 @@ export function openProfilesStore(options = {}) {
   // The host registry is handed over as a getter: extension.mjs points it at the live
   // session context, while tests pass an array. Only the ChatGPT-subscription models
   // are added to the picker, so the catalog stays the source of every other provider.
-  function registryPickerModels() {
+  function registryPickerModels(homeRegistries = null, requiredHomes = []) {
     const source = options.registry ?? options.registryModels ?? [];
     let available;
     try { available = typeof source === 'function' ? source() : source; } catch { available = []; }
@@ -642,8 +642,24 @@ export function openProfilesStore(options = {}) {
       provider: CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE,
       model: `${CHATGPT_SUBSCRIPTION_PROVIDER_CHOICE}/${id}`,
     }));
+    const seenModels = new Set(picks.map((item) => item.model));
+    for (const home of requiredHomes) {
+      const reg = homeRegistries?.[home];
+      if (!reg || reg.unknown || !Array.isArray(reg.models)) continue;
+      for (const item of reg.models) {
+        if (!item?.fromExtension || !item.modelId || seenModels.has(item.modelId)) continue;
+        seenModels.add(item.modelId);
+        picks.push({
+          provider: item.provider,
+          model: item.modelId,
+          ...(Array.isArray(item.levels) ? { levels: item.levels } : {}),
+        });
+      }
+    }
     const webModel = webDeepseekDeclaration(join(agentDir, 'web-deepseek'));
-    if (webModel) picks.push({ provider: webModel.provider, model: `${webModel.provider}/${webModel.id}`, levels: ['off'] });
+    if (webModel && !seenModels.has(`${webModel.provider}/${webModel.id}`)) {
+      picks.push({ provider: webModel.provider, model: `${webModel.provider}/${webModel.id}`, levels: ['off'] });
+    }
     return picks;
   }
 
@@ -1236,7 +1252,7 @@ export function openProfilesStore(options = {}) {
       memory,
       catalog,
       registry: { unknownHomes, surfacedModels },
-      registryModels: registryPickerModels().map((item) => withSupport(item, item.model)),
+      registryModels: registryPickerModels(homeRegistries, requiredHomes).map((item) => withSupport(item, item.model)),
       roster: { revision: rosterRead.roster.revision, agents: rosterAgents, warning: rosterRead.warning },
       targets: targetsView,
       applyJournal: journalView(),
@@ -1272,6 +1288,7 @@ export function openProfilesStore(options = {}) {
       config, profileKey, section: change.section, role: change.role, alias,
       ensureCatalogAlias: change.alias === undefined,
       ensureModelId: change.model, ensureVariant: change.thinking,
+      effortValidated: true, // The setRoute handler checks the engine registry for all required homes before mirroring.
     });
     return { profileKey, alias };
   }

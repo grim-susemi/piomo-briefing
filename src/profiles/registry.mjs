@@ -25,6 +25,7 @@ function resolveAgentPaths(agentDir) {
   return {
     modelsPath: path.join(resolved, 'models.json'),
     storePath: path.join(resolved, 'models-store.json'),
+    settingsPath: path.join(resolved, 'settings.json'),
   };
 }
 
@@ -34,6 +35,74 @@ function readSafeBytes(filePath) {
   } catch {
     return Buffer.alloc(0);
   }
+}
+
+function resolveExtensionTargets(settingsPath) {
+  const bytes = readSafeBytes(settingsPath);
+  if (!bytes.length) return { settingsBytes: bytes, targets: [] };
+  let settings;
+  try {
+    settings = JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, ''));
+  } catch {
+    return { settingsBytes: bytes, targets: [] };
+  }
+  const baseDir = path.dirname(settingsPath);
+  const candidates = [];
+  for (const entry of Array.isArray(settings?.packages) ? settings.packages : []) {
+    const raw = typeof entry === 'string' ? entry : entry?.source;
+    if (typeof raw === 'string' && raw.trim()) candidates.push({ raw: raw.trim(), kind: 'package' });
+  }
+  for (const entry of Array.isArray(settings?.extensions) ? settings.extensions : []) {
+    if (typeof entry === 'string' && entry.trim()) candidates.push({ raw: entry.trim(), kind: 'extension' });
+  }
+  const seen = new Set();
+  const targets = [];
+  for (const item of candidates) {
+    const resolved = path.isAbsolute(item.raw) ? item.raw : path.resolve(baseDir, item.raw);
+    if (!fs.existsSync(resolved)) continue;
+    let stat;
+    try { stat = fs.statSync(resolved); } catch { continue; }
+    if (stat.isFile()) {
+      const key = path.resolve(resolved);
+      if (!seen.has(key)) {
+        seen.add(key);
+        targets.push({ entryPath: key, packageJsonBytes: Buffer.alloc(0), stat });
+      }
+      continue;
+    }
+    if (!stat.isDirectory()) continue;
+    const pkgPath = path.join(resolved, 'package.json');
+    const packageJsonBytes = readSafeBytes(pkgPath);
+    let entryRels = [];
+    if (packageJsonBytes.length) {
+      try {
+        const pkg = JSON.parse(packageJsonBytes.toString('utf8').replace(/^\uFEFF/, ''));
+        if (Array.isArray(pkg?.pi?.extensions)) {
+          entryRels = pkg.pi.extensions.filter((rel) => typeof rel === 'string' && rel.trim());
+        }
+      } catch {
+        entryRels = [];
+      }
+    }
+    if (!entryRels.length) {
+      for (const fallback of ['index.js', 'index.ts']) {
+        if (fs.existsSync(path.join(resolved, fallback))) { entryRels = [fallback]; break; }
+      }
+    }
+    for (const rel of entryRels) {
+      const entryPath = path.resolve(resolved, rel);
+      if (!fs.existsSync(entryPath)) continue;
+      try {
+        const entryStat = fs.statSync(entryPath);
+        if (!entryStat.isFile() || seen.has(entryPath)) continue;
+        seen.add(entryPath);
+        targets.push({ entryPath, packageJsonBytes, stat: entryStat });
+      } catch {
+        // Ignore unreadable extension entry in cache fingerprint.
+      }
+    }
+  }
+  return { settingsBytes: bytes, targets };
 }
 
 // The installed senpi version, part of the registry cache key so an engine upgrade recomposes every home. It is the
@@ -78,8 +147,75 @@ const { composeModelProvider } = await import(pathToFileURL(path.join(senpi, 'di
 const modelsPath = process.argv[2];
 const cfg = ModelConfig.parse(fs.existsSync(modelsPath) ? fs.readFileSync(modelsPath, 'utf8') : '{"providers":{}}', modelsPath);
 if (cfg.getError()) throw new Error(cfg.getError());
-const storePath = path.join(path.dirname(modelsPath), 'models-store.json');
+const agentDir = path.dirname(modelsPath);
+const storePath = path.join(agentDir, 'models-store.json');
 const store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8').replace(/^\\uFEFF/, '')) : {};
+const settingsPath = path.join(agentDir, 'settings.json');
+const extPaths = [];
+if (fs.existsSync(settingsPath)) {
+  try {
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8').replace(/^\\uFEFF/, ''));
+    const rawEntries = [
+      ...(Array.isArray(settings?.packages) ? settings.packages.map((e) => (typeof e === 'string' ? e : e?.source)) : []),
+      ...(Array.isArray(settings?.extensions) ? settings.extensions : []),
+    ];
+    const seen = new Set();
+    for (const raw of rawEntries) {
+      if (typeof raw !== 'string' || !raw.trim()) continue;
+      const resolved = path.isAbsolute(raw.trim()) ? raw.trim() : path.resolve(agentDir, raw.trim());
+      if (!fs.existsSync(resolved)) continue;
+      let st;
+      try { st = fs.statSync(resolved); } catch { continue; }
+      if (st.isFile()) {
+        const key = path.resolve(resolved);
+        if (!seen.has(key)) { seen.add(key); extPaths.push(key); }
+        continue;
+      }
+      if (!st.isDirectory()) continue;
+      let rels = [];
+      const pkgFile = path.join(resolved, 'package.json');
+      if (fs.existsSync(pkgFile)) {
+        try {
+          const pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8').replace(/^\\uFEFF/, ''));
+          if (Array.isArray(pkg?.pi?.extensions)) rels = pkg.pi.extensions.filter((r) => typeof r === 'string' && r.trim());
+        } catch {}
+      }
+      if (!rels.length) {
+        for (const fallback of ['index.js', 'index.ts']) {
+          if (fs.existsSync(path.join(resolved, fallback))) { rels = [fallback]; break; }
+        }
+      }
+      for (const rel of rels) {
+        const full = path.resolve(resolved, rel);
+        if (!seen.has(full) && fs.existsSync(full)) {
+          try { if (fs.statSync(full).isFile()) { seen.add(full); extPaths.push(full); } } catch {}
+        }
+      }
+    }
+  } catch {}
+}
+const extensionProviders = new Map();
+if (extPaths.length > 0) {
+  const loader = await import(pathToFileURL(path.join(senpi, 'dist/core/extensions/loader.js')));
+  const runtime = loader.createExtensionRuntime();
+  const origLog = console.log;
+  console.log = () => {};
+  try {
+    await loader.loadExtensions(extPaths, agentDir, undefined, runtime);
+  } catch {
+  } finally {
+    console.log = origLog;
+  }
+  for (const reg of runtime.pendingProviderRegistrations ?? []) {
+    if (!reg || typeof reg.name !== 'string' || !reg.config || typeof reg.config !== 'object') continue;
+    const prev = extensionProviders.get(reg.name) ?? {};
+    const next = { ...prev };
+    for (const [k, v] of Object.entries(reg.config)) {
+      if (v !== undefined) next[k] = v;
+    }
+    extensionProviders.set(reg.name, next);
+  }
+}
 const bases = new Map(builtinProviders().map((p) => [p.id, p]));
 const anthropic = bases.get('anthropic');
 if (anthropic) {
@@ -91,11 +227,12 @@ if (anthropic) {
 }
 const models = [];
 const errors = [];
-for (const id of new Set([...bases.keys(), ...cfg.getProviderIds()])) {
+for (const id of new Set([...bases.keys(), ...cfg.getProviderIds(), ...extensionProviders.keys()])) {
   if (cfg.isProviderDisabled(id)) continue;
   const base = bases.get(id);
+  const ext = extensionProviders.get(id);
   try {
-    const p = cfg.getProvider(id) ? composeModelProvider(id, base, cfg) : base;
+    const p = (cfg.getProvider(id) || ext) ? composeModelProvider(id, base, cfg, ext) : base;
     if (!p) continue;
     if (p.refreshModels) {
       await p.refreshModels({
@@ -105,6 +242,7 @@ for (const id of new Set([...bases.keys(), ...cfg.getProviderIds()])) {
         publish: async ({ update }) => { update?.(); return true; },
       });
     }
+    const baseModelIds = new Set((base?.getModels?.() ?? []).map((bm) => bm.id));
     for (const m of p.getModels()) {
       models.push({
         provider: id,
@@ -112,6 +250,7 @@ for (const id of new Set([...bases.keys(), ...cfg.getProviderIds()])) {
         friendlyName: m.name,
         reasoning: Boolean(m.reasoning),
         levels: getSupportedThinkingLevels(m),
+        ...(ext && !baseModelIds.has(m.id) ? { fromExtension: true } : {}),
       });
     }
   } catch (error) {
@@ -126,12 +265,14 @@ export function composeHomeRegistry(agentDir, options = {}) {
   const lib = options.lib ?? DEFAULT_LIB;
   const timeoutMs = options.timeoutMs ?? 30000;
   const runner = options.spawn ?? spawnSync;
-  const { modelsPath, storePath } = resolveAgentPaths(agentDir);
+  const { modelsPath, storePath, settingsPath } = resolveAgentPaths(agentDir);
 
   const modelsBytes = readSafeBytes(modelsPath);
   const storeBytes = readSafeBytes(storePath);
+  const { settingsBytes, targets } = resolveExtensionTargets(settingsPath);
+  const extFingerprint = targets.map((t) => `${t.entryPath}:${t.stat.size}:${t.stat.mtimeMs}:${sha256(t.packageJsonBytes)}`).join('|');
   const senpiVersion = getSenpiVersion(lib);
-  const cacheKey = sha256(Buffer.concat([modelsBytes, storeBytes, Buffer.from(senpiVersion)]));
+  const cacheKey = sha256(Buffer.concat([modelsBytes, storeBytes, settingsBytes, Buffer.from(extFingerprint), Buffer.from(senpiVersion)]));
 
   if (registryCache.has(cacheKey)) {
     return registryCache.get(cacheKey);

@@ -23,8 +23,9 @@ const OUTPUT = join(ROOT, 'src', 'page', 'generated', 'profiles-view.min.js');
 // 2026-11-12 (G5/1502): optional save-start notification and local DOM ACK inside the IIFE; classic this/strictness unchanged.
 // 2026-11-13 (G5/1508): ACK disables every busy-gated control and a refused save refocuses its button; IIFE-local var and closure only, classic this/strictness unchanged.
 // 2026-11-13 (task16): new-profile form, controller newProfile state and standalone addProfile send inside the IIFE; no new top-level bindings, classic this/strictness unchanged.
-const REVIEWED_SOURCE = '8a7555bddcbd6819febf95c2eec1b0b484226384f195a00b5be605a18ec652b4';
-const REVIEWED_PAYLOAD = '4dc32c950596f5b4ae6c70af3628c035161e300b2b83856f4960ca63209fb127';
+// 2026-11-20: friendly Neon and xhigh labels, deduplicated model options; classic scope and strictness unchanged.
+const REVIEWED_SOURCE = '5f857f38638b28401c26526da905a767c59864a8e399f8e0494da62941ad65f3';
+const REVIEWED_PAYLOAD = 'ee235a7a4e3fdfb88adeb28ed34f59f65769f62ba1978d96de55bb261362a3d4';
 
 try {
   if (typeof Bun === 'undefined' || Bun.version !== '1.4.0') throw new Error('regeneration requires Bun 1.4.0');

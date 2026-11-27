@@ -121,6 +121,9 @@ export const ROUTING_GROUPS = {
 };
 
 export const MODEL_ALIAS_LABELS = {
+  ...Object.fromEntries(['low', 'medium', 'high', 'xhigh'].map((level) => [
+    `antigravity-ocx-gemini-4-neon-${level}`, { En: 'Gemini 4 Neon', Ko: 'Gemini 4 Neon' },
+  ])),
   "fable": {
     "En": "Fable 5",
     "Ko": "페이블 5"
@@ -632,6 +635,10 @@ export const MODEL_ALIAS_LABELS = {
   "opencode/gemini-4-argon": {
     "En": "Argon (Gemini 4)",
     "Ko": "Argon (Gemini 4)"
+  },
+  "dots-reviewer": {
+    "En": "Dots Reviewer Pro",
+    "Ko": "Dots 리뷰어 Pro"
   }
 };
 
@@ -711,6 +718,10 @@ export const PROVIDER_LABELS = {
   "explabs": {
     "En": "Experiential Labs",
     "Ko": "Experiential Labs"
+  },
+  "dots-reviewer": {
+    "En": "Dots Reviewer",
+    "Ko": "Dots 리뷰어"
   }
 };
 

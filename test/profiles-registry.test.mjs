@@ -247,10 +247,14 @@ test('support: opencode/gemini-4-argon served=false is refused in role, main, su
   assert.equal(backups.length, 0, 'zero backups written');
 });
 
-test('support: antigravity-ocx google-antigravity/gemini-4-argon is accepted with its registry levels', async (t) => {
+for (const [name, levels, effort] of [
+  ['argon', ['low', 'medium', 'high'], 'high'],
+  ['neon', ['low', 'medium', 'high', 'xhigh'], 'xhigh'],
+]) test(`support: Gemini ${name} role preview and apply accept its registry effort`, (t) => {
+  const model = `antigravity-ocx/google-antigravity/gemini-4-${name}`;
   const fakeRegistry = {
     models: [
-      { provider: 'antigravity-ocx', modelId: 'antigravity-ocx/google-antigravity/gemini-4-argon', reasoning: true, levels: ['low', 'medium', 'high'] },
+      { provider: 'antigravity-ocx', modelId: model, reasoning: true, levels },
     ],
     errors: [],
   };
@@ -266,12 +270,12 @@ test('support: antigravity-ocx google-antigravity/gemini-4-argon is accepted wit
     section: 'agents',
     role: 'ouroboros',
     provider: 'antigravity-ocx',
-    model: 'antigravity-ocx/google-antigravity/gemini-4-argon',
-    thinking: 'high',
+    model,
+    thinking: effort,
   };
 
   const previewRes = store.preview({ action: 'preview', changes: [change], expected: store.state().targets, rosterRevision: 0 });
-  assert.equal(previewRes.ok, true, 'preview accepted');
+  assert.equal(previewRes.ok, true, JSON.stringify(previewRes));
 
   const applyRes = store.apply({ action: 'apply', changes: [change], expected: store.state().targets, rosterRevision: 0 });
   assert.equal(applyRes.ok, true, 'apply accepted');
@@ -742,3 +746,111 @@ test('support: a newly registered non-catalog model becomes selectable after mod
   const newAliasEntry = Object.entries(catalogAfter).find(([, e]) => e.model === 'new-provider/new-chat-model');
   assert.ok(newAliasEntry, 'alias must be created on apply');
 });
+
+test('registry: settings.json extension package provider is discovered, cached by extension fingerprint, and selectable for route and backup', async (t) => {
+  const pkgRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'piomo-p5-extpkg-'));
+  t.after(() => fs.rmSync(pkgRoot, { recursive: true, force: true }));
+  const extFile = path.join(pkgRoot, 'extension.js');
+  const writePkg = (modelId, modelName) => {
+    fs.writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({
+      name: 'fixture-dots-reviewer',
+      version: '0.1.0',
+      type: 'module',
+      pi: { extensions: ['./extension.js'] },
+    }, null, 2));
+    fs.writeFileSync(extFile, [
+      'import "@earendil-works/pi-ai";',
+      'export default function (pi) {',
+      '  pi.registerProvider("dots-reviewer", {',
+      '    name: "Dots Reviewer",',
+      '    baseUrl: "http://127.0.0.1:47399",',
+      '    api: "dots-reviewer-mcp",',
+      '    apiKey: "local",',
+      '    models: [{',
+      `      id: ${JSON.stringify(modelId)},`,
+      `      name: ${JSON.stringify(modelName)},`,
+      '      reasoning: false,',
+      '      input: ["text"],',
+      '      contextWindow: 128000,',
+      '      maxTokens: 16384,',
+      '      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },',
+      '    }],',
+      '  });',
+      '}',
+    ].join('\n'));
+  };
+  writePkg('dots-reviewer-pro', 'Dots Reviewer Pro');
+
+  const regPrimaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'piomo-p5-extreg-'));
+  t.after(() => fs.rmSync(regPrimaryDir, { recursive: true, force: true }));
+  const regAgentDir = path.join(regPrimaryDir, 'agent');
+  fs.mkdirSync(regAgentDir, { recursive: true });
+  fs.writeFileSync(path.join(regAgentDir, 'models.json'), '{"providers":{}}');
+  fs.writeFileSync(path.join(regAgentDir, 'settings.json'), JSON.stringify({ packages: [pkgRoot] }));
+
+  const reg1 = composeHomeRegistry(regAgentDir);
+  assert.equal(reg1.unknown, undefined);
+  const found1 = reg1.models.find((m) => m.modelId === 'dots-reviewer/dots-reviewer-pro');
+  assert.ok(found1, 'extension provider model is composed');
+  assert.deepEqual(found1.levels, ['off']);
+  assert.equal(found1.fromExtension, true);
+
+  // Cache invalidates when extension file changes
+  writePkg('dots-reviewer-v2', 'Dots Reviewer V2');
+  const reg2 = composeHomeRegistry(regAgentDir);
+  assert.ok(reg2.models.some((m) => m.modelId === 'dots-reviewer/dots-reviewer-v2'), 'cache invalidates on extension edit');
+
+  // Restore pro id and wire into a full two-home store fixture
+  writePkg('dots-reviewer-pro', 'Dots Reviewer Pro');
+  const { store, primary, stable } = makeFixture(t, {
+    settings: { packages: [pkgRoot] },
+  });
+  fs.writeFileSync(path.join(stable, 'agent', 'settings.json'), JSON.stringify({ packages: [pkgRoot] }));
+
+  const state = store.state();
+  const picker = state.registryModels.find((m) => m.model === 'dots-reviewer/dots-reviewer-pro');
+  assert.deepEqual(picker, { provider: 'dots-reviewer', model: 'dots-reviewer/dots-reviewer-pro', levels: ['off'] });
+
+  const html = renderView(state);
+  assert.ok(html.includes('dots-reviewer/dots-reviewer-pro'), 'rendered picker includes extension model');
+
+  const routeChange = {
+    kind: 'setRoute',
+    profileKey: 'native-gpt-kimi-deepseek',
+    section: 'agents',
+    role: 'plan-reviewer',
+    provider: 'dots-reviewer',
+    model: 'dots-reviewer/dots-reviewer-pro',
+    thinking: 'off',
+  };
+  const backupChange = {
+    kind: 'setRoleBackup',
+    profileKey: 'native-gpt-kimi-deepseek',
+    section: 'agents',
+    role: 'plan-reviewer',
+    provider: 'dots-reviewer',
+    model: 'dots-reviewer-pro',
+    thinking: 'off',
+  };
+  const previewRes = store.preview({ action: 'preview', changes: [routeChange, backupChange], expected: state.targets, rosterRevision: 0 });
+  assert.equal(previewRes.ok, true, JSON.stringify(previewRes));
+
+  const applyRes = store.apply({ action: 'apply', changes: [routeChange, backupChange], expected: state.targets, rosterRevision: 0 });
+  assert.equal(applyRes.ok, true, JSON.stringify(applyRes));
+
+  const omoAfter = readJsonFile(path.join(primary, 'omo.jsonc'));
+  const catalogAfter = omoAfter['[senpi]']?.models ?? omoAfter['[native]']?.models;
+  const layerAfter = omoAfter.profiles['native-gpt-kimi-deepseek']['[senpi]'] ?? omoAfter.profiles['native-gpt-kimi-deepseek']['[native]'];
+  const assignedAlias = layerAfter.agents['plan-reviewer'].model;
+  assert.equal(catalogAfter[assignedAlias].model, 'dots-reviewer/dots-reviewer-pro');
+  assert.equal(catalogAfter[assignedAlias].variant, 'off');
+
+  // If stable home drops the package, support is refused on stable
+  fs.writeFileSync(path.join(stable, 'agent', 'settings.json'), '{"packages":[]}');
+  const mismatchState = store.state();
+  const mismatchPicker = mismatchState.registryModels.find((m) => m.model === 'dots-reviewer/dots-reviewer-pro');
+  assert.equal(mismatchPicker.unsupported, true);
+  assert.equal(mismatchPicker.unsupportedReason, 'UNSUPPORTED_MODEL');
+  assert.equal(mismatchPicker.unsupportedHome, 'stable');
+});
+

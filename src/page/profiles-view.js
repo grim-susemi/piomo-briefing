@@ -26,7 +26,7 @@
   // store.handle answers a refusal with its bare code; the ones the owner can act on read as one sentence.
   var REFUSAL_TEXT = {
     UNSUPPORTED_MODEL: '설치 엔진이 이 모델을 지원하지 않아 적용하지 않았으니 다른 모델을 고르십시오.',
-    ADVISOR_FAMILY: '자문가는 자기 계열(Claude 또는 GPT) 모델만 쓸 수 있어 저장하지 않았으니 같은 계열 모델을 고르십시오.'
+    ADVISOR_FAMILY: '자문가는 자기 계열 모델만 쓸 수 있어 저장하지 않았으니 같은 계열 모델을 고르십시오.'
   };
   var CARD_CONFLICT_TEXT = '다른 곳에서 설정이 바뀌어 충돌했습니다. 새로고침 후 다시 저장해 주십시오.';
   var CARD_BUSY_TEXT = '다른 작업이 진행 중입니다. 잠시 기다려 주십시오.';
@@ -162,9 +162,13 @@
   function thinkingOptions(selected, allowEmpty, levels) {
     var out = allowEmpty ? '<option value=""' + (selected ? '' : ' selected') + '>(없음)</option>' : '';
     (levels || THINKING).forEach(function (level) {
-      out += '<option value="' + esc(level) + '"' + (level === selected ? ' selected' : '') + '>' + esc(level) + '</option>';
+      out += thinkingOption(level, selected);
     });
     return out;
+  }
+  function thinkingOption(level, selected) {
+    return '<option value="' + esc(level) + '"' + (level === selected ? ' selected' : '') + '>' +
+      esc(level === 'xhigh' ? 'xhigh (extra high)' : level) + '</option>';
   }
   function unesc(v) {
     return str(v).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
@@ -265,7 +269,8 @@
     options.forEach(function (option) {
       if (option.placeholder || has(parts, option.model)) return;
       models.push(option.model);
-      parts[option.model] = bareModel(option.model).split('/');
+      parts[option.model] = option.model === 'antigravity-ocx/google-antigravity/gemini-4-neon'
+        ? ['Gemini 4 Neon'] : bareModel(option.model).split('/');
     });
     models.forEach(function (model) {
       var path = parts[model], label = '';
@@ -408,6 +413,12 @@
   function fullIdLine(id, model, alias) {
     return '<p class="pf-fullid"' + attr('id', id + '-fullid') + ' tabindex="0"><code>' +
       esc(model || STATUS_TEXT.none) + (alias ? ' · ' + esc(alias) : '') + '</code></p>';
+  }
+  function effortAlias(entries, model, thinking) {
+    var entry = entries.find(function (e) {
+      return e.registered && e.model === model && e.variant === thinking;
+    });
+    return entry ? entry.alias : '';
   }
   function modelDescription(id) {
     return attr('aria-describedby', id + '-fullid');
@@ -565,13 +576,13 @@
     return opts;
   }
   function memoryModelOptions(candidates, provider, model) {
-    var pool = [{ value: '', placeholder: true, selected: !model, text: '(선택)' }], found = false;
+    var pool = [{ value: '', placeholder: true, selected: !model, text: '(선택)' }], seen = map();
     candidates.forEach(function (c) {
-      if (!provider || c.provider !== provider) return;
-      if (c.model === model) found = true;
+      if (!provider || c.provider !== provider || has(seen, c.model)) return;
+      seen[c.model] = true;
       pool.push({ value: c.model, model: c.model, provider: providerOf(c.model), selected: c.model === model, off: c.off });
     });
-    if (model && !found) {
+    if (model && !has(seen, model)) {
       pool.push({ value: model, model: model, provider: providerOf(model), selected: true,
         missing: true, prefix: STATUS_LABEL.unresolved + ': ' });
     }
@@ -586,7 +597,7 @@
     var levels = cand ? cand.levels : [];
     levels.forEach(function (level) {
       if (level === reasoning) found = true;
-      opts += '<option value="' + esc(level) + '"' + (level === reasoning ? ' selected' : '') + '>' + esc(level) + '</option>';
+      opts += thinkingOption(level, reasoning);
     });
     if (reasoning && !found) {
       opts += '<option value="' + esc(reasoning) + '" selected>' + esc(cand ? STATUS_LABEL.unresolved + ': ' + reasoning : reasoning) + '</option>';
@@ -1149,7 +1160,7 @@
         labelled(CAPTIONS[0], rid + '-provider', providerSelect('route-provider', withId(rid + '-provider', on('service')), providersOf(entries, provider), provider, busy)) +
         labelled(CAPTIONS[1], rid + '-model', modelSelect('route-model', withId(rid + '-model', on('model')) + modelDescription(rid + '-model'), entries, provider, full, busy)) +
         labelled(CAPTIONS[2], rid + '-thinking', select('route-thinking', withId(rid + '-thinking', on('effort')), memoryThinkingOptions(candidates, full, thinking), busy)) +
-        fullIdLine(rid + '-model', full, alias) + backup.html +
+        fullIdLine(rid + '-model', full, change || draft ? effortAlias(entries, full, thinking) : alias) + backup.html +
         '</div>';
     var sumModel = '<span class="pf-row-primary"' + attr('title', full + (thinking ? ' / ' + thinking : '')) + '>' +
       valueOrDash(modelText(entries, full)) + (str(thinking) ? ' / ' + esc(thinking) : '') + '</span>';
@@ -1207,8 +1218,10 @@
   // the main agent names or the routing table resolves; with neither, it runs on the oracle row above. Each advisor
   // is offered only its own family's models, so a Claude advisor stays Claude and a GPT advisor stays GPT.
   function advisorFamily(model) {
-    var bare = bareModel(model).toLowerCase();
-    return bare.indexOf('claude') >= 0 ? 'claude' : bare.indexOf('gpt-') === 0 ? 'gpt' : 'other';
+    var bare = bareModel(model).split('/').pop().toLowerCase();
+    if (bare.indexOf('claude') >= 0) return 'claude';
+    if (bare.indexOf('gpt-') === 0) return 'gpt';
+    return bare.indexOf('gemini-') === 0 ? 'gemini' : 'other';
   }
   function advisorRows(view, edit, ro) {
     var adv = obj(view && view.advisors);
@@ -1237,7 +1250,8 @@
           labelled(CAPTIONS[1], rid + '-model', select('advisor-model', withId(rid + '-model', on('model')) + modelDescription(rid + '-model'), memoryModelOptions(candidates, provider, model), busy, model || '(선택)')) +
           labelled(CAPTIONS[2], rid + '-thinking', select('advisor-thinking', withId(rid + '-thinking', on('effort')), memoryThinkingOptions(candidates, model, thinking), busy)) +
           fullIdLine(rid + '-model', model, '') + '</div>';
-      var familyLabel = str(r.family) === 'claude' ? 'Claude 계열만' : str(r.family) === 'gpt' ? 'GPT 계열만' : str(r.family);
+      var familyLabel = str(r.family) === 'claude' ? 'Claude 계열만' : str(r.family) === 'gpt' ? 'GPT 계열만'
+        : str(r.family) === 'gemini' ? 'Gemini 계열만' : str(r.family);
       var sumBtn = '<button type="button" class="pf-row-sum" data-pf="row-toggle"' + attr('data-row', 'advisor:' + name) +
         ' aria-expanded="' + (open ? 'true' : 'false') + '"' + attr('aria-controls', editId) + '>' +
         '<span class="pf-row-sum-r">' + esc('oracle · ' + name) + '</span>' +
@@ -1285,6 +1299,7 @@
     var entry = entryOf(entries, '', provider + '/' + model);
     var off = entry ? entry.off : !pending && !draft ? unservedOf(current) : null;
     var levels = entry && !entry.off && Array.isArray(entry.levels) && entry.levels.length ? entry.levels : null;
+    var shownThinking = levels ? clampedThinking(entry, thinking) : thinking;
     var body;
     if (!effective.provider && !override && !pending) {
       body = emptyNote('현재 프로필의 메인 모델 정보가 없습니다.');
@@ -1295,9 +1310,10 @@
         labelled(CAPTIONS[0], prefix + '-provider', providerSelect('main-provider', withId(prefix + '-provider', ' data-main="1"'), providers, provider, busy)) +
         labelled(CAPTIONS[1], prefix + '-model', mainModelSelect('main-model', withId(prefix + '-model', ' data-main="1"') + modelDescription(prefix + '-model'), entries, provider, model, busy)) +
         labelled(CAPTIONS[2], prefix + '-thinking', select('main-thinking', withId(prefix + '-thinking', ' data-main="1"'),
-          levels ? thinkingOptions(clampedThinking(entry, thinking), false, levels) : thinkingOptions(thinking, true),
+           levels ? thinkingOptions(shownThinking, false, levels) : thinkingOptions(thinking, true),
           busy || !!off)) +
-        fullIdLine(prefix + '-model', model ? provider + '/' + model : '', entry && entry.alias) + '</div>';
+         fullIdLine(prefix + '-model', model ? provider + '/' + model : '',
+           effortAlias(entries, provider + '/' + model, shownThinking)) + '</div>';
     }
     if (inlineId) return body;
     return '<div class="pf-blk" id="pf-sec-main" data-pf-sec="main" data-flow="main" data-flow-sec="main"><h3 class="pf-blk-h">메인 모델 설정 ' +
